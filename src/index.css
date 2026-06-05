@@ -1,0 +1,212 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=IBM+Plex+Mono:ital,wght@0,100..700;1,100..700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 30 20% 98%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 30 15% 94%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 30 10% 92%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 30 10% 92%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 30 10% 90%;
+    --input: 30 10% 90%;
+    --ring: 240 5.9% 10%;
+    --logo-color: hsl(var(--primary));
+
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+
+    --sidebar: 30 20% 97%;
+    --sidebar-foreground: 240 5.9% 10%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 30 10% 92%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 30 10% 90%;
+    --sidebar-ring: 240 5.9% 10%;
+
+    /* Chat Input Variables */
+    --fill-input-chat: #ffffff;
+    --border-main: #e2e8f0;
+    --background-gray-main: #f8fafc;
+    --text-disable: #94a3b8;
+    --text-secondary: #64748b;
+    --icon-primary: #0f172a;
+    --fill-tsp-gray-main: #f1f5f9;
+    --Button-primary-black: #0f172a;
+    --text-onblack: #f8fafc;
+    --fill-tsp-white-dark: #e2e8f0;
+    --icon-disable: #cbd5e1;
+
+    --font-sans: "DM Sans", sans-serif;
+    --font-serif: "Playfair Display", serif;
+    --font-mono: "IBM Plex Mono", monospace;
+
+    --radius: 1rem;
+  }
+
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+
+    --sidebar: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 240 4.9% 83.9%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-sans);
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-serif);
+  }
+}
+
+.manus-pill {
+  @apply rounded-full border border-border bg-white px-4 py-2 text-sm font-medium transition-all hover:bg-secondary/50 hover:shadow-sm active:scale-95;
+}
+
+.manus-input-container {
+  @apply relative flex w-full max-w-2xl items-center rounded-2xl border border-border bg-white p-2 shadow-sm transition-all;
+}
+
+.manus-card {
+  @apply rounded-2xl border border-border bg-white p-6 shadow-sm hover:shadow-md transition-all;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Markdown & Table Styles */
+.manus-markdown table {
+  @apply w-full border-collapse text-sm text-left mb-6;
+}
+
+.manus-markdown th {
+  @apply bg-manus-cream/80 px-4 py-3 font-bold border-b border-border text-foreground first:rounded-tl-xl last:rounded-tr-xl;
+}
+
+.manus-markdown td {
+  @apply px-4 py-3 border-b border-border/60 text-muted-foreground;
+}
+
+.manus-markdown tr:last-child td {
+  @apply border-b-0;
+}
+
+.manus-markdown ul {
+  @apply list-none space-y-2 mb-4;
+}
+
+.manus-markdown ul li {
+  @apply relative pl-6;
+}
+
+.manus-markdown ul li::before {
+  content: "";
+  @apply absolute left-1 top-2.5 h-1.5 w-1.5 rounded-full bg-primary/40;
+}
+
+.manus-markdown h1, 
+.manus-markdown h2, 
+.manus-markdown h3 {
+  @apply font-serif text-foreground tracking-tight;
+}
+
+.manus-markdown h1 { @apply text-4xl mb-8 mt-4; }
+.manus-markdown h2 { @apply text-3xl mb-6 mt-12; }
+.manus-markdown h3 { @apply text-2xl mb-4 mt-8; }
+.manus-markdown h4 { @apply text-lg font-bold mb-3 mt-6; }
+
+.manus-markdown p {
+  @apply mb-4 leading-relaxed;
+}
+
+.manus-markdown strong {
+  @apply font-bold text-foreground;
+}
+
+.manus-markdown em {
+  @apply italic text-foreground/80;
+}
+
+.manus-markdown code {
+  @apply bg-manus-cream/50 px-1.5 py-0.5 rounded border border-border/40 font-mono text-xs text-primary;
+}
+
+.manus-markdown blockquote {
+  @apply border-l-4 border-primary/10 pl-6 my-8 italic text-muted-foreground bg-manus-cream/30 py-4 pr-4 rounded-r-xl;
+}
+
+@layer utilities {
+  .bg-manus-cream {
+    background-color: #FDFCF9;
+  }
+  .bg-manus-soft {
+    background-color: #F5F4F1;
+  }
+}

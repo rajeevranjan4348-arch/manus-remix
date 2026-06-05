@@ -1,0 +1,443 @@
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useAgent, Agent, webSearch, sandboxTools, fetchUrl, useBlinkAuth } from '@blinkdotnew/react';
+import { blink } from '@/lib/blink';
+import type { Sandbox } from '@blinkdotnew/sdk';
+
+export interface Step {
+  id: string;
+  label: string;
+  status: 'pending' | 'running' | 'completed' | 'error';
+  trace?: string[];
+}
+
+export interface ChartData {
+  labels: string[];
+  datasets: {
+    label: string;
+    data: number[];
+    backgroundColor?: string[];
+    borderColor?: string;
+  }[];
+}
+
+export function useAgentTask() {
+  const { isAuthenticated } = useBlinkAuth();
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [currentTask, setCurrentTask] = useState<{ prompt: string; options: any; fileData?: string; url?: string } | null>(null);
+  const [steps, setSteps] = useState<Step[]>([]);
+  const [taskStatus, setTaskStatus] = useState<'idle' | 'running' | 'completed' | 'error'>('idle');
+  const [result, setResult] = useState<any>(null);
+  const [chartData, setChartData] = useState<ChartData | null>(null);
+  const [sandbox, setSandbox] = useState<Sandbox | null>(null);
+  const messagesRef = useRef<any[]>([]);
+
+  // Initialize sandbox
+  useEffect(() => {
+    let mounted = true;
+    if (isAuthenticated && !sandbox) {
+      blink.sandbox.create({ template: 'devtools-base' }).then(sb => {
+        if (mounted) setSandbox(sb);
+      }).catch(err => console.error('Failed to create sandbox:', err));
+    }
+    return () => { mounted = false; };
+  }, [isAuthenticated, sandbox]);
+
+  // Define the agent
+  const agent = useMemo(() => new Agent({
+    model: 'google/gemini-3-flash',
+    system: `You are Manus, a premium AI workspace agent. Your goal is to turn prompts, file uploads (CSV, Excel, PDF), or URLs into actionable data analyses, charts, and reports.
+    
+    Guidelines:
+    1. When given file content or CSV data, ALWAYS parse it, analyze the context, compute statistics if numeric, and identify insights.
+    2. When given a URL, use web_search or fetch_url to research it thoroughly, extract key information, and if needed, structure findings as CSV data.
+    3. For data analysis tasks, generate chart-ready data in JSON format with labels and datasets.
+    4. Use multi-step reasoning - break analysis into: data profiling → cleaning → aggregation → insight generation.
+    5. When creating charts, provide specific data points with proper labels.
+    6. For reports, include: executive summary, key findings (bullet points), detailed analysis, and recommendations.
+    
+    Output Format Guide:
+    - graph: Generate structured JSON with chart data (labels, datasets with values) AND include a "type" field (bar, line, pie, scatter, area, bubble) if 'auto' was requested.
+    - document: If the user asks to create a document, PDF, or export, return JSON with:
+      {
+        "content": "Your message to the user...",
+        "files": [
+          { "name": "filename.pdf", "type": "pdf", "size": "282.40 KB" },
+          { "name": "filename.md", "type": "markdown", "size": "6.42 KB" }
+        ]
+      }
+    - report: Detailed markdown with sections, bullet points, and actionable insights
+    - slides: Key takeaways in bullet format with supporting data
+    - spreadsheet: Structured tabular data with headers
+    
+    Output Instructions:
+    ALWAYS wrap your JSON output in \`\`\`json\`\`\` code blocks.
+    If producing a document, ALWAYS simulate the file creation by returning the "files" array in your JSON.
+    
+    When analyzing data:
+    1. Parse and validate the structure/content
+    2. Identify data types (numeric, categorical, date) or key themes for unstructured data
+    3. Compute summary statistics for numeric columns or summarize key sections for documents
+    4. Identify trends, outliers, and correlations
+    5. Generate visualization-ready data if requested or appropriate
+    
+    When researching URLs:
+    1. Use web_search to find relevant information
+    2. Extract key facts, data points, and trends
+    3. Structure findings clearly
+    4. If creating CSV, ensure proper headers and data rows
+    `,
+    tools: [webSearch, fetchUrl, ...sandboxTools],
+    maxSteps: 20,
+  }), []);
+
+  const { sendMessage: agentSendMessage, isLoading, messages, append, setMessages, clearMessages } = useAgent({
+    agent,
+    sandbox: sandbox || undefined, // Pass sandbox to useAgent
+    onFinish: async (response) => {
+      // Parse response for chart data if present
+      const text = response.text || '';
+      let parsedChartData = null; // Full parsed JSON
+      let extractedChartData = null; // Inner data with labels/datasets
+      let parsedFiles = null;
+      
+      // Try to extract JSON chart data from response
+      const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/) || text.match(/```\n([\s\S]*?)\n```/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[1]);
+          // Check for direct structure, 'graph' wrapper, or nested data structure (Chart.js style)
+          const chartData = parsed.graph || parsed.data || parsed;
+          
+          if (chartData.labels && chartData.datasets) {
+            parsedChartData = parsed; // Keep original to preserve 'type'
+            extractedChartData = chartData; // Store inner data
+            setChartData(chartData); // Set just the data part for rendering
+          }
+
+          if (parsed.files) {
+            parsedFiles = parsed.files;
+          }
+        } catch (e) {
+          console.log('Failed to parse chart data:', e);
+        }
+      }
+      
+      const finalResult = { 
+        type: currentTask?.options?.format || 'report',
+        content: parsedChartData?.content || text.replace(/```json\n[\s\S]*?\n```/, '').trim() || text, // Remove JSON block from display text if it was separate
+        chartData: extractedChartData || parsedChartData, 
+        files: parsedFiles,
+        // Use detected type from agent, or fallback to user selection if it's a specific chart type (not auto)
+        detectedChartType: parsedChartData?.graph?.type || parsedChartData?.type || (currentTask?.options?.chartType !== 'auto' ? currentTask?.options?.chartType : undefined),
+        rawResponse: response,
+        messages: messages // Save messages for history
+      };
+      
+      setResult(finalResult);
+      setTaskStatus('completed');
+      
+      // Save to database if user is authenticated
+      if (isAuthenticated && taskId) {
+        try {
+          await (blink.db as any).tasks.update(taskId, {
+            status: 'completed',
+            result: JSON.stringify(finalResult),
+            steps: JSON.stringify(steps.map(s => ({ ...s, status: 'completed' })))
+          });
+        } catch (e) {
+          console.error('Failed to update task in DB:', e);
+        }
+      }
+      
+      // Update ALL steps to completed when task finishes
+      setSteps(prev => prev.map(s => ({ ...s, status: 'completed' })));
+    },
+    onError: (err) => {
+      setTaskStatus('error');
+      setSteps(prev => prev.map((s, i) => 
+        i === prev.length - 1 ? { ...s, status: 'error', trace: [...(s.trace || []), `Error: ${err.message}`] } : s
+      ));
+      
+      if (isAuthenticated && taskId) {
+        (blink.db as any).tasks.update(taskId, {
+          status: 'error',
+          steps: JSON.stringify(steps)
+        }).catch(console.error);
+      }
+    }
+  });
+
+  // Track tool calls and update steps dynamically
+  useEffect(() => {
+    if (messages.length > 0) {
+      messagesRef.current = messages;
+      
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage.role === 'assistant' && lastMessage.toolInvocations) {
+        // Update steps based on tool calls
+        lastMessage.toolInvocations.forEach((invocation: any) => {
+          const toolName = invocation.toolName;
+          let stepLabel = '';
+          let trace: string[] = [];
+          
+          if (toolName === 'web_search') {
+            stepLabel = 'Searching Web';
+            trace = [`Searching for: ${invocation.args?.query || 'information'}`];
+          } else if (toolName === 'fetch_url') {
+            stepLabel = 'Fetching URL Content';
+            trace = [`Fetching: ${invocation.args?.url || 'URL'}`];
+          } else if (toolName.includes('sandbox') || toolName === 'run_terminal_cmd') {
+            stepLabel = 'Executing Code Analysis';
+            trace = ['Running data processing script...'];
+          } else if (toolName === 'read_file') {
+            stepLabel = 'Reading Data File';
+            trace = [`Reading: ${invocation.args?.path || 'file'}`];
+          }
+          
+          if (stepLabel) {
+            setSteps(prev => {
+              const nextSteps = prev.map(s => s.label === stepLabel ? { ...s, status: 'running', trace: [...(s.trace || []), ...trace] } : s);
+              
+              // Add new step if it doesn't exist
+              const exists = prev.find(s => s.label === stepLabel);
+              if (!exists) {
+                nextSteps.push({ id: String(prev.length + 1), label: stepLabel, status: 'running', trace });
+              }
+              
+              // Save progressive steps to DB
+              if (isAuthenticated && taskId && nextSteps.length !== prev.length) {
+                (blink.db as any).tasks.update(taskId, {
+                  steps: JSON.stringify(nextSteps)
+                }).catch(() => {});
+              }
+              
+              return nextSteps;
+            });
+          }
+        });
+      }
+    }
+  }, [messages, taskId, isAuthenticated]);
+
+  const sendMessage = useCallback((content: string) => {
+    setTaskStatus('running');
+    agentSendMessage(content);
+  }, [agentSendMessage]);
+
+  const startTask = useCallback(async (prompt: string, options: any) => {
+    if (!isAuthenticated) {
+      blink.auth.login(window.location.href);
+      return;
+    }
+
+    // Start fresh
+    if (clearMessages) {
+      clearMessages();
+    } else if (setMessages) {
+      setMessages([]);
+    }
+
+    // Create task in DB immediately
+    let newTaskId: string | null = null;
+    try {
+      const user = await blink.auth.me();
+      if (user) {
+        const taskRecord = await (blink.db as any).tasks.create({
+          userId: user.id,
+          prompt: prompt,
+          outputFormat: options.format,
+          chartType: options.chartType,
+          status: 'running',
+          result: null,
+          steps: JSON.stringify([])
+        });
+        newTaskId = taskRecord.id;
+        setTaskId(newTaskId);
+      }
+    } catch (e) {
+      console.error('Failed to create task in DB:', e);
+    }
+
+    setCurrentTask({ prompt, options, fileData: options.fileData, url: options.url });
+    setTaskStatus('running');
+    setResult(null);
+    setChartData(null);
+
+    // Build enhanced prompt with context
+    let enhancedPrompt = prompt;
+    
+    // Check if it's a simple message (no files, no urls, no specific output format selected manually)
+    const isSimple = !options.fileData && !options.url && options.format === 'report' && !options.intent;
+
+    // Initial steps based on task type
+    let initialSteps: Step[] = [];
+    
+    if (!isSimple) {
+      initialSteps.push({ id: '1', label: 'Analyzing Request', status: 'running', trace: ['Parsing intent...', `Output: ${options.format}`, `Chart: ${options.chartType || 'auto'}`] });
+      
+      if (options.fileData) {
+        const isCSV = options.fileName?.toLowerCase().endsWith('.csv');
+        initialSteps.push(
+          { id: '2', label: isCSV ? 'Parsing CSV Data' : 'Parsing File Content', status: 'pending', trace: [] },
+          { id: '3', label: 'Profiling Data', status: 'pending', trace: [] },
+          { id: '4', label: 'Computing Statistics', status: 'pending', trace: [] },
+          { id: '5', label: 'Generating Insights', status: 'pending', trace: [] },
+          { id: '6', label: 'Creating Visualizations', status: 'pending', trace: [] },
+        );
+        
+        enhancedPrompt = `${prompt}\n\nFile Content to analyze (${options.fileName}):\n\`\`\`${isCSV ? 'csv' : 'text'}\n${options.fileData}\n\`\`\`\n\nPlease:\n1. Parse and validate this ${isCSV ? 'CSV data' : 'content'}\n2. Identify ${isCSV ? 'column types and compute summary statistics' : 'key themes and data points'}\n3. Generate insights about trends, patterns, and anomalies\n4. If applicable, create chart data in JSON format for ${options.chartType} chart\n5. Provide ${options.format} output with key findings`;
+      } else if (options.url) {
+        initialSteps.push(
+          { id: '2', label: 'Researching URL', status: 'pending', trace: [] },
+          { id: '3', label: 'Extracting Information', status: 'pending', trace: [] },
+          { id: '4', label: 'Structuring Data', status: 'pending', trace: [] },
+          { id: '5', label: 'Generating Analysis', status: 'pending', trace: [] },
+        );
+        enhancedPrompt = `${prompt}\n\nURL to research: ${options.url}\n\nPlease:\n1. Search and fetch information from this URL\n2. Extract key facts, data points, and trends\n3. Structure the findings clearly\n4. If relevant, create CSV data from the information\n5. Provide ${options.format} output with analysis`;
+      } else {
+        initialSteps.push(
+          { id: '2', label: 'Gathering Context', status: 'pending', trace: [] },
+          { id: '3', label: 'Executing Analysis', status: 'pending', trace: [] },
+          { id: '4', label: 'Generating Output', status: 'pending', trace: [] },
+        );
+      }
+    }
+
+    setSteps(initialSteps);
+
+    // Start agent execution
+    agentSendMessage(enhancedPrompt);
+
+    // Initial DB update with steps
+    if (newTaskId && initialSteps.length > 0) {
+      (blink.db as any).tasks.update(newTaskId, {
+        steps: JSON.stringify(initialSteps)
+      }).catch(console.error);
+    }
+
+    if (!isSimple) {
+      // Progressive step updates
+      setTimeout(() => {
+        setSteps(prev => prev.length > 0 ? prev.map((s, i) => i === 0 ? { ...s, status: 'completed' } : i === 1 ? { ...s, status: 'running' } : s) : prev);
+      }, 1500);
+
+      setTimeout(() => {
+        setSteps(prev => prev.length > 1 ? prev.map((s, i) => i === 1 ? { ...s, status: 'completed' } : i === 2 ? { ...s, status: 'running' } : s) : prev);
+      }, 3500);
+
+      setTimeout(() => {
+        setSteps(prev => prev.length > 2 ? prev.map((s, i) => i === 2 ? { ...s, status: 'completed' } : i === 3 ? { ...s, status: 'running' } : s) : prev);
+      }, 6000);
+    }
+    
+    return newTaskId;
+
+  }, [isAuthenticated, agentSendMessage]);
+
+  const loadTask = useCallback(async (id: string) => {
+    if (!isAuthenticated) return;
+    
+    try {
+      const task = await (blink.db as any).tasks.get(id);
+      if (task) {
+        setTaskId(task.id);
+        setCurrentTask({ 
+          prompt: task.prompt, 
+          options: { format: task.outputFormat, chartType: task.chartType } 
+        });
+        setTaskStatus(task.status as any);
+        
+        if (task.steps) {
+          try {
+            setSteps(JSON.parse(task.steps));
+          } catch { setSteps([]); }
+        }
+        
+        if (task.result) {
+          try {
+            const parsedResult = JSON.parse(task.result);
+            setResult(parsedResult);
+            setChartData(parsedResult.chartData);
+            if (parsedResult.messages && setMessages) {
+                setMessages(parsedResult.messages);
+            }
+          } catch { setResult(null); }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load task:', e);
+    }
+  }, [isAuthenticated]);
+
+  const resetTask = () => {
+    setTaskId(null);
+    setCurrentTask(null);
+    setTaskStatus('idle');
+    setSteps([]);
+    setResult(null);
+    setChartData(null);
+    if (clearMessages) {
+      clearMessages();
+    } else if (setMessages) {
+      setMessages([]);
+    }
+  };
+
+  const exportToPDF = useCallback(async () => {
+    if (!result) return;
+
+    // Create PDF content (we'll use a simple approach - in production use jsPDF or similar)
+    const content = `
+Manus Analysis Report
+Generated: ${new Date().toLocaleString()}
+
+Task: ${currentTask?.prompt}
+Output Format: ${currentTask?.options.format}
+
+${result.content}
+
+---
+Report generated by Manus AI Workspace
+    `.trim();
+
+    // Create blob and download
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `manus-report-${Date.now()}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [result, currentTask]);
+
+  const deleteTask = useCallback(async (id: string) => {
+    if (!isAuthenticated) return false;
+    
+    try {
+      await (blink.db as any).tasks.delete(id);
+      return true;
+    } catch (e) {
+      console.error('Failed to delete task:', e);
+      return false;
+    }
+  }, [isAuthenticated]);
+
+  return {
+    taskId,
+    loadTask,
+    startTask,
+    sendMessage,
+    resetTask,
+    exportToPDF,
+    deleteTask,
+    currentTask,
+    steps,
+    taskStatus,
+    result,
+    chartData,
+    messages,
+    isLoading
+  };
+}
