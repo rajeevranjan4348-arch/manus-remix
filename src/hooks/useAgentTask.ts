@@ -55,6 +55,14 @@ export function useAgentTask() {
     5. When creating charts, provide specific data points with proper labels.
     6. For reports, include: executive summary, key findings (bullet points), detailed analysis, and recommendations.
     
+    CHAT MODE BEHAVIOR:
+    - When the request is ordinary conversation (for example "hello", "hi", casual questions, explanations, or follow-up discussion), respond naturally and directly like a normal chat assistant.
+    - Do NOT call web_search, fetch_url, sandbox, or other tools for simple conversation.
+    - Do NOT create analysis steps, reports, charts, files, or research workflows unless the user explicitly asks for them.
+    - For a greeting such as "hello", answer briefly and warmly, e.g. "Hello! How can I help you?".
+    - Only use web/tools when the user explicitly asks for current/live information, web research, a URL, file/data analysis, code execution, or another task that genuinely requires a tool.
+    - In Chat mode, prioritize a fast conversational answer over autonomous task execution.
+
     Output Format Guide:
     - graph: Generate structured JSON with chart data (labels, datasets with values) AND include a "type" field (bar, line, pie, scatter, area, bubble) if 'auto' was requested.
     - document: If the user asks to create a document, PDF, or export, return JSON with:
@@ -319,9 +327,21 @@ Completed automated analysis for: **${promptText}**.
 
     // Build enhanced prompt with context
     let enhancedPrompt = prompt;
+
+    // Chat mode gets a strict conversational instruction so simple messages
+    // never enter the Manus research/analysis workflow.
+    if (isChatMode) {
+      enhancedPrompt = `[MODE: NORMAL CHAT]
+Respond as a friendly conversational AI. Answer the user's message directly.
+Do not search the web, execute code, create a report, generate charts, or start an autonomous workflow unless the user explicitly asks for something that requires it.
+If the user is simply greeting you, greet them naturally and ask how you can help.
+
+User: ${prompt}`;
+    }
     
     // Check if it's a simple message (no files, no urls, no specific output format selected manually)
-    const isSimple = !options.fileData && !options.url && options.format === 'report' && !options.intent;
+    const isChatMode = options.mode === 'chat';
+    const isSimple = isChatMode || (!options.fileData && !options.url && options.format === 'report' && !options.intent);
 
     // Initial steps based on task type
     let initialSteps: Step[] = [];
