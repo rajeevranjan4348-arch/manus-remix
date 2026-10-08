@@ -72,8 +72,18 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   const [isThinkHarder, setIsThinkHarder] = useState(false);
   const [activePlugins, setActivePlugins] = useState<string[]>(['web_search', 'code_sandbox', 'charts']);
   const [chatWorkMode, setChatWorkMode] = useState<PersonalityMode>(() => {
-    return (localStorage.getItem('manus_chat_work_mode') as PersonalityMode) || personality || 'chat';
+    return localStorage.getItem('manus_chat_work_mode') === 'work' ? 'work' : 'chat';
   });
+  const isWorkMode = chatWorkMode === 'work';
+
+  React.useEffect(() => {
+    const handleModeChanged = (event: Event) => {
+      const mode = (event as CustomEvent<PersonalityMode>).detail;
+      if (mode === 'chat' || mode === 'work') setChatWorkMode(mode);
+    };
+    window.addEventListener('manus_mode_changed', handleModeChanged);
+    return () => window.removeEventListener('manus_mode_changed', handleModeChanged);
+  }, []);
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -238,7 +248,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   const handleChatWorkMode = (mode: PersonalityMode) => {
     setChatWorkMode(mode);
     localStorage.setItem('manus_chat_work_mode', mode);
-    onPersonalityChange?.(mode);
+    window.dispatchEvent(new CustomEvent('manus_mode_changed', { detail: mode }));
   };
 
   const handleStart = () => {
@@ -248,9 +258,9 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
     }
 
     const options: any = { 
-      format: selectedFormat || 'report', 
+      format: isWorkMode ? (selectedFormat || 'report') : 'chat', 
       chartType: selectedChart || 'auto',
-      intent: activeIntent?.label,
+      intent: isWorkMode ? activeIntent?.label : undefined,
       thinkHarder: isThinkHarder,
       plugins: activePlugins,
       mode: chatWorkMode,
