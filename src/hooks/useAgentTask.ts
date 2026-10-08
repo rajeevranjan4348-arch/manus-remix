@@ -56,6 +56,15 @@ export function useAgentTask() {
     6. For reports, include: executive summary, key findings (bullet points), detailed analysis, and recommendations.
     
     CHAT MODE BEHAVIOR:
+    - When [SYSTEM: NORMAL CHAT MODE — HIGHEST PRIORITY] is present, this is a normal conversational chat, NOT a task/research workflow.
+    - For greetings and ordinary conversation, answer directly in one normal assistant message.
+    - NEVER call web_search, fetch_url, sandbox, or any other tool for ordinary conversation.
+    - NEVER show "Searching Web", "Executing Code Analysis", "Analyzing Request", or similar work progress for ordinary conversation.
+    - NEVER force JSON, reports, charts, files, or research output for ordinary conversation.
+    - A simple "hello" should receive a simple friendly reply such as "Hello! How can I help you?".
+    - Only use tools for an explicit request that genuinely requires them.
+    
+    CHAT MODE BEHAVIOR:
     - When the request is ordinary conversation (for example "hello", "hi", casual questions, explanations, or follow-up discussion), respond naturally and directly like a normal chat assistant.
     - Do NOT call web_search, fetch_url, sandbox, or other tools for simple conversation.
     - Do NOT create analysis steps, reports, charts, files, or research workflows unless the user explicitly asks for them.
@@ -325,22 +334,29 @@ Completed automated analysis for: **${promptText}**.
     setResult(null);
     setChartData(null);
 
+    // Determine the mode BEFORE building the prompt.
+    const isChatMode = options.mode === 'chat';
+
     // Build enhanced prompt with context
     let enhancedPrompt = prompt;
 
-    // Chat mode gets a strict conversational instruction so simple messages
-    // never enter the Manus research/analysis workflow.
     if (isChatMode) {
-      enhancedPrompt = `[MODE: NORMAL CHAT]
-Respond as a friendly conversational AI. Answer the user's message directly.
-Do not search the web, execute code, create a report, generate charts, or start an autonomous workflow unless the user explicitly asks for something that requires it.
-If the user is simply greeting you, greet them naturally and ask how you can help.
+      enhancedPrompt = `[SYSTEM: NORMAL CHAT MODE — HIGHEST PRIORITY]
+You are in a normal conversational chat, NOT an autonomous task workspace.
+For ordinary messages such as "hello", "hi", "thanks", casual conversation, simple explanations, or follow-up questions:
+- Reply directly and naturally.
+- Do NOT search the web.
+- Do NOT call any tool.
+- Do NOT show searching, analysis, research, code execution, or task-progress steps.
+- Do NOT create reports, charts, files, or JSON unless explicitly requested.
+- If the user says "hello", respond naturally: "Hello! How can I help you?"
+Only use tools for an explicit request that genuinely requires them.
 
-User: ${prompt}`;
+User message:
+${prompt}`;
     }
-    
-    // Check if it's a simple message (no files, no urls, no specific output format selected manually)
-    const isChatMode = options.mode === 'chat';
+
+    // Chat messages never enter the Work progress pipeline.
     const isSimple = isChatMode || (!options.fileData && !options.url && options.format === 'report' && !options.intent);
 
     // Initial steps based on task type
