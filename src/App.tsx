@@ -125,6 +125,7 @@ function AppContent() {
           <Topbar 
             onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
             onOpenHistory={() => setIsHistoryOpen(true)} 
+            onNewTask={handleReset}
           />
         )}
         <main className="flex-1 overflow-hidden relative">

@@ -15,12 +15,15 @@ import {
   Flame,
   Link as LinkIcon,
   X,
-  Gauge
+  Gauge,
+  MessageSquare,
+  Briefcase
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
 import { AttachmentMenu } from '@/components/chat/AttachmentMenu';
+import { PersonalityMode } from '@/components/layout/Topbar';
 
 const ACTION_CHIPS = [
   { label: "Build website", icon: Globe },
@@ -47,9 +50,11 @@ const CHART_TYPES = [
 
 interface HomeProps {
   onStartTask: (prompt: string, options: any) => void;
+  personality?: PersonalityMode;
+  onPersonalityChange?: (personality: PersonalityMode) => void;
 }
 
-export function Home({ onStartTask }: HomeProps) {
+export function Home({ onStartTask, personality = 'chat', onPersonalityChange }: HomeProps) {
   const [prompt, setPrompt] = useState('');
   const [activeIntent, setActiveIntent] = useState<{ label: string, icon: any, placeholder?: string } | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<string | null>(null);

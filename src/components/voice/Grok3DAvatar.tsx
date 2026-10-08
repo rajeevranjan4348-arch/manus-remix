@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { Sparkles, Bot, Hexagon, Radio, Palette } from 'lucide-react';
+import { Sparkles, Bot, Hexagon, Radio, Palette, CircleDot } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export type GrokAvatarStyle = 'geometric' | 'bot' | 'hologram';
+export type GrokAvatarStyle = 'sphere' | 'geometric' | 'bot' | 'hologram';
 export type GrokColorTheme = 'electric-blue' | 'cyber-cyan' | 'neon-purple' | 'obsidian-gold';
 
 interface Grok3DAvatarProps {
@@ -12,6 +12,8 @@ interface Grok3DAvatarProps {
   className?: string;
   initialStyle?: GrokAvatarStyle;
   initialColor?: GrokColorTheme;
+  onStyleChange?: (style: GrokAvatarStyle) => void;
+  onColorChange?: (color: GrokColorTheme) => void;
 }
 
 const COLOR_CONFIGS: Record<GrokColorTheme, {
@@ -61,12 +63,32 @@ export function Grok3DAvatar({
   liveTranscript = '',
   className,
   initialStyle = 'geometric',
-  initialColor = 'electric-blue'
+  initialColor = 'electric-blue',
+  onStyleChange,
+  onColorChange
 }: Grok3DAvatarProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const [avatarStyle, setAvatarStyle] = useState<GrokAvatarStyle>(initialStyle);
   const [colorTheme, setColorTheme] = useState<GrokColorTheme>(initialColor);
   const [showStyleMenu, setShowStyleMenu] = useState(false);
+
+  useEffect(() => {
+    if (initialStyle) setAvatarStyle(initialStyle);
+  }, [initialStyle]);
+
+  useEffect(() => {
+    if (initialColor) setColorTheme(initialColor);
+  }, [initialColor]);
+
+  const handleSelectStyle = (st: GrokAvatarStyle) => {
+    setAvatarStyle(st);
+    onStyleChange?.(st);
+  };
+
+  const handleSelectColor = (col: GrokColorTheme) => {
+    setColorTheme(col);
+    onColorChange?.(col);
+  };
 
   // References for Three.js state
   const stateRef = useRef({
@@ -746,90 +768,6 @@ export function Grok3DAvatar({
           background: `radial-gradient(circle, ${COLOR_CONFIGS[colorTheme].glowHex} 0%, rgba(15, 23, 42, 0) 70%)`
         }}
       />
-
-      {/* Interactive Controls Overlay for 3D Avatar (Style Switcher & Themes) */}
-      <div className="absolute -bottom-4 z-20 flex items-center gap-1.5 p-1 rounded-full bg-slate-900/80 backdrop-blur-md border border-white/10 shadow-xl">
-        {/* Style Buttons */}
-        <button
-          onClick={() => setAvatarStyle('geometric')}
-          className={cn(
-            "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer",
-            avatarStyle === 'geometric' 
-              ? "bg-blue-600 text-white shadow-xs" 
-              : "text-white/60 hover:text-white hover:bg-white/10"
-          )}
-          title="Grok Quantum Polyhedron"
-        >
-          <Hexagon size={13} />
-          <span>Grok Core</span>
-        </button>
-
-        <button
-          onClick={() => setAvatarStyle('bot')}
-          className={cn(
-            "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer",
-            avatarStyle === 'bot' 
-              ? "bg-blue-600 text-white shadow-xs" 
-              : "text-white/60 hover:text-white hover:bg-white/10"
-          )}
-          title="Grok 3D Cyber Bot"
-        >
-          <Bot size={13} />
-          <span>Cyber Bot</span>
-        </button>
-
-        <button
-          onClick={() => setAvatarStyle('hologram')}
-          className={cn(
-            "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer",
-            avatarStyle === 'hologram' 
-              ? "bg-blue-600 text-white shadow-xs" 
-              : "text-white/60 hover:text-white hover:bg-white/10"
-          )}
-          title="Holographic Neural Matrix"
-        >
-          <Radio size={13} />
-          <span>Holo Matrix</span>
-        </button>
-
-        {/* Color Palette Toggle */}
-        <div className="relative">
-          <button
-            onClick={() => setShowStyleMenu(!showStyleMenu)}
-            className="p-1.5 text-white/60 hover:text-white hover:bg-white/10 rounded-full transition-colors cursor-pointer"
-            title="Theme Palette"
-          >
-            <Palette size={14} />
-          </button>
-
-          {showStyleMenu && (
-            <div className="absolute bottom-full mb-2 right-0 bg-slate-950/95 border border-white/15 rounded-2xl p-2 shadow-2xl backdrop-blur-xl flex flex-col gap-1.5 w-36 z-50">
-              <span className="text-[10px] font-semibold text-white/40 uppercase tracking-wider px-2 pt-1">
-                Aura Color
-              </span>
-              {(Object.keys(COLOR_CONFIGS) as GrokColorTheme[]).map((thm) => (
-                <button
-                  key={thm}
-                  onClick={() => {
-                    setColorTheme(thm);
-                    setShowStyleMenu(false);
-                  }}
-                  className={cn(
-                    "flex items-center gap-2 px-2 py-1.5 rounded-xl text-xs text-left transition-all cursor-pointer",
-                    colorTheme === thm ? "bg-white/15 text-white font-medium" : "text-white/70 hover:bg-white/10 hover:text-white"
-                  )}
-                >
-                  <span 
-                    className="w-2.5 h-2.5 rounded-full shrink-0" 
-                    style={{ backgroundColor: '#' + COLOR_CONFIGS[thm].primary.toString(16).padStart(6, '0') }} 
-                  />
-                  <span className="truncate">{COLOR_CONFIGS[thm].name}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

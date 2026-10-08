@@ -1,32 +1,50 @@
-import React from 'react';
-import { User, ChevronDown, Sun, Moon, PanelLeft, History } from 'lucide-react';
-import { useBlinkAuth, useBlinkClient } from '@blinkdotnew/react';
-import { useTheme } from '@/context/ThemeContext';
+import React, { useState, useRef, useEffect } from 'react';
+import { ChevronDown, PanelLeft, Plus, Check, Sparkles, Zap, Brain, Cpu } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface TopbarProps {
   onToggleSidebar?: () => void;
   onOpenHistory?: () => void;
+  onNewTask?: () => void;
 }
 
-export function Topbar({ onToggleSidebar, onOpenHistory }: TopbarProps) {
-  const { user, isAuthenticated } = useBlinkAuth();
-  const blink = useBlinkClient();
-  const { theme, setTheme, resolvedTheme } = useTheme();
-  const [mounted, setMounted] = React.useState(false);
+const MODELS = [
+  { id: 'manus-1.6-lite', name: 'Manus 1.6 Lite', badge: 'Fast', desc: 'Optimized for speed and quick tasks', icon: Zap },
+  { id: 'manus-1.6-max', name: 'Manus 1.6 Max', badge: 'Pro', desc: 'Complex reasoning & autonomous workflows', icon: Brain },
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', badge: 'Multimodal', desc: 'Ultra-fast vision & text processing', icon: Sparkles },
+  { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', badge: 'Code', desc: 'Advanced coding & data synthesis', icon: Cpu },
+];
 
-  React.useEffect(() => {
-    setMounted(true);
+export function Topbar({ onToggleSidebar, onNewTask }: TopbarProps) {
+  const [selectedModel, setSelectedModel] = useState(() => {
+    return localStorage.getItem('selected_manus_model') || 'manus-1.6-lite';
+  });
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const isDark = mounted ? (resolvedTheme === 'dark' || theme === 'dark') : false;
+  const currentModel = MODELS.find(m => m.id === selectedModel) || MODELS[0];
 
-  const toggleTheme = () => {
-    setTheme(isDark ? 'light' : 'dark');
+  const handleSelectModel = (id: string, name: string) => {
+    setSelectedModel(id);
+    localStorage.setItem('selected_manus_model', id);
+    setIsOpen(false);
+    toast.success(`Switched to ${name}`);
   };
 
   return (
-    <header className="h-16 border-b border-border bg-manus-cream dark:bg-background px-4 sm:px-6 flex items-center justify-between transition-colors">
-      <div className="flex items-center gap-2">
+    <header className="h-16 border-b border-border bg-manus-cream dark:bg-background px-4 sm:px-6 flex items-center justify-between relative transition-colors z-30">
+      {/* Left section: Sidebar toggle */}
+      <div className="flex items-center gap-2 z-10">
         {onToggleSidebar && (
           <button
             onClick={onToggleSidebar}
@@ -37,55 +55,79 @@ export function Topbar({ onToggleSidebar, onOpenHistory }: TopbarProps) {
             <PanelLeft size={20} />
           </button>
         )}
-        <div className="flex items-center gap-2 cursor-pointer hover:bg-manus-soft dark:hover:bg-accent px-3 py-1.5 rounded-lg transition-colors">
-          <h2 className="text-sm font-medium text-foreground">Manus 1.6 Lite</h2>
-          <ChevronDown size={14} className="text-muted-foreground" />
-        </div>
       </div>
 
-      <div className="flex items-center gap-2.5">
-        {/* History Panel Button */}
-        {onOpenHistory && (
-          <button
-            onClick={onOpenHistory}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-white dark:bg-card text-muted-foreground hover:text-foreground hover:bg-manus-soft dark:hover:bg-accent transition-all cursor-pointer shadow-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-ring text-xs font-medium"
-            title="Open Activity & History Panel (Ctrl+H)"
-            aria-label="Open Activity & History Panel"
-          >
-            <History size={14} className="text-primary" />
-            <span className="hidden sm:inline">History</span>
-          </button>
-        )}
-
+      {/* Middle section: Centered Model Selection */}
+      <div className="absolute left-1/2 -translate-x-1/2 z-20" ref={dropdownRef}>
         <button
-          onClick={toggleTheme}
-          className="p-2 rounded-full border border-border bg-white dark:bg-card text-muted-foreground hover:text-foreground hover:bg-manus-soft dark:hover:bg-accent transition-all cursor-pointer shadow-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-          aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+          onClick={() => setIsOpen(!isOpen)}
+          className="flex items-center gap-2 bg-white/80 dark:bg-card/90 backdrop-blur-md border border-border/80 hover:border-foreground/20 px-3.5 py-1.5 rounded-full shadow-xs transition-all cursor-pointer text-foreground group"
+          title="Select AI Model"
         >
-          {isDark ? (
-            <Sun size={15} className="text-amber-400 transition-transform hover:rotate-45" />
-          ) : (
-            <Moon size={15} className="text-slate-700 transition-transform hover:-rotate-12" />
-          )}
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+          <span className="text-sm font-semibold tracking-tight">{currentModel.name}</span>
+          <ChevronDown size={14} className={`text-muted-foreground transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
         </button>
 
-        <button 
+        {/* Dropdown Menu */}
+        {isOpen && (
+          <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-72 sm:w-80 bg-white dark:bg-[#18191c] border border-border rounded-2xl shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+            <div className="px-3 py-2 border-b border-border/60 mb-1">
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Select Intelligence Model</p>
+            </div>
+            <div className="space-y-1">
+              {MODELS.map((model) => {
+                const Icon = model.icon;
+                const isSelected = model.id === selectedModel;
+                return (
+                  <button
+                    key={model.id}
+                    onClick={() => handleSelectModel(model.id, model.name)}
+                    className={`w-full flex items-start gap-3 p-2.5 rounded-xl transition-all cursor-pointer text-left ${
+                      isSelected 
+                        ? 'bg-primary/10 border border-primary/20 text-foreground' 
+                        : 'hover:bg-manus-soft dark:hover:bg-accent/60 text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <div className={`p-2 rounded-lg shrink-0 ${isSelected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+                      <Icon size={16} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-xs font-semibold text-foreground truncate">{model.name}</span>
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
+                          {model.badge}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">{model.desc}</p>
+                    </div>
+                    {isSelected && (
+                      <Check size={16} className="text-primary shrink-0 self-center ml-1" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Right section: Plus button */}
+      <div className="flex items-center gap-2.5 z-10">
+        <button
           onClick={() => {
-            if (!isAuthenticated && blink?.auth?.login) {
-              try { blink.auth.login(window.location.href); } catch {}
+            if (onNewTask) {
+              onNewTask();
+              toast.success('Started new chat session');
+            } else {
+              window.location.href = '/';
             }
           }}
-          className="flex items-center gap-2 p-1 pr-2 rounded-full hover:bg-manus-soft dark:hover:bg-accent transition-all"
+          className="p-2 rounded-full border border-border bg-white dark:bg-card text-foreground hover:bg-manus-soft dark:hover:bg-accent transition-all cursor-pointer shadow-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          title="New Chat / New Task"
+          aria-label="New Chat or Task"
         >
-          <div className="w-7 h-7 bg-manus-soft dark:bg-muted rounded-full flex items-center justify-center overflow-hidden border border-border">
-            {user?.avatar ? (
-              <img src={user.avatar} alt={user?.displayName || 'User'} className="w-full h-full object-cover" />
-            ) : (
-              <User size={14} className="text-muted-foreground" />
-            )}
-          </div>
-          <ChevronDown size={12} className="text-muted-foreground" />
+          <Plus size={16} className="text-foreground" />
         </button>
       </div>
     </header>

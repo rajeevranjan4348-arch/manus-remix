@@ -23,6 +23,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { Grok3DAvatar, GrokAvatarStyle, GrokColorTheme } from './Grok3DAvatar';
+import { UiverseSphereLoader } from './UiverseSphereLoader';
+import { CobpChatInput } from './CobpChatInput';
+import { HorizontalLoader } from '../common/HorizontalLoader';
 
 export interface VoiceMessage {
   id: string;
@@ -80,7 +83,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
   const [voiceInterruptEnabled, setVoiceInterruptEnabled] = useState(true);
   const [keyboardEnabled, setKeyboardEnabled] = useState(true);
   const [avatarStyle, setAvatarStyle] = useState<GrokAvatarStyle>(() => {
-    return (localStorage.getItem('grok_avatar_style') as GrokAvatarStyle) || 'geometric';
+    return (localStorage.getItem('grok_avatar_style') as GrokAvatarStyle) || 'sphere';
   });
   const [colorTheme, setColorTheme] = useState<GrokColorTheme>(() => {
     return (localStorage.getItem('grok_color_theme') as GrokColorTheme) || 'electric-blue';
@@ -422,17 +425,42 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
         </button>
       </div>
 
-      {/* Main Center Stage: Grok 3D Interactive Avatar */}
+      {/* Main Center Stage: Grok 3D Interactive Avatar & Uiverse 3D Sphere */}
       <div className="flex-1 flex flex-col items-center justify-center relative z-10 px-6">
         
-        {/* Grok 3D Avatar (Interactive Three.js avatar with audio reactivity and dragging) */}
+        {/* Interactive Avatar / Sphere Stage */}
         <div className="relative my-auto flex items-center justify-center">
-          <Grok3DAvatar
-            callStatus={callStatus}
-            liveTranscript={liveTranscript}
-            initialStyle={avatarStyle}
-            initialColor={colorTheme}
-          />
+          {avatarStyle === 'sphere' ? (
+            <UiverseSphereLoader
+              callStatus={callStatus}
+              liveTranscript={liveTranscript}
+              colorTheme={colorTheme}
+              avatarStyle={avatarStyle}
+              onStyleChange={(st) => {
+                setAvatarStyle(st);
+                localStorage.setItem('grok_avatar_style', st);
+              }}
+              onColorChange={(col) => {
+                setColorTheme(col);
+                localStorage.setItem('grok_color_theme', col);
+              }}
+            />
+          ) : (
+            <Grok3DAvatar
+              callStatus={callStatus}
+              liveTranscript={liveTranscript}
+              initialStyle={avatarStyle}
+              initialColor={colorTheme}
+              onStyleChange={(st) => {
+                setAvatarStyle(st);
+                localStorage.setItem('grok_avatar_style', st);
+              }}
+              onColorChange={(col) => {
+                setColorTheme(col);
+                localStorage.setItem('grok_color_theme', col);
+              }}
+            />
+          )}
         </div>
 
         {/* Status Text & Live Transcript */}
@@ -441,9 +469,23 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
             {liveTranscript ? `"${liveTranscript}"` : statusText}
           </p>
 
-          <p className="text-xs text-white/50 tracking-wide uppercase font-medium">
-            {callStatus === 'listening' ? 'Start speaking' : callStatus === 'speaking' ? 'Manus speaking' : callStatus === 'thinking' ? 'Processing' : 'Paused'}
-          </p>
+          {callStatus === 'thinking' ? (
+            <div className="flex justify-center pt-1">
+              <HorizontalLoader 
+                label={
+                  liveTranscript.toLowerCase().includes('image')
+                    ? "Generating Image"
+                    : liveTranscript.toLowerCase().includes('graph') || liveTranscript.toLowerCase().includes('chart')
+                      ? "Generating Graph"
+                      : "Generating"
+                } 
+              />
+            </div>
+          ) : (
+            <p className="text-xs text-white/50 tracking-wide uppercase font-medium">
+              {callStatus === 'listening' ? 'Start speaking' : callStatus === 'speaking' ? 'Manus speaking' : 'Paused'}
+            </p>
+          )}
 
           {/* Audio Waveform Dots */}
           <div className="flex items-center justify-center gap-2 pt-2">
@@ -471,25 +513,12 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
           </div>
         </div>
 
-        {/* Inline Keyboard Text Input (if toggled) */}
+        {/* Inline Keyboard Text Input (Uiverse Cobp Chatbot Component) */}
         {showKeyboardInput && (
-          <form onSubmit={handleSendKeyboardInput} className="w-full max-w-md mt-6 flex gap-2">
-            <input
-              type="text"
-              value={textInput}
-              onChange={(e) => setTextInput(e.target.value)}
-              placeholder="Type message to Manus..."
-              className="flex-1 bg-white/10 border border-white/20 rounded-full px-4 py-2 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              autoFocus
-            />
-            <button
-              type="submit"
-              disabled={!textInput.trim()}
-              className="w-9 h-9 rounded-full bg-blue-600 disabled:opacity-40 flex items-center justify-center text-white shrink-0"
-            >
-              <Send size={15} />
-            </button>
-          </form>
+          <CobpChatInput
+            onSubmit={(text) => handleUserSpoken(text)}
+            placeholder="Imagine Something...✦˚"
+          />
         )}
       </div>
 
@@ -759,9 +788,10 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
                 }}
               >
                 <SelectTrigger className="w-32 h-8 bg-white/5 border-white/10 text-xs text-white rounded-xl">
-                  <SelectValue placeholder="Grok Core" />
+                  <SelectValue placeholder="Orbit Sphere" />
                 </SelectTrigger>
                 <SelectContent className="bg-[#1C1E22] border-white/10 text-white">
+                  <SelectItem value="sphere">Orbit Sphere</SelectItem>
                   <SelectItem value="geometric">Grok Core</SelectItem>
                   <SelectItem value="bot">Cyber Bot</SelectItem>
                   <SelectItem value="hologram">Holo Matrix</SelectItem>

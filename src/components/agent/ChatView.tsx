@@ -21,6 +21,7 @@ import { Logo, ManusLogo } from '../layout/Logo';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ChartResult } from './ChartResult';
 import { FileAttachments } from './FileAttachments';
+import { HorizontalLoader } from '../common/HorizontalLoader';
 import { AttachmentMenu } from '../chat/AttachmentMenu';
 import { Step } from '@/hooks/useAgentTask';
 import { gsap } from 'gsap';
@@ -321,7 +322,7 @@ export function ChatView({
           </div>
         )}
 
-        {/* Subtle Assistant Typing Indicator Animation */}
+        {/* Horizontal Loader Animation (Uiverse.io by dexter-st) for Image & Graph Generation */}
         {isAssistantWorking && !result && (
           <div className="flex gap-4 max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="flex-1 space-y-2.5 min-w-0">
@@ -333,10 +334,16 @@ export function ChatView({
                 </span>
               </div>
               
-              <div className="inline-flex items-center gap-1.5 px-4 py-3 bg-white dark:bg-card border border-border/80 dark:border-border rounded-2xl rounded-tl-sm shadow-xs">
-                <span className="typing-dot w-2 h-2 rounded-full bg-slate-700 dark:bg-slate-300 inline-block" />
-                <span className="typing-dot w-2 h-2 rounded-full bg-slate-700 dark:bg-slate-300 inline-block" />
-                <span className="typing-dot w-2 h-2 rounded-full bg-slate-700 dark:bg-slate-300 inline-block" />
+              <div className="pt-1">
+                <HorizontalLoader 
+                  label={
+                    typingStatus.toLowerCase().includes('image')
+                      ? "Generating Image"
+                      : typingStatus.toLowerCase().includes('graph') || typingStatus.toLowerCase().includes('chart') || typingStatus.toLowerCase().includes('data')
+                        ? "Generating Graph"
+                        : "Generating"
+                  } 
+                />
               </div>
             </div>
           </div>
