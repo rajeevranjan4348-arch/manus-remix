@@ -25,6 +25,11 @@ import { toast } from 'sonner';
 import { AttachmentMenu } from '@/components/chat/AttachmentMenu';
 import { PersonalityMode } from '@/components/layout/Topbar';
 
+const CHAT_WORK_MODES = [
+  { id: 'chat' as PersonalityMode, label: 'Chat', icon: MessageSquare, desc: 'Normal conversation' },
+  { id: 'work' as PersonalityMode, label: 'Work', icon: Briefcase, desc: 'Autonomous task mode' },
+];
+
 const ACTION_CHIPS = [
   { label: "Build website", icon: Globe },
   { label: "Data analysis", icon: BarChart3 },
@@ -64,6 +69,9 @@ export function Home({ onStartTask, personality = 'chat', onPersonalityChange }:
   const [isExtracting, setIsExtracting] = useState(false);
   const [isThinkHarder, setIsThinkHarder] = useState(false);
   const [activePlugins, setActivePlugins] = useState<string[]>(['web_search', 'code_sandbox', 'charts']);
+  const [chatWorkMode, setChatWorkMode] = useState<PersonalityMode>(() => {
+    return (localStorage.getItem('manus_chat_work_mode') as PersonalityMode) || personality || 'chat';
+  });
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -222,6 +230,12 @@ export function Home({ onStartTask, personality = 'chat', onPersonalityChange }:
     }
   };
 
+  const handleChatWorkMode = (mode: PersonalityMode) => {
+    setChatWorkMode(mode);
+    localStorage.setItem('manus_chat_work_mode', mode);
+    onPersonalityChange?.(mode);
+  };
+
   const handleStart = () => {
     if (!prompt.trim()) {
       toast.error('Please enter a prompt');
@@ -234,6 +248,7 @@ export function Home({ onStartTask, personality = 'chat', onPersonalityChange }:
       intent: activeIntent?.label,
       thinkHarder: isThinkHarder,
       plugins: activePlugins,
+      mode: chatWorkMode,
     };
 
     if (fileData) {
@@ -393,6 +408,32 @@ export function Home({ onStartTask, personality = 'chat', onPersonalityChange }:
           </div>
 
           <div className="flex flex-wrap justify-center gap-3">
+            {/* Chat / Work mode switch — placed in the highlighted action-chip area. */}
+            <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 dark:border-border bg-white/80 dark:bg-card/80 p-1 shadow-xs backdrop-blur-sm">
+              {CHAT_WORK_MODES.map((mode) => {
+                const Icon = mode.icon;
+                const active = chatWorkMode === mode.id;
+                return (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    onClick={() => handleChatWorkMode(mode.id)}
+                    title={mode.desc}
+                    aria-pressed={active}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200",
+                      active
+                        ? "bg-[var(--Button-primary-black)] text-[var(--text-onblack)] shadow-sm"
+                        : "text-muted-foreground hover:text-foreground hover:bg-[var(--fill-tsp-gray-main)]"
+                    )}
+                  >
+                    <Icon size={14} />
+                    {mode.label}
+                  </button>
+                );
+              })}
+            </div>
+
             {ACTION_CHIPS.map((chip) => (
               <button
                 key={chip.label}
