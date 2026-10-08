@@ -515,6 +515,59 @@
 /* =========================================================================
    From Uiverse.io by dexter-st - Horizontal Loader for Image & Graph Generation
    ========================================================================= */
+.horizontal-loader-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0.6rem 1.1rem;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.85) 0%, rgba(30, 41, 59, 0.75) 100%);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  box-shadow: 0 8px 24px -6px rgba(37, 99, 235, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  user-select: none;
+  transform: none;
+  transform-style: flat;
+  animation: none;
+}
+
+.horizontal-loader-wrapper .loader-letter {
+  position: relative;
+  display: inline-block;
+  transform: none;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 0.95rem;
+  line-height: 1;
+  color: #93c5fd;
+  text-shadow: 0 0 12px rgba(59, 130, 246, 0.8);
+  animation: horizontalLetterBounce 1.4s ease-in-out infinite;
+  animation-delay: calc(var(--index, 0) * 0.08s);
+  backface-visibility: hidden;
+  pointer-events: none;
+}
+
+.horizontal-loader-wrapper .loader {
+  position: relative;
+  width: 2rem;
+  height: 0.25rem;
+  margin-left: 0.5rem;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, #3b82f6, #60a5fa, #93c5fd);
+  box-shadow: 0 0 10px #3b82f6, 0 0 20px #60a5fa;
+  animation: horizontalPulseSlide 1.2s ease-in-out infinite alternate;
+  z-index: 1;
+}
+
+/* Legacy selector retained for compatibility, but no longer controls the horizontal loader. */
 .loader-wrapper:not(#loader .loader-wrapper) {
   position: relative;
   display: inline-flex;
