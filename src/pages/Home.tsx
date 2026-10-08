@@ -14,11 +14,13 @@ import {
   ScatterChart,
   Flame,
   Link as LinkIcon,
-  X
+  X,
+  Gauge
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
+import { AttachmentMenu } from '@/components/chat/AttachmentMenu';
 
 const ACTION_CHIPS = [
   { label: "Build website", icon: Globe },
@@ -55,33 +57,66 @@ export function Home({ onStartTask }: HomeProps) {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [fileData, setFileData] = useState<string | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
+  const [isThinkHarder, setIsThinkHarder] = useState(false);
+  const [activePlugins, setActivePlugins] = useState<string[]>(['web_search', 'code_sandbox', 'charts']);
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const handleTogglePlugin = (pluginId: string) => {
+    setActivePlugins(prev => 
+      prev.includes(pluginId) ? prev.filter(p => p !== pluginId) : [...prev, pluginId]
+    );
+  };
+
   React.useEffect(() => {
     if (containerRef.current) {
-      gsap.from(containerRef.current.querySelectorAll('.animate-on-load'), {
-        y: 20,
-        opacity: 0,
-        stagger: 0.1,
-        duration: 0.8,
-        ease: 'power3.out'
-      });
+      const ctx = gsap.context(() => {
+        gsap.fromTo(
+          '.animate-on-load',
+          { y: 15, opacity: 0 },
+          {
+            y: 0,
+            opacity: 1,
+            stagger: 0.08,
+            duration: 0.5,
+            ease: 'power2.out',
+            clearProps: 'all'
+          }
+        );
+      }, containerRef);
+      return () => ctx.revert();
     }
   }, []);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const handleProcessFile = async (file: File) => {
     setUploadedFile(file);
     setIsExtracting(true);
     
     try {
       const fileName = file.name.toLowerCase();
       
-      // Handle CSV files - use FileReader (no auth required)
+      // Handle images (from Camera or Photos)
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const dataUrl = event.target?.result as string;
+          setFileData(dataUrl);
+          toast.success(`Attached photo: ${file.name}`);
+          if (!prompt.trim()) {
+            setPrompt('Examine and analyze this image in detail');
+          }
+          setIsExtracting(false);
+        };
+        reader.onerror = () => {
+          toast.error('Failed to read image');
+          setIsExtracting(false);
+        };
+        reader.readAsDataURL(file);
+        return;
+      }
+
+      // Handle CSV files
       if (fileName.endsWith('.csv')) {
         const reader = new FileReader();
         reader.onload = (event) => {
@@ -101,13 +136,12 @@ export function Home({ onStartTask }: HomeProps) {
         return;
       }
       
-      // Handle JSON files - use FileReader (no auth required)
+      // Handle JSON files
       if (fileName.endsWith('.json')) {
         const reader = new FileReader();
         reader.onload = (event) => {
           const text = event.target?.result as string;
           try {
-            // Validate it's valid JSON
             JSON.parse(text);
             setFileData(text);
             toast.success(`Loaded ${file.name}`);
@@ -127,8 +161,8 @@ export function Home({ onStartTask }: HomeProps) {
         return;
       }
       
-      // Handle plain text files - use FileReader (no auth required)
-      if (fileName.endsWith('.txt')) {
+      // Handle plain text files
+      if (fileName.endsWith('.txt') || fileName.endsWith('.md')) {
         const reader = new FileReader();
         reader.onload = (event) => {
           const text = event.target?.result as string;
@@ -146,82 +180,33 @@ export function Home({ onStartTask }: HomeProps) {
         reader.readAsText(file);
         return;
       }
-      
-      // Handle Excel files (.xlsx, .xls) - try to read as text/binary
-      if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
-        // For Excel files, we'll read as text which gives limited results
-        // but works without auth. For full Excel parsing, auth is needed.
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-          // Try extractFromBlob with auth if available
-          try {
-            const { blink } = await import('@/lib/blink');
-            const text = await blink.data.extractFromBlob(file);
-            
-            if (typeof text === 'string') {
-              setFileData(text);
-            } else if (Array.isArray(text)) {
-              setFileData(text.join('\n'));
-            }
-            
-            toast.success(`Loaded ${file.name}`);
-            if (!prompt.trim()) {
-              setPrompt(`Analyze the content of ${file.name} and provide insights`);
-            }
-          } catch (error: any) {
-            // If 401, suggest using CSV instead
-            if (error?.message?.includes('401') || error?.message?.includes('Unauthorized')) {
-              toast.error('Please sign in to upload Excel files, or convert to CSV');
-            } else {
-              toast.error('Failed to read Excel file. Try converting to CSV format.');
-            }
-          }
-          setIsExtracting(false);
-        };
-        reader.onerror = () => {
-          toast.error('Failed to read Excel file. Try converting to CSV format.');
-          setIsExtracting(false);
-        };
-        reader.readAsArrayBuffer(file);
-        return;
-      }
-      
-      // Handle PDF files - requires authentication
-      if (fileName.endsWith('.pdf')) {
-        try {
-          const { blink } = await import('@/lib/blink');
-          const text = await blink.data.extractFromBlob(file);
-          
-          if (typeof text === 'string') {
-            setFileData(text);
-          } else if (Array.isArray(text)) {
-            setFileData(text.join('\n'));
-          }
-          
-          toast.success(`Loaded ${file.name}`);
-          if (!prompt.trim()) {
-            setPrompt(`Analyze the content of ${file.name} and provide insights`);
-          }
-        } catch (error: any) {
-          if (error?.message?.includes('401') || error?.message?.includes('Unauthorized')) {
-            toast.error('Please sign in to upload PDF files');
-          } else {
-            toast.error('Failed to extract content from PDF');
-          }
+
+      // Handle PDF and other documents
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = event.target?.result as string;
+        setFileData(text || file.name);
+        toast.success(`Loaded ${file.name}`);
+        if (!prompt.trim()) {
+          setPrompt(`Summarize and extract key insights from ${file.name}`);
         }
         setIsExtracting(false);
-        return;
-      }
-      
-      // Unsupported file type
-      toast.error('Unsupported file type. Please use CSV, JSON, TXT, or PDF files.');
-      setIsExtracting(false);
-      
+      };
+      reader.onerror = () => {
+        toast.error('Failed to read file');
+        setIsExtracting(false);
+      };
+      reader.readAsText(file);
     } catch (error) {
       console.error('File extraction error:', error);
-      toast.error('Failed to process file. Please try a different format.');
+      toast.error('Failed to process file');
       setIsExtracting(false);
     }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleProcessFile(file);
   };
 
   const handleRemoveFile = () => {
@@ -241,7 +226,9 @@ export function Home({ onStartTask }: HomeProps) {
     const options: any = { 
       format: selectedFormat || 'report', 
       chartType: selectedChart || 'auto',
-      intent: activeIntent?.label
+      intent: activeIntent?.label,
+      thinkHarder: isThinkHarder,
+      plugins: activePlugins,
     };
 
     if (fileData) {
@@ -263,13 +250,13 @@ export function Home({ onStartTask }: HomeProps) {
   };
 
   return (
-    <div ref={containerRef} className="flex-1 flex flex-col items-center justify-center p-6 bg-manus-cream min-h-full">
-      <div className="w-full max-w-4xl space-y-12">
-        <div className="text-center space-y-4 animate-on-load">
-          <h1 className="text-6xl font-serif font-bold tracking-tight text-foreground">
+    <div ref={containerRef} className="w-full h-full overflow-y-auto flex flex-col items-center p-6 md:py-10 bg-manus-cream">
+      <div className="w-full max-w-4xl space-y-10 my-auto">
+        <div className="text-center space-y-3 animate-on-load">
+          <h1 className="text-5xl md:text-6xl font-serif font-bold tracking-tight text-foreground">
             What can I do for you?
           </h1>
-          <p className="text-muted-foreground text-lg">Assign a task, and I'll handle the rest.</p>
+          <p className="text-muted-foreground text-base md:text-lg">Assign a task, and I'll handle the rest.</p>
         </div>
 
         <div className="space-y-6 animate-on-load">
@@ -290,7 +277,7 @@ export function Home({ onStartTask }: HomeProps) {
             </div>
           )}
 
-          <div className="flex flex-col gap-3 rounded-[22px] transition-all relative bg-[var(--fill-input-chat)] py-3 max-h-[312px] w-full z-[2] shadow-[0px_12px_32px_0px_rgba(0,0,0,0.02)] border border-black/8 dark:border-[var(--border-main)]">
+          <div className="flex flex-col gap-3 rounded-[22px] transition-all relative bg-[var(--fill-input-chat)] py-3 max-h-[312px] w-full z-[2] shadow-[0px_12px_32px_0px_rgba(0,0,0,0.04)] border border-slate-200 dark:border-[var(--border-main)]">
             <div className="overflow-y-auto pl-4 pr-2">
               {activeIntent && (
                 <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-600 text-white rounded-full mr-2 mb-2 align-middle animate-in fade-in zoom-in duration-200">
@@ -314,6 +301,18 @@ export function Home({ onStartTask }: HomeProps) {
                   </button>
                 </div>
               )}
+              {isThinkHarder && (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-600/10 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-500/20 rounded-full mr-2 mb-2 align-middle animate-in fade-in zoom-in duration-200 text-xs font-semibold">
+                  <Gauge size={13} className="text-blue-600 dark:text-blue-400" />
+                  <span>Think harder</span>
+                  <button 
+                    onClick={() => setIsThinkHarder(false)} 
+                    className="p-0.5 hover:bg-blue-500/20 rounded-full transition-colors ml-0.5"
+                  >
+                    <X size={10} />
+                  </button>
+                </div>
+              )}
               <textarea 
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
@@ -323,35 +322,45 @@ export function Home({ onStartTask }: HomeProps) {
                     handleStart();
                   }
                 }}
-                className="flex border-none focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-50 overflow-hidden bg-transparent px-0 w-full placeholder:text-[var(--text-disable)] text-lg shadow-none resize-none leading-relaxed min-h-[48px]" 
+                className="flex border-none focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-50 overflow-hidden bg-transparent px-0 w-full placeholder:text-[var(--text-disable)] text-foreground text-lg shadow-none resize-none leading-relaxed min-h-[48px]" 
                 rows={1}
-                placeholder={activeIntent?.placeholder || "Assign a task or ask anything"} 
+                placeholder={activeIntent?.placeholder || (isThinkHarder ? "Assign a deep reasoning task or question..." : "Assign a task or ask anything")} 
               />
             </div>
             <div className="px-3 flex gap-2 item-center">
               <div className="flex gap-2 items-center flex-shrink-0">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".csv,.xlsx,.xls,.pdf,.txt,.json"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-                <button 
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isExtracting}
-                  className="rounded-full border border-[var(--border-main)] inline-flex items-center justify-center gap-1 clickable cursor-pointer text-xs text-[var(--text-secondary)] hover:bg-[var(--fill-tsp-gray-main)] w-8 h-8 p-0 data-[popover-trigger]:bg-[var(--fill-tsp-gray-main)] shrink-0 relative" 
+                <AttachmentMenu
+                  onFileSelect={handleProcessFile}
+                  isThinkHarder={isThinkHarder}
+                  onToggleThinkHarder={() => setIsThinkHarder(prev => !prev)}
+                  activePlugins={activePlugins}
+                  onTogglePlugin={handleTogglePlugin}
+                  onSendMessageToChat={(text) => setPrompt(text)}
+                >
+                  <button 
+                    disabled={isExtracting}
+                    className="rounded-full border border-[var(--border-main)] inline-flex items-center justify-center gap-1 clickable cursor-pointer text-xs text-[var(--text-secondary)] hover:bg-[var(--fill-tsp-gray-main)] w-8 h-8 p-0 data-[popover-trigger]:bg-[var(--fill-tsp-gray-main)] shrink-0 relative transition-transform active:scale-95" 
+                    title="Camera, Photos, Files, Plugins, Think harder"
+                    aria-label="Add attachments or options"
+                  >
+                    <Plus size={18} className="text-[var(--icon-primary)]"/>
+                    {(uploadedFile || isThinkHarder) && (
+                      <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-4 h-[2px] bg-blue-600 rounded-full shadow-[0_0_8px_rgba(37,99,235,0.4)]" />
+                    )}
+                  </button>
+                </AttachmentMenu>
+                <div 
+                  onClick={() => setIsThinkHarder(prev => !prev)}
+                  title={isThinkHarder ? "Think harder enabled (click to toggle)" : "Toggle Think harder mode"}
+                  className={cn(
+                    "flex items-center gap-[4px] p-[8px] pl-[8px] cursor-pointer rounded-[100px] border border-[var(--border-main)] hover:bg-[var(--fill-tsp-gray-main)] relative transition-colors",
+                    isThinkHarder && "bg-blue-50 dark:bg-blue-500/10 border-blue-200 dark:border-blue-500/30"
+                  )} 
                   aria-expanded="false" 
                   aria-haspopup="dialog"
                 >
-                  <Plus size={18} className="text-[var(--icon-primary)]"/>
-                  {uploadedFile && (
-                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-4 h-[2px] bg-blue-600 rounded-full shadow-[0_0_8px_rgba(37,99,235,0.4)]" />
-                  )}
-                </button>
-                <div className="flex items-center gap-[4px] p-[8px] pl-[8px] cursor-pointer rounded-[100px] border border-[var(--border-main)] hover:bg-[var(--fill-tsp-gray-main)] relative" aria-expanded="false" aria-haspopup="dialog">
                   <div className="flex items-center gap-[4px]">
-                    <Cable size={16} className="text-[var(--icon-primary)]"/>
+                    <Cable size={16} className={cn("text-[var(--icon-primary)]", isThinkHarder && "text-blue-600 dark:text-blue-400")}/>
                   </div>
                   {activeIntent && (
                     <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-4 h-[2px] bg-blue-600 rounded-full shadow-[0_0_8px_rgba(37,99,235,0.4)]" />
@@ -428,7 +437,7 @@ export function Home({ onStartTask }: HomeProps) {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-on-load">
           <div className="space-y-4">
-            <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-widest px-1">Choose output format</h3>
+            <h3 className="text-xs font-bold text-slate-500 dark:text-muted-foreground uppercase tracking-widest px-1">Choose output format</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {OUTPUT_FORMATS.map((format) => (
                 <button
@@ -437,18 +446,20 @@ export function Home({ onStartTask }: HomeProps) {
                   className={cn(
                     "flex items-start gap-4 p-4 rounded-2xl border transition-all text-left group",
                     selectedFormat === format.id 
-                      ? "bg-white border-primary shadow-lg ring-1 ring-primary/10 -translate-y-1" 
-                      : "bg-white/50 border-border hover:bg-white hover:border-primary/20 hover:-translate-y-0.5"
+                      ? "bg-white dark:bg-card border-primary shadow-md ring-1 ring-primary/10 -translate-y-0.5" 
+                      : "bg-white dark:bg-card border-slate-200 dark:border-border hover:border-primary/40 dark:hover:border-primary/50 hover:-translate-y-0.5 shadow-xs"
                   )}
                 >
                   <div className={cn(
                     "p-2.5 rounded-xl transition-colors",
-                    selectedFormat === format.id ? "bg-primary text-primary-foreground" : "bg-manus-soft text-muted-foreground group-hover:bg-manus-cream"
+                    selectedFormat === format.id 
+                      ? "bg-primary text-primary-foreground" 
+                      : "bg-slate-100 dark:bg-muted text-slate-700 dark:text-foreground group-hover:bg-slate-200 dark:group-hover:bg-accent"
                   )}>
                     <format.icon size={20} />
                   </div>
                   <div>
-                    <div className="font-bold text-sm tracking-tight">{format.label}</div>
+                    <div className="font-bold text-sm tracking-tight text-foreground">{format.label}</div>
                     <div className="text-xs text-muted-foreground leading-relaxed mt-0.5">{format.desc}</div>
                   </div>
                 </button>
@@ -457,26 +468,28 @@ export function Home({ onStartTask }: HomeProps) {
           </div>
 
           <div className="space-y-4">
-            <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-widest px-1">Preferred charts gallery</h3>
+            <h3 className="text-xs font-bold text-slate-500 dark:text-muted-foreground uppercase tracking-widest px-1">Preferred charts gallery</h3>
             <div className="grid grid-cols-3 gap-3">
               {CHART_TYPES.map((chart) => (
                 <button
                   key={chart.id}
                   onClick={() => setSelectedChart(chart.id)}
                   className={cn(
-                    "flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border bg-white transition-all group",
+                    "flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border bg-white dark:bg-card transition-all group",
                     selectedChart === chart.id 
-                      ? "border-primary shadow-lg ring-1 ring-primary/10 -translate-y-1" 
-                      : "border-border hover:border-primary/20 hover:-translate-y-0.5"
+                      ? "border-primary shadow-md ring-1 ring-primary/10 -translate-y-0.5" 
+                      : "border-slate-200 dark:border-border hover:border-primary/40 dark:hover:border-primary/50 hover:-translate-y-0.5 shadow-xs"
                   )}
                 >
                   <div className={cn(
                     "p-2 rounded-lg transition-colors",
-                    selectedChart === chart.id ? "bg-primary/5 text-primary" : "text-muted-foreground group-hover:text-foreground"
+                    selectedChart === chart.id 
+                      ? "bg-primary/10 text-primary" 
+                      : "text-slate-700 dark:text-muted-foreground group-hover:text-foreground"
                   )}>
                     <chart.icon size={22} />
                   </div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider">{chart.label}</span>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-muted-foreground group-hover:text-foreground">{chart.label}</span>
                 </button>
               ))}
             </div>

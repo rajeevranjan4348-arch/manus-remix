@@ -5,14 +5,16 @@ import { Topbar } from './components/layout/Topbar';
 import { Home } from './pages/Home';
 import { ChatView } from './components/agent/ChatView';
 import { WebsiteBuilderView } from './components/agent/WebsiteBuilderView';
+import { HistoryPanel } from './components/history/HistoryPanel';
 import { useAgentTask } from './hooks/useAgentTask';
 import { useWebsiteBuilder } from './hooks/useWebsiteBuilder';
 import { BlinkProvider, BlinkAuthProvider, useBlinkAuth } from '@blinkdotnew/react';
+import { ThemeProvider } from './context/ThemeContext';
 import { Toaster } from './components/ui/sonner';
 import { blink } from './lib/blink';
 
-const PROJECT_ID = import.meta.env.VITE_BLINK_PROJECT_ID;
-const PUBLISHABLE_KEY = import.meta.env.VITE_BLINK_PUBLISHABLE_KEY;
+const PROJECT_ID = (import.meta as any).env?.VITE_BLINK_PROJECT_ID || 'manus-agent-clone-tkzhogvs';
+const PUBLISHABLE_KEY = (import.meta as any).env?.VITE_BLINK_PUBLISHABLE_KEY || 'blnk_pk_dummy';
 
 // Wrapper for ChatView to handle params
 function TaskView({ 
@@ -51,6 +53,7 @@ function TaskView({
 
 function AppContent() {
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = React.useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useBlinkAuth();
@@ -58,6 +61,18 @@ function AppContent() {
   // Data analysis hook
   const agentTask = useAgentTask();
   const { startTask, resetTask } = agentTask;
+
+  // Global keyboard shortcut (Ctrl+H / Cmd+H for History Panel)
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'h') {
+        e.preventDefault();
+        setIsHistoryOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Website builder hook
   const {
@@ -102,10 +117,16 @@ function AppContent() {
         isOpen={isSidebarOpen} 
         onToggle={() => setIsSidebarOpen(!isSidebarOpen)} 
         onNewTask={handleReset}
+        onOpenHistory={() => setIsHistoryOpen(true)}
         activeTaskId={location.pathname.startsWith('/task/') ? location.pathname.split('/')[2] : undefined}
       />
       <div className="flex-1 flex flex-col min-w-0">
-        {!isWebsiteActive && <Topbar />}
+        {!isWebsiteActive && (
+          <Topbar 
+            onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+            onOpenHistory={() => setIsHistoryOpen(true)} 
+          />
+        )}
         <main className="flex-1 overflow-hidden relative">
           {isWebsiteActive ? (
             <WebsiteBuilderView
@@ -132,34 +153,35 @@ function AppContent() {
           )}
         </main>
       </div>
+
+      {/* Slide-out Activity & History Panel */}
+      <HistoryPanel 
+        isOpen={isHistoryOpen} 
+        onClose={() => setIsHistoryOpen(false)}
+        onSelectTask={(id) => {
+          setIsHistoryOpen(false);
+          navigate(`/task/${id}`);
+        }}
+      />
+
       <Toaster />
     </div>
   );
 }
 
 export default function App() {
-  if (!PROJECT_ID || !PUBLISHABLE_KEY) {
-    return (
-      <div className="h-screen flex items-center justify-center p-6 bg-manus-cream text-center">
-        <div className="max-w-md space-y-4">
-          <h1 className="text-2xl font-serif font-bold">Configuration Missing</h1>
-          <p className="text-muted-foreground">Please ensure VITE_BLINK_PROJECT_ID and VITE_BLINK_PUBLISHABLE_KEY are set in your environment.</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <BlinkProvider 
-      projectId={PROJECT_ID} 
-      publishableKey={PUBLISHABLE_KEY}
-      auth={{ mode: 'managed' }}
-    >
-      <BlinkAuthProvider>
-        <BrowserRouter>
-          <AppContent />
-        </BrowserRouter>
-      </BlinkAuthProvider>
-    </BlinkProvider>
+    <ThemeProvider>
+      <BlinkProvider 
+        projectId={PROJECT_ID} 
+        publishableKey={PUBLISHABLE_KEY}
+      >
+        <BlinkAuthProvider>
+          <BrowserRouter>
+            <AppContent />
+          </BrowserRouter>
+        </BlinkAuthProvider>
+      </BlinkProvider>
+    </ThemeProvider>
   );
 }

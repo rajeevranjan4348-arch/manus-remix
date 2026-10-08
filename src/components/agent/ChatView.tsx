@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { 
   ArrowUp, 
   Plus, 
@@ -11,15 +11,20 @@ import {
   ChevronUp,
   ChevronDown,
   RotateCcw,
-  Workflow
+  Workflow,
+  Gauge,
+  X,
+  FileText
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Logo, ManusLogo } from '../layout/Logo';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ChartResult } from './ChartResult';
 import { FileAttachments } from './FileAttachments';
+import { AttachmentMenu } from '../chat/AttachmentMenu';
 import { Step } from '@/hooks/useAgentTask';
 import { gsap } from 'gsap';
+import { toast } from 'sonner';
 
 interface ChatViewProps {
   prompt: string;
@@ -48,23 +53,53 @@ export function ChatView({
 }: ChatViewProps) {
   const [input, setInput] = React.useState('');
   const [expandedSteps, setExpandedSteps] = React.useState<Record<string, boolean>>({});
+  const [isThinkHarder, setIsThinkHarder] = useState(false);
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [activePlugins, setActivePlugins] = useState<string[]>(['web_search', 'code_sandbox', 'charts']);
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleTogglePlugin = (pluginId: string) => {
+    setActivePlugins(prev => 
+      prev.includes(pluginId) ? prev.filter(p => p !== pluginId) : [...prev, pluginId]
+    );
+  };
+
+  const handleFileSelect = (file: File) => {
+    setAttachedFile(file);
+    toast.success(`Attached: ${file.name}`);
+  };
+
+  const handleSend = () => {
+    if (!input.trim() && !attachedFile) return;
+    let message = input.trim();
+    if (attachedFile) {
+      message = `[Attached: ${attachedFile.name}]\n` + message;
+    }
+    if (isThinkHarder) {
+      message = `[Think Harder / Deep Reasoning Mode]\n` + message;
+    }
+    onSubmit(message);
+    setInput('');
+    setAttachedFile(null);
+  };
 
   // Auto-scroll to bottom
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, steps, result]);
+  }, [messages, steps, result, isLoading, status]);
 
   // Initial animation
   useEffect(() => {
     if (containerRef.current) {
-      gsap.from(containerRef.current, {
-        opacity: 0,
-        y: 20,
-        duration: 0.5,
-        ease: 'power3.out'
-      });
+      const ctx = gsap.context(() => {
+        gsap.fromTo(
+          containerRef.current,
+          { opacity: 0, y: 15 },
+          { opacity: 1, y: 0, duration: 0.4, ease: 'power2.out', clearProps: 'all' }
+        );
+      }, containerRef);
+      return () => ctx.revert();
     }
   }, []);
 
@@ -179,8 +214,16 @@ export function ChatView({
     );
   };
 
+  const isAssistantWorking = isLoading || status === 'running';
+  const activeRunningStep = steps.find(s => s.status === 'running');
+  const typingStatus = activeRunningStep 
+    ? activeRunningStep.label 
+    : isThinkHarder 
+      ? "Manus is reasoning deeply..." 
+      : "Manus is thinking...";
+
   return (
-    <div className="flex flex-col h-full bg-manus-cream relative">
+    <div className="flex flex-col h-full bg-manus-cream dark:bg-background relative">
       {/* Chat Area */}
       <div ref={containerRef} className="flex-1 overflow-y-auto px-4 sm:px-20 py-6 space-y-8 custom-scrollbar scroll-smooth">
         
@@ -278,46 +321,100 @@ export function ChatView({
           </div>
         )}
 
-        {/* Loading Indicator */}
-        {isLoading && status === 'running' && steps.length === 0 && (
-           <div className="flex gap-4 max-w-3xl mx-auto">
-             <div className="w-8 shrink-0 flex justify-center">
-               <div className="w-2 h-2 bg-primary rounded-full animate-ping" />
-             </div>
-             <div className="text-sm text-muted-foreground">Thinking...</div>
-           </div>
+        {/* Subtle Assistant Typing Indicator Animation */}
+        {isAssistantWorking && !result && (
+          <div className="flex gap-4 max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="flex-1 space-y-2.5 min-w-0">
+              <div className="flex items-center gap-2.5">
+                <ManusLogo showBadge={true} />
+                <span className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 animate-pulse">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping" />
+                  {typingStatus}
+                </span>
+              </div>
+              
+              <div className="inline-flex items-center gap-1.5 px-4 py-3 bg-white dark:bg-card border border-border/80 dark:border-border rounded-2xl rounded-tl-sm shadow-xs">
+                <span className="typing-dot w-2 h-2 rounded-full bg-slate-700 dark:bg-slate-300 inline-block" />
+                <span className="typing-dot w-2 h-2 rounded-full bg-slate-700 dark:bg-slate-300 inline-block" />
+                <span className="typing-dot w-2 h-2 rounded-full bg-slate-700 dark:bg-slate-300 inline-block" />
+              </div>
+            </div>
+          </div>
         )}
 
         <div ref={bottomRef} className="h-24" /> {/* Spacer for bottom input */}
       </div>
 
       {/* Input Area - Floating Bottom */}
-      <div className="absolute bottom-6 left-0 right-0 px-4 flex justify-center z-20">
-        <div className="w-full max-w-3xl bg-white rounded-[2rem] shadow-xl border border-border/50 p-2 pl-4 flex items-center gap-2 transition-all focus-within:ring-1 focus-within:ring-primary/20">
-          <button className="p-2 hover:bg-manus-soft rounded-full transition-colors text-muted-foreground">
-            <Plus size={20} />
-          </button>
-          <button className="p-2 hover:bg-manus-soft rounded-full transition-colors text-muted-foreground">
+      <div className="absolute bottom-6 left-0 right-0 px-4 flex flex-col items-center gap-2 z-20">
+        {(attachedFile || isThinkHarder) && (
+          <div className="flex items-center gap-2 flex-wrap max-w-3xl w-full px-2">
+            {isThinkHarder && (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-600 text-white rounded-full text-xs font-semibold shadow-md animate-in fade-in zoom-in duration-200">
+                <Gauge size={13} />
+                <span>Think harder</span>
+                <button onClick={() => setIsThinkHarder(false)} className="p-0.5 hover:bg-white/20 rounded-full ml-1">
+                  <X size={10} />
+                </button>
+              </div>
+            )}
+            {attachedFile && (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white dark:bg-card border border-border rounded-full text-xs font-medium shadow-md animate-in fade-in zoom-in duration-200">
+                <FileText size={13} className="text-primary" />
+                <span className="truncate max-w-[150px]">{attachedFile.name}</span>
+                <button onClick={() => setAttachedFile(null)} className="p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full ml-1">
+                  <X size={10} />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        <div className="w-full max-w-3xl bg-white dark:bg-card rounded-[2rem] shadow-xl border border-border/50 p-2 pl-4 flex items-center gap-2 transition-all focus-within:ring-1 focus-within:ring-primary/20">
+          <AttachmentMenu
+            onFileSelect={handleFileSelect}
+            isThinkHarder={isThinkHarder}
+            onToggleThinkHarder={() => setIsThinkHarder(prev => !prev)}
+            activePlugins={activePlugins}
+            onTogglePlugin={handleTogglePlugin}
+            onSendMessageToChat={(text) => onSubmit(text)}
+          >
+            <button 
+              className="p-2 hover:bg-manus-soft dark:hover:bg-accent rounded-full transition-colors text-muted-foreground relative"
+              title="Camera, Photos, Files, Plugins, Think harder"
+              aria-label="Add attachments or options"
+            >
+              <Plus size={20} />
+              {(attachedFile || isThinkHarder) && (
+                <div className="absolute bottom-1 right-1 w-2 h-2 bg-blue-600 rounded-full" />
+              )}
+            </button>
+          </AttachmentMenu>
+          <button className="p-2 hover:bg-manus-soft dark:hover:bg-accent rounded-full transition-colors text-muted-foreground">
             <Workflow size={20} />
           </button>
           <input 
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Send message to Manus..."
-            className="flex-1 bg-transparent border-none outline-none text-base placeholder:text-muted-foreground/50 h-10"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            placeholder={isThinkHarder ? "Ask with deep reasoning..." : "Send message to Manus..."}
+            className="flex-1 bg-transparent border-none outline-none text-base placeholder:text-muted-foreground/50 h-10 text-foreground"
             disabled={isLoading}
           />
           <div className="flex items-center gap-1 pr-1">
-             <button className="p-2 hover:bg-manus-soft rounded-full transition-colors text-muted-foreground">
+             <button className="p-2 hover:bg-manus-soft dark:hover:bg-accent rounded-full transition-colors text-muted-foreground">
                <Mic size={20} />
              </button>
              <button 
-               onClick={() => { if(input.trim()) { onSubmit(input); setInput(''); } }}
-               disabled={!input.trim() || isLoading}
+               onClick={handleSend}
+               disabled={(!input.trim() && !attachedFile) || isLoading}
                className={cn(
                  "p-2 rounded-full transition-all flex items-center justify-center w-10 h-10",
-                 input.trim() ? "bg-primary text-white" : "bg-manus-soft text-muted-foreground"
+                 (input.trim() || attachedFile) ? "bg-primary text-white" : "bg-manus-soft dark:bg-muted text-muted-foreground"
                )}
              >
                <ArrowUp size={20} />

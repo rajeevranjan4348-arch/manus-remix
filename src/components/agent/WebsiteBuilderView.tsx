@@ -49,24 +49,27 @@ export function WebsiteBuilderView({
 
   React.useEffect(() => {
     if (sidebarRef.current) {
-      gsap.from(sidebarRef.current.children, {
-        x: -20,
-        opacity: 0,
-        stagger: 0.1,
-        duration: 0.8,
-        ease: 'power3.out'
-      });
+      const ctx = gsap.context(() => {
+        gsap.fromTo(
+          sidebarRef.current?.children || [],
+          { x: -15, opacity: 0 },
+          { x: 0, opacity: 1, stagger: 0.08, duration: 0.5, ease: 'power2.out', clearProps: 'all' }
+        );
+      }, sidebarRef);
+      return () => ctx.revert();
     }
   }, []);
 
   React.useEffect(() => {
     if (previewRef.current && previewUrl) {
-      gsap.from(previewRef.current, {
-        opacity: 0,
-        scale: 0.98,
-        duration: 0.6,
-        ease: 'power2.out'
-      });
+      const ctx = gsap.context(() => {
+        gsap.fromTo(
+          previewRef.current,
+          { opacity: 0, scale: 0.98 },
+          { opacity: 1, scale: 1, duration: 0.4, ease: 'power2.out', clearProps: 'all' }
+        );
+      }, previewRef);
+      return () => ctx.revert();
     }
   }, [previewUrl]);
 

@@ -37,13 +37,14 @@ export function AgentView({ prompt, steps, result, status, onReset, onExport, op
   React.useEffect(() => {
     // animate sidebar only
     if (sidebarRef.current) {
-      gsap.from(sidebarRef.current.children, {
-        x: -20,
-        opacity: 0,
-        stagger: 0.1,
-        duration: 0.8,
-        ease: 'power3.out'
-      });
+      const ctx = gsap.context(() => {
+        gsap.fromTo(
+          sidebarRef.current?.children || [],
+          { x: -15, opacity: 0 },
+          { x: 0, opacity: 1, stagger: 0.08, duration: 0.5, ease: 'power2.out', clearProps: 'all' }
+        );
+      }, sidebarRef);
+      return () => ctx.revert();
     }
   }, []);
 
