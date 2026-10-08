@@ -22,12 +22,15 @@ import {
   Play,
   FileCode,
   Check,
-  Plus
+  Plus,
+  LayoutList,
+  LayoutGrid
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { blink } from '@/lib/blink';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { syncTasksToLibrary, getLibraryItems } from '@/lib/libraryStore';
 import {
   Sheet,
   SheetContent,
@@ -162,6 +165,27 @@ function getRelativeTime(dateString: string): string {
   }
 }
 
+function getTypeLabel(item: LibraryFileItem): { label: string; bg: string; text: string; icon: any } {
+  switch (item.type) {
+    case 'photo':
+      return { label: 'Image', bg: 'bg-emerald-500/10 dark:bg-emerald-500/20', text: 'text-emerald-600 dark:text-emerald-400', icon: ImageIcon };
+    case 'video':
+      return { label: 'Video', bg: 'bg-purple-500/10 dark:bg-purple-500/20', text: 'text-purple-600 dark:text-purple-400', icon: Film };
+    case 'audio':
+      return { label: 'Audio', bg: 'bg-amber-500/10 dark:bg-amber-500/20', text: 'text-amber-600 dark:text-amber-400', icon: Mic };
+    case 'website':
+      return { label: 'Web Project', bg: 'bg-indigo-500/10 dark:bg-indigo-500/20', text: 'text-indigo-600 dark:text-indigo-400', icon: Globe };
+    case 'graph':
+      return { label: 'Dataset', bg: 'bg-cyan-500/10 dark:bg-cyan-500/20', text: 'text-cyan-600 dark:text-cyan-400', icon: BarChart3 };
+    case 'doc':
+    default:
+      if (item.name.endsWith('.pdf')) {
+        return { label: 'PDF Document', bg: 'bg-blue-500/10 dark:bg-blue-500/20', text: 'text-blue-600 dark:text-blue-400', icon: FileText };
+      }
+      return { label: 'Document', bg: 'bg-blue-500/10 dark:bg-blue-500/20', text: 'text-blue-600 dark:text-blue-400', icon: FileText };
+  }
+}
+
 export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProps) {
   const [tasks, setTasks] = useState<TaskHistoryItem[]>([]);
   const [voiceHistory, setVoiceHistory] = useState<VoiceHistoryRecord[]>([]);
@@ -169,6 +193,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'photos' | 'videos' | 'docs' | 'sessions'>('all');
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [previewMedia, setPreviewMedia] = useState<LibraryFileItem | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
@@ -198,6 +223,11 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
         limit: 100
       });
       setTasks(result || []);
+
+      // Automatically convert task artifacts & shared docs into Library items
+      if (result && result.length > 0) {
+        syncTasksToLibrary(result);
+      }
 
       // 2. Load voice transcripts
       const savedVoice = localStorage.getItem('manus_voice_history');
@@ -458,8 +488,8 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
             onValueChange={(val: any) => setActiveTab(val)} 
             className="flex-1 flex flex-col min-h-0"
           >
-            <div className="px-5 pt-3 pb-2 flex items-center justify-between border-b border-border/60">
-              <TabsList className="bg-manus-soft dark:bg-muted/50 p-1 rounded-xl h-9 gap-1">
+            <div className="px-5 pt-3 pb-2 flex items-center justify-between border-b border-border/60 gap-2">
+              <TabsList className="bg-manus-soft dark:bg-muted/50 p-1 rounded-xl h-9 gap-1 overflow-x-auto">
                 <TabsTrigger value="all" className="text-xs px-2.5 py-1 rounded-lg font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
                   All Items
                 </TabsTrigger>
@@ -476,11 +506,41 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
                   Sessions
                 </TabsTrigger>
               </TabsList>
+
+              {/* View Mode Switcher (List vs Grid) */}
+              {activeTab !== 'sessions' && (
+                <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-lg shrink-0">
+                  <button
+                    onClick={() => setViewMode('list')}
+                    className={cn(
+                      "p-1.5 rounded-md transition-all",
+                      viewMode === 'list' 
+                        ? "bg-white dark:bg-card text-foreground shadow-2xs font-semibold" 
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title="Clean List Format"
+                  >
+                    <LayoutList size={14} />
+                  </button>
+                  <button
+                    onClick={() => setViewMode('grid')}
+                    className={cn(
+                      "p-1.5 rounded-md transition-all",
+                      viewMode === 'grid' 
+                        ? "bg-white dark:bg-card text-foreground shadow-2xs font-semibold" 
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title="Grid Preview Format"
+                  >
+                    <LayoutGrid size={14} />
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Content for Media Tabs (All, Photos, Videos, Docs) */}
             {activeTab !== 'sessions' ? (
-              <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+              <div className="flex-1 overflow-y-auto p-4 space-y-2.5 custom-scrollbar">
                 {filteredItems.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-56 text-center px-4 space-y-3">
                     <div className="w-12 h-12 rounded-2xl bg-muted/60 text-muted-foreground flex items-center justify-center">
@@ -495,7 +555,87 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
                       </p>
                     </div>
                   </div>
+                ) : viewMode === 'list' ? (
+                  /* Clean List Format Layout */
+                  <div className="space-y-2">
+                    {filteredItems.map((item) => {
+                      const typeBadge = getTypeLabel(item);
+                      const TypeIcon = typeBadge.icon;
+                      return (
+                        <div
+                          key={item.id}
+                          className="group relative flex items-center justify-between p-3 rounded-2xl border border-border bg-white dark:bg-card hover:border-primary/50 hover:shadow-sm transition-all gap-3"
+                        >
+                          {/* File Icon & Main Details */}
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0 font-medium shadow-2xs", typeBadge.bg, typeBadge.text)}>
+                              <TypeIcon size={18} />
+                            </div>
+
+                            <div className="min-w-0 flex-1 space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <h4 className="font-semibold text-xs text-foreground truncate" title={item.name}>
+                                  {item.name}
+                                </h4>
+                                {item.source && (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-md bg-muted text-muted-foreground font-medium shrink-0 hidden sm:inline-block">
+                                    {item.source}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2 text-[11px] text-muted-foreground flex-wrap">
+                                {/* Type Label Badge */}
+                                <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase", typeBadge.bg, typeBadge.text)}>
+                                  {typeBadge.label}
+                                </span>
+                                <span>•</span>
+                                {/* File Size Label */}
+                                <span className="font-mono text-[10px] font-semibold text-foreground/80 bg-slate-100 dark:bg-muted/80 px-1.5 py-0.5 rounded">
+                                  {item.size || 'Shared File'}
+                                </span>
+                                <span>•</span>
+                                {/* Timestamp */}
+                                <span className="text-[10px] font-mono">{getRelativeTime(item.createdAt)}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Action Buttons */}
+                          <div className="flex items-center gap-1 shrink-0">
+                            {(item.type === 'photo' || item.type === 'video' || item.type === 'audio') && (
+                              <button
+                                onClick={() => setPreviewMedia(item)}
+                                className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                                title={item.type === 'photo' ? 'View Photo' : 'Play Media'}
+                              >
+                                {item.type === 'photo' ? <Eye size={15} /> : <Play size={15} />}
+                              </button>
+                            )}
+
+                            <button
+                              onClick={(e) => handleDownloadFile(item, e)}
+                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-primary/10 hover:bg-primary hover:text-primary-foreground text-primary font-semibold transition-all text-xs cursor-pointer shadow-2xs"
+                              title={`Download ${item.name}`}
+                            >
+                              <Download size={13} />
+                              <span className="hidden sm:inline">Download</span>
+                            </button>
+
+                            <button
+                              onClick={(e) => handleDeleteLibraryItem(item.id, e)}
+                              className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors cursor-pointer"
+                              title="Delete from Library"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 ) : (
+                  /* Grid Layout */
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {filteredItems.map((item) => (
                       <div

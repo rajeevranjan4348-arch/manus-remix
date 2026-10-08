@@ -25,7 +25,7 @@ import { toast } from 'sonner';
 import { AttachmentMenu } from '@/components/chat/AttachmentMenu';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
 
-type PersonalityMode = 'chat' | 'work';
+export type PersonalityMode = 'chat' | 'work';
 
 const CHAT_WORK_MODES = [
   { id: 'chat' as PersonalityMode, label: 'Chat', icon: MessageSquare, desc: 'Normal conversation' },
@@ -57,9 +57,11 @@ const CHART_TYPES = [
 
 interface HomeProps {
   onStartTask: (prompt: string, options: any) => void;
+  personality?: PersonalityMode;
+  onPersonalityChange?: (mode: PersonalityMode) => void;
 }
 
-export function Home({ onStartTask }: HomeProps) {
+export function Home({ onStartTask, personality, onPersonalityChange }: HomeProps) {
   const [prompt, setPrompt] = useState('');
   const [activeIntent, setActiveIntent] = useState<{ label: string, icon: any, placeholder?: string } | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<string | null>(null);
@@ -70,9 +72,8 @@ export function Home({ onStartTask }: HomeProps) {
   const [isThinkHarder, setIsThinkHarder] = useState(false);
   const [activePlugins, setActivePlugins] = useState<string[]>(['web_search', 'code_sandbox', 'charts']);
   const [chatWorkMode, setChatWorkMode] = useState<PersonalityMode>(() => {
-    return localStorage.getItem('manus_chat_work_mode') === 'work' ? 'work' : 'chat';
+    return (localStorage.getItem('manus_chat_work_mode') as PersonalityMode) || personality || 'chat';
   });
-  const isWorkMode = chatWorkMode === 'work';
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -237,6 +238,7 @@ export function Home({ onStartTask }: HomeProps) {
   const handleChatWorkMode = (mode: PersonalityMode) => {
     setChatWorkMode(mode);
     localStorage.setItem('manus_chat_work_mode', mode);
+    onPersonalityChange?.(mode);
   };
 
   const handleStart = () => {
@@ -246,9 +248,9 @@ export function Home({ onStartTask }: HomeProps) {
     }
 
     const options: any = { 
-      format: isWorkMode ? (selectedFormat || 'report') : 'chat', 
+      format: selectedFormat || 'report', 
       chartType: selectedChart || 'auto',
-      intent: isWorkMode ? activeIntent?.label : undefined,
+      intent: activeIntent?.label,
       thinkHarder: isThinkHarder,
       plugins: activePlugins,
       mode: chatWorkMode,
@@ -277,9 +279,9 @@ export function Home({ onStartTask }: HomeProps) {
       <div className="w-full max-w-4xl space-y-10 my-auto">
         <div className="text-center space-y-3 animate-on-load">
           <h1 className="text-5xl md:text-6xl font-serif font-bold tracking-tight text-foreground">
-            {isWorkMode ? 'What can I do for you?' : 'What can I help you with?'}
+            What can I do for you?
           </h1>
-          <p className="text-muted-foreground text-base md:text-lg">{isWorkMode ? "Assign a task, and I'll handle the rest." : "Ask anything and let's chat."}</p>
+          <p className="text-muted-foreground text-base md:text-lg">Assign a task, and I'll handle the rest.</p>
         </div>
 
         <div className="space-y-6 animate-on-load">
@@ -347,7 +349,7 @@ export function Home({ onStartTask }: HomeProps) {
                 }}
                 className="flex border-none focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-50 overflow-hidden bg-transparent px-0 w-full placeholder:text-[var(--text-disable)] text-foreground text-lg shadow-none resize-none leading-relaxed min-h-[48px]" 
                 rows={1}
-                placeholder={isWorkMode ? (activeIntent?.placeholder || (isThinkHarder ? "Assign a deep reasoning task or question..." : "Assign a task or ask anything")) : "Message Manus..."} 
+                placeholder={activeIntent?.placeholder || (isThinkHarder ? "Assign a deep reasoning task or question..." : "Assign a task or ask anything")} 
               />
             </div>
             <div className="px-3 flex gap-2 item-center">
@@ -437,7 +439,7 @@ export function Home({ onStartTask }: HomeProps) {
               })}
             </div>
 
-            {isWorkMode && ACTION_CHIPS.map((chip) => (
+            {ACTION_CHIPS.map((chip) => (
               <button
                 key={chip.label}
                 onClick={() => {
@@ -484,7 +486,6 @@ export function Home({ onStartTask }: HomeProps) {
           </div>
         </div>
 
-        {isWorkMode && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-on-load">
           <div className="space-y-4">
             <h3 className="text-xs font-bold text-slate-500 dark:text-muted-foreground uppercase tracking-widest px-1">Choose output format</h3>
@@ -544,8 +545,6 @@ export function Home({ onStartTask }: HomeProps) {
               ))}
             </div>
           </div>
-
-        )}
         </div>
       </div>
     </div>

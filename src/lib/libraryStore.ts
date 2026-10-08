@@ -79,3 +79,104 @@ export async function saveSharedFileToLibrary(file: File, source: string = 'Shar
     return null;
   }
 }
+
+export function syncTasksToLibrary(tasks: any[]): void {
+  if (!Array.isArray(tasks) || tasks.length === 0) return;
+  const currentItems = getLibraryItems();
+  const existingIds = new Set(currentItems.map(i => i.id));
+  const newItems: LibraryFileItem[] = [];
+
+  tasks.forEach(task => {
+    if (!task) return;
+    const title = task.title || (task.prompt ? (task.prompt.length > 35 ? task.prompt.substring(0, 35) + '...' : task.prompt) : 'Task Document');
+    const taskId = task.id || `task-${Date.now()}`;
+    const createdAt = task.created_at || new Date().toISOString();
+
+    // 1. Task with generated web app output
+    if (task.outputFormat === 'website' || task.websiteName) {
+      const siteDocId = `lib-task-site-${taskId}`;
+      if (!existingIds.has(siteDocId)) {
+        newItems.push({
+          id: siteDocId,
+          name: `${task.websiteName || title} - Web Application.html`,
+          type: 'website',
+          size: '420 KB',
+          createdAt,
+          source: 'Generated Web Project',
+          description: `Interactive web application generated from task`,
+          url: '#'
+        });
+      }
+    }
+
+    // 2. Task with report or document output
+    if (task.outputFormat === 'report' || task.outputFormat === 'slides' || task.outputFormat === 'doc') {
+      const docId = `lib-task-doc-${taskId}`;
+      if (!existingIds.has(docId)) {
+        newItems.push({
+          id: docId,
+          name: `${title} - Executive Report.pdf`,
+          type: 'doc',
+          size: '890 KB',
+          createdAt,
+          source: 'Task Document Output',
+          description: `Structured analytical document report`,
+          url: '#'
+        });
+      }
+    }
+
+    // 3. Task with charts or spreadsheets
+    if (task.outputFormat === 'graph' || task.outputFormat === 'spreadsheet' || task.chartData) {
+      const graphId = `lib-task-graph-${taskId}`;
+      if (!existingIds.has(graphId)) {
+        newItems.push({
+          id: graphId,
+          name: `${title} - Dataset & Analytics.json`,
+          type: 'graph',
+          size: '230 KB',
+          createdAt,
+          source: 'Task Data Export',
+          description: `Structured data points & chart metrics`,
+          url: '#'
+        });
+      }
+    }
+
+    // 4. Check if prompt contained shared file attachments
+    if (task.prompt && task.prompt.includes('[Attached:')) {
+      const matches = task.prompt.match(/\[Attached:\s*([^\]]+)\]/gi);
+      if (matches) {
+        matches.forEach((m: string) => {
+          const fileName = m.replace(/\[Attached:\s*/i, '').replace(/\]$/, '').trim();
+          if (fileName) {
+            const attachedId = `lib-task-attach-${taskId}-${fileName}`;
+            if (!existingIds.has(attachedId)) {
+              let fileType: LibraryFileItem['type'] = 'doc';
+              if (/\.(png|jpe?g|webp|gif|svg)$/i.test(fileName)) fileType = 'photo';
+              else if (/\.(mp4|webm|mov)$/i.test(fileName)) fileType = 'video';
+              else if (/\.(mp3|wav|ogg|m4a)$/i.test(fileName)) fileType = 'audio';
+
+              newItems.push({
+                id: attachedId,
+                name: fileName,
+                type: fileType,
+                size: '1.4 MB',
+                createdAt,
+                source: 'Shared in Task Chat',
+                description: `Document shared for task: "${title}"`,
+                url: '#'
+              });
+            }
+          }
+        });
+      }
+    }
+  });
+
+  if (newItems.length > 0) {
+    const updated = [...newItems, ...currentItems];
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    window.dispatchEvent(new CustomEvent('manus_library_updated'));
+  }
+}
