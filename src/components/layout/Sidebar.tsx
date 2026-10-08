@@ -44,6 +44,12 @@ interface TaskHistory {
   outputFormat?: string;
 }
 
+interface SidebarProject {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
 function formatTaskTitle(task: TaskHistory): string {
   if (task.title && task.title.trim()) {
     return task.title.trim();
@@ -115,12 +121,103 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
   const [tasks, setTasks] = useState<TaskHistory[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [projects, setProjects] = useState<SidebarProject[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [projectTaskMap, setProjectTaskMap] = useState<Record<string, string[]>>({});
   const { isAuthenticated, user } = useBlinkAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
     loadTasks();
   }, [isAuthenticated, user, activeTaskId]);
+
+  useEffect(() => {
+    try {
+      const savedProjects = JSON.parse(localStorage.getItem('manus_projects') || '[]');
+      const savedMap = JSON.parse(localStorage.getItem('manus_project_tasks') || '{}');
+      const savedActive = localStorage.getItem('manus_active_project');
+      setProjects(Array.isArray(savedProjects) ? savedProjects : []);
+      setProjectTaskMap(savedMap && typeof savedMap === 'object' ? savedMap : {});
+      setActiveProjectId(savedActive || null);
+    } catch {
+      setProjects([]);
+      setProjectTaskMap({});
+      setActiveProjectId(null);
+    }
+  }, []);
+
+  const persistProjects = (next: SidebarProject[]) => {
+    setProjects(next);
+    localStorage.setItem('manus_projects', JSON.stringify(next));
+  };
+
+  const persistProjectTaskMap = (next: Record<string, string[]>) => {
+    setProjectTaskMap(next);
+    localStorage.setItem('manus_project_tasks', JSON.stringify(next));
+  };
+
+  const handleCreateProject = () => {
+    const name = window.prompt('Project name');
+    const trimmed = name?.trim();
+    if (!trimmed) return;
+    const project: SidebarProject = {
+      id: crypto.randomUUID(),
+      name: trimmed.slice(0, 60),
+      createdAt: new Date().toISOString(),
+    };
+    persistProjects([...projects, project]);
+    setActiveProjectId(project.id);
+    localStorage.setItem('manus_active_project', project.id);
+    toast.success(`Project "${project.name}" created`);
+  };
+
+  const handleSelectProject = (projectId: string | null) => {
+    setActiveProjectId(projectId);
+    if (projectId) localStorage.setItem('manus_active_project', projectId);
+    else localStorage.removeItem('manus_active_project');
+  };
+
+  const handleRenameProject = (project: SidebarProject, e?: React.MouseEvent) => {
+    e?.preventDefault();
+    e?.stopPropagation();
+    const name = window.prompt('Rename project', project.name)?.trim();
+    if (!name) return;
+    persistProjects(projects.map(p => p.id === project.id ? { ...p, name: name.slice(0, 60) } : p));
+    toast.success('Project renamed');
+  };
+
+  const handleDeleteProject = (project: SidebarProject, e?: React.MouseEvent) => {
+    e?.preventDefault();
+    e?.stopPropagation();
+    if (!window.confirm(`Delete project "${project.name}"? Chats will remain in history.`)) return;
+    const nextMap = { ...projectTaskMap };
+    delete nextMap[project.id];
+    persistProjectTaskMap(nextMap);
+    persistProjects(projects.filter(p => p.id !== project.id));
+    if (activeProjectId === project.id) handleSelectProject(null);
+    toast.success('Project deleted');
+  };
+
+  const handleAssignTaskToProject = (task: TaskHistory, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (projects.length === 0) {
+      handleCreateProject();
+      return;
+    }
+    const names = projects.map((p, i) => `${i + 1}. ${p.name}`).join('\n');
+    const raw = window.prompt(`Choose a project by number:\n${names}`);
+    const index = Number(raw) - 1;
+    if (!Number.isInteger(index) || !projects[index]) return;
+    const project = projects[index];
+    const next = { ...projectTaskMap };
+    Object.keys(next).forEach(id => {
+      next[id] = (next[id] || []).filter(taskId => taskId !== task.id);
+    });
+    next[project.id] = [...(next[project.id] || []), task.id];
+    persistProjectTaskMap(next);
+    toast.success(`Added to ${project.name}`);
+  };
 
   const loadTasks = async () => {
     try {
@@ -164,16 +261,22 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
     toast.success(`Task ID copied: ${taskId.slice(0, 10)}...`);
   };
 
+  const projectFilteredTasks = useMemo(() => {
+    if (!activeProjectId) return tasks;
+    const ids = new Set(projectTaskMap[activeProjectId] || []);
+    return tasks.filter(task => ids.has(task.id));
+  }, [tasks, activeProjectId, projectTaskMap]);
+
   const filteredTasks = useMemo(() => {
-    if (!searchQuery.trim()) return tasks;
+    if (!searchQuery.trim()) return projectFilteredTasks;
     const q = searchQuery.toLowerCase().trim();
-    return tasks.filter(task => {
+    return projectFilteredTasks.filter(task => {
       const title = formatTaskTitle(task).toLowerCase();
       const prompt = (task.prompt || '').toLowerCase();
       const id = (task.id || '').toLowerCase();
       return title.includes(q) || prompt.includes(q) || id.includes(q);
     });
-  }, [tasks, searchQuery]);
+  }, [projectFilteredTasks, searchQuery]);
 
   const groupedTasks = useMemo(() => {
     return groupTasksByTime(filteredTasks);
@@ -337,14 +440,62 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
         <div className="mt-6 px-5">
           <div className="flex items-center justify-between mb-1.5">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Projects</h3>
-            <button className="text-muted-foreground hover:text-foreground p-0.5 rounded hover:bg-manus-cream dark:hover:bg-accent transition-colors cursor-pointer">
+            <button
+              onClick={handleCreateProject}
+              className="text-muted-foreground hover:text-foreground p-0.5 rounded hover:bg-manus-cream dark:hover:bg-accent transition-colors cursor-pointer"
+              title="Create project"
+            >
               <Plus size={14} />
             </button>
           </div>
-          <button className="w-full flex items-center gap-2.5 text-muted-foreground hover:text-foreground py-1.5 text-sm transition-colors cursor-pointer rounded-lg px-1 hover:bg-manus-cream dark:hover:bg-accent">
+
+          <button
+            onClick={() => handleSelectProject(null)}
+            className={cn(
+              "w-full flex items-center gap-2.5 py-1.5 text-sm transition-colors cursor-pointer rounded-lg px-1",
+              !activeProjectId ? "text-foreground bg-manus-cream dark:bg-accent" : "text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent"
+            )}
+          >
             <Folder size={15} />
-            <span>New project</span>
+            <span>All projects</span>
           </button>
+
+          <div className="mt-1 space-y-0.5 max-h-28 overflow-y-auto custom-scrollbar">
+            {projects.map(project => (
+              <div key={project.id} className="group flex items-center gap-1">
+                <button
+                  onClick={() => handleSelectProject(project.id)}
+                  className={cn(
+                    "flex-1 min-w-0 flex items-center gap-2 py-1.5 px-1 rounded-lg text-sm text-left transition-colors cursor-pointer",
+                    activeProjectId === project.id ? "text-foreground bg-manus-cream dark:bg-accent" : "text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent"
+                  )}
+                  title={project.name}
+                >
+                  <Folder size={14} className="shrink-0" />
+                  <span className="truncate">{project.name}</span>
+                  <span className="ml-auto text-[10px] opacity-60">{(projectTaskMap[project.id] || []).length}</span>
+                </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="p-1 rounded opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent cursor-pointer">
+                      <MoreHorizontal size={13} />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-36 p-1">
+                    <DropdownMenuItem onClick={() => handleRenameProject(project)} className="text-xs cursor-pointer">Rename</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleDeleteProject(project)} className="text-xs text-red-600 cursor-pointer">Delete</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            ))}
+          </div>
+
+          {projects.length === 0 && (
+            <button onClick={handleCreateProject} className="w-full flex items-center gap-2.5 text-muted-foreground hover:text-foreground py-1.5 text-sm transition-colors cursor-pointer rounded-lg px-1 hover:bg-manus-cream dark:hover:bg-accent">
+              <Folder size={15} />
+              <span>New project</span>
+            </button>
+          )}
         </div>
 
         {/* All Tasks Section (Previous Sessions) */}
@@ -479,6 +630,13 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                           >
                             <Copy size={13} />
                             <span>Copy Task ID</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={(e) => handleAssignTaskToProject(task, e as any)}
+                            className="flex items-center gap-2 cursor-pointer text-xs"
+                          >
+                            <Folder size={13} />
+                            <span>Add to project</span>
                           </DropdownMenuItem>
 
                           <DropdownMenuSeparator />
