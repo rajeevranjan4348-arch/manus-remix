@@ -26,6 +26,7 @@ import { Grok3DAvatar, GrokAvatarStyle, GrokColorTheme } from './Grok3DAvatar';
 import { UiverseSphereLoader } from './UiverseSphereLoader';
 import { CobpChatInput } from './CobpChatInput';
 import { HorizontalLoader } from '../common/HorizontalLoader';
+import { blink } from '@/lib/blink';
 
 export interface VoiceMessage {
   id: string;
@@ -75,6 +76,9 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
   const [historySearch, setHistorySearch] = useState('');
   const [showKeyboardInput, setShowKeyboardInput] = useState(false);
   const [textInput, setTextInput] = useState('');
+  // Voice sessions are persisted in the same task store used by normal chat history.
+  const [voiceTaskId, setVoiceTaskId] = useState<string | null>(null);
+  const voiceTaskIdRef = useRef<string | null>(null);
 
   // Settings State
   const [speechRate, setSpeechRate] = useState('1.0');
@@ -216,6 +220,58 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
     } catch {}
   };
 
+  // Persist the complete voice transcript as a normal Manus chat/task.
+  // This makes voice conversations appear in the same History panel as text chats.
+  const persistVoiceConversation = async (conversation: VoiceMessage[], preferredTitle?: string) => {
+    if (!conversation.length) return;
+
+    const firstUser = conversation.find(m => m.sender === 'user');
+    const title = (preferredTitle || firstUser?.text || 'Voice conversation').trim().slice(0, 160);
+    const normalizedMessages = conversation.map(m => ({
+      id: m.id,
+      role: m.sender === 'user' ? 'user' : 'assistant',
+      content: m.text,
+      createdAt: m.time,
+      source: 'voice',
+    }));
+
+    const resultPayload = {
+      type: 'report',
+      content: conversation.filter(m => m.sender === 'ai').map(m => m.text).join('\\n\\n') || 'Voice conversation',
+      messages: normalizedMessages,
+      voiceConversation: true,
+      voiceMessages: conversation,
+    };
+
+    try {
+      let id = voiceTaskIdRef.current;
+
+      if (!id) {
+        const user = await blink.auth.me();
+        const task = await (blink.db as any).tasks.create({
+          userId: user?.id || 'usr_manus_default',
+          prompt: title,
+          outputFormat: 'report',
+          chartType: 'auto',
+          status: 'completed',
+          result: JSON.stringify(resultPayload),
+          steps: JSON.stringify([]),
+        });
+        id = task.id;
+        voiceTaskIdRef.current = id;
+        setVoiceTaskId(id);
+      } else {
+        await (blink.db as any).tasks.update(id, {
+          prompt: title,
+          status: 'completed',
+          result: JSON.stringify(resultPayload),
+        });
+      }
+    } catch (e) {
+      console.warn('[Voice History] Failed to persist voice conversation:', e);
+    }
+  };
+
   // Handle User Speech
   const handleUserSpoken = (userText: string) => {
     if (!userText.trim()) return;
@@ -228,7 +284,11 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
       time
     };
 
-    setMessages(prev => [...prev, userMsg]);
+    setMessages(prev => {
+      const next = [...prev, userMsg];
+      void persistVoiceConversation(next, userText);
+      return next;
+    });
     setLiveTranscript('');
     setStatusText('Thinking...');
     setCallStatus('thinking');
@@ -275,7 +335,11 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
       time
     };
 
-    setMessages(prev => [...prev, aiMsg]);
+    setMessages(prev => {
+      const next = [...prev, aiMsg];
+      void persistVoiceConversation(next);
+      return next;
+    });
     speakText(reply);
   };
 
@@ -341,7 +405,10 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
       if (recognitionRef.current) recognitionRef.current.stop();
       if (synthRef.current) synthRef.current.cancel();
     } catch {}
-    toast.success('Voice call ended');
+    // The conversation is already persisted after each turn; this final save
+    // ensures the latest transcript is also present before the modal closes.
+    void persistVoiceConversation(messages);
+    toast.success('Voice call saved to chat history');
     onClose();
   };
 
