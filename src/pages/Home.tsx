@@ -72,18 +72,8 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   const [isThinkHarder, setIsThinkHarder] = useState(false);
   const [activePlugins, setActivePlugins] = useState<string[]>(['web_search', 'code_sandbox', 'charts']);
   const [chatWorkMode, setChatWorkMode] = useState<PersonalityMode>(() => {
-    return localStorage.getItem('manus_chat_work_mode') === 'work' ? 'work' : 'chat';
+    return (localStorage.getItem('manus_chat_work_mode') as PersonalityMode) || personality || 'chat';
   });
-  const isWorkMode = chatWorkMode === 'work';
-
-  React.useEffect(() => {
-    const handleModeChanged = (event: Event) => {
-      const mode = (event as CustomEvent<PersonalityMode>).detail;
-      if (mode === 'chat' || mode === 'work') setChatWorkMode(mode);
-    };
-    window.addEventListener('manus_mode_changed', handleModeChanged);
-    return () => window.removeEventListener('manus_mode_changed', handleModeChanged);
-  }, []);
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -248,7 +238,12 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   const handleChatWorkMode = (mode: PersonalityMode) => {
     setChatWorkMode(mode);
     localStorage.setItem('manus_chat_work_mode', mode);
-    window.dispatchEvent(new CustomEvent('manus_mode_changed', { detail: mode }));
+    if (mode === 'chat') {
+      setActiveIntent(null);
+      setSelectedFormat(null);
+      setSelectedChart(null);
+    }
+    onPersonalityChange?.(mode);
   };
 
   const handleStart = () => {
@@ -258,9 +253,9 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
     }
 
     const options: any = { 
-      format: isWorkMode ? (selectedFormat || 'report') : 'chat', 
+      format: selectedFormat || 'report', 
       chartType: selectedChart || 'auto',
-      intent: isWorkMode ? activeIntent?.label : undefined,
+      intent: activeIntent?.label,
       thinkHarder: isThinkHarder,
       plugins: activePlugins,
       mode: chatWorkMode,
@@ -289,9 +284,13 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
       <div className="w-full max-w-4xl space-y-10 my-auto">
         <div className="text-center space-y-3 animate-on-load">
           <h1 className="text-5xl md:text-6xl font-serif font-bold tracking-tight text-foreground">
-            What can I do for you?
+            {chatWorkMode === 'chat' ? 'How can I help you today?' : 'What building task can I do for you?'}
           </h1>
-          <p className="text-muted-foreground text-base md:text-lg">Assign a task, and I'll handle the rest.</p>
+          <p className="text-muted-foreground text-base md:text-lg">
+            {chatWorkMode === 'chat' 
+              ? 'Ask questions, brainstorm ideas, or share files for instant chat.' 
+              : "Assign an autonomous task, build a website, or analyze datasets."}
+          </p>
         </div>
 
         <div className="space-y-6 animate-on-load">
@@ -359,7 +358,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                 }}
                 className="flex border-none focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-50 overflow-hidden bg-transparent px-0 w-full placeholder:text-[var(--text-disable)] text-foreground text-lg shadow-none resize-none leading-relaxed min-h-[48px]" 
                 rows={1}
-                placeholder={activeIntent?.placeholder || (isThinkHarder ? "Assign a deep reasoning task or question..." : "Assign a task or ask anything")} 
+                placeholder={activeIntent?.placeholder || (chatWorkMode === 'chat' ? "Type a message or ask anything..." : (isThinkHarder ? "Assign a deep reasoning task or question..." : "Assign a building task or ask anything"))} 
               />
             </div>
             <div className="px-3 flex gap-2 item-center">
@@ -422,140 +421,150 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
             </div>
           </div>
 
-          <div className="flex flex-wrap justify-center gap-3">
-            {/* Chat / Work mode switch — placed in the highlighted action-chip area. */}
-            <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 dark:border-border bg-white/80 dark:bg-card/80 p-1 shadow-xs backdrop-blur-sm">
-              {CHAT_WORK_MODES.map((mode) => {
-                const Icon = mode.icon;
-                const active = chatWorkMode === mode.id;
-                return (
+          <div className="flex flex-col items-center justify-center gap-4 w-full">
+            {/* Chat / Work mode switch centered in the middle */}
+            <div className="flex justify-center w-full">
+              <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 dark:border-border bg-white/80 dark:bg-card/80 p-1 shadow-xs backdrop-blur-sm">
+                {CHAT_WORK_MODES.map((mode) => {
+                  const Icon = mode.icon;
+                  const active = chatWorkMode === mode.id;
+                  return (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      onClick={() => handleChatWorkMode(mode.id)}
+                      title={mode.desc}
+                      aria-pressed={active}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 cursor-pointer",
+                        active
+                          ? "bg-[var(--Button-primary-black)] text-[var(--text-onblack)] shadow-sm"
+                          : "text-muted-foreground hover:text-foreground hover:bg-[var(--fill-tsp-gray-main)]"
+                      )}
+                    >
+                      <Icon size={14} />
+                      {mode.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Action chips displayed together in a single row line when in Work mode */}
+            {chatWorkMode === 'work' && (
+              <div className="flex items-center justify-center gap-2.5 sm:gap-3 w-full overflow-x-auto no-scrollbar py-0.5 whitespace-nowrap">
+                {ACTION_CHIPS.map((chip) => (
                   <button
-                    key={mode.id}
-                    type="button"
-                    onClick={() => handleChatWorkMode(mode.id)}
-                    title={mode.desc}
-                    aria-pressed={active}
+                    key={chip.label}
+                    onClick={() => {
+                      if (chip.label === "Research link") {
+                        setActiveIntent({ 
+                          label: "Research", 
+                          icon: chip.icon,
+                          placeholder: "Enter URL to research (e.g., https://example.com)"
+                        });
+                        setPrompt('');
+                      } else if (chip.label === "Build website") {
+                        setSelectedFormat('website');
+                        setActiveIntent({ 
+                          label: "Website", 
+                          icon: chip.icon,
+                          placeholder: "Enter website name (e.g., My Portfolio, Coffee Shop)"
+                        });
+                        setPrompt('');
+                      } else if (chip.label === "Data analysis") {
+                        setSelectedFormat('graph');
+                        setSelectedChart('bar');
+                        setActiveIntent({ 
+                          label: "Data analysis", 
+                          icon: chip.icon,
+                          placeholder: "Describe the data you want to analyze or upload a file"
+                        });
+                        setPrompt('');
+                      } else {
+                        const shortLabel = chip.label.replace('Create ', '').replace('Build ', '').replace('Develop ', '');
+                        setActiveIntent({ 
+                          label: shortLabel.charAt(0).toUpperCase() + shortLabel.slice(1), 
+                          icon: chip.icon,
+                          placeholder: `Describe the ${shortLabel} you want to build`
+                        });
+                        setPrompt('');
+                      }
+                    }}
+                    className="manus-pill action-chip shrink-0 text-muted-foreground hover:text-foreground hover:border-primary/20 flex items-center gap-2 cursor-pointer animate-in fade-in zoom-in duration-200"
+                  >
+                    <chip.icon size={14} />
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Building agent features (Output formats and Chart gallery) shown ONLY in Work mode */}
+        {chatWorkMode === 'work' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-on-load animate-in fade-in slide-in-from-bottom-4 duration-300">
+            <div className="space-y-4">
+              <h3 className="text-xs font-bold text-slate-500 dark:text-muted-foreground uppercase tracking-widest px-1">Choose output format</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {OUTPUT_FORMATS.map((format) => (
+                  <button
+                    key={format.id}
+                    onClick={() => setSelectedFormat(format.id)}
                     className={cn(
-                      "inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200",
-                      active
-                        ? "bg-[var(--Button-primary-black)] text-[var(--text-onblack)] shadow-sm"
-                        : "text-muted-foreground hover:text-foreground hover:bg-[var(--fill-tsp-gray-main)]"
+                      "flex items-start gap-4 p-4 rounded-2xl border transition-all text-left group cursor-pointer",
+                      selectedFormat === format.id 
+                        ? "bg-white dark:bg-card border-primary shadow-md ring-1 ring-primary/10 -translate-y-0.5" 
+                        : "bg-white dark:bg-card border-slate-200 dark:border-border hover:border-primary/40 dark:hover:border-primary/50 hover:-translate-y-0.5 shadow-xs"
                     )}
                   >
-                    <Icon size={14} />
-                    {mode.label}
+                    <div className={cn(
+                      "p-2.5 rounded-xl transition-colors",
+                      selectedFormat === format.id 
+                        ? "bg-primary text-primary-foreground" 
+                        : "bg-slate-100 dark:bg-muted text-slate-700 dark:text-foreground group-hover:bg-slate-200 dark:group-hover:bg-accent"
+                    )}>
+                      <format.icon size={20} />
+                    </div>
+                    <div>
+                      <div className="font-bold text-sm tracking-tight text-foreground">{format.label}</div>
+                      <div className="text-xs text-muted-foreground leading-relaxed mt-0.5">{format.desc}</div>
+                    </div>
                   </button>
-                );
-              })}
+                ))}
+              </div>
             </div>
 
-            {ACTION_CHIPS.map((chip) => (
-              <button
-                key={chip.label}
-                onClick={() => {
-                  if (chip.label === "Research link") {
-                    setActiveIntent({ 
-                      label: "Research", 
-                      icon: chip.icon,
-                      placeholder: "Enter URL to research (e.g., https://example.com)"
-                    });
-                    setPrompt('');
-                  } else if (chip.label === "Build website") {
-                    setSelectedFormat('website');
-                    setActiveIntent({ 
-                      label: "Website", 
-                      icon: chip.icon,
-                      placeholder: "Enter website name (e.g., My Portfolio, Coffee Shop)"
-                    });
-                    setPrompt('');
-                  } else if (chip.label === "Data analysis") {
-                    setSelectedFormat('graph');
-                    setSelectedChart('bar');
-                    setActiveIntent({ 
-                      label: "Data analysis", 
-                      icon: chip.icon,
-                      placeholder: "Describe the data you want to analyze or upload a file"
-                    });
-                    setPrompt('');
-                  } else {
-                    const shortLabel = chip.label.replace('Create ', '').replace('Build ', '').replace('Develop ', '');
-                    setActiveIntent({ 
-                      label: shortLabel.charAt(0).toUpperCase() + shortLabel.slice(1), 
-                      icon: chip.icon,
-                      placeholder: `Describe the ${shortLabel} you want to build`
-                    });
-                    setPrompt('');
-                  }
-                }}
-                className="manus-pill action-chip text-muted-foreground hover:text-foreground hover:border-primary/20 flex items-center gap-2"
-              >
-                <chip.icon size={14} />
-                {chip.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-on-load">
-          <div className="space-y-4">
-            <h3 className="text-xs font-bold text-slate-500 dark:text-muted-foreground uppercase tracking-widest px-1">Choose output format</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {OUTPUT_FORMATS.map((format) => (
-                <button
-                  key={format.id}
-                  onClick={() => setSelectedFormat(format.id)}
-                  className={cn(
-                    "flex items-start gap-4 p-4 rounded-2xl border transition-all text-left group",
-                    selectedFormat === format.id 
-                      ? "bg-white dark:bg-card border-primary shadow-md ring-1 ring-primary/10 -translate-y-0.5" 
-                      : "bg-white dark:bg-card border-slate-200 dark:border-border hover:border-primary/40 dark:hover:border-primary/50 hover:-translate-y-0.5 shadow-xs"
-                  )}
-                >
-                  <div className={cn(
-                    "p-2.5 rounded-xl transition-colors",
-                    selectedFormat === format.id 
-                      ? "bg-primary text-primary-foreground" 
-                      : "bg-slate-100 dark:bg-muted text-slate-700 dark:text-foreground group-hover:bg-slate-200 dark:group-hover:bg-accent"
-                  )}>
-                    <format.icon size={20} />
-                  </div>
-                  <div>
-                    <div className="font-bold text-sm tracking-tight text-foreground">{format.label}</div>
-                    <div className="text-xs text-muted-foreground leading-relaxed mt-0.5">{format.desc}</div>
-                  </div>
-                </button>
-              ))}
+            <div className="space-y-4">
+              <h3 className="text-xs font-bold text-slate-500 dark:text-muted-foreground uppercase tracking-widest px-1">Preferred charts gallery</h3>
+              <div className="grid grid-cols-3 gap-3">
+                {CHART_TYPES.map((chart) => (
+                  <button
+                    key={chart.id}
+                    onClick={() => setSelectedChart(chart.id)}
+                    className={cn(
+                      "flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border bg-white dark:bg-card transition-all group cursor-pointer",
+                      selectedChart === chart.id 
+                        ? "border-primary shadow-md ring-1 ring-primary/10 -translate-y-0.5" 
+                        : "border-slate-200 dark:border-border hover:border-primary/40 dark:hover:border-primary/50 hover:-translate-y-0.5 shadow-xs"
+                    )}
+                  >
+                    <div className={cn(
+                      "p-2 rounded-lg transition-colors",
+                      selectedChart === chart.id 
+                        ? "bg-primary/10 text-primary" 
+                        : "text-slate-700 dark:text-muted-foreground group-hover:text-foreground"
+                    )}>
+                      <chart.icon size={22} />
+                    </div>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-muted-foreground group-hover:text-foreground">{chart.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-
-          <div className="space-y-4">
-            <h3 className="text-xs font-bold text-slate-500 dark:text-muted-foreground uppercase tracking-widest px-1">Preferred charts gallery</h3>
-            <div className="grid grid-cols-3 gap-3">
-              {CHART_TYPES.map((chart) => (
-                <button
-                  key={chart.id}
-                  onClick={() => setSelectedChart(chart.id)}
-                  className={cn(
-                    "flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border bg-white dark:bg-card transition-all group",
-                    selectedChart === chart.id 
-                      ? "border-primary shadow-md ring-1 ring-primary/10 -translate-y-0.5" 
-                      : "border-slate-200 dark:border-border hover:border-primary/40 dark:hover:border-primary/50 hover:-translate-y-0.5 shadow-xs"
-                  )}
-                >
-                  <div className={cn(
-                    "p-2 rounded-lg transition-colors",
-                    selectedChart === chart.id 
-                      ? "bg-primary/10 text-primary" 
-                      : "text-slate-700 dark:text-muted-foreground group-hover:text-foreground"
-                  )}>
-                    <chart.icon size={22} />
-                  </div>
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-muted-foreground group-hover:text-foreground">{chart.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

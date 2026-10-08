@@ -637,88 +637,128 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
                 ) : (
                   /* Grid Layout */
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {filteredItems.map((item) => (
-                      <div
-                        key={item.id}
-                        className="group relative rounded-2xl border border-border bg-white dark:bg-card p-3 hover:border-primary/50 hover:shadow-md transition-all flex flex-col justify-between"
-                      >
-                        {/* Media Preview or Icon Header */}
-                        <div>
-                          {item.type === 'photo' && item.url ? (
-                            <div className="relative aspect-video rounded-xl overflow-hidden mb-2.5 bg-muted">
-                              <img 
-                                src={item.url} 
-                                alt={item.name} 
-                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                              />
-                              <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                    {filteredItems.map((item) => {
+                      const typeBadge = getTypeLabel(item);
+                      const TypeIcon = typeBadge.icon;
+                      return (
+                        <div
+                          key={item.id}
+                          className="group relative rounded-2xl border border-border bg-white dark:bg-card p-3 hover:border-primary/50 hover:shadow-md transition-all flex flex-col justify-between"
+                        >
+                          {/* Media Preview or Icon Header */}
+                          <div>
+                            {item.type === 'photo' && item.url ? (
+                              <div className="relative aspect-video rounded-xl overflow-hidden mb-2.5 bg-muted">
+                                <img 
+                                  src={item.url} 
+                                  alt={item.name} 
+                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                />
+                                <div className="absolute top-2 left-2 flex items-center gap-1 z-10">
+                                  <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase shadow-xs backdrop-blur-md", typeBadge.bg, typeBadge.text)}>
+                                    {typeBadge.label}
+                                  </span>
+                                </div>
+                                <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                  <button
+                                    onClick={() => setPreviewMedia(item)}
+                                    className="p-2 rounded-full bg-white/90 text-foreground hover:bg-white shadow-md transition-transform transform hover:scale-105 cursor-pointer"
+                                    title="View Photo"
+                                  >
+                                    <Eye size={15} />
+                                  </button>
+                                  <button
+                                    onClick={(e) => handleDownloadFile(item, e)}
+                                    className="p-2 rounded-full bg-white/90 text-foreground hover:bg-white shadow-md transition-transform transform hover:scale-105 cursor-pointer"
+                                    title="Download Photo"
+                                  >
+                                    <Download size={15} />
+                                  </button>
+                                </div>
+                              </div>
+                            ) : item.type === 'video' ? (
+                              <div className="relative aspect-video rounded-xl bg-slate-900 flex items-center justify-center mb-2.5 overflow-hidden group">
+                                <Film size={28} className="text-white/60" />
+                                <div className="absolute top-2 left-2 flex items-center gap-1 z-10">
+                                  <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase shadow-xs backdrop-blur-md", typeBadge.bg, typeBadge.text)}>
+                                    {typeBadge.label}
+                                  </span>
+                                </div>
                                 <button
                                   onClick={() => setPreviewMedia(item)}
-                                  className="p-1.5 rounded-full bg-white/90 text-foreground hover:bg-white shadow-xs"
-                                  title="View Photo"
+                                  className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-90 group-hover:bg-black/60 transition-colors cursor-pointer"
                                 >
-                                  <Eye size={14} />
+                                  <div className="w-10 h-10 rounded-full bg-primary/90 text-primary-foreground flex items-center justify-center shadow-lg transform group-hover:scale-110 transition-transform">
+                                    <Play size={18} className="ml-0.5" />
+                                  </div>
                                 </button>
                               </div>
-                            </div>
-                          ) : item.type === 'video' ? (
-                            <div className="relative aspect-video rounded-xl bg-slate-900 flex items-center justify-center mb-2.5 overflow-hidden group">
-                              <Film size={28} className="text-white/60" />
-                              <button
-                                onClick={() => setPreviewMedia(item)}
-                                className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-90 group-hover:bg-black/60 transition-colors"
-                              >
-                                <div className="w-10 h-10 rounded-full bg-primary/90 text-primary-foreground flex items-center justify-center shadow-lg transform group-hover:scale-110 transition-transform">
-                                  <Play size={18} className="ml-0.5" />
+                            ) : (
+                              <div className="p-3 rounded-xl bg-manus-soft dark:bg-muted/40 mb-2.5 flex items-center gap-3">
+                                <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0 font-medium shadow-2xs", typeBadge.bg, typeBadge.text)}>
+                                  <TypeIcon size={20} />
                                 </div>
+                                <div className="min-w-0 flex-1 space-y-1">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase", typeBadge.bg, typeBadge.text)}>
+                                      {typeBadge.label}
+                                    </span>
+                                    <span className="font-mono text-[10px] font-semibold text-foreground/80 bg-slate-100 dark:bg-muted/80 px-1.5 py-0.5 rounded">
+                                      {item.size || 'Shared File'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* File Details */}
+                            <div className="space-y-1">
+                              <h4 className="font-semibold text-xs text-foreground truncate" title={item.name}>
+                                {item.name}
+                              </h4>
+                              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground flex-wrap">
+                                <span className="font-mono text-[10px] text-foreground/80 font-semibold bg-muted px-1.5 py-0.5 rounded">
+                                  {item.size || 'File'}
+                                </span>
+                                {item.source && (
+                                  <>
+                                    <span>•</span>
+                                    <span className="text-[10px] truncate max-w-[120px]">{item.source}</span>
+                                  </>
+                                )}
+                              </div>
+                              {item.description && (
+                                <p className="text-[11px] text-muted-foreground line-clamp-1">
+                                  {item.description}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Card Footer Actions */}
+                          <div className="flex items-center justify-between pt-2.5 mt-2 border-t border-border/40 text-[10px] text-muted-foreground">
+                            <span className="font-mono">{getRelativeTime(item.createdAt)}</span>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={(e) => handleDownloadFile(item, e)}
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-primary/10 hover:bg-primary hover:text-primary-foreground text-primary font-semibold transition-all text-[11px] cursor-pointer shadow-2xs"
+                                title={`Download ${item.name}`}
+                              >
+                                <Download size={13} />
+                                <span>Download</span>
+                              </button>
+                              <button
+                                onClick={(e) => handleDeleteLibraryItem(item.id, e)}
+                                className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 text-muted-foreground hover:text-red-500 transition-colors cursor-pointer"
+                                title="Delete from Library"
+                              >
+                                <Trash2 size={14} />
                               </button>
                             </div>
-                          ) : (
-                            <div className="p-3 rounded-xl bg-manus-soft dark:bg-muted/40 mb-2.5 flex items-center gap-3">
-                              <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                                {item.type === 'doc' ? <FileText size={18} /> : <BarChart3 size={18} />}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <p className="text-xs font-semibold text-foreground truncate">{item.name}</p>
-                                <p className="text-[10px] text-muted-foreground">{item.size || 'Shared File'}</p>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* File Details */}
-                          <div className="space-y-1">
-                            <h4 className="font-semibold text-xs text-foreground truncate" title={item.name}>
-                              {item.name}
-                            </h4>
-                            <p className="text-[11px] text-muted-foreground line-clamp-1">
-                              {item.description || item.source}
-                            </p>
                           </div>
                         </div>
-
-                        {/* Card Footer Actions */}
-                        <div className="flex items-center justify-between pt-2.5 mt-2 border-t border-border/40 text-[10px] text-muted-foreground">
-                          <span className="font-mono">{getRelativeTime(item.createdAt)}</span>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              onClick={(e) => handleDownloadFile(item, e)}
-                              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-primary/10 hover:bg-primary hover:text-primary-foreground text-primary font-medium transition-all text-[10px] cursor-pointer"
-                              title={`Download ${item.name}`}
-                            >
-                              <Download size={12} />
-                              <span>Download</span>
-                            </button>
-                            <button
-                              onClick={(e) => handleDeleteLibraryItem(item.id, e)}
-                              className="p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 text-muted-foreground hover:text-red-500 transition-colors"
-                              title="Delete from Library"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
