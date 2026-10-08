@@ -6,6 +6,7 @@ import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { VoiceCallModal } from '../voice/VoiceCallModal';
+import { saveSharedFileToLibrary } from '@/lib/libraryStore';
 
 export interface AttachmentMenuProps {
   onFileSelect: (file: File) => void;
@@ -43,27 +44,30 @@ export function AttachmentMenu({
   const handleCameraChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      saveSharedFileToLibrary(file, 'Camera Capture').catch(console.error);
       onFileSelect(file);
       setIsOpen(false);
-      toast.success(`Photo captured: ${file.name}`);
+      toast.success(`Photo captured & saved to Library: ${file.name}`);
     }
   };
 
   const handlePhotosChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      saveSharedFileToLibrary(file, 'Photo Attachment').catch(console.error);
       onFileSelect(file);
       setIsOpen(false);
-      toast.success(`Image attached: ${file.name}`);
+      toast.success(`Image attached & saved to Library: ${file.name}`);
     }
   };
 
   const handleFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      saveSharedFileToLibrary(file, 'File Attachment').catch(console.error);
       onFileSelect(file);
       setIsOpen(false);
-      toast.success(`File attached: ${file.name}`);
+      toast.success(`File attached & saved to Library: ${file.name}`);
     }
   };
 

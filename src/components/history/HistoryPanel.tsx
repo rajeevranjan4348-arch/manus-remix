@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
-  History, 
+  Library, 
   Clock, 
   Search, 
   Trash2, 
@@ -9,18 +9,20 @@ import {
   MessageSquare, 
   Mic, 
   Sparkles, 
-  Filter, 
   X, 
-  ChevronRight, 
-  CheckCircle2, 
-  AlertCircle, 
   Loader2, 
   Globe, 
   BarChart3, 
   FileText, 
-  Layout, 
-  Table as TableIcon,
-  RotateCcw
+  Image as ImageIcon,
+  Film,
+  Upload,
+  Download,
+  Eye,
+  Play,
+  FileCode,
+  Check,
+  Plus
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { blink } from '@/lib/blink';
@@ -34,6 +36,18 @@ import {
   SheetDescription
 } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+
+export interface LibraryFileItem {
+  id: string;
+  name: string;
+  type: 'photo' | 'video' | 'doc' | 'audio' | 'website' | 'graph';
+  url?: string;
+  thumbnail?: string;
+  size?: string;
+  createdAt: string;
+  source?: string;
+  description?: string;
+}
 
 export interface TaskHistoryItem {
   id: string;
@@ -57,6 +71,62 @@ interface HistoryPanelProps {
   onClose: () => void;
   onSelectTask?: (taskId: string) => void;
 }
+
+// Initial sample media & shared items for rich Library experience
+const DEFAULT_LIBRARY_ITEMS: LibraryFileItem[] = [
+  {
+    id: 'lib-photo-1',
+    name: '3D AI Assistant Concept Art.png',
+    type: 'photo',
+    url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
+    thumbnail: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=300&q=80',
+    size: '2.4 MB',
+    createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
+    source: 'Generated Image',
+    description: 'Abstract futuristic neon gradient sphere UI rendering'
+  },
+  {
+    id: 'lib-photo-2',
+    name: 'Neural Network Workflow.jpeg',
+    type: 'photo',
+    url: 'https://images.unsplash.com/photo-1620712943543-bcc4688e7485?auto=format&fit=crop&w=800&q=80',
+    thumbnail: 'https://images.unsplash.com/photo-1620712943543-bcc4688e7485?auto=format&fit=crop&w=300&q=80',
+    size: '1.8 MB',
+    createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
+    source: 'Shared Photo',
+    description: 'AI intelligence nodes analysis diagram'
+  },
+  {
+    id: 'lib-video-1',
+    name: 'Voice Call Session Recording.mp4',
+    type: 'video',
+    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+    size: '12.5 MB',
+    createdAt: new Date(Date.now() - 3600000 * 12).toISOString(),
+    source: 'Voice Call Media',
+    description: 'Recorded live voice agent stream'
+  },
+  {
+    id: 'lib-doc-1',
+    name: 'Financial Data Report 2026.pdf',
+    type: 'doc',
+    url: '#',
+    size: '840 KB',
+    createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
+    source: 'Exported Document',
+    description: 'Quarterly growth data & projected revenue charts'
+  },
+  {
+    id: 'lib-graph-1',
+    name: 'Market Intelligence Analytics.json',
+    type: 'graph',
+    url: '#',
+    size: '150 KB',
+    createdAt: new Date(Date.now() - 3600000 * 36).toISOString(),
+    source: 'Data Visualization',
+    description: 'Interactive chart datasets'
+  }
+];
 
 function formatTitle(task: TaskHistoryItem): string {
   if (task.title && task.title.trim()) {
@@ -95,30 +165,41 @@ function getRelativeTime(dateString: string): string {
 export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProps) {
   const [tasks, setTasks] = useState<TaskHistoryItem[]>([]);
   const [voiceHistory, setVoiceHistory] = useState<VoiceHistoryRecord[]>([]);
+  const [libraryItems, setLibraryItems] = useState<LibraryFileItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'tasks' | 'voice'>('tasks');
-  const [selectedFormatFilter, setSelectedFormatFilter] = useState<string>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'photos' | 'videos' | 'docs' | 'sessions'>('all');
+  const [previewMedia, setPreviewMedia] = useState<LibraryFileItem | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
-  // Load history data whenever panel opens
+  // Load library & task data whenever panel opens or new file is shared with AI
   useEffect(() => {
     if (isOpen) {
-      loadHistory();
+      loadLibraryData();
     }
+
+    const handleLibraryUpdate = () => {
+      loadLibraryData();
+    };
+
+    window.addEventListener('manus_library_updated', handleLibraryUpdate);
+    return () => {
+      window.removeEventListener('manus_library_updated', handleLibraryUpdate);
+    };
   }, [isOpen]);
 
-  const loadHistory = async () => {
+  const loadLibraryData = async () => {
     setIsLoading(true);
     try {
-      // 1. Fetch task sessions from blink.db
+      // 1. Load tasks from DB
       const result = await (blink.db as any).tasks.list({
         orderBy: { created_at: 'desc' },
         limit: 100
       });
       setTasks(result || []);
 
-      // 2. Fetch voice call records from localStorage
+      // 2. Load voice transcripts
       const savedVoice = localStorage.getItem('manus_voice_history');
       if (savedVoice) {
         try {
@@ -126,14 +207,117 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
         } catch {
           setVoiceHistory([]);
         }
+      }
+
+      // 3. Load stored library items
+      const savedLib = localStorage.getItem('manus_library_files');
+      if (savedLib) {
+        try {
+          const parsed = JSON.parse(savedLib);
+          setLibraryItems(parsed.length > 0 ? parsed : DEFAULT_LIBRARY_ITEMS);
+        } catch {
+          setLibraryItems(DEFAULT_LIBRARY_ITEMS);
+        }
       } else {
-        setVoiceHistory([]);
+        setLibraryItems(DEFAULT_LIBRARY_ITEMS);
+        localStorage.setItem('manus_library_files', JSON.stringify(DEFAULT_LIBRARY_ITEMS));
       }
     } catch (error) {
-      console.error('Failed to load history', error);
-      toast.error('Failed to load past sessions');
+      console.error('Failed to load library', error);
+      setLibraryItems(DEFAULT_LIBRARY_ITEMS);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const newItems: LibraryFileItem[] = [];
+
+    Array.from(files).forEach((file) => {
+      let fileType: LibraryFileItem['type'] = 'doc';
+      if (file.type.startsWith('image/')) fileType = 'photo';
+      else if (file.type.startsWith('video/')) fileType = 'video';
+      else if (file.type.startsWith('audio/')) fileType = 'audio';
+
+      const objectUrl = URL.createObjectURL(file);
+      const newItem: LibraryFileItem = {
+        id: `lib-user-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        name: file.name,
+        type: fileType,
+        url: objectUrl,
+        thumbnail: fileType === 'photo' ? objectUrl : undefined,
+        size: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
+        createdAt: new Date().toISOString(),
+        source: 'User Upload',
+        description: `Uploaded file (${file.type || 'file'})`
+      };
+      newItems.push(newItem);
+    });
+
+    const updated = [...newItems, ...libraryItems];
+    setLibraryItems(updated);
+    localStorage.setItem('manus_library_files', JSON.stringify(updated));
+    toast.success(`Added ${newItems.length} file(s) to Library`);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleDeleteLibraryItem = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = libraryItems.filter(item => item.id !== id);
+    setLibraryItems(updated);
+    localStorage.setItem('manus_library_files', JSON.stringify(updated));
+    toast.success('Item removed from Library');
+  };
+
+  const handleDownloadFile = async (item: LibraryFileItem, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    try {
+      toast.info(`Downloading ${item.name}...`);
+      let downloadUrl = item.url;
+
+      if (!downloadUrl || downloadUrl === '#') {
+        let content = `Manus AI Library - ${item.name}\nType: ${item.type}\nCreated: ${item.createdAt}\nSource: ${item.source || 'AI Library'}\nDescription: ${item.description || ''}`;
+        if (item.name.endsWith('.json')) {
+          content = JSON.stringify({
+            title: item.name,
+            source: item.source,
+            created: item.createdAt,
+            data: [
+              { period: 'Q1', revenue: 125000, growth: '14%' },
+              { period: 'Q2', revenue: 180000, growth: '22%' },
+              { period: 'Q3', revenue: 240000, growth: '35%' },
+              { period: 'Q4', revenue: 310000, growth: '48%' }
+            ]
+          }, null, 2);
+        }
+        const blob = new Blob([content], { type: item.name.endsWith('.json') ? 'application/json' : 'text/plain;charset=utf-8' });
+        downloadUrl = URL.createObjectURL(blob);
+      } else if (downloadUrl.startsWith('http') && !downloadUrl.startsWith('data:')) {
+        try {
+          const resp = await fetch(downloadUrl);
+          const blob = await resp.blob();
+          downloadUrl = URL.createObjectURL(blob);
+        } catch {
+          // fallback to opening link
+        }
+      }
+
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = item.name;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.success(`Downloaded: ${item.name}`);
+    } catch (err) {
+      console.error('Download error:', err);
+      toast.error('Failed to download file');
     }
   };
 
@@ -151,173 +335,110 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
     try {
       await (blink.db as any).tasks.delete(taskId);
       setTasks(prev => prev.filter(t => t.id !== taskId));
-      toast.success('Session removed from history');
+      toast.success('Session deleted');
     } catch (error) {
       toast.error('Failed to delete session');
     }
   };
 
-  const handleClearAllTasks = async () => {
-    if (!window.confirm('Are you sure you want to delete all task history? This action cannot be undone.')) {
-      return;
-    }
-
-    const toastId = toast.loading('Clearing task history...');
-    try {
-      for (const t of tasks) {
-        try {
-          await (blink.db as any).tasks.delete(t.id);
-        } catch {}
-      }
-      setTasks([]);
-      toast.dismiss(toastId);
-      toast.success('All task history cleared');
-    } catch (e) {
-      toast.dismiss(toastId);
-      toast.error('Error clearing tasks');
-    }
-  };
-
-  const handleClearVoiceHistory = () => {
-    if (!window.confirm('Clear all voice call transcripts?')) return;
-    localStorage.removeItem('manus_voice_history');
-    setVoiceHistory([]);
-    toast.success('Voice transcripts cleared');
-  };
-
-  const handleCopyPrompt = (text: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(text);
-    toast.success('Prompt copied to clipboard');
-  };
-
-  const handleCopyTaskId = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(id);
-    toast.success('Task ID copied');
-  };
-
-  // Filtered task results
-  const filteredTasks = useMemo(() => {
-    return tasks.filter(task => {
+  // Filtered files & items
+  const filteredItems = useMemo(() => {
+    return libraryItems.filter(item => {
       const q = searchQuery.toLowerCase().trim();
-      const title = formatTitle(task).toLowerCase();
-      const prompt = (task.prompt || '').toLowerCase();
-      const id = (task.id || '').toLowerCase();
-      const matchesSearch = !q || title.includes(q) || prompt.includes(q) || id.includes(q);
-
+      const matchesSearch = !q || item.name.toLowerCase().includes(q) || (item.description || '').toLowerCase().includes(q);
       if (!matchesSearch) return false;
 
-      if (selectedFormatFilter === 'all') return true;
-      if (selectedFormatFilter === 'website') return task.outputFormat === 'website';
-      if (selectedFormatFilter === 'graph') return task.outputFormat === 'graph';
-      if (selectedFormatFilter === 'report') return task.outputFormat === 'report';
-      if (selectedFormatFilter === 'slides') return task.outputFormat === 'slides';
+      if (activeTab === 'all') return true;
+      if (activeTab === 'photos') return item.type === 'photo';
+      if (activeTab === 'videos') return item.type === 'video' || item.type === 'audio';
+      if (activeTab === 'docs') return item.type === 'doc' || item.type === 'graph';
       return true;
     });
-  }, [tasks, searchQuery, selectedFormatFilter]);
+  }, [libraryItems, searchQuery, activeTab]);
 
-  // Filtered voice results
-  const filteredVoice = useMemo(() => {
-    if (!searchQuery.trim()) return voiceHistory;
+  const filteredTasks = useMemo(() => {
+    if (!searchQuery.trim()) return tasks;
     const q = searchQuery.toLowerCase().trim();
-    return voiceHistory.filter(v => v.text.toLowerCase().includes(q));
-  }, [voiceHistory, searchQuery]);
-
-  const getFormatBadge = (task: TaskHistoryItem) => {
-    const fmt = task.outputFormat || 'general';
-    switch (fmt) {
-      case 'website':
-        return (
-          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium">
-            <Globe size={11} /> Website
-          </span>
-        );
-      case 'graph':
-        return (
-          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium">
-            <BarChart3 size={11} /> Chart / Data
-          </span>
-        );
-      case 'report':
-        return (
-          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 font-medium">
-            <FileText size={11} /> Report
-          </span>
-        );
-      case 'slides':
-        return (
-          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium">
-            <Layout size={11} /> Slides
-          </span>
-        );
-      default:
-        return (
-          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-slate-500/10 text-muted-foreground font-medium">
-            <MessageSquare size={11} /> Chat
-          </span>
-        );
-    }
-  };
+    return tasks.filter(task => {
+      const title = formatTitle(task).toLowerCase();
+      const prompt = (task.prompt || '').toLowerCase();
+      return title.includes(q) || prompt.includes(q);
+    });
+  }, [tasks, searchQuery]);
 
   return (
     <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <SheetContent 
         side="right" 
-        className="w-full sm:max-w-lg p-0 flex flex-col h-full bg-background border-l border-border shadow-2xl z-50 overflow-hidden"
+        className="w-full sm:max-w-xl p-0 flex flex-col h-full bg-background border-l border-border shadow-2xl z-50 overflow-hidden"
       >
-        {/* Header */}
+        {/* Top Header - Strictly "Library" */}
         <div className="p-5 pb-3 border-b border-border bg-manus-soft dark:bg-card/40">
           <SheetHeader className="text-left space-y-1">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
-                  <History size={18} />
+                <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center shadow-xs">
+                  <Library size={20} />
                 </div>
                 <div>
-                  <SheetTitle className="text-base font-bold text-foreground">
-                    Activity & History
+                  <SheetTitle className="text-lg font-bold text-foreground tracking-tight">
+                    Library
                   </SheetTitle>
                   <SheetDescription className="text-xs text-muted-foreground">
-                    Review past AI sessions, tasks, and voice calls
+                    All shared files, photos, videos, documents & media
                   </SheetDescription>
                 </div>
+              </div>
+
+              {/* Upload to Library Button */}
+              <div>
+                <input 
+                  type="file" 
+                  ref={fileInputRef}
+                  onChange={handleFileUpload}
+                  multiple 
+                  className="hidden" 
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary text-primary-foreground font-medium text-xs shadow-xs hover:opacity-90 transition-all cursor-pointer"
+                >
+                  <Plus size={14} />
+                  <span>Add File</span>
+                </button>
               </div>
             </div>
           </SheetHeader>
 
-          {/* Quick Statistics Overview */}
-          <div className="grid grid-cols-2 gap-2 mt-4">
-            <div className="bg-white dark:bg-card border border-border rounded-xl p-2.5 flex items-center gap-3 shadow-xs">
-              <div className="w-7 h-7 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-                <MessageSquare size={14} />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Total Tasks</p>
-                <p className="text-sm font-bold text-foreground">{tasks.length}</p>
-              </div>
+          {/* Quick Stats Grid */}
+          <div className="grid grid-cols-4 gap-2 mt-4">
+            <div className="bg-white dark:bg-card border border-border rounded-xl p-2 text-center shadow-2xs">
+              <span className="text-xs font-bold text-foreground block">{libraryItems.filter(i => i.type === 'photo').length}</span>
+              <span className="text-[10px] text-muted-foreground">Photos</span>
             </div>
-
-            <div className="bg-white dark:bg-card border border-border rounded-xl p-2.5 flex items-center gap-3 shadow-xs">
-              <div className="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
-                <Mic size={14} />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Voice Notes</p>
-                <p className="text-sm font-bold text-foreground">{voiceHistory.length}</p>
-              </div>
+            <div className="bg-white dark:bg-card border border-border rounded-xl p-2 text-center shadow-2xs">
+              <span className="text-xs font-bold text-foreground block">{libraryItems.filter(i => i.type === 'video' || i.type === 'audio').length}</span>
+              <span className="text-[10px] text-muted-foreground">Videos</span>
+            </div>
+            <div className="bg-white dark:bg-card border border-border rounded-xl p-2 text-center shadow-2xs">
+              <span className="text-xs font-bold text-foreground block">{libraryItems.filter(i => i.type === 'doc' || i.type === 'graph').length}</span>
+              <span className="text-[10px] text-muted-foreground">Files</span>
+            </div>
+            <div className="bg-white dark:bg-card border border-border rounded-xl p-2 text-center shadow-2xs">
+              <span className="text-xs font-bold text-foreground block">{tasks.length}</span>
+              <span className="text-[10px] text-muted-foreground">Sessions</span>
             </div>
           </div>
 
-          {/* Search Box */}
+          {/* Search Bar */}
           <div className="relative mt-3">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search history by keyword, title, or ID..."
-              className="w-full pl-9 pr-8 py-2 bg-white dark:bg-card border border-border rounded-xl text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary shadow-xs"
+              placeholder="Search Library files, photos, videos..."
+              className="w-full pl-9 pr-8 py-2 bg-white dark:bg-card border border-border rounded-xl text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary shadow-2xs"
             />
             {searchQuery && (
               <button
@@ -330,7 +451,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
           </div>
         </div>
 
-        {/* Tabs & Filters */}
+        {/* Library Navigation Tabs */}
         <div className="flex-1 flex flex-col min-h-0">
           <Tabs 
             value={activeTab} 
@@ -338,93 +459,146 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
             className="flex-1 flex flex-col min-h-0"
           >
             <div className="px-5 pt-3 pb-2 flex items-center justify-between border-b border-border/60">
-              <TabsList className="bg-manus-soft dark:bg-muted/50 p-0.5 rounded-lg h-8">
-                <TabsTrigger value="tasks" className="text-xs px-3 py-1 font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-xs">
-                  Tasks ({tasks.length})
+              <TabsList className="bg-manus-soft dark:bg-muted/50 p-1 rounded-xl h-9 gap-1">
+                <TabsTrigger value="all" className="text-xs px-2.5 py-1 rounded-lg font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
+                  All Items
                 </TabsTrigger>
-                <TabsTrigger value="voice" className="text-xs px-3 py-1 font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-xs">
-                  Voice Transcripts ({voiceHistory.length})
+                <TabsTrigger value="photos" className="text-xs px-2.5 py-1 rounded-lg font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
+                  Photos
+                </TabsTrigger>
+                <TabsTrigger value="videos" className="text-xs px-2.5 py-1 rounded-lg font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
+                  Videos
+                </TabsTrigger>
+                <TabsTrigger value="docs" className="text-xs px-2.5 py-1 rounded-lg font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
+                  Docs & Files
+                </TabsTrigger>
+                <TabsTrigger value="sessions" className="text-xs px-2.5 py-1 rounded-lg font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
+                  Sessions
                 </TabsTrigger>
               </TabsList>
-
-              {activeTab === 'tasks' && tasks.length > 0 && (
-                <button
-                  onClick={handleClearAllTasks}
-                  className="text-[11px] text-muted-foreground hover:text-red-500 flex items-center gap-1 transition-colors px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer"
-                  title="Clear all tasks"
-                >
-                  <Trash2 size={12} />
-                  <span>Clear All</span>
-                </button>
-              )}
-
-              {activeTab === 'voice' && voiceHistory.length > 0 && (
-                <button
-                  onClick={handleClearVoiceHistory}
-                  className="text-[11px] text-muted-foreground hover:text-red-500 flex items-center gap-1 transition-colors px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer"
-                  title="Clear voice transcripts"
-                >
-                  <Trash2 size={12} />
-                  <span>Clear Voice</span>
-                </button>
-              )}
             </div>
 
-            {/* Filter pills for tasks tab */}
-            {activeTab === 'tasks' && (
-              <div className="flex items-center gap-1.5 px-5 py-2 overflow-x-auto custom-scrollbar border-b border-border/40 shrink-0">
-                {[
-                  { id: 'all', label: 'All Formats' },
-                  { id: 'website', label: 'Websites' },
-                  { id: 'graph', label: 'Charts' },
-                  { id: 'report', label: 'Reports' },
-                  { id: 'slides', label: 'Slides' }
-                ].map(pill => (
-                  <button
-                    key={pill.id}
-                    onClick={() => setSelectedFormatFilter(pill.id)}
-                    className={cn(
-                      "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all whitespace-nowrap cursor-pointer",
-                      selectedFormatFilter === pill.id
-                        ? "bg-primary text-primary-foreground shadow-xs"
-                        : "bg-manus-soft dark:bg-muted/40 text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-muted"
-                    )}
-                  >
-                    {pill.label}
-                  </button>
-                ))}
+            {/* Content for Media Tabs (All, Photos, Videos, Docs) */}
+            {activeTab !== 'sessions' ? (
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                {filteredItems.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-56 text-center px-4 space-y-3">
+                    <div className="w-12 h-12 rounded-2xl bg-muted/60 text-muted-foreground flex items-center justify-center">
+                      <Library size={22} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">
+                        {searchQuery ? 'No matching items found' : 'Library is empty'}
+                      </p>
+                      <p className="text-xs text-muted-foreground max-w-xs mt-1">
+                        Upload photos, videos, or documents to keep all your shared files in one place.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {filteredItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className="group relative rounded-2xl border border-border bg-white dark:bg-card p-3 hover:border-primary/50 hover:shadow-md transition-all flex flex-col justify-between"
+                      >
+                        {/* Media Preview or Icon Header */}
+                        <div>
+                          {item.type === 'photo' && item.url ? (
+                            <div className="relative aspect-video rounded-xl overflow-hidden mb-2.5 bg-muted">
+                              <img 
+                                src={item.url} 
+                                alt={item.name} 
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                              />
+                              <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                <button
+                                  onClick={() => setPreviewMedia(item)}
+                                  className="p-1.5 rounded-full bg-white/90 text-foreground hover:bg-white shadow-xs"
+                                  title="View Photo"
+                                >
+                                  <Eye size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          ) : item.type === 'video' ? (
+                            <div className="relative aspect-video rounded-xl bg-slate-900 flex items-center justify-center mb-2.5 overflow-hidden group">
+                              <Film size={28} className="text-white/60" />
+                              <button
+                                onClick={() => setPreviewMedia(item)}
+                                className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-90 group-hover:bg-black/60 transition-colors"
+                              >
+                                <div className="w-10 h-10 rounded-full bg-primary/90 text-primary-foreground flex items-center justify-center shadow-lg transform group-hover:scale-110 transition-transform">
+                                  <Play size={18} className="ml-0.5" />
+                                </div>
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="p-3 rounded-xl bg-manus-soft dark:bg-muted/40 mb-2.5 flex items-center gap-3">
+                              <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                                {item.type === 'doc' ? <FileText size={18} /> : <BarChart3 size={18} />}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-semibold text-foreground truncate">{item.name}</p>
+                                <p className="text-[10px] text-muted-foreground">{item.size || 'Shared File'}</p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* File Details */}
+                          <div className="space-y-1">
+                            <h4 className="font-semibold text-xs text-foreground truncate" title={item.name}>
+                              {item.name}
+                            </h4>
+                            <p className="text-[11px] text-muted-foreground line-clamp-1">
+                              {item.description || item.source}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Card Footer Actions */}
+                        <div className="flex items-center justify-between pt-2.5 mt-2 border-t border-border/40 text-[10px] text-muted-foreground">
+                          <span className="font-mono">{getRelativeTime(item.createdAt)}</span>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={(e) => handleDownloadFile(item, e)}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-primary/10 hover:bg-primary hover:text-primary-foreground text-primary font-medium transition-all text-[10px] cursor-pointer"
+                              title={`Download ${item.name}`}
+                            >
+                              <Download size={12} />
+                              <span>Download</span>
+                            </button>
+                            <button
+                              onClick={(e) => handleDeleteLibraryItem(item.id, e)}
+                              className="p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 text-muted-foreground hover:text-red-500 transition-colors"
+                              title="Delete from Library"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-
-            {/* Tab 1: Task Sessions */}
-            <TabsContent value="tasks" className="flex-1 overflow-y-auto p-4 space-y-2.5 custom-scrollbar m-0">
-              {isLoading ? (
-                <div className="flex flex-col items-center justify-center h-48 text-muted-foreground space-y-2">
-                  <Loader2 size={24} className="animate-spin text-primary" />
-                  <p className="text-xs">Loading task sessions...</p>
-                </div>
-              ) : filteredTasks.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-56 text-center px-4 space-y-3">
-                  <div className="w-12 h-12 rounded-2xl bg-muted/60 text-muted-foreground flex items-center justify-center">
-                    <Clock size={20} />
+            ) : (
+              /* Chat & Task Sessions Tab */
+              <TabsContent value="sessions" className="flex-1 overflow-y-auto p-4 space-y-2.5 custom-scrollbar m-0">
+                {filteredTasks.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-56 text-center px-4 space-y-3">
+                    <div className="w-12 h-12 rounded-2xl bg-muted/60 text-muted-foreground flex items-center justify-center">
+                      <MessageSquare size={20} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">No chat sessions found</p>
+                      <p className="text-xs text-muted-foreground max-w-xs mt-1">
+                        All research and conversation tasks will be archived here.
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">
-                      {searchQuery ? 'No matching sessions found' : 'No task history yet'}
-                    </p>
-                    <p className="text-xs text-muted-foreground max-w-xs mt-1">
-                      {searchQuery 
-                        ? `Try adjusting your search query "${searchQuery}"`
-                        : 'Your research queries, chart analyses, and website builds will be preserved here.'}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                filteredTasks.map((task) => {
-                  const title = formatTitle(task);
-                  const relTime = getRelativeTime(task.created_at);
-
-                  return (
+                ) : (
+                  filteredTasks.map((task) => (
                     <div
                       key={task.id}
                       onClick={() => handleOpenTask(task.id)}
@@ -432,110 +606,86 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex-1 min-w-0 space-y-1.5">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            {getFormatBadge(task)}
-                            <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-mono">
-                              <Clock size={11} /> {relTime}
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
+                              <MessageSquare size={11} /> Chat Session
+                            </span>
+                            <span className="text-[10px] text-muted-foreground font-mono">
+                              {getRelativeTime(task.created_at)}
                             </span>
                           </div>
-
-                          <h4 className="font-semibold text-sm text-foreground group-hover:text-primary transition-colors line-clamp-1">
-                            {title}
+                          <h4 className="font-semibold text-xs text-foreground line-clamp-1">
+                            {formatTitle(task)}
                           </h4>
-
-                          <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+                          <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
                             {task.prompt}
                           </p>
-
-                          <div className="flex items-center gap-2 pt-1 text-[10px] text-muted-foreground font-mono">
-                            <span>ID: {task.id.slice(0, 10)}...</span>
-                          </div>
                         </div>
-
-                        {/* Quick Action Icons */}
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                          <button
-                            onClick={(e) => handleCopyPrompt(task.prompt, e)}
-                            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-manus-soft dark:hover:bg-accent transition-colors"
-                            title="Copy Prompt"
-                          >
-                            <Copy size={13} />
-                          </button>
-
-                          <button
-                            onClick={(e) => handleCopyTaskId(task.id, e)}
-                            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-manus-soft dark:hover:bg-accent transition-colors"
-                            title="Copy Task ID"
-                          >
-                            <ExternalLink size={13} />
-                          </button>
-
-                          <button
-                            onClick={(e) => handleDeleteTask(task.id, e)}
-                            className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
-                            title="Delete Session"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
+                        <button
+                          onClick={(e) => handleDeleteTask(task.id, e)}
+                          className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors opacity-0 group-hover:opacity-100"
+                        >
+                          <Trash2 size={13} />
+                        </button>
                       </div>
                     </div>
-                  );
-                })
-              )}
-            </TabsContent>
-
-            {/* Tab 2: Voice Transcripts */}
-            <TabsContent value="voice" className="flex-1 overflow-y-auto p-4 space-y-2.5 custom-scrollbar m-0">
-              {filteredVoice.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-56 text-center px-4 space-y-3">
-                  <div className="w-12 h-12 rounded-2xl bg-muted/60 text-muted-foreground flex items-center justify-center">
-                    <Mic size={20} />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">
-                      {searchQuery ? 'No voice notes found' : 'No voice notes recorded yet'}
-                    </p>
-                    <p className="text-xs text-muted-foreground max-w-xs mt-1">
-                      Start a voice call using the plus menu to record and save spoken conversations.
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                filteredVoice.map((item) => (
-                  <div
-                    key={item.id}
-                    className="p-3.5 rounded-2xl border border-border bg-white dark:bg-card hover:border-indigo-500/50 hover:shadow-xs transition-all space-y-1.5"
-                  >
-                    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                      <div className="flex items-center gap-1.5 font-medium text-indigo-600 dark:text-indigo-400">
-                        <Mic size={12} />
-                        <span>Spoken Transcript</span>
-                      </div>
-                      <span className="font-mono">{item.time} • {item.date}</span>
-                    </div>
-
-                    <p className="text-xs text-foreground font-medium leading-relaxed">
-                      "{item.text}"
-                    </p>
-
-                    <div className="flex items-center justify-end gap-2 pt-1">
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(item.text);
-                          toast.success('Transcript copied');
-                        }}
-                        className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors px-2 py-0.5 rounded hover:bg-muted"
-                      >
-                        <Copy size={11} /> Copy
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </TabsContent>
+                  ))
+                )}
+              </TabsContent>
+            )}
           </Tabs>
         </div>
+
+        {/* Media Lightbox Modal */}
+        {previewMedia && (
+          <div 
+            onClick={() => setPreviewMedia(null)}
+            className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-xs animate-in fade-in"
+          >
+            <div 
+              onClick={(e) => e.stopPropagation()}
+              className="relative max-w-2xl w-full bg-card rounded-2xl overflow-hidden border border-border shadow-2xl p-4 space-y-3"
+            >
+              <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                <h3 className="font-bold text-sm text-foreground truncate">{previewMedia.name}</h3>
+                <button
+                  onClick={() => setPreviewMedia(null)}
+                  className="p-1 rounded-lg hover:bg-muted text-muted-foreground"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {previewMedia.type === 'photo' && previewMedia.url && (
+                <img 
+                  src={previewMedia.url} 
+                  alt={previewMedia.name} 
+                  className="w-full max-h-[60vh] object-contain rounded-xl bg-black"
+                />
+              )}
+
+              {previewMedia.type === 'video' && previewMedia.url && (
+                <video 
+                  src={previewMedia.url} 
+                  controls 
+                  autoPlay
+                  className="w-full max-h-[60vh] rounded-xl bg-black"
+                />
+              )}
+
+              <div className="flex items-center justify-between text-xs text-muted-foreground pt-1">
+                <span>{previewMedia.description || previewMedia.source}</span>
+                <button
+                  onClick={() => handleDownloadFile(previewMedia)}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-primary text-primary-foreground text-xs font-semibold shadow-xs hover:opacity-90 transition-all cursor-pointer"
+                >
+                  <Download size={14} />
+                  <span>Download File</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </SheetContent>
     </Sheet>
   );

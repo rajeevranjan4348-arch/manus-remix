@@ -190,7 +190,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
         setIsSearchOpen(true);
       } 
     },
-    { id: 'library', label: 'History & Library', icon: Library, action: onOpenHistory },
+    { id: 'library', label: 'Library', icon: Library, action: onOpenHistory },
     { id: 'settings', label: 'Settings', icon: Settings2 },
   ];
 

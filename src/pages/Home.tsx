@@ -15,15 +15,13 @@ import {
   Flame,
   Link as LinkIcon,
   X,
-  Gauge,
-  MessageSquare,
-  Briefcase
+  Gauge
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
 import { AttachmentMenu } from '@/components/chat/AttachmentMenu';
-import { PersonalityMode } from '@/components/layout/Topbar';
+import { saveSharedFileToLibrary } from '@/lib/libraryStore';
 
 const CHAT_WORK_MODES = [
   { id: 'chat' as PersonalityMode, label: 'Chat', icon: MessageSquare, desc: 'Normal conversation' },
@@ -55,11 +53,9 @@ const CHART_TYPES = [
 
 interface HomeProps {
   onStartTask: (prompt: string, options: any) => void;
-  personality?: PersonalityMode;
-  onPersonalityChange?: (personality: PersonalityMode) => void;
 }
 
-export function Home({ onStartTask, personality = 'chat', onPersonalityChange }: HomeProps) {
+export function Home({ onStartTask }: HomeProps) {
   const [prompt, setPrompt] = useState('');
   const [activeIntent, setActiveIntent] = useState<{ label: string, icon: any, placeholder?: string } | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<string | null>(null);
@@ -105,6 +101,9 @@ export function Home({ onStartTask, personality = 'chat', onPersonalityChange }:
   const handleProcessFile = async (file: File) => {
     setUploadedFile(file);
     setIsExtracting(true);
+    
+    // Automatically preserve every file shared with AI in the Library
+    saveSharedFileToLibrary(file, 'Shared with AI Chat').catch(err => console.error(err));
     
     try {
       const fileName = file.name.toLowerCase();

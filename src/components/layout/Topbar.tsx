@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown, PanelLeft, Plus, Check, Sparkles, Zap, Brain, Cpu } from 'lucide-react';
+import { ChevronDown, PanelLeft, Plus, Check, Sparkles, Zap, Brain, Cpu, MessageSquare, Briefcase } from 'lucide-react';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 
 interface TopbarProps {
   onToggleSidebar?: () => void;
@@ -18,6 +19,9 @@ const MODELS = [
 export function Topbar({ onToggleSidebar, onNewTask }: TopbarProps) {
   const [selectedModel, setSelectedModel] = useState(() => {
     return localStorage.getItem('selected_manus_model') || 'manus-1.6-lite';
+  });
+  const [activeMode, setActiveMode] = useState<'chat' | 'work'>(() => {
+    return (localStorage.getItem('manus_active_mode') as 'chat' | 'work') || 'work';
   });
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -41,10 +45,17 @@ export function Topbar({ onToggleSidebar, onNewTask }: TopbarProps) {
     toast.success(`Switched to ${name}`);
   };
 
+  const handleToggleMode = (mode: 'chat' | 'work') => {
+    setActiveMode(mode);
+    localStorage.setItem('manus_active_mode', mode);
+    window.dispatchEvent(new CustomEvent('manus_mode_changed', { detail: mode }));
+    toast.success(`Switched to ${mode === 'chat' ? 'Chat Mode 💬' : 'Work Mode 💼'}`);
+  };
+
   return (
     <header className="h-16 border-b border-border bg-manus-cream dark:bg-background px-4 sm:px-6 flex items-center justify-between relative transition-colors z-30">
-      {/* Left section: Sidebar toggle */}
-      <div className="flex items-center gap-2 z-10">
+      {/* Left section: Sidebar toggle & Chat/Work Mode Switch */}
+      <div className="flex items-center gap-3 z-10">
         {onToggleSidebar && (
           <button
             onClick={onToggleSidebar}
@@ -55,6 +66,37 @@ export function Topbar({ onToggleSidebar, onNewTask }: TopbarProps) {
             <PanelLeft size={20} />
           </button>
         )}
+
+        {/* Chat / Work Toggle Button */}
+        <div className="flex items-center bg-black/5 dark:bg-muted/60 p-1 rounded-full border border-border/60 shadow-xs">
+          <button
+            onClick={() => handleToggleMode('chat')}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer",
+              activeMode === 'chat'
+                ? "bg-white dark:bg-card text-foreground shadow-xs border border-border/40 font-bold"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            title="Chat mode for quick direct responses"
+          >
+            <MessageSquare size={13} className={activeMode === 'chat' ? "text-blue-600 dark:text-blue-400" : ""} />
+            <span>Chat</span>
+          </button>
+
+          <button
+            onClick={() => handleToggleMode('work')}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer",
+              activeMode === 'work'
+                ? "bg-white dark:bg-card text-foreground shadow-xs border border-border/40 font-bold"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            title="Work mode for autonomous tasks, analysis & agent tools"
+          >
+            <Briefcase size={13} className={activeMode === 'work' ? "text-emerald-600 dark:text-emerald-400" : ""} />
+            <span>Work</span>
+          </button>
+        </div>
       </div>
 
       {/* Middle section: Centered Model Selection */}
