@@ -15,13 +15,17 @@ import {
   Flame,
   Link as LinkIcon,
   X,
-  Gauge
+  Gauge,
+  MessageSquare,
+  Briefcase
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
 import { AttachmentMenu } from '@/components/chat/AttachmentMenu';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
+
+type PersonalityMode = 'chat' | 'work';
 
 const CHAT_WORK_MODES = [
   { id: 'chat' as PersonalityMode, label: 'Chat', icon: MessageSquare, desc: 'Normal conversation' },
@@ -66,8 +70,9 @@ export function Home({ onStartTask }: HomeProps) {
   const [isThinkHarder, setIsThinkHarder] = useState(false);
   const [activePlugins, setActivePlugins] = useState<string[]>(['web_search', 'code_sandbox', 'charts']);
   const [chatWorkMode, setChatWorkMode] = useState<PersonalityMode>(() => {
-    return (localStorage.getItem('manus_chat_work_mode') as PersonalityMode) || personality || 'chat';
+    return localStorage.getItem('manus_chat_work_mode') === 'work' ? 'work' : 'chat';
   });
+  const isWorkMode = chatWorkMode === 'work';
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -232,7 +237,6 @@ export function Home({ onStartTask }: HomeProps) {
   const handleChatWorkMode = (mode: PersonalityMode) => {
     setChatWorkMode(mode);
     localStorage.setItem('manus_chat_work_mode', mode);
-    onPersonalityChange?.(mode);
   };
 
   const handleStart = () => {
@@ -242,9 +246,9 @@ export function Home({ onStartTask }: HomeProps) {
     }
 
     const options: any = { 
-      format: selectedFormat || 'report', 
+      format: isWorkMode ? (selectedFormat || 'report') : 'chat', 
       chartType: selectedChart || 'auto',
-      intent: activeIntent?.label,
+      intent: isWorkMode ? activeIntent?.label : undefined,
       thinkHarder: isThinkHarder,
       plugins: activePlugins,
       mode: chatWorkMode,
@@ -273,9 +277,9 @@ export function Home({ onStartTask }: HomeProps) {
       <div className="w-full max-w-4xl space-y-10 my-auto">
         <div className="text-center space-y-3 animate-on-load">
           <h1 className="text-5xl md:text-6xl font-serif font-bold tracking-tight text-foreground">
-            What can I do for you?
+            {isWorkMode ? 'What can I do for you?' : 'What can I help you with?'}
           </h1>
-          <p className="text-muted-foreground text-base md:text-lg">Assign a task, and I'll handle the rest.</p>
+          <p className="text-muted-foreground text-base md:text-lg">{isWorkMode ? "Assign a task, and I'll handle the rest." : "Ask anything and let's chat."}</p>
         </div>
 
         <div className="space-y-6 animate-on-load">
@@ -343,7 +347,7 @@ export function Home({ onStartTask }: HomeProps) {
                 }}
                 className="flex border-none focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-50 overflow-hidden bg-transparent px-0 w-full placeholder:text-[var(--text-disable)] text-foreground text-lg shadow-none resize-none leading-relaxed min-h-[48px]" 
                 rows={1}
-                placeholder={activeIntent?.placeholder || (isThinkHarder ? "Assign a deep reasoning task or question..." : "Assign a task or ask anything")} 
+                placeholder={isWorkMode ? (activeIntent?.placeholder || (isThinkHarder ? "Assign a deep reasoning task or question..." : "Assign a task or ask anything")) : "Message Manus..."} 
               />
             </div>
             <div className="px-3 flex gap-2 item-center">
@@ -433,7 +437,7 @@ export function Home({ onStartTask }: HomeProps) {
               })}
             </div>
 
-            {ACTION_CHIPS.map((chip) => (
+            {isWorkMode && ACTION_CHIPS.map((chip) => (
               <button
                 key={chip.label}
                 onClick={() => {
@@ -480,6 +484,7 @@ export function Home({ onStartTask }: HomeProps) {
           </div>
         </div>
 
+        {isWorkMode && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-on-load">
           <div className="space-y-4">
             <h3 className="text-xs font-bold text-slate-500 dark:text-muted-foreground uppercase tracking-widest px-1">Choose output format</h3>
@@ -539,6 +544,8 @@ export function Home({ onStartTask }: HomeProps) {
               ))}
             </div>
           </div>
+
+        )}
         </div>
       </div>
     </div>
