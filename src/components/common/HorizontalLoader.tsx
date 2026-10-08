@@ -14,7 +14,7 @@ export function HorizontalLoader({
 
   return (
     /* <!-- From Uiverse.io by dexter-st --> */
-    <div className={cn("loader-wrapper", className)}>
+    <div className={cn("horizontal-loader-wrapper", className)}>
       {letters.map((char, index) => (
         <span
           key={index}
