@@ -200,67 +200,19 @@ export function useAgentTask() {
       setSteps(prev => prev.map(s => ({ ...s, status: 'completed' as const })));
     },
     onError: (err) => {
-      console.warn('[AI Studio] Agent stream notice:', err);
-      // Fallback: Generate intelligent analysis response so user has seamless experience
-      const promptText = currentTask?.prompt || 'Data Analysis';
-      const format = currentTask?.options?.format || 'report';
-      const chartType = currentTask?.options?.chartType || 'bar';
-
-      const fallbackLabels = ['Q1', 'Q2', 'Q3', 'Q4'];
-      const fallbackDatasets = [
-        {
-          label: 'Performance Trends',
-          data: [48, 64, 79, 93],
-          backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'],
-        },
-      ];
-
-      const fallbackChart = {
-        labels: fallbackLabels,
-        datasets: fallbackDatasets,
-      };
-
-      const fallbackContent = `## Executive Summary
-Completed automated analysis for: **${promptText}**.
-
-### Key Findings
-- **Primary Trend**: Consistent upward trajectory observed across all tracked dimensions.
-- **Statistical Significance**: Normalized variance remains within expected confidence thresholds (< 5%).
-- **Operational Correlation**: Direct correlation observed between activity volume and conversion rates.
-
-### Strategic Recommendations
-1. Prioritize resource scaling in top-performing categories.
-2. Automate continuous monitoring for anomalies and milestones.
-3. Review comparative periodic benchmarks for quarterly reporting.`;
-
+      console.error('[Manus] AI request failed:', err);
+      const errorMessage = 'I couldn’t get a response from the AI service. Please check your connection and AI provider configuration, then try again.';
       const finalResult = {
-        type: format,
-        content: fallbackContent,
-        chartData: fallbackChart,
-        files: [
-          { name: 'analysis_summary.pdf', type: 'pdf', size: '142.50 KB' },
-          { name: 'metrics_report.md', type: 'markdown', size: '4.80 KB' },
-        ],
-        detectedChartType: chartType !== 'auto' ? chartType : 'bar',
-        rawResponse: { text: fallbackContent },
-        messages: [{ role: 'assistant', content: fallbackContent }],
+        type: 'chat',
+        content: errorMessage,
+        chartData: null,
+        files: [],
+        rawResponse: { text: errorMessage },
+        messages: [{ role: 'assistant', content: errorMessage }],
       };
-
-      setChartData(fallbackChart);
       setResult(finalResult);
-      setTaskStatus('completed');
-      setSteps(prev => prev.map(s => ({ ...s, status: 'completed' as const })));
-      playNotificationSound('success');
-
-      if (taskId) {
-        (blink.db as any).tasks
-          .update(taskId, {
-            status: 'completed',
-            result: JSON.stringify(finalResult),
-            steps: JSON.stringify(steps.map(s => ({ ...s, status: 'completed' as const }))),
-          })
-          .catch(() => {});
-      }
+      setTaskStatus('error');
+      setSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'error' as const } : s));
     }
   });
 
