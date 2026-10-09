@@ -23,7 +23,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { Grok3DAvatar, GrokAvatarStyle, GrokColorTheme } from './Grok3DAvatar';
-import { UiverseSphereLoader } from './UiverseSphereLoader';
+import { VoicePulseOrb } from './VoicePulseOrb';
 import { CobpChatInput } from './CobpChatInput';
 import { HorizontalLoader } from '../common/HorizontalLoader';
 import { blink } from '@/lib/blink';
@@ -498,19 +498,9 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
         {/* Interactive Avatar / Sphere Stage */}
         <div className="relative my-auto flex items-center justify-center">
           {avatarStyle === 'sphere' ? (
-            <UiverseSphereLoader
+            <VoicePulseOrb
               callStatus={callStatus}
-              liveTranscript={liveTranscript}
-              colorTheme={colorTheme}
-              avatarStyle={avatarStyle}
-              onStyleChange={(st) => {
-                setAvatarStyle(st);
-                localStorage.setItem('grok_avatar_style', st);
-              }}
-              onColorChange={(col) => {
-                setColorTheme(col);
-                localStorage.setItem('grok_color_theme', col);
-              }}
+              className="voice-call-main-orb"
             />
           ) : (
             <Grok3DAvatar
