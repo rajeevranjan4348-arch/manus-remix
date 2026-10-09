@@ -133,7 +133,7 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
           type: 'text-delta',
           delta: 'Website setup and verified successfully. The live preview is ready.'
         });
-      } else if (/^(?:hi|hello|hey|hiya|howdy|good morning|good afternoon|good evening)[!?.\\s,]*$/i.test(lastUserMsg.trim())) {
+      } else if ((/^(?:hi|hello|hey|hiya|howdy|good morning|good afternoon|good evening)[!?.\\s,]*$/i.test(lastUserMsg.trim()) || /\\bUser:\\s*(?:hi|hello|hey|hiya|howdy|good morning|good afternoon|good evening)[!?.\\s,]*$/i.test(lastUserMsg.trim()))) {
         // Simple greetings must stay in normal-chat mode: no fake tools, reports, charts, or files.
         sendEvent({
           type: 'text-delta',
