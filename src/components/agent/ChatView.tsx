@@ -13,6 +13,7 @@ import {
   RotateCcw,
   Workflow,
   Gauge,
+  Brain,
   X,
   FileText,
   Upload
@@ -25,6 +26,7 @@ import { ChartResult } from './ChartResult';
 import { FileAttachments } from './FileAttachments';
 import { HorizontalLoader } from '../common/HorizontalLoader';
 import { AttachmentMenu } from '../chat/AttachmentMenu';
+import { ThoughtProcess } from './ThoughtProcess';
 import { Step } from '@/hooks/useAgentTask';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
@@ -196,9 +198,7 @@ export function ChatView({
   // Helper to clean message content (hide raw JSON outputs that are rendered as UI)
   const cleanMessageContent = (content: string) => {
     if (!content) return '';
-    // matches ```json ... ``` or ``` ... ```
     return content.replace(/```(json)?\n[\s\S]*?\n```/g, (match) => {
-      // Only remove if it looks like our structured output (graph or files)
       if (
         match.includes('"graph"') || 
         match.includes('"labels"') || 
@@ -209,6 +209,42 @@ export function ChatView({
       }
       return match;
     }).trim();
+  };
+
+  // Helper to extract AI thought process (<think>...</think> or [THOUGHTS]...[/THOUGHTS])
+  const extractThoughtProcess = (rawContent: string) => {
+    if (!rawContent) return { thought: '', content: '' };
+
+    let thought = '';
+    let content = rawContent;
+
+    // Match closed <think>...</think>
+    const thinkMatch = rawContent.match(/<think>([\s\S]*?)<\/think>/i);
+    if (thinkMatch) {
+      thought = thinkMatch[1].trim();
+      content = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    } else {
+      // Match unclosed <think> tag (e.g. streaming thoughts)
+      const unclosedMatch = rawContent.match(/<think>([\s\S]*)$/i);
+      if (unclosedMatch) {
+        thought = unclosedMatch[1].trim();
+        content = rawContent.replace(/<think>[\s\S]*$/i, '').trim();
+      }
+    }
+
+    // Match [THOUGHTS]...[/THOUGHTS]
+    if (!thought) {
+      const thoughtsMatch = rawContent.match(/\[THOUGHTS?\]([\s\S]*?)\[\/THOUGHTS?\]/i);
+      if (thoughtsMatch) {
+        thought = thoughtsMatch[1].trim();
+        content = rawContent.replace(/\[THOUGHTS?\][\s\S]*?\[\/THOUGHTS?\]/gi, '').trim();
+      }
+    }
+
+    // Strip internal prompt headers if any
+    content = content.replace(/^\[MODE:\s*THINK HARDER[^\]]*\]\s*/gi, '').trim();
+
+    return { thought, content };
   };
 
   // Render a single step (Task Progress Item)
@@ -315,8 +351,10 @@ export function ChatView({
           }
 
           if (msg.role === 'assistant') {
-            const cleanedContent = cleanMessageContent(msg.content);
-            if (!cleanedContent && msg.content && (result || chartData)) return null;
+            const raw = msg.content || '';
+            const { thought, content: extracted } = extractThoughtProcess(raw);
+            const cleanedContent = cleanMessageContent(extracted || raw);
+            if (!cleanedContent && !thought && raw && (result || chartData)) return null;
 
             return (
               <div key={msg.id || i} className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-1">
@@ -324,9 +362,19 @@ export function ChatView({
                   <div className="flex items-center gap-3">
                     <ManusLogo showBadge={true} />
                   </div>
-                  <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
-                    <MarkdownRenderer content={cleanedContent || msg.content} />
-                  </div>
+
+                  {thought && (
+                    <ThoughtProcess
+                      thoughtText={thought}
+                      defaultExpanded={false}
+                    />
+                  )}
+
+                  {cleanedContent ? (
+                    <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
+                      <MarkdownRenderer content={cleanedContent} />
+                    </div>
+                  ) : null}
                 </div>
               </div>
             );
@@ -414,10 +462,10 @@ export function ChatView({
         {(attachedFile || isThinkHarder) && (
           <div className="flex items-center gap-2 flex-wrap max-w-3xl w-full px-2">
             {isThinkHarder && (
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-600 text-white rounded-full text-xs font-semibold shadow-md animate-in fade-in zoom-in duration-200">
-                <Gauge size={13} />
-                <span>Think harder</span>
-                <button onClick={() => setIsThinkHarder(false)} className="p-0.5 hover:bg-white/20 rounded-full ml-1">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-600 text-white rounded-full text-xs font-semibold shadow-md animate-in fade-in zoom-in duration-200">
+                <Brain size={14} className="animate-pulse" />
+                <span>Deep reasoning</span>
+                <button onClick={() => setIsThinkHarder(false)} className="p-0.5 hover:bg-white/20 rounded-full ml-1" title="Remove deep reasoning">
                   <X size={10} />
                 </button>
               </div>

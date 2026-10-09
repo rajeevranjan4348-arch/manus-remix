@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Camera, Image, Paperclip, Blocks, Gauge, Check, X, Sparkles, Globe, Terminal, BarChart2, PhoneCall } from 'lucide-react';
+import { Camera, Image, Paperclip, Blocks, Gauge, Brain, Check, X, Sparkles, Globe, Terminal, BarChart2, PhoneCall } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
@@ -188,7 +188,7 @@ export function AttachmentMenu({
               onClick={() => {
                 onToggleThinkHarder();
                 if (!isThinkHarder) {
-                  toast.success('Think harder enabled: extended reasoning mode active');
+                  toast.success('Think harder enabled: extended chain-of-thought reasoning active');
                 } else {
                   toast.info('Think harder mode disabled');
                 }
@@ -196,7 +196,7 @@ export function AttachmentMenu({
               className={cn(
                 "w-full flex items-center justify-between px-3 py-2.5 rounded-2xl transition-colors text-left group cursor-pointer",
                 isThinkHarder 
-                  ? "bg-blue-50/80 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400" 
+                  ? "bg-purple-500/10 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300" 
                   : "hover:bg-slate-100 dark:hover:bg-white/10"
               )}
             >
@@ -204,24 +204,27 @@ export function AttachmentMenu({
                 <div className={cn(
                   "w-10 h-10 rounded-full flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform",
                   isThinkHarder
-                    ? "bg-blue-600 text-white shadow-[0_0_12px_rgba(37,99,235,0.4)]"
+                    ? "bg-purple-600 text-white shadow-[0_0_12px_rgba(168,85,247,0.4)]"
                     : "bg-slate-100 dark:bg-white/10 text-slate-800 dark:text-white"
                 )}>
-                  <Gauge size={20} />
+                  <Brain size={20} />
                 </div>
                 <div className="flex flex-col">
                   <span className={cn(
                     "font-semibold text-base tracking-tight",
-                    isThinkHarder ? "text-blue-600 dark:text-blue-400" : "text-slate-900 dark:text-white"
+                    isThinkHarder ? "text-purple-700 dark:text-purple-300" : "text-slate-900 dark:text-white"
                   )}>
                     Think harder
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    Deep chain-of-thought & step analysis
                   </span>
                 </div>
               </div>
               <div className={cn(
                 "w-5 h-5 rounded-full border flex items-center justify-center transition-colors",
                 isThinkHarder 
-                  ? "border-blue-600 bg-blue-600 text-white" 
+                  ? "border-purple-600 bg-purple-600 text-white" 
                   : "border-slate-300 dark:border-white/20"
               )}>
                 {isThinkHarder && <Check size={12} strokeWidth={3} />}

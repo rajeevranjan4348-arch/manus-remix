@@ -16,6 +16,7 @@ import {
   Link as LinkIcon,
   X,
   Gauge,
+  Brain,
   MessageSquare,
   Briefcase,
   Upload
@@ -392,12 +393,13 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                 </div>
               )}
               {isThinkHarder && (
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-600/10 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-500/20 rounded-full mr-2 mb-2 align-middle animate-in fade-in zoom-in duration-200 text-xs font-semibold">
-                  <Gauge size={13} className="text-blue-600 dark:text-blue-400" />
-                  <span>Think harder</span>
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-500/15 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300 border border-purple-400/30 rounded-full mr-2 mb-2 align-middle animate-in fade-in zoom-in duration-200 text-xs font-semibold shadow-xs">
+                  <Brain size={14} className="text-purple-600 dark:text-purple-400 animate-pulse" />
+                  <span>Deep reasoning</span>
                   <button 
                     onClick={() => setIsThinkHarder(false)} 
-                    className="p-0.5 hover:bg-blue-500/20 rounded-full transition-colors ml-0.5"
+                    className="p-0.5 hover:bg-purple-500/20 rounded-full transition-colors ml-0.5"
+                    title="Remove deep reasoning"
                   >
                     <X size={10} />
                   </button>

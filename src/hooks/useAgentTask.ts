@@ -64,6 +64,16 @@ export function useAgentTask() {
     - Only use web/tools when the user explicitly asks for current/live information, web research, a URL, file/data analysis, code execution, or another task that genuinely requires a tool.
     - In Chat mode, prioritize a fast conversational answer over autonomous task execution.
 
+    THINKING & DEEP REASONING GUIDELINES:
+    1. For complex tasks, data analysis, code generation, multi-step queries, or when requested with "Think Harder", include your step-by-step reasoning enclosed within <think> and </think> tags at the very beginning of your response.
+    2. Inside <think>, structure your rationale clearly:
+       - Problem Deconstruction & Core Objective
+       - Data / Context Evaluation
+       - Multi-step Logic & Edge Case Considerations
+       - Conclusion & Solution Verification
+    3. Place your complete user-facing answer immediately after the closing </think> tag.
+    4. For quick conversational messages, keep your answer fast and direct.
+
     Output Format Guide:
     - graph: Generate structured JSON with chart data (labels, datasets with values) AND include a "type" field (bar, line, pie, scatter, area, bubble) if 'auto' was requested.
     - document: If the user asks to create a document, PDF, or export, return JSON with:
@@ -449,13 +459,28 @@ User: ${prompt}`;
       }
 
       if (options.thinkHarder) {
-        initialSteps.splice(1, 0, {
-          id: 'think_harder',
-          label: 'Deep Reasoning (Think Harder)',
-          status: 'pending',
-          trace: ['Activating multi-step chain-of-thought analysis...', 'Evaluating counterfactuals and validation steps']
-        });
-        enhancedPrompt = `[MODE: THINK HARDER / EXTENDED REASONING]\nApply thorough multi-step deep reasoning, verify conclusions, and explore edge cases.\n\n` + enhancedPrompt;
+        initialSteps.splice(1, 0, 
+          {
+            id: 'think_harder_1',
+            label: '🧠 Deconstructing Core Problem & Assumptions',
+            status: 'pending',
+            trace: ['Analyzing constraints and goal metrics...', 'Mapping contextual dependencies']
+          },
+          {
+            id: 'think_harder_2',
+            label: '🔍 Extended Multi-Angle Chain-of-Thought',
+            status: 'pending',
+            trace: ['Synthesizing alternative approaches...', 'Testing edge cases and stress-testing logic']
+          }
+        );
+        enhancedPrompt = `[MODE: THINK HARDER / EXTENDED REASONING]
+Please activate deep reasoning mode. Wrap your multi-step chain-of-thought analysis in <think>...</think> tags before giving the final answer.
+Structure your <think> section into:
+- Problem Analysis & Objective
+- Step-by-Step Hypotheses & Verification
+- Solution Synthesis & Edge-Case Validation
+
+User Prompt: ` + enhancedPrompt;
       }
     }
 
