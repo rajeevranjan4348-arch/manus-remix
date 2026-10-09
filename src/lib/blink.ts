@@ -1,4 +1,4 @@
-import { createClient, Agent } from '@blinkdotnew/sdk';
+import { createClient } from '@blinkdotnew/sdk';
 
 const PROJECT_ID = (import.meta as any).env?.VITE_BLINK_PROJECT_ID || 'manus-agent-clone-tkzhogvs';
 const PUBLISHABLE_KEY = (import.meta as any).env?.VITE_BLINK_PUBLISHABLE_KEY || '';
@@ -252,7 +252,7 @@ if (typeof window !== 'undefined' && window.fetch) {
       const lastUserMsg = bodyObj.messages
         ? bodyObj.messages.filter((m: any) => m.role === 'user').slice(-1)[0]?.content || ''
         : bodyObj.prompt || '';
-      const isGreeting = /^(?:hi|hello|hey|hiya|howdy|good morning|good afternoon|good evening)[!?.\\s,]*$/i.test(String(lastUserMsg).trim());
+      const isGreeting = /^(?:hi|hello|hey|hiya|howdy|good morning|good afternoon|good evening)[!?.\s,]*$/i.test(String(lastUserMsg).trim());
 
       // Only provide a local fallback for greetings. All other prompts must reach
       // the configured AI provider instead of receiving fabricated demo reports.
