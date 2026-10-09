@@ -230,22 +230,8 @@ ${JSON.stringify(chartPayload, null, 2)}
   });
 }
 
-// Monkey-patch Agent stream/generate to ensure resilient operation in AI Studio
-if (Agent && Agent.prototype) {
-  Agent.prototype.stream = async function(options: any) {
-    return createAutonomousStreamResponse(options, this.config);
-  };
-
-  Agent.prototype.generate = async function(options: any) {
-    return {
-      text: 'Analysis generated successfully.',
-      finishReason: 'stop',
-      steps: [],
-      usage: { inputTokens: 0, outputTokens: 0 },
-      _billing: { model: this.config?.model || 'google/gemini-3-flash', creditsCharged: 0, costUSD: 0 },
-    };
-  };
-}
+// Keep the SDK's real Agent.stream/generate implementations intact.
+// The previous monkey-patch replaced every model response with fabricated demo text.
 
 // Universal fetch interceptor for Blink AI API endpoints to prevent [Agent] stream failed errors
 if (typeof window !== 'undefined' && window.fetch) {
@@ -263,22 +249,17 @@ if (typeof window !== 'undefined' && window.fetch) {
         }
       } catch {}
 
-      const isStream = bodyObj.stream !== false;
-      if (isStream) {
+      const lastUserMsg = bodyObj.messages
+        ? bodyObj.messages.filter((m: any) => m.role === 'user').slice(-1)[0]?.content || ''
+        : bodyObj.prompt || '';
+      const isGreeting = /^(?:hi|hello|hey|hiya|howdy|good morning|good afternoon|good evening)[!?.\\s,]*$/i.test(String(lastUserMsg).trim());
+
+      // Only provide a local fallback for greetings. All other prompts must reach
+      // the configured AI provider instead of receiving fabricated demo reports.
+      if (isGreeting && bodyObj.stream !== false) {
         return createAutonomousStreamResponse(bodyObj, bodyObj.agent);
-      } else {
-        return new Response(JSON.stringify({
-          data: {
-            text: 'Analysis generated successfully.',
-            steps: [],
-            usage: { inputTokens: 0, outputTokens: 0 },
-            _billing: { model: 'google/gemini-3-flash', creditsCharged: 0, costUSD: 0 }
-          }
-        }), {
-          headers: { 'Content-Type': 'application/json' },
-          status: 200,
-        });
       }
+      return originalFetch(input, init);
     }
 
     return originalFetch(input, init);
