@@ -327,6 +327,29 @@ const localTasksDb = {
   },
 };
 
+const localProjectsDb = {
+  list: async () => {
+    const { getProjects } = await import('./projectStore');
+    return getProjects();
+  },
+  get: async (id: string) => {
+    const { getProject } = await import('./projectStore');
+    return getProject(id);
+  },
+  create: async (data: any) => {
+    const { createProject } = await import('./projectStore');
+    return createProject(data);
+  },
+  update: async (id: string, updates: any) => {
+    const { updateProject } = await import('./projectStore');
+    return updateProject(id, updates);
+  },
+  delete: async (id: string) => {
+    const { deleteProject } = await import('./projectStore');
+    return deleteProject(id);
+  }
+};
+
 const localAuth = {
   me: async () => mockUser,
   login: (redirectUrl?: string) => {
@@ -370,6 +393,9 @@ export const blink: any = new Proxy(baseClient || {}, {
         get(dbTarget, dbProp) {
           if (dbProp === 'tasks') {
             return localTasksDb;
+          }
+          if (dbProp === 'projects') {
+            return localProjectsDb;
           }
           return dbTarget[dbProp] || localTasksDb;
         },

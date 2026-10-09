@@ -1,5 +1,6 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
+import { Sparkles } from 'lucide-react';
 
 interface HorizontalLoaderProps {
   label?: string;
@@ -7,24 +8,20 @@ interface HorizontalLoaderProps {
 }
 
 export function HorizontalLoader({
-  label = "Generating",
+  label = "Generating...",
   className
 }: HorizontalLoaderProps) {
-  const letters = label.split('');
-
   return (
-    /* <!-- From Uiverse.io by dexter-st --> */
-    <div className={cn("horizontal-loader-wrapper", className)}>
-      {letters.map((char, index) => (
-        <span
-          key={index}
-          className="loader-letter"
-          style={{ ['--index' as any]: index }}
-        >
-          {char === ' ' ? '\u00A0' : char}
-        </span>
-      ))}
-      <div className="loader" />
+    <div className={cn("inline-flex items-center gap-3 px-4 py-2 rounded-full bg-slate-900/90 dark:bg-card text-white dark:text-foreground shadow-sm border border-slate-800 dark:border-border backdrop-blur-md animate-in fade-in duration-300", className)}>
+      <div className="flex items-center gap-1.5">
+        <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" style={{ animationDelay: '0ms' }} />
+        <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" style={{ animationDelay: '200ms' }} />
+        <span className="w-2 h-2 rounded-full bg-blue-300 animate-pulse" style={{ animationDelay: '400ms' }} />
+      </div>
+      <div className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-slate-200 dark:text-slate-300">
+        <Sparkles className="w-3.5 h-3.5 text-blue-400 animate-spin" style={{ animationDuration: '4s' }} />
+        <span>{label.endsWith('...') ? label : `${label}...`}</span>
+      </div>
     </div>
   );
 }

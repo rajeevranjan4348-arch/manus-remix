@@ -33,20 +33,21 @@ const COLORS = ['#18181B', '#52525B', '#71717A', '#A1A1AA', '#D4D4D8', '#E4E4E7'
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
+    const title = label || payload[0]?.name || payload[0]?.payload?.name || '';
     return (
-      <div className="bg-white/90 backdrop-blur-sm border border-border p-3 rounded-xl shadow-lg text-xs">
-        <p className="font-bold mb-2 text-foreground">{label}</p>
+      <div className="bg-white/95 dark:bg-card/95 backdrop-blur-sm border border-border p-3 rounded-xl shadow-lg text-xs z-50">
+        {title && <p className="font-bold mb-2 text-foreground">{title}</p>}
         {payload.map((entry: any, index: number) => (
           <div key={index} className="flex items-center gap-2 mb-1">
             <div 
-              className="w-2 h-2 rounded-full" 
-              style={{ backgroundColor: entry.color }}
+              className="w-2.5 h-2.5 rounded-full shrink-0" 
+              style={{ backgroundColor: entry.color || entry.fill || COLORS[index % COLORS.length] }}
             />
-            <span className="text-muted-foreground capitalize">{entry.name}:</span>
+            <span className="text-muted-foreground capitalize">{entry.name || entry.dataKey || 'Value'}:</span>
             <span className="font-mono font-medium">{
               typeof entry.value === 'number' 
                 ? entry.value.toLocaleString() 
-                : entry.value
+                : (entry.value ?? 0)
             }</span>
           </div>
         ))}
@@ -194,10 +195,11 @@ export function ChartResult({ type, data }: { type: string, data?: any }) {
               data={chartData}
               cx="50%"
               cy="50%"
-              innerRadius={80}
-              outerRadius={120}
-              paddingAngle={2}
+              innerRadius={70}
+              outerRadius={110}
+              paddingAngle={3}
               dataKey={chartKeys[0] || "value"}
+              nameKey="name"
               stroke="none"
             >
               {chartData.map((entry: any, index: number) => (

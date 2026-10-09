@@ -6,6 +6,7 @@ import { Home } from './pages/Home';
 import { ChatView } from './components/agent/ChatView';
 import { WebsiteBuilderView } from './components/agent/WebsiteBuilderView';
 import { HistoryPanel } from './components/history/HistoryPanel';
+import { SettingsModal } from './components/settings/SettingsModal';
 import { useAgentTask } from './hooks/useAgentTask';
 import { useWebsiteBuilder } from './hooks/useWebsiteBuilder';
 import { BlinkProvider, BlinkAuthProvider, useBlinkAuth } from '@blinkdotnew/react';
@@ -54,6 +55,7 @@ function TaskView({
 function AppContent() {
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = React.useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useBlinkAuth();
@@ -62,16 +64,27 @@ function AppContent() {
   const agentTask = useAgentTask();
   const { startTask, resetTask } = agentTask;
 
-  // Global keyboard shortcut (Ctrl+H / Cmd+H for History Panel)
+  // Global keyboard shortcuts (Ctrl+H: History, Ctrl+, : Settings)
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'h') {
         e.preventDefault();
         setIsHistoryOpen(prev => !prev);
       }
+      if ((e.ctrlKey || e.metaKey) && (e.key === ',' || e.key.toLowerCase() === 'p')) {
+        e.preventDefault();
+        setIsSettingsOpen(prev => !prev);
+      }
+    };
+    const handleOpenSettings = () => {
+      setIsSettingsOpen(true);
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('manus_open_settings', handleOpenSettings);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('manus_open_settings', handleOpenSettings);
+    };
   }, []);
 
   // Website builder hook
@@ -110,6 +123,8 @@ function AppContent() {
   };
 
   const isWebsiteActive = websiteTask !== null;
+  const isHomePage = location.pathname === '/';
+  const hasSentMessage = !isHomePage || isWebsiteActive || Boolean(agentTask.currentTask) || agentTask.messages.length > 0 || agentTask.isLoading;
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
@@ -118,6 +133,7 @@ function AppContent() {
         onToggle={() => setIsSidebarOpen(!isSidebarOpen)} 
         onNewTask={handleReset}
         onOpenHistory={() => setIsHistoryOpen(true)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
         activeTaskId={location.pathname.startsWith('/task/') ? location.pathname.split('/')[2] : undefined}
       />
       <div className="flex-1 flex flex-col min-w-0">
@@ -126,6 +142,8 @@ function AppContent() {
             onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
             onOpenHistory={() => setIsHistoryOpen(true)} 
             onNewTask={handleReset}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+            showNewTask={hasSentMessage}
           />
         )}
         <main className="flex-1 overflow-hidden relative">
@@ -163,6 +181,12 @@ function AppContent() {
           setIsHistoryOpen(false);
           navigate(`/task/${id}`);
         }}
+      />
+
+      {/* Global Settings & Preferences Modal */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
       />
 
       <Toaster />

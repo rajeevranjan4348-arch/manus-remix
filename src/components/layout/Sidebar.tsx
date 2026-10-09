@@ -16,16 +16,43 @@ import {
   Copy,
   ExternalLink,
   X,
-  Sparkles
+  Sparkles,
+  Code,
+  Globe,
+  BarChart3,
+  Database,
+  Brain,
+  Box,
+  Zap,
+  Layers,
+  Edit3,
+  FolderKanban,
+  Check,
+  ChevronRight
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Logo } from './Logo';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent } from '@/components/ui/dropdown-menu';
 import { useBlinkAuth } from '@blinkdotnew/react';
 import { blink } from '@/lib/blink';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import { Project } from '@/types/project';
+import { getProjects, deleteProject, addTaskToProject } from '@/lib/projectStore';
+import { ProjectModal } from '@/components/projects/ProjectModal';
+import { ProjectViewModal } from '@/components/projects/ProjectViewModal';
+import { SettingsModal } from '@/components/settings/SettingsModal';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -33,6 +60,7 @@ interface SidebarProps {
   onNewTask?: () => void;
   activeTaskId?: string;
   onOpenHistory?: () => void;
+  onOpenSettings?: () => void;
 }
 
 interface TaskHistory {
@@ -42,20 +70,37 @@ interface TaskHistory {
   created_at: string;
   status?: string;
   outputFormat?: string;
+  projectId?: string;
 }
 
-interface SidebarProject {
-  id: string;
-  name: string;
-  createdAt: string;
-}
+const PROJECT_ICON_MAP: Record<string, any> = {
+  folder: Folder,
+  code: Code,
+  sparkles: Sparkles,
+  globe: Globe,
+  'bar-chart': BarChart3,
+  database: Database,
+  brain: Brain,
+  box: Box,
+  zap: Zap,
+  layers: Layers,
+};
+
+const PROJECT_COLOR_MAP: Record<string, { bg: string; text: string }> = {
+  blue: { bg: 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-500', text: 'text-blue-500' },
+  indigo: { bg: 'bg-indigo-500/10 dark:bg-indigo-500/20 text-indigo-500', text: 'text-indigo-500' },
+  purple: { bg: 'bg-purple-500/10 dark:bg-purple-500/20 text-purple-500', text: 'text-purple-500' },
+  emerald: { bg: 'bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-500', text: 'text-emerald-500' },
+  amber: { bg: 'bg-amber-500/10 dark:bg-amber-500/20 text-amber-500', text: 'text-amber-500' },
+  rose: { bg: 'bg-rose-500/10 dark:bg-rose-500/20 text-rose-500', text: 'text-rose-500' },
+  cyan: { bg: 'bg-cyan-500/10 dark:bg-cyan-500/20 text-cyan-500', text: 'text-cyan-500' },
+};
 
 function formatTaskTitle(task: TaskHistory): string {
   if (task.title && task.title.trim()) {
     return task.title.trim();
   }
   let text = task.prompt || 'Untitled session';
-  // Strip metadata tags like [Attached: ...] or [Think Harder ...]
   text = text.replace(/^\[(?:Attached|Think Harder|MODE)[^\]]*\]\s*/gi, '');
   text = text.replace(/^#+\s*/, '');
   const firstLine = text.split('\n')[0].trim();
@@ -116,107 +161,48 @@ function groupTasksByTime(tasks: TaskHistory[]): { group: string; items: TaskHis
     .map(([group, items]) => ({ group, items }));
 }
 
-export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHistory }: SidebarProps) {
+export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHistory, onOpenSettings }: SidebarProps) {
   const [activeTab, setActiveTab] = React.useState('new');
   const [tasks, setTasks] = useState<TaskHistory[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [projects, setProjects] = useState<SidebarProject[]>([]);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [taskToDelete, setTaskToDelete] = useState<{ id: string; title: string } | null>(null);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [isDeletingTask, setIsDeletingTask] = useState(false);
+  
+  // Projects states
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
+  const [projectToEdit, setProjectToEdit] = useState<Project | null>(null);
+  const [selectedProjectView, setSelectedProjectView] = useState<Project | null>(null);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const [projectTaskMap, setProjectTaskMap] = useState<Record<string, string[]>>({});
+
   const { isAuthenticated, user } = useBlinkAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
     loadTasks();
+    loadProjects();
   }, [isAuthenticated, user, activeTaskId]);
 
   useEffect(() => {
-    try {
-      const savedProjects = JSON.parse(localStorage.getItem('manus_projects') || '[]');
-      const savedMap = JSON.parse(localStorage.getItem('manus_project_tasks') || '{}');
-      const savedActive = localStorage.getItem('manus_active_project');
-      setProjects(Array.isArray(savedProjects) ? savedProjects : []);
-      setProjectTaskMap(savedMap && typeof savedMap === 'object' ? savedMap : {});
-      setActiveProjectId(savedActive || null);
-    } catch {
-      setProjects([]);
-      setProjectTaskMap({});
-      setActiveProjectId(null);
-    }
+    const handleProjectsUpdated = () => {
+      loadProjects();
+    };
+    const handleOpenSettingsEvent = () => {
+      setIsSettingsOpen(true);
+    };
+    window.addEventListener('manus_projects_updated', handleProjectsUpdated);
+    window.addEventListener('manus_open_settings', handleOpenSettingsEvent);
+    return () => {
+      window.removeEventListener('manus_projects_updated', handleProjectsUpdated);
+      window.removeEventListener('manus_open_settings', handleOpenSettingsEvent);
+    };
   }, []);
 
-  const persistProjects = (next: SidebarProject[]) => {
-    setProjects(next);
-    localStorage.setItem('manus_projects', JSON.stringify(next));
-  };
-
-  const persistProjectTaskMap = (next: Record<string, string[]>) => {
-    setProjectTaskMap(next);
-    localStorage.setItem('manus_project_tasks', JSON.stringify(next));
-  };
-
-  const handleCreateProject = () => {
-    const name = window.prompt('Project name');
-    const trimmed = name?.trim();
-    if (!trimmed) return;
-    const project: SidebarProject = {
-      id: crypto.randomUUID(),
-      name: trimmed.slice(0, 60),
-      createdAt: new Date().toISOString(),
-    };
-    persistProjects([...projects, project]);
-    setActiveProjectId(project.id);
-    localStorage.setItem('manus_active_project', project.id);
-    toast.success(`Project "${project.name}" created`);
-  };
-
-  const handleSelectProject = (projectId: string | null) => {
-    setActiveProjectId(projectId);
-    if (projectId) localStorage.setItem('manus_active_project', projectId);
-    else localStorage.removeItem('manus_active_project');
-  };
-
-  const handleRenameProject = (project: SidebarProject, e?: React.MouseEvent) => {
-    e?.preventDefault();
-    e?.stopPropagation();
-    const name = window.prompt('Rename project', project.name)?.trim();
-    if (!name) return;
-    persistProjects(projects.map(p => p.id === project.id ? { ...p, name: name.slice(0, 60) } : p));
-    toast.success('Project renamed');
-  };
-
-  const handleDeleteProject = (project: SidebarProject, e?: React.MouseEvent) => {
-    e?.preventDefault();
-    e?.stopPropagation();
-    if (!window.confirm(`Delete project "${project.name}"? Chats will remain in history.`)) return;
-    const nextMap = { ...projectTaskMap };
-    delete nextMap[project.id];
-    persistProjectTaskMap(nextMap);
-    persistProjects(projects.filter(p => p.id !== project.id));
-    if (activeProjectId === project.id) handleSelectProject(null);
-    toast.success('Project deleted');
-  };
-
-  const handleAssignTaskToProject = (task: TaskHistory, e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (projects.length === 0) {
-      handleCreateProject();
-      return;
-    }
-    const names = projects.map((p, i) => `${i + 1}. ${p.name}`).join('\n');
-    const raw = window.prompt(`Choose a project by number:\n${names}`);
-    const index = Number(raw) - 1;
-    if (!Number.isInteger(index) || !projects[index]) return;
-    const project = projects[index];
-    const next = { ...projectTaskMap };
-    Object.keys(next).forEach(id => {
-      next[id] = (next[id] || []).filter(taskId => taskId !== task.id);
-    });
-    next[project.id] = [...(next[project.id] || []), task.id];
-    persistProjectTaskMap(next);
-    toast.success(`Added to ${project.name}`);
+  const loadProjects = () => {
+    setProjects(getProjects());
   };
 
   const loadTasks = async () => {
@@ -231,26 +217,32 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
     }
   };
 
-  const handleDeleteTask = async (taskId: string, e: React.MouseEvent) => {
+  const handleDeleteTask = (taskId: string, e: React.MouseEvent, title?: string) => {
     e.preventDefault();
     e.stopPropagation();
-    
-    const toastId = toast.loading('Deleting task...');
-    
+    const targetTask = tasks.find(t => t.id === taskId);
+    setTaskToDelete({
+      id: taskId,
+      title: title || (targetTask ? formatTaskTitle(targetTask) : 'Chat session')
+    });
+  };
+
+  const confirmDeleteTask = async () => {
+    if (!taskToDelete) return;
+    setIsDeletingTask(true);
     try {
-      await (blink.db as any).tasks.delete(taskId);
-      toast.dismiss(toastId);
-      toast.success('Task deleted');
-      
-      setTasks(prev => prev.filter(t => t.id !== taskId));
-      
-      if (activeTaskId === taskId) {
+      await (blink.db as any).tasks.delete(taskToDelete.id);
+      toast.success('Session deleted successfully');
+      setTasks(prev => prev.filter(t => t.id !== taskToDelete.id));
+      if (activeTaskId === taskToDelete.id) {
         navigate('/');
       }
+      setTaskToDelete(null);
     } catch (error) {
-      toast.dismiss(toastId);
-      toast.error('Failed to delete task');
+      toast.error('Failed to delete session');
       console.error('Delete error:', error);
+    } finally {
+      setIsDeletingTask(false);
     }
   };
 
@@ -261,22 +253,36 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
     toast.success(`Task ID copied: ${taskId.slice(0, 10)}...`);
   };
 
-  const projectFilteredTasks = useMemo(() => {
-    if (!activeProjectId) return tasks;
-    const ids = new Set(projectTaskMap[activeProjectId] || []);
-    return tasks.filter(task => ids.has(task.id));
-  }, [tasks, activeProjectId, projectTaskMap]);
+  const handleAssignTaskToProject = async (taskId: string, projectId: string) => {
+    try {
+      await (blink.db as any).tasks.update(taskId, { projectId });
+      addTaskToProject(projectId, taskId);
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, projectId } : t));
+      toast.success('Task moved to project');
+    } catch (err) {
+      toast.error('Failed to assign task to project');
+    }
+  };
 
   const filteredTasks = useMemo(() => {
-    if (!searchQuery.trim()) return projectFilteredTasks;
-    const q = searchQuery.toLowerCase().trim();
-    return projectFilteredTasks.filter(task => {
-      const title = formatTaskTitle(task).toLowerCase();
-      const prompt = (task.prompt || '').toLowerCase();
-      const id = (task.id || '').toLowerCase();
-      return title.includes(q) || prompt.includes(q) || id.includes(q);
-    });
-  }, [projectFilteredTasks, searchQuery]);
+    let list = tasks;
+    if (activeProjectId) {
+      const proj = projects.find(p => p.id === activeProjectId);
+      list = list.filter(task => 
+        task.projectId === activeProjectId || (proj?.taskIds && proj.taskIds.includes(task.id))
+      );
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      list = list.filter(task => {
+        const title = formatTaskTitle(task).toLowerCase();
+        const prompt = (task.prompt || '').toLowerCase();
+        const id = (task.id || '').toLowerCase();
+        return title.includes(q) || prompt.includes(q) || id.includes(q);
+      });
+    }
+    return list;
+  }, [tasks, searchQuery, activeProjectId, projects]);
 
   const groupedTasks = useMemo(() => {
     return groupTasksByTime(filteredTasks);
@@ -294,8 +300,20 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
       } 
     },
     { id: 'library', label: 'Library', icon: Library, action: onOpenHistory },
-    { id: 'settings', label: 'Settings', icon: Settings2 },
+    { 
+      id: 'settings', 
+      label: 'Settings', 
+      icon: Settings2,
+      action: () => {
+        if (onOpenSettings) onOpenSettings();
+        else setIsSettingsOpen(true);
+      }
+    },
   ];
+
+  const activeProject = useMemo(() => {
+    return projects.find(p => p.id === activeProjectId);
+  }, [projects, activeProjectId]);
 
   // Collapsed Sidebar (Icon Mode)
   if (!isOpen) {
@@ -345,9 +363,41 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
           ))}
         </nav>
 
+        {/* Quick Project Shortcuts in Collapsed View */}
+        <div className="w-full pt-4 mt-4 border-t border-border/60 flex flex-col items-center space-y-2">
+          {projects.slice(0, 4).map((proj) => {
+            const IconComp = PROJECT_ICON_MAP[proj.icon] || Folder;
+            const colorTheme = PROJECT_COLOR_MAP[proj.color] || PROJECT_COLOR_MAP.indigo;
+            return (
+              <TooltipProvider key={proj.id}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => {
+                        onToggle();
+                        setSelectedProjectView(proj);
+                      }}
+                      className={cn(
+                        "w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-2xs hover:scale-105",
+                        colorTheme.bg
+                      )}
+                    >
+                      <IconComp size={16} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    <p className="font-bold text-xs">{proj.name}</p>
+                    <p className="text-[10px] text-muted-foreground">{proj.description || 'Project'}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            );
+          })}
+        </div>
+
         {/* Quick Recent Task Sessions in Collapsed View */}
-        <div className="w-full flex-1 flex flex-col items-center pt-5 mt-4 border-t border-border/60 space-y-2 overflow-y-auto custom-scrollbar">
-          {tasks.slice(0, 8).map((task) => {
+        <div className="w-full flex-1 flex flex-col items-center pt-3 mt-2 border-t border-border/60 space-y-2 overflow-y-auto custom-scrollbar">
+          {tasks.slice(0, 6).map((task) => {
             const title = formatTaskTitle(task);
             const isActive = activeTaskId === task.id;
             return (
@@ -373,8 +423,6 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                     <p className="font-semibold text-xs text-foreground leading-tight">{title}</p>
                     <div className="flex items-center gap-1.5 mt-1 text-[10px] text-muted-foreground">
                       <span>{getRelativeTime(task.created_at)}</span>
-                      <span>•</span>
-                      <span className="font-mono text-[9px] opacity-75">{task.id.slice(0, 8)}...</span>
                     </div>
                   </TooltipContent>
                 </Tooltip>
@@ -436,78 +484,128 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
           ))}
         </nav>
 
-        {/* Projects Section */}
-        <div className="mt-6 px-5">
-          <div className="flex items-center justify-between mb-1.5">
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Projects</h3>
-            <button
-              onClick={handleCreateProject}
-              className="text-muted-foreground hover:text-foreground p-0.5 rounded hover:bg-manus-cream dark:hover:bg-accent transition-colors cursor-pointer"
-              title="Create project"
+        {/* PROJECTS SECTION */}
+        <div className="mt-5 px-3">
+          <div className="flex items-center justify-between px-2 mb-1.5">
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Projects ({projects.length})
+            </h3>
+            <button 
+              onClick={() => {
+                setProjectToEdit(null);
+                setIsProjectModalOpen(true);
+              }}
+              className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent transition-colors cursor-pointer"
+              title="Create new project"
             >
               <Plus size={14} />
             </button>
           </div>
 
-          <button
-            onClick={() => handleSelectProject(null)}
-            className={cn(
-              "w-full flex items-center gap-2.5 py-1.5 text-sm transition-colors cursor-pointer rounded-lg px-1",
-              !activeProjectId ? "text-foreground bg-manus-cream dark:bg-accent" : "text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent"
-            )}
-          >
-            <Folder size={15} />
-            <span>All projects</span>
-          </button>
+          <div className="space-y-1 max-h-44 overflow-y-auto pr-1 custom-scrollbar">
+            {projects.map((proj) => {
+              const IconComp = PROJECT_ICON_MAP[proj.icon] || Folder;
+              const colorTheme = PROJECT_COLOR_MAP[proj.color] || PROJECT_COLOR_MAP.indigo;
+              const isFiltered = activeProjectId === proj.id;
+              const projTaskCount = tasks.filter(t => (t as any).projectId === proj.id || (proj.taskIds && proj.taskIds.includes(t.id))).length;
 
-          <div className="mt-1 space-y-0.5 max-h-28 overflow-y-auto custom-scrollbar">
-            {projects.map(project => (
-              <div key={project.id} className="group flex items-center gap-1">
-                <button
-                  onClick={() => handleSelectProject(project.id)}
-                  className={cn(
-                    "flex-1 min-w-0 flex items-center gap-2 py-1.5 px-1 rounded-lg text-sm text-left transition-colors cursor-pointer",
-                    activeProjectId === project.id ? "text-foreground bg-manus-cream dark:bg-accent" : "text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent"
-                  )}
-                  title={project.name}
-                >
-                  <Folder size={14} className="shrink-0" />
-                  <span className="truncate">{project.name}</span>
-                  <span className="ml-auto text-[10px] opacity-60">{(projectTaskMap[project.id] || []).length}</span>
-                </button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className="p-1 rounded opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent cursor-pointer">
-                      <MoreHorizontal size={13} />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-36 p-1">
-                    <DropdownMenuItem onClick={() => handleRenameProject(project)} className="text-xs cursor-pointer">Rename</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleDeleteProject(project)} className="text-xs text-red-600 cursor-pointer">Delete</DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            ))}
-          </div>
+              return (
+                <div key={proj.id} className="relative group">
+                  <button
+                    onClick={() => {
+                      if (activeProjectId === proj.id) {
+                        setActiveProjectId(null);
+                      } else {
+                        setActiveProjectId(proj.id);
+                      }
+                    }}
+                    className={cn(
+                      "w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl transition-all text-left text-xs font-medium cursor-pointer",
+                      isFiltered
+                        ? "bg-primary/10 text-primary font-semibold border border-primary/30"
+                        : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
+                    )}
+                  >
+                    <div className={cn("w-6 h-6 rounded-lg flex items-center justify-center shrink-0 font-semibold shadow-2xs", colorTheme.bg)}>
+                      <IconComp size={13} />
+                    </div>
 
-          {projects.length === 0 && (
-            <button onClick={handleCreateProject} className="w-full flex items-center gap-2.5 text-muted-foreground hover:text-foreground py-1.5 text-sm transition-colors cursor-pointer rounded-lg px-1 hover:bg-manus-cream dark:hover:bg-accent">
-              <Folder size={15} />
+                    <span className="truncate flex-1 pr-5">{proj.name}</span>
+
+                    {projTaskCount > 0 && (
+                      <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-border/60 text-muted-foreground font-mono shrink-0">
+                        {projTaskCount}
+                      </span>
+                    )}
+                  </button>
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        onClick={(e) => e.stopPropagation()}
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                      >
+                        <MoreHorizontal size={13} />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-44 p-1">
+                      <DropdownMenuItem
+                        onClick={() => setSelectedProjectView(proj)}
+                        className="flex items-center gap-2 cursor-pointer text-xs"
+                      >
+                        <FolderKanban size={13} />
+                        <span>View Details</span>
+                      </DropdownMenuItem>
+
+                      <DropdownMenuItem
+                        onClick={() => {
+                          setProjectToEdit(proj);
+                          setIsProjectModalOpen(true);
+                        }}
+                        className="flex items-center gap-2 cursor-pointer text-xs"
+                      >
+                        <Edit3 size={13} />
+                        <span>Edit Project</span>
+                      </DropdownMenuItem>
+
+                      <DropdownMenuSeparator />
+
+                      <DropdownMenuItem
+                        onClick={() => setProjectToDelete(proj)}
+                        className="flex items-center gap-2 text-red-600 hover:text-red-700 cursor-pointer text-xs"
+                      >
+                        <Trash2 size={13} />
+                        <span>Delete Project</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              );
+            })}
+
+            <button
+              onClick={() => {
+                setProjectToEdit(null);
+                setIsProjectModalOpen(true);
+              }}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded-xl hover:bg-manus-cream dark:hover:bg-accent font-medium"
+            >
+              <Plus size={14} className="text-primary" />
               <span>New project</span>
             </button>
-          )}
+          </div>
         </div>
 
         {/* All Tasks Section (Previous Sessions) */}
-        <div className="mt-5 px-3 flex-1 overflow-hidden flex flex-col min-h-0 border-t border-border/50 pt-4">
+        <div className="mt-4 px-3 flex-1 overflow-hidden flex flex-col min-h-0 border-t border-border/50 pt-3">
           <div className="flex items-center justify-between px-2 mb-2">
             <div className="flex items-center gap-2">
               <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Previous Tasks
               </h3>
-              {tasks.length > 0 && (
+              {filteredTasks.length > 0 && (
                 <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-border text-muted-foreground font-mono">
-                  {tasks.length}
+                  {filteredTasks.length}
                 </span>
               )}
             </div>
@@ -533,6 +631,22 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
               </button>
             </div>
           </div>
+
+          {/* Filter Banner if Project Filter is Active */}
+          {activeProject && (
+            <div className="px-2 mb-2">
+              <div className="flex items-center justify-between px-2.5 py-1 rounded-xl bg-primary/10 border border-primary/20 text-xs font-medium text-primary">
+                <span className="truncate">Filtered: {activeProject.name}</span>
+                <button
+                  onClick={() => setActiveProjectId(null)}
+                  className="p-0.5 rounded-full hover:bg-primary/20 text-primary cursor-pointer"
+                  title="Clear project filter"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Search Filter Input */}
           {isSearchOpen && (
@@ -571,6 +685,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                   const title = formatTaskTitle(task);
                   const isActive = activeTaskId === task.id;
                   const relTime = getRelativeTime(task.created_at);
+                  const taskProj = projects.find(p => p.id === task.projectId);
 
                   return (
                     <div key={task.id} className="relative group">
@@ -593,9 +708,16 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                         
                         <div className="flex-1 min-w-0 pr-6">
                           <p className="truncate text-xs leading-snug">{title}</p>
-                          <p className="text-[10px] text-muted-foreground/70 leading-tight mt-0.5">
-                            {relTime}
-                          </p>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="text-[10px] text-muted-foreground/70 leading-tight">
+                              {relTime}
+                            </span>
+                            {taskProj && (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-primary/10 text-primary font-semibold truncate max-w-[90px]">
+                                {taskProj.name}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </button>
                       
@@ -615,7 +737,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                             <MoreHorizontal size={14} />
                           </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-44 p-1">
+                        <DropdownMenuContent align="end" className="w-48 p-1">
                           <DropdownMenuItem
                             onClick={() => navigate(`/task/${task.id}`)}
                             className="flex items-center gap-2 cursor-pointer text-xs"
@@ -631,18 +753,33 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                             <Copy size={13} />
                             <span>Copy Task ID</span>
                           </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={(e) => handleAssignTaskToProject(task, e as any)}
-                            className="flex items-center gap-2 cursor-pointer text-xs"
-                          >
-                            <Folder size={13} />
-                            <span>Add to project</span>
-                          </DropdownMenuItem>
+
+                          {/* Move to Project Submenu */}
+                          {projects.length > 0 && (
+                            <DropdownMenuSub>
+                              <DropdownMenuSubTrigger className="flex items-center gap-2 cursor-pointer text-xs">
+                                <FolderKanban size={13} />
+                                <span>Assign to Project</span>
+                              </DropdownMenuSubTrigger>
+                              <DropdownMenuSubContent className="w-44 p-1">
+                                {projects.map((p) => (
+                                  <DropdownMenuItem
+                                    key={p.id}
+                                    onClick={() => handleAssignTaskToProject(task.id, p.id)}
+                                    className="flex items-center justify-between cursor-pointer text-xs"
+                                  >
+                                    <span className="truncate">{p.name}</span>
+                                    {task.projectId === p.id && <Check size={12} className="text-primary" />}
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuSubContent>
+                            </DropdownMenuSub>
+                          )}
 
                           <DropdownMenuSeparator />
 
                           <DropdownMenuItem
-                            onClick={(e) => handleDeleteTask(task.id, e as any)}
+                            onClick={(e) => handleDeleteTask(task.id, e as any, formatTaskTitle(task))}
                             className="flex items-center gap-2 text-red-600 hover:text-red-700 cursor-pointer text-xs"
                           >
                             <Trash2 size={13} />
@@ -671,12 +808,117 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
 
             {tasks.length > 0 && filteredTasks.length === 0 && (
               <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-                No sessions match "{searchQuery}"
+                No sessions match criteria
               </div>
             )}
           </div>
         </div>
       </aside>
+
+      {/* Project Modal (Create / Edit) */}
+      <ProjectModal
+        isOpen={isProjectModalOpen}
+        onClose={() => {
+          setIsProjectModalOpen(false);
+          setProjectToEdit(null);
+        }}
+        projectToEdit={projectToEdit}
+      />
+
+      {/* Project View Modal */}
+      <ProjectViewModal
+        isOpen={!!selectedProjectView}
+        onClose={() => setSelectedProjectView(null)}
+        project={selectedProjectView}
+        onEdit={(proj) => {
+          setSelectedProjectView(null);
+          setProjectToEdit(proj);
+          setIsProjectModalOpen(true);
+        }}
+        onNewTaskInProject={(proj) => {
+          setSelectedProjectView(null);
+          if (onNewTask) onNewTask();
+          navigate('/');
+        }}
+      />
+
+      {/* Settings & Preferences Modal */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+      />
+
+      {/* Delete Session Confirmation Alert Dialog */}
+      <AlertDialog open={!!taskToDelete} onOpenChange={(open) => !open && setTaskToDelete(null)}>
+        <AlertDialogContent className="max-w-md rounded-2xl p-6 bg-card border border-border">
+          <AlertDialogHeader>
+            <div className="w-11 h-11 rounded-2xl bg-destructive/10 text-destructive flex items-center justify-center mb-2 mx-auto sm:mx-0">
+              <Trash2 size={22} />
+            </div>
+            <AlertDialogTitle className="text-base sm:text-lg font-bold text-foreground">
+              Delete Chat Session?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-muted-foreground leading-relaxed">
+              Are you sure you want to delete <span className="font-semibold text-foreground">"{taskToDelete?.title}"</span>? This action cannot be undone and all data from this session will be permanently removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-4 gap-2 sm:gap-2">
+            <AlertDialogCancel 
+              disabled={isDeletingTask}
+              onClick={() => setTaskToDelete(null)}
+              className="rounded-xl text-xs cursor-pointer border border-border hover:bg-muted"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isDeletingTask}
+              onClick={confirmDeleteTask}
+              className="rounded-xl text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer shadow-xs font-semibold"
+            >
+              {isDeletingTask ? 'Deleting...' : 'Delete Session'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Project Confirmation Alert Dialog */}
+      <AlertDialog open={!!projectToDelete} onOpenChange={(open) => !open && setProjectToDelete(null)}>
+        <AlertDialogContent className="max-w-md rounded-2xl p-6 bg-card border border-border">
+          <AlertDialogHeader>
+            <div className="w-11 h-11 rounded-2xl bg-destructive/10 text-destructive flex items-center justify-center mb-2 mx-auto sm:mx-0">
+              <Trash2 size={22} />
+            </div>
+            <AlertDialogTitle className="text-base sm:text-lg font-bold text-foreground">
+              Delete Project?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-muted-foreground leading-relaxed">
+              Are you sure you want to delete <span className="font-semibold text-foreground">"{projectToDelete?.name}"</span>? 
+              This will remove the project configuration. Associated chat sessions will remain safe in your history.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-4 gap-2 sm:gap-2">
+            <AlertDialogCancel 
+              onClick={() => setProjectToDelete(null)}
+              className="rounded-xl text-xs cursor-pointer border border-border hover:bg-muted"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (projectToDelete) {
+                  deleteProject(projectToDelete.id);
+                  toast.success('Project deleted');
+                  if (activeProjectId === projectToDelete.id) setActiveProjectId(null);
+                  setProjectToDelete(null);
+                }
+              }}
+              className="rounded-xl text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer shadow-xs font-semibold"
+            >
+              Delete Project
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

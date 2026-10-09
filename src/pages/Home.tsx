@@ -17,7 +17,8 @@ import {
   X,
   Gauge,
   MessageSquare,
-  Briefcase
+  Briefcase,
+  Upload
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { gsap } from 'gsap';
@@ -74,9 +75,49 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   const [chatWorkMode, setChatWorkMode] = useState<PersonalityMode>(() => {
     return (localStorage.getItem('manus_chat_work_mode') as PersonalityMode) || personality || 'chat';
   });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCounterRef = useRef(0);
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer && e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      setIsDragging(false);
+      dragCounterRef.current = 0;
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    dragCounterRef.current = 0;
+    const files = e.dataTransfer?.files;
+    if (files && files.length > 0) {
+      handleProcessFile(files[0]);
+    }
+  };
 
   const handleTogglePlugin = (pluginId: string) => {
     setActivePlugins(prev => 
@@ -280,7 +321,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   };
 
   return (
-    <div ref={containerRef} className="w-full h-full overflow-y-auto flex flex-col items-center p-6 md:py-10 bg-manus-cream">
+    <div ref={containerRef} className="w-full h-full overflow-y-auto flex flex-col items-center p-6 md:py-10 bg-manus-cream dark:bg-background">
       <div className="w-full max-w-4xl space-y-10 my-auto">
         <div className="text-center space-y-3 animate-on-load">
           <h1 className="text-5xl md:text-6xl font-serif font-bold tracking-tight text-foreground">
@@ -311,7 +352,22 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
             </div>
           )}
 
-          <div className="flex flex-col gap-3 rounded-[22px] transition-all relative bg-[var(--fill-input-chat)] py-3 max-h-[312px] w-full z-[2] shadow-[0px_12px_32px_0px_rgba(0,0,0,0.04)] border border-slate-200 dark:border-[var(--border-main)]">
+          <div 
+            onDragEnter={handleDragEnter}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={cn(
+              "flex flex-col gap-3 rounded-[22px] transition-all relative bg-[var(--fill-input-chat)] py-3 max-h-[312px] w-full z-[2] shadow-[0px_12px_32px_0px_rgba(0,0,0,0.04)] border border-slate-200 dark:border-[var(--border-main)]",
+              isDragging && "ring-2 ring-blue-500 border-blue-500 bg-blue-50/50 dark:bg-blue-950/30"
+            )}
+          >
+            {isDragging && (
+              <div className="absolute inset-0 bg-blue-50/95 dark:bg-slate-900/95 border-2 border-dashed border-blue-500 rounded-[22px] flex items-center justify-center gap-3 z-30 backdrop-blur-xs transition-all animate-in fade-in zoom-in duration-200 pointer-events-none">
+                <Upload className="w-6 h-6 text-blue-600 animate-bounce" />
+                <span className="font-semibold text-sm text-blue-700 dark:text-blue-300">Drop files, images or datasets here</span>
+              </div>
+            )}
             <div className="overflow-y-auto pl-4 pr-2">
               {activeIntent && (
                 <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-600 text-white rounded-full mr-2 mb-2 align-middle animate-in fade-in zoom-in duration-200">

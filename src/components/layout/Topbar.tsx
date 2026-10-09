@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown, PanelLeft, Plus, Check, Sparkles, Zap, Brain, Cpu, MessageSquare, Briefcase } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
+import { ChevronDown, PanelLeft, Plus, Check, Sparkles, Zap, Brain, Cpu, MessageSquare, Briefcase, Settings2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -7,6 +8,8 @@ interface TopbarProps {
   onToggleSidebar?: () => void;
   onOpenHistory?: () => void;
   onNewTask?: () => void;
+  onOpenSettings?: () => void;
+  showNewTask?: boolean;
 }
 
 const MODELS = [
@@ -16,7 +19,11 @@ const MODELS = [
   { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', badge: 'Code', desc: 'Advanced coding & data synthesis', icon: Cpu },
 ];
 
-export function Topbar({ onToggleSidebar, onNewTask }: TopbarProps) {
+export function Topbar({ onToggleSidebar, onNewTask, onOpenSettings, showNewTask }: TopbarProps) {
+  const location = useLocation();
+  const isAtHome = location.pathname === '/';
+  const shouldShowNewTask = showNewTask !== undefined ? showNewTask : !isAtHome;
+
   const [selectedModel, setSelectedModel] = useState(() => {
     return localStorage.getItem('selected_manus_model') || 'manus-1.6-lite';
   });
@@ -25,6 +32,16 @@ export function Topbar({ onToggleSidebar, onNewTask }: TopbarProps) {
   });
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleSettingsUpdate = (e: any) => {
+      if (e.detail?.defaultModel) {
+        setSelectedModel(e.detail.defaultModel);
+      }
+    };
+    window.addEventListener('manus_settings_updated', handleSettingsUpdate);
+    return () => window.removeEventListener('manus_settings_updated', handleSettingsUpdate);
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -86,30 +103,6 @@ export function Topbar({ onToggleSidebar, onNewTask }: TopbarProps) {
             <div className="px-3 py-2 border-b border-border/60 mb-1">
               <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Select Intelligence Model</p>
             </div>
-            <div className="mb-2 p-1 rounded-xl border border-border/60 bg-muted/40">
-              <div className="px-2 pt-1 pb-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Mode</div>
-              <div className="grid grid-cols-2 gap-1">
-                {(['chat', 'work'] as const).map((mode) => {
-                  const active = activeMode === mode;
-                  return (
-                    <button
-                      key={mode}
-                      onClick={() => handleToggleMode(mode)}
-                      className={cn(
-                        "flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer",
-                        active
-                          ? "bg-white dark:bg-card text-foreground shadow-sm border border-border/50"
-                          : "text-muted-foreground hover:text-foreground hover:bg-white/60 dark:hover:bg-accent/50"
-                      )}
-                      aria-pressed={active}
-                    >
-                      {mode === 'chat' ? <MessageSquare size={13} /> : <Briefcase size={13} />}
-                      <span>{mode === 'chat' ? 'Chat' : 'Work'}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
 
             <div className="space-y-1">
               {MODELS.map((model) => {
@@ -148,23 +141,40 @@ export function Topbar({ onToggleSidebar, onNewTask }: TopbarProps) {
         )}
       </div>
 
-      {/* Right section: Plus button */}
-      <div className="flex items-center gap-2.5 z-10">
+      {/* Right section: Settings and Plus buttons */}
+      <div className="flex items-center gap-2 z-10">
         <button
           onClick={() => {
-            if (onNewTask) {
-              onNewTask();
-              toast.success('Started new chat session');
+            if (onOpenSettings) {
+              onOpenSettings();
             } else {
-              window.location.href = '/';
+              window.dispatchEvent(new CustomEvent('manus_open_settings'));
             }
           }}
           className="p-2 rounded-full border border-border bg-white dark:bg-card text-foreground hover:bg-manus-soft dark:hover:bg-accent transition-all cursor-pointer shadow-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          title="New Chat / New Task"
-          aria-label="New Chat or Task"
+          title="Settings & Preferences"
+          aria-label="Settings"
         >
-          <Plus size={16} className="text-foreground" />
+          <Settings2 size={16} className="text-muted-foreground hover:text-foreground transition-colors" />
         </button>
+
+        {shouldShowNewTask && (
+          <button
+            onClick={() => {
+              if (onNewTask) {
+                onNewTask();
+                toast.success('Started new chat session');
+              } else {
+                window.location.href = '/';
+              }
+            }}
+            className="p-2 rounded-full border border-border bg-white dark:bg-card text-foreground hover:bg-manus-soft dark:hover:bg-accent transition-all cursor-pointer shadow-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-ring animate-in fade-in duration-150"
+            title="New Chat / New Task"
+            aria-label="New Chat or Task"
+          >
+            <Plus size={16} className="text-foreground" />
+          </button>
+        )}
       </div>
     </header>
   );

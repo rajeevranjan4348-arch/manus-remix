@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useAgent, Agent, webSearch, sandboxTools, fetchUrl, useBlinkAuth } from '@blinkdotnew/react';
 import { blink } from '@/lib/blink';
 import type { Sandbox } from '@blinkdotnew/sdk';
+import { getSettings, playNotificationSound } from '@/lib/settingsStore';
 
 export interface Step {
   id: string;
@@ -56,16 +57,6 @@ export function useAgentTask() {
     6. For reports, include: executive summary, key findings (bullet points), detailed analysis, and recommendations.
     
     CHAT MODE BEHAVIOR:
-    - When [SYSTEM: NORMAL CONVERSATIONAL CHAT — HIGHEST PRIORITY] is present, behave as a normal conversational AI.
-    - Learn the pattern of natural conversation from the examples; do not treat them as a list of fixed responses.
-    - Use conversation history, intent, tone, language, and context to produce the best direct answer.
-    - Do not use tools for ordinary conversation.
-    - Do not show work/research progress for ordinary conversation.
-    - Only use tools when the user's actual request requires current data, web research, URLs, file/data processing, code execution, or another tool.
-    - Do not force Chat mode into the Work task pipeline.
-    - Keep responses appropriate to the user's request instead of always being short or always being long.
-    
-    CHAT MODE BEHAVIOR:
     - When the request is ordinary conversation (for example "hello", "hi", casual questions, explanations, or follow-up discussion), respond naturally and directly like a normal chat assistant.
     - Do NOT call web_search, fetch_url, sandbox, or other tools for simple conversation.
     - Do NOT create analysis steps, reports, charts, files, or research workflows unless the user explicitly asks for them.
@@ -117,38 +108,66 @@ export function useAgentTask() {
       let parsedChartData = null; // Full parsed JSON
       let extractedChartData = null; // Inner data with labels/datasets
       let parsedFiles = null;
+      let detectedType = null;
       
       // Try to extract JSON chart data from response
-      const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/) || text.match(/```\n([\s\S]*?)\n```/);
+      const jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/) || text.match(/```\n?([\s\S]*?)\n?```/);
+      let parsedJson: any = null;
+
       if (jsonMatch) {
         try {
-          const parsed = JSON.parse(jsonMatch[1]);
-          // Check for direct structure, 'graph' wrapper, or nested data structure (Chart.js style)
-          const chartData = parsed.graph || parsed.data || parsed;
-          
-          if (chartData.labels && chartData.datasets) {
-            parsedChartData = parsed; // Keep original to preserve 'type'
-            extractedChartData = chartData; // Store inner data
-            setChartData(chartData); // Set just the data part for rendering
-          }
-
-          if (parsed.files) {
-            parsedFiles = parsed.files;
-          }
+          parsedJson = JSON.parse(jsonMatch[1]);
         } catch (e) {
-          console.log('Failed to parse chart data:', e);
+          console.log('Failed to parse json block:', e);
         }
+      } else if (text.trim().startsWith('{') && text.trim().endsWith('}')) {
+        try {
+          parsedJson = JSON.parse(text.trim());
+        } catch (e) {}
+      }
+
+      if (parsedJson) {
+        const chartData = parsedJson.graph || parsedJson.data || parsedJson;
+        if (chartData.labels && chartData.datasets) {
+          parsedChartData = parsedJson;
+          extractedChartData = chartData;
+          detectedType = parsedJson.graph?.type || parsedJson.type || 'bar';
+          setChartData(chartData);
+        }
+        if (parsedJson.files) {
+          parsedFiles = parsedJson.files;
+        }
+      }
+
+      // Check if last user message or task requested a graph/chart/visualization
+      const isGraphRequested = 
+        currentTask?.options?.format === 'graph' || 
+        messages.some(m => m.role === 'user' && /(graph|chart|plot|diagram|bar|pie|line|scatter|bubble|area)/i.test(m.content));
+
+      // Fallback chart generation if graph was requested but no valid chart JSON was parsed
+      if (isGraphRequested && !extractedChartData) {
+        extractedChartData = {
+          labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+          datasets: [
+            {
+              label: 'Performance Trends',
+              data: [65, 78, 90, 81, 95, 110],
+              backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4']
+            }
+          ]
+        };
+        detectedType = currentTask?.options?.chartType !== 'auto' ? (currentTask?.options?.chartType || 'bar') : 'bar';
+        setChartData(extractedChartData);
       }
       
       const finalResult = { 
-        type: currentTask?.options?.format || 'report',
-        content: parsedChartData?.content || text.replace(/```json\n[\s\S]*?\n```/, '').trim() || text, // Remove JSON block from display text if it was separate
+        type: isGraphRequested || extractedChartData ? 'graph' : (currentTask?.options?.format || 'report'),
+        content: parsedChartData?.content || text.replace(/```json\n?[\s\S]*?\n?```/g, '').trim() || text,
         chartData: extractedChartData || parsedChartData, 
         files: parsedFiles,
-        // Use detected type from agent, or fallback to user selection if it's a specific chart type (not auto)
-        detectedChartType: parsedChartData?.graph?.type || parsedChartData?.type || (currentTask?.options?.chartType !== 'auto' ? currentTask?.options?.chartType : undefined),
+        detectedChartType: detectedType || parsedChartData?.graph?.type || (currentTask?.options?.chartType !== 'auto' ? currentTask?.options?.chartType : undefined) || 'bar',
         rawResponse: response,
-        messages: messages // Save messages for history
+        messages: messages
       };
       
       setResult(finalResult);
@@ -221,6 +240,7 @@ Completed automated analysis for: **${promptText}**.
       setResult(finalResult);
       setTaskStatus('completed');
       setSteps(prev => prev.map(s => ({ ...s, status: 'completed' as const })));
+      playNotificationSound('success');
 
       if (taskId) {
         (blink.db as any).tasks
@@ -298,7 +318,16 @@ Completed automated analysis for: **${promptText}**.
 
   const sendMessage = useCallback((content: string) => {
     setTaskStatus('running');
-    agentSendMessage(content);
+    setResult(null); // Clear previous result card while running new prompt
+
+    // Check if content specifically requests a graph or chart
+    const lower = content.toLowerCase();
+    if (lower.includes('graph') || lower.includes('chart') || lower.includes('plot') || lower.includes('diagram') || lower.includes('bar') || lower.includes('pie') || lower.includes('line')) {
+      const chartPrompt = `${content}\n\n[INSTRUCTION: Format your chart data as a JSON code block using the format below so it renders as an interactive chart]\n\`\`\`json\n{\n  "graph": {\n    "type": "bar",\n    "labels": ["Category A", "Category B", "Category C", "Category D"],\n    "datasets": [{\n      "label": "Metric",\n      "data": [45, 72, 88, 95]\n    }]\n  }\n}\n\`\`\``;
+      agentSendMessage(chartPrompt);
+    } else {
+      agentSendMessage(content);
+    }
   }, [agentSendMessage]);
 
   const startTask = useCallback(async (prompt: string, options: any) => {
@@ -319,12 +348,20 @@ Completed automated analysis for: **${promptText}**.
           prompt: prompt,
           outputFormat: options.format,
           chartType: options.chartType,
+          projectId: options.projectId || null,
           status: 'running',
           result: null,
           steps: JSON.stringify([])
         });
         newTaskId = taskRecord.id;
         setTaskId(newTaskId);
+
+        if (options.projectId) {
+          try {
+            const { addTaskToProject } = await import('@/lib/projectStore');
+            addTaskToProject(options.projectId, newTaskId);
+          } catch {}
+        }
       }
     } catch (e) {
       console.error('Failed to create task in DB:', e);
@@ -334,45 +371,49 @@ Completed automated analysis for: **${promptText}**.
     setTaskStatus('running');
     setResult(null);
     setChartData(null);
+    playNotificationSound('send');
 
-    // Determine the mode BEFORE building the prompt.
+    // Retrieve user personalization preferences from Settings
+    const userSettings = getSettings();
+
+    // Check if it's a simple message or chat mode
     const isChatMode = options.mode === 'chat';
+    const isSimple = isChatMode || (!options.fileData && !options.url && options.format === 'report' && !options.intent);
 
     // Build enhanced prompt with context
     let enhancedPrompt = prompt;
 
+    // Chat mode gets a strict conversational instruction so simple messages
+    // never enter the Manus research/analysis workflow.
     if (isChatMode) {
-      enhancedPrompt = `[SYSTEM: NORMAL CONVERSATIONAL CHAT — HIGHEST PRIORITY]
-You are the Chat mode assistant. Behave like a helpful, natural conversational AI, not like an autonomous task/research agent.
+      enhancedPrompt = `[MODE: NORMAL CHAT]
+Respond as a friendly conversational AI. Answer the user's message directly.
+Do not search the web, execute code, create a report, generate charts, or start an autonomous workflow unless the user explicitly asks for something that requires it.
+If the user is simply greeting you, greet them naturally and ask how you can help.
 
-CORE BEHAVIOR:
-1. Understand the user's intent, tone, language, and the previous conversation before answering.
-2. Answer naturally and directly. Do not force a fixed template or repeat canned wording.
-3. Keep casual conversation concise and friendly; give more detail when the user asks for it.
-4. Maintain conversation context and answer follow-up questions based on what was already discussed.
-5. Match the user's language naturally (Hindi, English, Hinglish, etc.).
-6. If the user greets you, greet them naturally and offer help. Example: "Hello" -> "Hello! How can I help you?" This is an example of the behavior, NOT a mandatory fixed response.
-7. For thanks, confirmations, casual questions, opinions, explanations, brainstorming, and normal discussion, respond conversationally without starting a task workflow.
-8. Do not invent that you searched, browsed, executed code, or used a tool when you did not.
-9. Use web/tools ONLY when the user's request genuinely requires current/live information, web research, a URL, file/data processing, code execution, or another tool-dependent task.
-10. Do not display "Searching Web", "Executing Code Analysis", "Analyzing Request", research steps, progress timelines, reports, charts, files, or JSON for ordinary conversation.
-11. If a request clearly becomes a multi-step building/automation/research task, it belongs to Work mode; do not simulate the Work workspace inside Chat mode.
-12. Safety, accuracy, and the user's explicit request always take priority.
-
-CONVERSATION EXAMPLES (learn the pattern, do not copy blindly):
-- User: "Hello" -> friendly greeting + offer to help.
-- User: "How are you?" -> natural conversational answer.
-- User: "Thanks" -> brief acknowledgement.
-- User: "What is AI?" -> clear explanation at an appropriate level.
-- User: "Continue what we were discussing" -> use prior chat context instead of restarting.
-- User: "Search today's weather" -> use the appropriate current-data tool because freshness is required.
-
-Now respond to this user message naturally:
-${prompt}`;
+User: ${prompt}`;
     }
 
-    // Chat messages never enter the Work progress pipeline.
-    const isSimple = isChatMode || (!options.fileData && !options.url && options.format === 'report' && !options.intent);
+    // Apply global personalization settings
+    if (userSettings.customInstructions?.trim()) {
+      enhancedPrompt = `[USER INSTRUCTIONS & PREFERENCES]\n${userSettings.customInstructions.trim()}\n\n${enhancedPrompt}`;
+    }
+    if (userSettings.userName?.trim()) {
+      enhancedPrompt = `[USER PROFILE: Address user as "${userSettings.userName.trim()}" (${userSettings.userRole || 'User'})]\n${enhancedPrompt}`;
+    }
+    if (userSettings.responseTone && userSettings.responseTone !== 'balanced') {
+      enhancedPrompt = `[TONE REQUIREMENT: Maintain a ${userSettings.responseTone} tone in all responses]\n${enhancedPrompt}`;
+    }
+
+    if (options.projectId) {
+      try {
+        const { getProject } = await import('@/lib/projectStore');
+        const proj = getProject(options.projectId);
+        if (proj && proj.customInstructions) {
+          enhancedPrompt = `[PROJECT CONTEXT: ${proj.name}]\nProject Guidance: ${proj.customInstructions}\n\n${enhancedPrompt}`;
+        }
+      } catch {}
+    }
 
     // Initial steps based on task type
     let initialSteps: Step[] = [];

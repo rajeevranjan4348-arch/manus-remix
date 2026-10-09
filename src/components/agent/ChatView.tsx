@@ -14,8 +14,10 @@ import {
   Workflow,
   Gauge,
   X,
-  FileText
+  FileText,
+  Upload
 } from 'lucide-react';
+import { saveSharedFileToLibrary } from '@/lib/libraryStore';
 import { cn } from '@/lib/utils';
 import { Logo, ManusLogo } from '../layout/Logo';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -57,8 +59,24 @@ export function ChatView({
   const [isThinkHarder, setIsThinkHarder] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [activePlugins, setActivePlugins] = useState<string[]>(['web_search', 'code_sandbox', 'charts']);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Prevent default browser behavior for global drag/drop to stop browser opening dropped files
+  useEffect(() => {
+    const preventDefaults = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    window.addEventListener('dragover', preventDefaults);
+    window.addEventListener('drop', preventDefaults);
+    return () => {
+      window.removeEventListener('dragover', preventDefaults);
+      window.removeEventListener('drop', preventDefaults);
+    };
+  }, []);
 
   const handleTogglePlugin = (pluginId: string) => {
     setActivePlugins(prev => 
@@ -68,17 +86,73 @@ export function ChatView({
 
   const handleFileSelect = (file: File) => {
     setAttachedFile(file);
+    saveSharedFileToLibrary(file, 'Shared in Chat').catch(err => console.error(err));
     toast.success(`Attached: ${file.name}`);
   };
 
-  const handleSend = () => {
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer && e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      setIsDragging(false);
+      dragCounterRef.current = 0;
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    dragCounterRef.current = 0;
+    const files = e.dataTransfer?.files;
+    if (files && files.length > 0) {
+      handleFileSelect(files[0]);
+    }
+  };
+
+  const handleSend = async () => {
     if (!input.trim() && !attachedFile) return;
     let message = input.trim();
     if (attachedFile) {
-      message = `[Attached: ${attachedFile.name}]\n` + message;
+      try {
+        const isTextFile = attachedFile.type.startsWith('text/') || 
+                           attachedFile.name.endsWith('.csv') || 
+                           attachedFile.name.endsWith('.json') || 
+                           attachedFile.name.endsWith('.txt') || 
+                           attachedFile.name.endsWith('.md') ||
+                           attachedFile.name.endsWith('.js') ||
+                           attachedFile.name.endsWith('.py');
+        if (isTextFile) {
+          const textContent = await attachedFile.text();
+          const preview = textContent.slice(0, 12000);
+          message = `[Attached File: ${attachedFile.name}]\n\`\`\`\n${preview}\n\`\`\`\n${message}`.trim();
+        } else {
+          message = `[Attached File: ${attachedFile.name} (${(attachedFile.size / 1024).toFixed(1)} KB)]\n${message}`.trim();
+        }
+      } catch {
+        message = `[Attached File: ${attachedFile.name}]\n${message}`.trim();
+      }
     }
     if (isThinkHarder) {
-      message = `[Think Harder / Deep Reasoning Mode]\n` + message;
+      message = `[Think Harder / Deep Reasoning Mode]\n${message}`;
     }
     onSubmit(message);
     setInput('');
@@ -228,50 +302,41 @@ export function ChatView({
       {/* Chat Area */}
       <div ref={containerRef} className="flex-1 overflow-y-auto px-4 sm:px-20 py-6 space-y-8 custom-scrollbar scroll-smooth">
         
-        {/* Render History Messages */}
+        {/* Render Conversation Messages in Chronological Order */}
         {messages.map((msg, i) => {
-           if (msg.role === 'user') {
-             // User Message (Right or Top) - Manus uses right aligned for user usually, or just simple text
-             return (
-               <div key={msg.id || i} className="flex justify-end">
-                 <div className="bg-manus-soft px-4 py-2 rounded-2xl rounded-tr-sm text-foreground max-w-[80%]">
-                   {msg.content}
-                 </div>
-               </div>
-             );
-           }
-           return null; // Assistant messages are handled below/differently or we assume single turn task for now?
-           // Actually, for a full chat, we should render all.
-           // But the screenshot shows "I've received your request..." as the main agent response.
-           // Let's render assistant messages normally.
-        })}
-        
-        {/* Render Assistant Messages (Interleaved) */}
-        {messages.map((msg, i) => {
-          if (msg.role === 'assistant') {
-             const cleanedContent = cleanMessageContent(msg.content);
-             // If message is empty after cleaning (only contained the JSON), don't render empty bubble unless it's the only content
-             if (!cleanedContent && msg.content) return null;
+          if (msg.role === 'user') {
+            return (
+              <div key={msg.id || i} className="flex justify-end my-2">
+                <div className="bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium max-w-[80%] shadow-xs leading-relaxed">
+                  {msg.content}
+                </div>
+              </div>
+            );
+          }
 
-             return (
-               <div key={msg.id || i} className="flex gap-4 max-w-3xl mx-auto">
-                 <div className="flex-1 space-y-4 min-w-0">
-                   <div className="flex items-center gap-3">
-                     <ManusLogo showBadge={true} />
-                   </div>
-                   <div className="prose prose-sm max-w-none text-foreground/90">
-                     <MarkdownRenderer content={cleanedContent || msg.content} />
-                   </div>
-                 </div>
-               </div>
-             );
+          if (msg.role === 'assistant') {
+            const cleanedContent = cleanMessageContent(msg.content);
+            if (!cleanedContent && msg.content && (result || chartData)) return null;
+
+            return (
+              <div key={msg.id || i} className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-1">
+                <div className="flex-1 space-y-3 min-w-0">
+                  <div className="flex items-center gap-3">
+                    <ManusLogo showBadge={true} />
+                  </div>
+                  <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
+                    <MarkdownRenderer content={cleanedContent || msg.content} />
+                  </div>
+                </div>
+              </div>
+            );
           }
           return null;
         })}
 
         {/* Steps / Task Progress */}
         {steps.length > 0 && (
-          <div className="flex gap-4 max-w-3xl mx-auto">
+          <div className="flex gap-4 max-w-3xl mx-auto my-2">
              <div className="w-8 shrink-0" /> {/* Spacer for alignment */}
              <div className="flex-1 min-w-0">
                {steps.map(renderStep)}
@@ -279,52 +344,44 @@ export function ChatView({
           </div>
         )}
 
-        {/* Final Result (Chart/Report) */}
+        {/* Final Result (Chart / Interactive Visualizations / Files) */}
         {result && (
-          <div className="flex gap-4 max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <div className="flex gap-4 max-w-3xl mx-auto my-4 animate-in fade-in slide-in-from-bottom-3 duration-500">
             <div className="w-8 shrink-0" />
             <div className="flex-1 min-w-0">
-              <div className="border border-border/50 rounded-2xl bg-white overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-                {/* Result Header Removed as requested */}
+              <div className="border border-border/60 rounded-2xl bg-white dark:bg-card overflow-hidden shadow-sm hover:shadow-md transition-all p-5">
+                {/* Show Chart if available */}
+                {(result.type === 'graph' || result.chartData || chartData) && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between border-b border-border/40 pb-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-blue-500 inline-block animate-pulse" />
+                        {result.detectedChartType ? `${result.detectedChartType.toUpperCase()} CHART` : 'DATA VISUALIZATION'}
+                      </span>
+                    </div>
+                    <div className="h-[320px] w-full pt-2">
+                      <ChartResult 
+                        type={result.detectedChartType || result.type || 'bar'} 
+                        data={result.chartData || chartData} 
+                      />
+                    </div>
+                  </div>
+                )}
                 
-                <div className="p-6">
-                  {/* Always show content if available */}
-                  {(result.content && !result.chartData) && (
-                    <div className="prose prose-sm max-w-none text-foreground/90 mb-4">
-                      <MarkdownRenderer content={result.content} />
-                    </div>
-                  )}
-
-                  {/* Show Chart if available */}
-                  {(result.type === 'graph' || result.chartData) && (
-                    <div className="mb-4">
-                      {result.content && result.chartData && (
-                        <div className="prose prose-sm max-w-none text-foreground/90 mb-6">
-                          <MarkdownRenderer content={result.content} />
-                        </div>
-                      )}
-                      <div className="h-[300px] w-full">
-                        <ChartResult 
-                          type={result.detectedChartType || result.type} 
-                          data={result.chartData || chartData} 
-                        />
-                      </div>
-                    </div>
-                  )}
-                  
-                  {/* Show Files if available */}
-                  {result.files && result.files.length > 0 && (
-                     <FileAttachments files={result.files} />
-                  )}
-                </div>
+                {/* Show Files if available */}
+                {result.files && result.files.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-border/40">
+                    <FileAttachments files={result.files} />
+                  </div>
+                )}
               </div>
             </div>
           </div>
         )}
 
-        {/* Horizontal Loader Animation (Uiverse.io by dexter-st) for Image & Graph Generation */}
-        {isAssistantWorking && !result && (
-          <div className="flex gap-4 max-w-3xl mx-auto animate-in fade-in slide-in-from-bottom-2 duration-300">
+        {/* Horizontal Loader Animation for Generating */}
+        {isAssistantWorking && (
+          <div className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="flex-1 space-y-2.5 min-w-0">
               <div className="flex items-center gap-2.5">
                 <ManusLogo showBadge={true} />
@@ -376,7 +433,22 @@ export function ChatView({
             )}
           </div>
         )}
-        <div className="w-full max-w-3xl bg-white dark:bg-card rounded-[2rem] shadow-xl border border-border/50 p-2 pl-4 flex items-center gap-2 transition-all focus-within:ring-1 focus-within:ring-primary/20">
+        <div 
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={cn(
+            "w-full max-w-3xl bg-white dark:bg-card rounded-[2rem] shadow-xl border border-border/50 p-2 pl-4 flex items-center gap-2 transition-all focus-within:ring-1 focus-within:ring-primary/20 relative",
+            isDragging && "ring-2 ring-blue-500 border-blue-500 bg-blue-50/50 dark:bg-blue-950/30"
+          )}
+        >
+          {isDragging && (
+            <div className="absolute inset-0 bg-blue-50/95 dark:bg-slate-900/95 border-2 border-dashed border-blue-500 rounded-[2rem] flex items-center justify-center gap-3 z-30 backdrop-blur-xs transition-all animate-in fade-in zoom-in duration-200 pointer-events-none">
+              <Upload className="w-5 h-5 text-blue-600 animate-bounce" />
+              <span className="font-semibold text-sm text-blue-700 dark:text-blue-300">Drop files, images or datasets here</span>
+            </div>
+          )}
           <AttachmentMenu
             onFileSelect={handleFileSelect}
             isThinkHarder={isThinkHarder}

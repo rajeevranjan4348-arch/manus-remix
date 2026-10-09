@@ -39,6 +39,16 @@ import {
   SheetDescription
 } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export interface LibraryFileItem {
   id: string;
@@ -195,6 +205,12 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
   const [activeTab, setActiveTab] = useState<'all' | 'photos' | 'videos' | 'docs' | 'sessions'>('all');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [previewMedia, setPreviewMedia] = useState<LibraryFileItem | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<{
+    type: 'session' | 'library';
+    id: string;
+    name: string;
+  } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
@@ -297,12 +313,14 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
     }
   };
 
-  const handleDeleteLibraryItem = (id: string, e: React.MouseEvent) => {
+  const handleDeleteLibraryItem = (id: string, e: React.MouseEvent, name?: string) => {
     e.stopPropagation();
-    const updated = libraryItems.filter(item => item.id !== id);
-    setLibraryItems(updated);
-    localStorage.setItem('manus_library_files', JSON.stringify(updated));
-    toast.success('Item removed from Library');
+    const targetItem = libraryItems.find(item => item.id === id);
+    setItemToDelete({
+      type: 'library',
+      id,
+      name: name || targetItem?.name || 'File'
+    });
   };
 
   const handleDownloadFile = async (item: LibraryFileItem, e?: React.MouseEvent) => {
@@ -360,14 +378,36 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
     onClose();
   };
 
-  const handleDeleteTask = async (taskId: string, e: React.MouseEvent) => {
+  const handleDeleteTask = (taskId: string, e: React.MouseEvent, title?: string) => {
     e.stopPropagation();
+    const targetTask = tasks.find(t => t.id === taskId);
+    setItemToDelete({
+      type: 'session',
+      id: taskId,
+      name: title || (targetTask ? formatTitle(targetTask) : 'Chat Session')
+    });
+  };
+
+  const confirmDeleteItem = async () => {
+    if (!itemToDelete) return;
+    setIsDeleting(true);
     try {
-      await (blink.db as any).tasks.delete(taskId);
-      setTasks(prev => prev.filter(t => t.id !== taskId));
-      toast.success('Session deleted');
+      if (itemToDelete.type === 'session') {
+        await (blink.db as any).tasks.delete(itemToDelete.id);
+        setTasks(prev => prev.filter(t => t.id !== itemToDelete.id));
+        toast.success('Session deleted from history');
+      } else {
+        const updated = libraryItems.filter(item => item.id !== itemToDelete.id);
+        setLibraryItems(updated);
+        localStorage.setItem('manus_library_files', JSON.stringify(updated));
+        toast.success(`"${itemToDelete.name}" removed from Library`);
+      }
+      setItemToDelete(null);
     } catch (error) {
-      toast.error('Failed to delete session');
+      toast.error('Failed to delete item');
+      console.error('Delete error:', error);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -421,7 +461,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
               </div>
 
               {/* Upload to Library Button */}
-              <div>
+              <div className="mr-8 sm:mr-9 mt-1.5">
                 <input 
                   type="file" 
                   ref={fileInputRef}
@@ -623,7 +663,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
                             </button>
 
                             <button
-                              onClick={(e) => handleDeleteLibraryItem(item.id, e)}
+                              onClick={(e) => handleDeleteLibraryItem(item.id, e, item.name)}
                               className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors cursor-pointer"
                               title="Delete from Library"
                             >
@@ -748,7 +788,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
                                 <span>Download</span>
                               </button>
                               <button
-                                onClick={(e) => handleDeleteLibraryItem(item.id, e)}
+                                onClick={(e) => handleDeleteLibraryItem(item.id, e, item.name)}
                                 className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 text-muted-foreground hover:text-red-500 transition-colors cursor-pointer"
                                 title="Delete from Library"
                               >
@@ -802,8 +842,9 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
                           </p>
                         </div>
                         <button
-                          onClick={(e) => handleDeleteTask(task.id, e)}
-                          className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors opacity-0 group-hover:opacity-100"
+                          onClick={(e) => handleDeleteTask(task.id, e, formatTitle(task))}
+                          className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
+                          title="Delete session"
                         >
                           <Trash2 size={13} />
                         </button>
@@ -866,6 +907,42 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
             </div>
           </div>
         )}
+
+        {/* Delete Confirmation Alert Dialog */}
+        <AlertDialog open={!!itemToDelete} onOpenChange={(open) => !open && setItemToDelete(null)}>
+          <AlertDialogContent className="max-w-md rounded-2xl p-6 bg-card border border-border">
+            <AlertDialogHeader>
+              <div className="w-11 h-11 rounded-2xl bg-destructive/10 text-destructive flex items-center justify-center mb-2 mx-auto sm:mx-0">
+                <Trash2 size={22} />
+              </div>
+              <AlertDialogTitle className="text-base sm:text-lg font-bold text-foreground">
+                {itemToDelete?.type === 'session' ? 'Delete Chat Session?' : 'Delete File from Library?'}
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-xs text-muted-foreground leading-relaxed">
+                Are you sure you want to delete <span className="font-semibold text-foreground">"{itemToDelete?.name}"</span>?
+                {itemToDelete?.type === 'session' 
+                  ? ' This action cannot be undone. All conversation messages, research steps, and generated analysis will be permanently deleted.'
+                  : ' This file will be permanently removed from your shared workspace assets.'}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="mt-4 gap-2 sm:gap-2">
+              <AlertDialogCancel 
+                disabled={isDeleting}
+                onClick={() => setItemToDelete(null)}
+                className="rounded-xl text-xs cursor-pointer border border-border hover:bg-muted"
+              >
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                disabled={isDeleting}
+                onClick={confirmDeleteItem}
+                className="rounded-xl text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer shadow-xs font-semibold"
+              >
+                {isDeleting ? 'Deleting...' : (itemToDelete?.type === 'session' ? 'Delete Session' : 'Delete File')}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </SheetContent>
     </Sheet>
   );
