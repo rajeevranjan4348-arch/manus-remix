@@ -25,6 +25,7 @@ import { gsap } from 'gsap';
 import { toast } from 'sonner';
 import { AttachmentMenu } from '@/components/chat/AttachmentMenu';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
+import { listenForSpeech } from '@/lib/voiceInput';
 
 export type PersonalityMode = 'chat' | 'work';
 
@@ -285,6 +286,21 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
       setSelectedChart(null);
     }
     onPersonalityChange?.(mode);
+  };
+
+  const handleVoiceInput = async () => {
+    try {
+      const { transcript } = await listenForSpeech('en-IN');
+      setPrompt(transcript);
+      if (chatWorkMode === 'chat') {
+        try { sessionStorage.setItem('manus_voice_reply_pending', '1'); } catch {}
+        onStartTask(transcript, { format: 'report', chartType: 'auto', thinkHarder: false, plugins: activePlugins, mode: 'chat' });
+      } else {
+        toast.info('Voice prompt added. Review it before starting the Work task.');
+      }
+    } catch (error: any) {
+      toast.error(error?.message || 'Voice input is unavailable.');
+    }
   };
 
   const handleStart = () => {
