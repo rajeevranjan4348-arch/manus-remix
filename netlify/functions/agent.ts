@@ -44,16 +44,37 @@ export default async (req: Request) => {
       'gemini-3.8-flash'
     ]));
 
-    let systemInstruction = body.systemInstruction || 
+    let systemInstruction = body.systemInstruction ||
       'You are Manus, an intelligent AI assistant. Provide direct, helpful, and high-quality responses. Answer factual questions directly. Do not generate fake reports or fake charts unless specifically asked for them.';
 
     if (body.thinkHarder) {
-      systemInstruction += `\n\n[EXTENDED REASONING MODE ACTIVE]\nEnclose your step-by-step reasoning inside <think>...</think> tags before your final answer.`;
+      systemInstruction += `\n\n[EXTENDED REASONING MODE ACTIVE]\nReason carefully internally, then provide a concise answer without revealing private chain-of-thought.`;
     }
 
-    const messages = body.messages || [];
+    const messages = Array.isArray(body.messages) ? body.messages : [];
+    const latestUserText =
+      [...messages].reverse().find((m: any) => m?.role === 'user' && typeof m?.content === 'string')?.content
+      || (typeof body.prompt === 'string' ? body.prompt : '');
+
+    // Keep greetings and ordinary conversation on the fast, non-search path.
+    // Enable Google Search grounding for queries whose answers can change over time.
+    const needsLiveSearch = (text: string) => {
+      const q = text.toLowerCase();
+      return /\b(latest|today|current|currently|right now|breaking|live|real[\s-]?time|news|headlines|recent|this week|yesterday|weather|stock price|share price|exchange rate|world news|india news|tech news|latest updates|election results|box office|release date|latest version|price today|score|standings|forecast|who won|who is (the )?(prime minister|president|chief minister|ceo)|who are the (current|latest)\b)\b/i.test(q)
+        || /\b(202[5-9]|203\d)\b/.test(q)
+        || /\b(what happened|what's happening|whats happening|tell me about the latest|latest on)\b/i.test(q);
+    };
+    const useGoogleSearch = needsLiveSearch(latestUserText);
+
+    if (useGoogleSearch) {
+      systemInstruction +=
+        '\n\nLIVE WEB SEARCH IS ENABLED. Use Google Search grounding to answer current-events, news, and other changing-fact questions. ' +
+        'Prioritize recent, reliable sources. Clearly distinguish confirmed information from uncertainty. Include useful source links and publication dates when available. ' +
+        'Never invent sources, URLs, dates, headlines, or live facts. If search results are insufficient, say so.';
+    }
+
     const contents = messages
-      .filter((m: any) => m.role === 'user' || m.role === 'assistant')
+      .filter((m: any) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
       .map((m: any) => ({
         role: m.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: m.content }],
@@ -67,7 +88,6 @@ export default async (req: Request) => {
     }
 
     let responseStream: any = null;
-    let selectedModel = '';
 
     for (const model of candidateModels) {
       try {
@@ -76,9 +96,9 @@ export default async (req: Request) => {
           contents,
           config: {
             systemInstruction,
+            ...(useGoogleSearch ? { tools: [{ googleSearch: {} }] } : {}),
           },
         });
-        selectedModel = model;
         break;
       } catch (err) {
         console.warn(`[Netlify Agent] Model ${model} failed, trying fallback:`, err);
@@ -92,6 +112,7 @@ export default async (req: Request) => {
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
+        const sources = new Map<string, string>();
         try {
           for await (const chunk of responseStream) {
             const text = chunk.text;
@@ -100,7 +121,29 @@ export default async (req: Request) => {
                 encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: text })}\n\n`)
               );
             }
+
+            // Grounding metadata can arrive on a later stream chunk.
+            const groundingChunks = chunk?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+            for (const groundingChunk of groundingChunks) {
+              const web = groundingChunk?.web;
+              if (typeof web?.uri === 'string' && /^https?:\/\//i.test(web.uri)) {
+                sources.set(web.uri, typeof web.title === 'string' && web.title.trim() ? web.title : web.uri);
+              }
+            }
           }
+
+          // Append links as normal streamed Markdown so existing chat UIs can render them
+          // without any UI changes or a new event protocol.
+          if (useGoogleSearch && sources.size > 0) {
+            const sourceMarkdown = '\n\n**Sources**\n' + Array.from(sources.entries())
+              .slice(0, 8)
+              .map(([url, title]) => `- [${title.replace(/[\[\]]/g, '')}](${url})`)
+              .join('\n');
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: sourceMarkdown })}\n\n`)
+            );
+          }
+
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`)
           );
