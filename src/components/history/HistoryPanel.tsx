@@ -829,7 +829,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center gap-2">
                             <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
-                              <MessageSquare size={11} /> Chat Session
+                              <MessageSquare size={11} /> {((task as any).mode === 'work' || task.outputFormat === 'website' || Boolean(task.websiteName)) ? 'Work' : 'Chat'}
                             </span>
                             <span className="text-[10px] text-muted-foreground font-mono">
                               {getRelativeTime(task.created_at)}
