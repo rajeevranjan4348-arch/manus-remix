@@ -191,6 +191,7 @@ export default async (req: Request) => {
       const repo = safeSegment(body.repo, 'repository');
       const branch = safeBranch(body.branch, 'branch');
       const base = safeBranch(body.base, 'base branch');
+      if (body.confirm !== true) return json({ error: 'Confirmation required. Set confirm=true after the user approves creating this branch.' }, 409);
       const ref = await githubApi(session.accessToken, `/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(base)}`);
       const created = await githubApi(session.accessToken, `/repos/${owner}/${repo}/git/refs`, {
         method: 'POST', body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: ref.object.sha }),
