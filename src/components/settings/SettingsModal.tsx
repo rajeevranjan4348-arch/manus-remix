@@ -20,7 +20,8 @@ import {
   Globe, 
   Terminal, 
   VolumeX, 
-  Keyboard
+  Keyboard,
+  Github
 } from 'lucide-react';
 import { 
   UserSettings, 
@@ -47,7 +48,7 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
-type SettingsTab = 'general' | 'ai' | 'personalization' | 'voice' | 'data' | 'about';
+type SettingsTab = 'general' | 'ai' | 'personalization' | 'voice' | 'data' | 'github' | 'about';
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { theme, setTheme } = useTheme();
@@ -55,6 +56,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [isExporting, setIsExporting] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [githubStatus, setGithubStatus] = useState<{ connected: boolean; user?: { login: string; avatar_url?: string } }>({ connected: false });
+  const [githubRepos, setGithubRepos] = useState<Array<{ full_name: string; private: boolean; html_url: string; permissions?: { push?: boolean } }>>([]);
+  const [isGitHubLoading, setIsGitHubLoading] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -62,6 +66,33 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setShowClearConfirm(false);
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'github') return;
+    let cancelled = false;
+    const loadGitHub = async () => {
+      setIsGitHubLoading(true);
+      try {
+        const statusResponse = await fetch('/api/github/status', { credentials: 'same-origin' });
+        const status = await statusResponse.json();
+        if (cancelled) return;
+        setGithubStatus(status);
+        if (status.connected) {
+          const reposResponse = await fetch('/api/github/repos?page=1', { credentials: 'same-origin' });
+          const reposData = await reposResponse.json();
+          if (!cancelled) setGithubRepos(Array.isArray(reposData.repositories) ? reposData.repositories : []);
+        } else {
+          setGithubRepos([]);
+        }
+      } catch {
+        if (!cancelled) toast.error('Could not load GitHub connection status');
+      } finally {
+        if (!cancelled) setIsGitHubLoading(false);
+      }
+    };
+    void loadGitHub();
+    return () => { cancelled = true; };
+  }, [isOpen, activeTab]);
 
   // Close on Escape key
   useEffect(() => {
@@ -159,6 +190,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     { id: 'personalization', label: 'Personalization', icon: User },
     { id: 'voice', label: 'Voice & Audio', icon: Volume2 },
     { id: 'data', label: 'Data & Privacy', icon: Shield },
+    { id: 'github', label: 'GitHub Connector', icon: Github },
     { id: 'about', label: 'About', icon: Info },
   ];
 
@@ -753,6 +785,52 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     </button>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* GITHUB CONNECTOR TAB */}
+            {activeTab === 'github' && (
+              <div className="space-y-5 animate-in fade-in duration-100">
+                <div>
+                  <p className="text-xs font-semibold text-foreground">GitHub Connector</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">Connect repositories to inspect code and prepare agent-assisted changes. Your GitHub token stays server-side.</p>
+                </div>
+                <div className="rounded-xl border border-border/60 p-4 space-y-3">
+                  {isGitHubLoading ? (
+                    <p className="text-xs text-muted-foreground">Checking GitHub connection…</p>
+                  ) : githubStatus.connected ? (
+                    <>
+                      <div className="flex items-center gap-3">
+                        {githubStatus.user?.avatar_url && <img src={githubStatus.user.avatar_url} alt="GitHub avatar" className="w-9 h-9 rounded-full" />}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-medium text-foreground">Connected as @{githubStatus.user?.login || 'GitHub user'}</p>
+                          <p className="text-[11px] text-muted-foreground">Repository access is controlled by your GitHub permissions.</p>
+                        </div>
+                        <span className="text-[10px] rounded-full px-2 py-1 bg-emerald-500/10 text-emerald-600">Connected</span>
+                      </div>
+                      <button onClick={async () => { try { await fetch('/api/github/disconnect', { method: 'GET', credentials: 'same-origin' }); setGithubStatus({ connected: false }); setGithubRepos([]); toast.success('GitHub disconnected'); } catch { toast.error('Could not disconnect GitHub'); } }} className="px-3 py-1.5 rounded-lg border border-border/60 text-xs hover:bg-muted/50 transition-colors">Disconnect</button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs text-muted-foreground">No GitHub account is connected.</p>
+                      <button onClick={() => { window.location.href = '/api/github/connect'; }} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-foreground text-background text-xs font-medium hover:opacity-90 transition-opacity"><Github size={14} /> Connect GitHub</button>
+                    </>
+                  )}
+                </div>
+                {githubStatus.connected && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between"><p className="text-xs font-medium text-foreground">Accessible repositories</p><span className="text-[10px] text-muted-foreground">First 100</span></div>
+                    {githubRepos.length === 0 ? <p className="text-[11px] text-muted-foreground">No repositories returned, or repository access is still loading.</p> : githubRepos.slice(0, 12).map(repo => (
+                      <div key={repo.full_name} className="flex items-center gap-2 rounded-lg border border-border/50 px-3 py-2">
+                        <Github size={13} className="text-muted-foreground shrink-0" />
+                        <a href={repo.html_url} target="_blank" rel="noreferrer" className="text-xs text-foreground hover:underline truncate flex-1">{repo.full_name}</a>
+                        <span className="text-[10px] text-muted-foreground">{repo.private ? 'Private' : 'Public'}</span>
+                        {repo.permissions?.push && <span className="text-[10px] text-emerald-600">Write</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="text-[10px] text-muted-foreground leading-relaxed">Setup required: configure GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, and GITHUB_OAUTH_SECRET in Netlify. See docs/github-connector.md for OAuth callback and permissions.</p>
               </div>
             )}
 
