@@ -9,7 +9,7 @@ const capabilities = [
   { id: 'github-public', label: 'Public GitHub repository lookup', status: 'available', transport: 'GitHub REST API; private access requires OAuth' },
   { id: 'maps', label: 'Places search', status: 'requires-config', env: 'GOOGLE_MAPS_API_KEY' },
   { id: 'file-vision-ocr', label: 'Image/document understanding and OCR', status: 'available', transport: 'Gemini multimodal input' },
-  { id: 'persistent-cloud-memory', label: 'Cross-device persistent memory', status: 'requires-auth-backend', note: 'Must use verified user identity and a configured persistent database; no fake in-memory persistence.' },
+  { id: 'persistent-cloud-memory', label: 'Mem0 long-term personal context memory', status: 'requires-config', env: 'MEM0_API_KEY and verified Firebase ID token', note: 'Searches and stores memories per verified Firebase user; exact chat/work history remains in the history store.' },
   { id: 'github-write', label: 'Private GitHub read/write/commit/push', status: 'requires-oauth', note: 'Use the guarded GitHub connector and explicit approval for writes.' },
   { id: 'google-workspace', label: 'Drive, Docs, Sheets, Gmail and Calendar', status: 'requires-oauth' },
   { id: 'youtube-manager', label: 'YouTube analytics and channel operations', status: 'requires-config', env: 'YOUTUBE_DATA_API_KEY and channel OAuth for writes' },
