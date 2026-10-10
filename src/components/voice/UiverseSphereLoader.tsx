@@ -25,15 +25,15 @@ const THEME_STYLES: Record<GrokColorTheme, {
   name: string;
 }> = {
   'electric-blue': {
-    highlight: '#93c5fd',
-    mid: '#3b82f6',
-    deep: '#1d4ed8',
-    dark: '#0c1836',
-    glow: 'rgba(59, 130, 246, 0.75)',
-    ambient: 'rgba(37, 99, 235, 0.45)',
-    letter: '#93c5fd',
-    letterGlow: 'rgba(147, 197, 253, 0.9)',
-    name: 'Electric Blue'
+    highlight: '#a1a1aa',
+    mid: '#27272a',
+    deep: '#18181b',
+    dark: '#000000',
+    glow: 'rgba(0, 0, 0, 0.75)',
+    ambient: 'rgba(24, 24, 27, 0.55)',
+    letter: '#ffffff',
+    letterGlow: 'rgba(0, 0, 0, 0.8)',
+    name: 'Obsidian Black'
   },
   'cyber-cyan': {
     highlight: '#a5f3fc',

@@ -87,7 +87,7 @@ const PROJECT_ICON_MAP: Record<string, any> = {
 };
 
 const PROJECT_COLOR_MAP: Record<string, { bg: string; text: string }> = {
-  blue: { bg: 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-500', text: 'text-blue-500' },
+  blue: { bg: 'bg-black/10 dark:bg-white/10 text-black dark:text-white', text: 'text-black dark:text-white' },
   indigo: { bg: 'bg-indigo-500/10 dark:bg-indigo-500/20 text-indigo-500', text: 'text-indigo-500' },
   purple: { bg: 'bg-purple-500/10 dark:bg-purple-500/20 text-purple-500', text: 'text-purple-500' },
   emerald: { bg: 'bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-500', text: 'text-emerald-500' },

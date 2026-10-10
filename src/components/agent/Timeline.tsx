@@ -86,7 +86,7 @@ export function Timeline({ steps }: TimelineProps) {
                       if (isSearch) {
                         return (
                           <div key={i} className="flex items-center gap-2 p-2 bg-white rounded-lg border border-border/50 shadow-sm">
-                            <div className="p-1 bg-blue-50 text-blue-600 rounded">
+                            <div className="p-1 bg-slate-100 dark:bg-white/10 text-slate-800 dark:text-white rounded">
                               <Search size={12} />
                             </div>
                             <span className="text-xs font-medium truncate">{line.replace('Searching for:', '')}</span>

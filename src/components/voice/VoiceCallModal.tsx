@@ -451,7 +451,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
           >
             <History size={18} />
             {voiceHistory.length > 0 && (
-              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">
+              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-white text-black text-[10px] font-bold flex items-center justify-center">
                 {voiceHistory.length}
               </span>
             )}
@@ -552,9 +552,9 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
                 className={cn(
                   "w-1.5 rounded-full transition-all duration-300",
                   callStatus === 'speaking' 
-                    ? "bg-blue-400 animate-pulse" 
+                    ? "bg-white animate-pulse" 
                     : callStatus === 'listening'
-                      ? "bg-blue-500/70"
+                      ? "bg-white/70"
                       : "bg-white/20"
                 )}
                 style={{
@@ -589,7 +589,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
               className={cn(
                 "w-16 h-16 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-lg",
                 callStatus === 'paused'
-                  ? "bg-blue-600 text-white ring-4 ring-blue-600/30"
+                  ? "bg-white text-black ring-4 ring-white/20"
                   : "bg-[#1E2024] text-white hover:bg-white/15"
               )}
             >
@@ -629,7 +629,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
         <div className="absolute inset-y-0 left-0 w-full sm:w-96 bg-[#121316] border-r border-white/10 z-40 flex flex-col shadow-2xl animate-in slide-in-from-left duration-300">
           <div className="p-4 border-b border-white/10 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center">
+              <div className="w-8 h-8 rounded-lg bg-white/10 text-white flex items-center justify-center">
                 <MessageSquare size={16} />
               </div>
               <div>
@@ -653,7 +653,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
                   "p-3.5 rounded-2xl border transition-all",
                   msg.sender === 'ai'
                     ? "bg-white/5 border-white/10 text-white"
-                    : "bg-blue-600/10 border-blue-500/20 text-blue-100 ml-4"
+                    : "bg-white/10 border-white/20 text-white ml-4"
                 )}
               >
                 <div className="flex items-center justify-between mb-1.5">
@@ -676,7 +676,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
                   onClose();
                   toast.success('Transcript copied to chat');
                 }}
-                className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
+                className="w-full py-2.5 px-4 rounded-xl bg-white hover:bg-white/90 text-black text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
               >
                 <MessageSquare size={14} />
                 <span>Transfer Transcript to Chat</span>
@@ -691,7 +691,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
         <div className="absolute inset-y-0 left-0 w-full sm:w-96 bg-[#121316] border-r border-white/10 z-40 flex flex-col shadow-2xl animate-in slide-in-from-left duration-300">
           <div className="p-4 border-b border-white/10 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center">
+              <div className="w-8 h-8 rounded-lg bg-black border border-white/10 text-white flex items-center justify-center">
                 <History size={16} />
               </div>
               <div>
@@ -741,7 +741,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
                 className="p-4 rounded-2xl bg-white/5 border border-white/10 hover:border-white/20 transition-all space-y-3"
               >
                 <div className="flex items-start gap-3">
-                  <div className="w-7 h-7 rounded-full bg-blue-600/20 text-blue-400 flex items-center justify-center shrink-0 mt-0.5">
+                  <div className="w-7 h-7 rounded-full bg-black border border-white/10 text-white flex items-center justify-center shrink-0 mt-0.5">
                     <Mic size={14} />
                   </div>
                   <p className="text-sm font-medium text-white leading-snug">
@@ -759,7 +759,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
 
                   <button
                     onClick={() => handleResendHistory(item)}
-                    className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 text-xs font-semibold transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-black hover:bg-neutral-900 border border-white/15 text-white text-xs font-semibold transition-colors"
                   >
                     <RotateCcw size={12} />
                     <span>Re-send</span>
@@ -859,7 +859,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
             {/* 3D Avatar Aura Color */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-white/80 text-xs font-medium">
-                <span className="w-4 h-4 rounded-full bg-blue-500 inline-block border border-white/20" />
+                <span className="w-4 h-4 rounded-full bg-black inline-block border border-white/40 shadow-xs" />
                 <span>Aura Color</span>
               </div>
               <Select 
@@ -870,10 +870,10 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
                 }}
               >
                 <SelectTrigger className="w-32 h-8 bg-white/5 border-white/10 text-xs text-white rounded-xl">
-                  <SelectValue placeholder="Electric Blue" />
+                  <SelectValue placeholder="Obsidian Black" />
                 </SelectTrigger>
                 <SelectContent className="bg-[#1C1E22] border-white/10 text-white">
-                  <SelectItem value="electric-blue">Electric Blue</SelectItem>
+                  <SelectItem value="electric-blue">Obsidian Black</SelectItem>
                   <SelectItem value="cyber-cyan">Cyber Cyan</SelectItem>
                   <SelectItem value="neon-purple">Neon Violet</SelectItem>
                   <SelectItem value="obsidian-gold">Grok Obsidian</SelectItem>

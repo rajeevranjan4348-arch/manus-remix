@@ -190,9 +190,9 @@ function getTypeLabel(item: LibraryFileItem): { label: string; bg: string; text:
     case 'doc':
     default:
       if (item.name.endsWith('.pdf')) {
-        return { label: 'PDF Document', bg: 'bg-blue-500/10 dark:bg-blue-500/20', text: 'text-blue-600 dark:text-blue-400', icon: FileText };
+        return { label: 'PDF Document', bg: 'bg-black/10 dark:bg-white/10', text: 'text-black dark:text-white', icon: FileText };
       }
-      return { label: 'Document', bg: 'bg-blue-500/10 dark:bg-blue-500/20', text: 'text-blue-600 dark:text-blue-400', icon: FileText };
+      return { label: 'Document', bg: 'bg-black/10 dark:bg-white/10', text: 'text-black dark:text-white', icon: FileText };
   }
 }
 

@@ -43,7 +43,7 @@ export function FileCard({ file }: FileCardProps) {
       case 'pdf':
         return <div className="p-2 bg-red-100 rounded-lg text-red-600"><FileText size={20} /></div>;
       case 'markdown':
-        return <div className="p-2 bg-blue-100 rounded-lg text-blue-600"><FileCodeIcon size={20} /></div>;
+        return <div className="p-2 bg-slate-100 dark:bg-white/10 rounded-lg text-slate-800 dark:text-white"><FileCodeIcon size={20} /></div>;
       case 'json':
       case 'csv':
         return <div className="p-2 bg-green-100 rounded-lg text-green-600"><FileJson size={20} /></div>;

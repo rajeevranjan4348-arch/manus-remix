@@ -79,11 +79,16 @@ function AppContent() {
     const handleOpenSettings = () => {
       setIsSettingsOpen(true);
     };
+    const handleOpenHistory = () => {
+      setIsHistoryOpen(true);
+    };
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('manus_open_settings', handleOpenSettings);
+    window.addEventListener('manus_open_history', handleOpenHistory);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('manus_open_settings', handleOpenSettings);
+      window.removeEventListener('manus_open_history', handleOpenHistory);
     };
   }, []);
 

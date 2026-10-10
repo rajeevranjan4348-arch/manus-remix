@@ -25,12 +25,12 @@ const COLOR_CONFIGS: Record<GrokColorTheme, {
   name: string;
 }> = {
   'electric-blue': {
-    primary: 0x2563eb,
-    secondary: 0x60a5fa,
-    core: 0x93c5fd,
-    wireframe: 0x38bdf8,
-    glowHex: 'rgba(37, 99, 235, 0.45)',
-    name: 'Electric Blue'
+    primary: 0x18181b,
+    secondary: 0x27272a,
+    core: 0x3f3f46,
+    wireframe: 0x52525b,
+    glowHex: 'rgba(0, 0, 0, 0.45)',
+    name: 'Obsidian Black'
   },
   'cyber-cyan': {
     primary: 0x06b6d4,

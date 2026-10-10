@@ -41,7 +41,7 @@ const ICON_OPTIONS: { id: ProjectIconType; label: string; icon: any }[] = [
 ];
 
 const COLOR_OPTIONS: { id: ProjectColorType; label: string; bg: string; border: string; ring: string; badgeText: string }[] = [
-  { id: 'blue', label: 'Ocean Blue', bg: 'bg-blue-500', border: 'border-blue-500', ring: 'ring-blue-500', badgeText: 'text-blue-500' },
+  { id: 'blue', label: 'Classic Black', bg: 'bg-black', border: 'border-black', ring: 'ring-black', badgeText: 'text-black dark:text-white' },
   { id: 'indigo', label: 'Deep Indigo', bg: 'bg-indigo-500', border: 'border-indigo-500', ring: 'ring-indigo-500', badgeText: 'text-indigo-500' },
   { id: 'purple', label: 'Royal Purple', bg: 'bg-purple-500', border: 'border-purple-500', ring: 'ring-purple-500', badgeText: 'text-purple-500' },
   { id: 'emerald', label: 'Emerald Green', bg: 'bg-emerald-500', border: 'border-emerald-500', ring: 'ring-emerald-500', badgeText: 'text-emerald-500' },

@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { ChevronDown, PanelLeft, Plus, Check, Sparkles, Zap, Brain, Cpu, MessageSquare, Briefcase, Settings2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { SegmentedChatIcon } from './SegmentedChatIcon';
 
 interface TopbarProps {
   onToggleSidebar?: () => void;
@@ -19,7 +20,7 @@ const MODELS = [
   { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', badge: 'Code', desc: 'Advanced coding & data synthesis', icon: Cpu },
 ];
 
-export function Topbar({ onToggleSidebar, onNewTask, onOpenSettings, showNewTask }: TopbarProps) {
+export function Topbar({ onToggleSidebar, onOpenHistory, onNewTask, onOpenSettings, showNewTask }: TopbarProps) {
   const location = useLocation();
   const isAtHome = location.pathname === '/';
   const shouldShowNewTask = showNewTask !== undefined ? showNewTask : !isAtHome;
@@ -141,21 +142,21 @@ export function Topbar({ onToggleSidebar, onNewTask, onOpenSettings, showNewTask
         )}
       </div>
 
-      {/* Right section: Settings and Plus buttons */}
+      {/* Right section: Chat history and Plus buttons */}
       <div className="flex items-center gap-2 z-10">
         <button
           onClick={() => {
-            if (onOpenSettings) {
-              onOpenSettings();
+            if (onOpenHistory) {
+              onOpenHistory();
             } else {
-              window.dispatchEvent(new CustomEvent('manus_open_settings'));
+              window.dispatchEvent(new CustomEvent('manus_open_history'));
             }
           }}
-          className="p-2 rounded-full border border-border bg-white dark:bg-card text-foreground hover:bg-manus-soft dark:hover:bg-accent transition-all cursor-pointer shadow-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          title="Settings & Preferences"
-          aria-label="Settings"
+          className="w-9 h-9 rounded-full border border-border/80 bg-white dark:bg-[#1e1f23] text-foreground hover:bg-manus-soft dark:hover:bg-[#27282d] flex items-center justify-center transition-all cursor-pointer shadow-xs active:scale-95 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          title="Chat History"
+          aria-label="Chat History"
         >
-          <Settings2 size={16} className="text-muted-foreground hover:text-foreground transition-colors" />
+          <SegmentedChatIcon size={19} className="text-foreground" />
         </button>
 
         {shouldShowNewTask && (

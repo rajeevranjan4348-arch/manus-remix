@@ -327,7 +327,7 @@ export function ChatView({
                 <div key={idx} className="flex items-center gap-2">
                   <div className={cn(
                     "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border max-w-full truncate",
-                    type === 'search' ? "bg-blue-50 text-blue-700 border-blue-100" :
+                    type === 'search' ? "bg-slate-100 dark:bg-white/10 text-slate-900 dark:text-white border-slate-200 dark:border-white/10" :
                     type === 'web' ? "bg-green-50 text-green-700 border-green-100" :
                     type === 'file' ? "bg-orange-50 text-orange-700 border-orange-100" :
                     type === 'action' ? "bg-purple-50 text-purple-700 border-purple-100" :
@@ -423,7 +423,7 @@ export function ChatView({
                   <div className="space-y-3">
                     <div className="flex items-center justify-between border-b border-border/40 pb-2">
                       <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-blue-500 inline-block animate-pulse" />
+                        <span className="w-2 h-2 rounded-full bg-black dark:bg-white inline-block animate-pulse" />
                         {result.detectedChartType ? `${result.detectedChartType.toUpperCase()} CHART` : 'DATA VISUALIZATION'}
                       </span>
                     </div>
@@ -454,7 +454,7 @@ export function ChatView({
               <div className="flex items-center gap-2.5">
                 <ManusLogo showBadge={true} />
                 <span className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 animate-pulse">
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping" />
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-black dark:bg-white animate-ping" />
                   {typingStatus}
                 </span>
               </div>
@@ -508,13 +508,13 @@ export function ChatView({
           onDrop={handleDrop}
           className={cn(
             "w-full max-w-3xl bg-white dark:bg-card rounded-[2rem] shadow-xl border border-border/50 p-2 pl-4 flex items-center gap-2 transition-all focus-within:ring-1 focus-within:ring-primary/20 relative",
-            isDragging && "ring-2 ring-blue-500 border-blue-500 bg-blue-50/50 dark:bg-blue-950/30"
+            isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30"
           )}
         >
           {isDragging && (
-            <div className="absolute inset-0 bg-blue-50/95 dark:bg-slate-900/95 border-2 border-dashed border-blue-500 rounded-[2rem] flex items-center justify-center gap-3 z-30 backdrop-blur-xs transition-all animate-in fade-in zoom-in duration-200 pointer-events-none">
-              <Upload className="w-5 h-5 text-blue-600 animate-bounce" />
-              <span className="font-semibold text-sm text-blue-700 dark:text-blue-300">Drop files, images or datasets here</span>
+            <div className="absolute inset-0 bg-slate-100/95 dark:bg-slate-900/95 border-2 border-dashed border-foreground rounded-[2rem] flex items-center justify-center gap-3 z-30 backdrop-blur-xs transition-all animate-in fade-in zoom-in duration-200 pointer-events-none">
+              <Upload className="w-5 h-5 text-foreground animate-bounce" />
+              <span className="font-semibold text-sm text-foreground">Drop files, images or datasets here</span>
             </div>
           )}
           <AttachmentMenu
@@ -532,7 +532,7 @@ export function ChatView({
             >
               <Plus size={20} />
               {(attachedFile || isThinkHarder) && (
-                <div className="absolute bottom-1 right-1 w-2 h-2 bg-blue-600 rounded-full" />
+                <div className="absolute bottom-1 right-1 w-2 h-2 bg-black dark:bg-white rounded-full" />
               )}
             </button>
           </AttachmentMenu>

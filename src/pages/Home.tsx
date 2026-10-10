@@ -360,18 +360,18 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
             onDrop={handleDrop}
             className={cn(
               "flex flex-col gap-3 rounded-[22px] transition-all relative bg-[var(--fill-input-chat)] py-3 max-h-[312px] w-full z-[2] shadow-[0px_12px_32px_0px_rgba(0,0,0,0.04)] border border-slate-200 dark:border-[var(--border-main)]",
-              isDragging && "ring-2 ring-blue-500 border-blue-500 bg-blue-50/50 dark:bg-blue-950/30"
+              isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30"
             )}
           >
             {isDragging && (
-              <div className="absolute inset-0 bg-blue-50/95 dark:bg-slate-900/95 border-2 border-dashed border-blue-500 rounded-[22px] flex items-center justify-center gap-3 z-30 backdrop-blur-xs transition-all animate-in fade-in zoom-in duration-200 pointer-events-none">
-                <Upload className="w-6 h-6 text-blue-600 animate-bounce" />
-                <span className="font-semibold text-sm text-blue-700 dark:text-blue-300">Drop files, images or datasets here</span>
+              <div className="absolute inset-0 bg-slate-100/95 dark:bg-slate-900/95 border-2 border-dashed border-foreground rounded-[22px] flex items-center justify-center gap-3 z-30 backdrop-blur-xs transition-all animate-in fade-in zoom-in duration-200 pointer-events-none">
+                <Upload className="w-6 h-6 text-foreground animate-bounce" />
+                <span className="font-semibold text-sm text-foreground">Drop files, images or datasets here</span>
               </div>
             )}
             <div className="overflow-y-auto pl-4 pr-2">
               {activeIntent && (
-                <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-600 text-white rounded-full mr-2 mb-2 align-middle animate-in fade-in zoom-in duration-200">
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-black dark:bg-white text-white dark:text-black rounded-full mr-2 mb-2 align-middle animate-in fade-in zoom-in duration-200">
                   <activeIntent.icon size={12} />
                   <span className="text-xs font-medium">{activeIntent.label}</span>
                   <button 
@@ -386,7 +386,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                       setActiveIntent(null);
                       setPrompt('');
                     }} 
-                    className="p-0.5 hover:bg-white/20 rounded-full transition-colors"
+                    className="p-0.5 hover:bg-white/20 dark:hover:bg-black/20 rounded-full transition-colors"
                   >
                     <X size={10} />
                   </button>
@@ -437,7 +437,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                   >
                     <Plus size={18} className="text-[var(--icon-primary)]"/>
                     {(uploadedFile || isThinkHarder) && (
-                      <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-4 h-[2px] bg-blue-600 rounded-full shadow-[0_0_8px_rgba(37,99,235,0.4)]" />
+                      <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-4 h-[2px] bg-black dark:bg-white rounded-full shadow-[0_0_8px_rgba(0,0,0,0.3)]" />
                     )}
                   </button>
                 </AttachmentMenu>
@@ -446,16 +446,16 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                   title={isThinkHarder ? "Think harder enabled (click to toggle)" : "Toggle Think harder mode"}
                   className={cn(
                     "flex items-center gap-[4px] p-[8px] pl-[8px] cursor-pointer rounded-[100px] border border-[var(--border-main)] hover:bg-[var(--fill-tsp-gray-main)] relative transition-colors",
-                    isThinkHarder && "bg-blue-50 dark:bg-blue-500/10 border-blue-200 dark:border-blue-500/30"
+                    isThinkHarder && "bg-black/10 dark:bg-white/10 border-black/40 dark:border-white/40"
                   )} 
                   aria-expanded="false" 
                   aria-haspopup="dialog"
                 >
                   <div className="flex items-center gap-[4px]">
-                    <Cable size={16} className={cn("text-[var(--icon-primary)]", isThinkHarder && "text-blue-600 dark:text-blue-400")}/>
+                    <Cable size={16} className={cn("text-[var(--icon-primary)]", isThinkHarder && "text-black dark:text-white font-bold")}/>
                   </div>
                   {activeIntent && (
-                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-4 h-[2px] bg-blue-600 rounded-full shadow-[0_0_8px_rgba(37,99,235,0.4)]" />
+                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-4 h-[2px] bg-black dark:bg-white rounded-full shadow-[0_0_8px_rgba(0,0,0,0.3)]" />
                   )}
                 </div>
               </div>

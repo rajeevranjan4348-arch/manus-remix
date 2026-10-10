@@ -28,7 +28,7 @@ export function VoicePulseOrb({ callStatus, className = '' }: VoicePulseOrbProps
         }
         .voice-pulse-orb-stage::after {
           inset: 4%; border: 1px solid rgba(255,255,255,.055);
-          box-shadow: 0 0 38px rgba(168,85,247,.05), inset 0 0 32px rgba(59,130,246,.035);
+          box-shadow: 0 0 38px rgba(168,85,247,.05), inset 0 0 32px rgba(0,0,0,.08);
         }
         .voice-pulse-orb-shell {
           position: relative; width: 31%; aspect-ratio: 1; z-index: 1; border-radius: 50%;

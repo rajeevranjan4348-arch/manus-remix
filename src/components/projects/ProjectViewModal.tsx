@@ -60,7 +60,7 @@ const ICON_MAP: Record<string, any> = {
 };
 
 const COLOR_MAP: Record<string, { bg: string; text: string; badgeBg: string }> = {
-  blue: { bg: 'bg-blue-500', text: 'text-blue-500', badgeBg: 'bg-blue-500/10 dark:bg-blue-500/20' },
+  blue: { bg: 'bg-black', text: 'text-black dark:text-white', badgeBg: 'bg-black/10 dark:bg-white/10' },
   indigo: { bg: 'bg-indigo-500', text: 'text-indigo-500', badgeBg: 'bg-indigo-500/10 dark:bg-indigo-500/20' },
   purple: { bg: 'bg-purple-500', text: 'text-purple-500', badgeBg: 'bg-purple-500/10 dark:bg-purple-500/20' },
   emerald: { bg: 'bg-emerald-500', text: 'text-emerald-500', badgeBg: 'bg-emerald-500/10 dark:bg-emerald-500/20' },
