@@ -11,7 +11,7 @@ function json(data: unknown, status = 200) {
   });
 }
 
-async function verifyFirebaseIdToken(req: Request): Promise<string | null> {
+async function verifyFirebaseIdToken(req: Request): Promise<{ uid: string; token: string } | null> {
   const token = req.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
   const apiKey = process.env.FIREBASE_WEB_API_KEY;
   if (!token || !apiKey) return null;
@@ -25,7 +25,7 @@ async function verifyFirebaseIdToken(req: Request): Promise<string | null> {
     const data: any = await response.json();
     const user = data.users?.[0];
     if (!user?.localId || user.disabled === true) return null;
-    return String(user.localId);
+    return { uid: String(user.localId), token };
   } catch {
     return null;
   }
@@ -60,8 +60,9 @@ function verifyApproval(token: string, uid: string): { command: CommandId; args:
 
 export default async (req: Request) => {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
-  const uid = await verifyFirebaseIdToken(req);
-  if (!uid) return json({ error: 'Sign in with a verified Firebase account. Device actions are disabled until server auth is configured.' }, 401);
+  const auth = await verifyFirebaseIdToken(req);
+  if (!auth) return json({ error: 'Sign in with a verified Firebase account. Device actions are disabled until server auth is configured.' }, 401);
+  const { uid, token: firebaseIdToken } = auth;
   if (!approvalSecret()) return json({ error: 'TOOL_APPROVAL_SECRET is not configured on the server.' }, 503);
 
   try {
@@ -87,6 +88,23 @@ export default async (req: Request) => {
       }
       const approval = verifyApproval(body.approvalToken, uid);
       if (!approval) return json({ error: 'Approval token is invalid, expired, or belongs to another user.' }, 403);
+      const projectId = process.env.FIREBASE_PROJECT_ID;
+      if (!projectId) return json({ error: 'FIREBASE_PROJECT_ID is not configured; one-time approval consumption is disabled.' }, 503);
+      const payloadPart = body.approvalToken.split('.')[0];
+      const signedPayload: any = JSON.parse(Buffer.from(payloadPart, 'base64url').toString('utf8'));
+      const documentId = (uid + '_' + String(signedPayload.nonce || '')).replace(/[^a-zA-Z0-9_-]/g, '_');
+      const consumeUrl = 'https://firestore.googleapis.com/v1/projects/' + encodeURIComponent(projectId) + '/databases/(default)/documents/toolApprovals/' + encodeURIComponent(documentId) + '?currentDocument.exists=false';
+      const consumed = await fetch(consumeUrl, {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer ' + firebaseIdToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: {
+          uid: { stringValue: uid },
+          command: { stringValue: approval.command },
+          expiresAt: { integerValue: String(signedPayload.exp) },
+          consumedAt: { integerValue: String(Date.now()) }
+        } })
+      });
+      if (!consumed.ok) return json({ error: consumed.status === 409 ? 'This approval token has already been used.' : 'Could not consume the approval token. Check Firestore rules and configuration.' }, 403);
       // This web endpoint never controls the phone directly. A signed plan is returned
       // only for a paired native companion to validate and execute with OS permissions.
       return json({
