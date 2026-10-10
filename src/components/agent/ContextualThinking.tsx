@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import './ContextualThinking.css';
 
 interface ContextualThinkingProps {
   prompt: string;

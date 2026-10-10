@@ -808,12 +808,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         </div>
                         <span className="text-[10px] rounded-full px-2 py-1 bg-emerald-500/10 text-emerald-600">Connected</span>
                       </div>
-                      <button onClick={async () => { try { await fetch('/api/github/disconnect', { method: 'GET', credentials: 'same-origin' }); setGithubStatus({ connected: false }); setGithubRepos([]); toast.success('GitHub disconnected'); } catch { toast.error('Could not disconnect GitHub'); } }} className="px-3 py-1.5 rounded-lg border border-border/60 text-xs hover:bg-muted/50 transition-colors">Disconnect</button>
+                      <button type="button" onClick={async () => { try { await fetch('/api/github/disconnect', { method: 'GET', credentials: 'same-origin' }); setGithubStatus({ connected: false }); setGithubRepos([]); toast.success('GitHub disconnected'); } catch { toast.error('Could not disconnect GitHub'); } }} className="px-3 py-1.5 rounded-lg border border-border/60 text-xs hover:bg-muted/50 transition-colors">Disconnect</button>
                     </>
                   ) : (
                     <>
                       <p className="text-xs text-muted-foreground">No GitHub account is connected.</p>
-                      <button onClick={() => { window.location.href = '/api/github/connect'; }} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-foreground text-background text-xs font-medium hover:opacity-90 transition-opacity"><Github size={14} /> Connect GitHub</button>
+                      <button type="button" onClick={() => { window.location.href = '/api/github/connect'; }} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-foreground text-background text-xs font-medium hover:opacity-90 transition-opacity"><Github size={14} /> Connect GitHub</button>
                     </>
                   )}
                 </div>
