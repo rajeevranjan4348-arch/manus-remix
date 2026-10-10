@@ -82,6 +82,12 @@ function safeSegment(value: unknown, label: string) {
   }
   return value;
 }
+function safeBranch(value: unknown, label: string) {
+  if (typeof value !== 'string' || value.length > 200 || !/^[A-Za-z0-9_.\/-]+$/.test(value) || value.startsWith('/') || value.endsWith('/') || value.split('/').some(part => !part || part === '.' || part === '..')) {
+    throw new Error(`Invalid ${label}`);
+  }
+  return value;
+}
 function requireSession(req: Request) {
   const session = decrypt<{ accessToken: string; expiresAt: number }>(cookieValue(req, COOKIE));
   if (!session?.accessToken || !session.expiresAt || session.expiresAt < Date.now()) return null;
@@ -183,8 +189,8 @@ export default async (req: Request) => {
       const body = await readBody(req);
       const owner = safeSegment(body.owner, 'owner');
       const repo = safeSegment(body.repo, 'repository');
-      const branch = safeSegment(body.branch, 'branch');
-      const base = safeSegment(body.base, 'base branch');
+      const branch = safeBranch(body.branch, 'branch');
+      const base = safeBranch(body.base, 'base branch');
       const ref = await githubApi(session.accessToken, `/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(base)}`);
       const created = await githubApi(session.accessToken, `/repos/${owner}/${repo}/git/refs`, {
         method: 'POST', body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: ref.object.sha }),
@@ -199,7 +205,7 @@ export default async (req: Request) => {
       const repo = safeSegment(body.repo, 'repository');
       const title = typeof body.title === 'string' ? body.title.trim().slice(0, 200) : '';
       const head = typeof body.head === 'string' ? body.head.trim() : '';
-      const base = safeSegment(body.base, 'base branch');
+      const base = safeBranch(body.base, 'base branch');
       const draft = body.draft === true;
       if (!title || !/^[A-Za-z0-9_.\/-]{1,200}$/.test(head)) return json({ error: 'Valid title and head branch are required' }, 400);
       if (body.confirm !== true) return json({ error: 'Confirmation required. Set confirm=true after the user approves creating this pull request.' }, 409);
