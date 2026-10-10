@@ -16,8 +16,12 @@ import {
   Brain,
   X,
   FileText,
-  Upload
+  Upload,
+  AtSign,
+  Plug
 } from 'lucide-react';
+import { ConnectorsPopupMenu } from '../chat/ConnectorsPopupMenu';
+import { ConnectorsStorePanel } from '../connectors/ConnectorsStorePanel';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
 import { cn } from '@/lib/utils';
 import { Logo, ManusLogo } from '../layout/Logo';
@@ -38,6 +42,8 @@ import { GoogleDrivePickerModal } from '../workspace/GoogleDrivePickerModal';
 import { WorkspaceToolCard } from '../workspace/WorkspaceToolCard';
 import { GoogleMapWidgetCard } from '../maps/GoogleMapWidgetCard';
 import { GoogleDriveFileItem } from '@/lib/workspaceTools';
+import { WorkspaceMentionPicker, WORKSPACE_CONNECTOR_OPTIONS, WorkspaceConnectorOption } from '../chat/WorkspaceMentionPicker';
+import { fetchWorkspaceContextSummary } from '@/lib/workspaceContextService';
 import { Step } from '@/hooks/useAgentTask';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
@@ -71,19 +77,58 @@ export function ChatView({
   const [expandedSteps, setExpandedSteps] = React.useState<Record<string, boolean>>({});
   const [isThinkHarder, setIsThinkHarder] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
-  const [activePlugins, setActivePlugins] = useState<string[]>([
-    'web_search', 'code_sandbox', 'charts', 'deep_research', 
-    'google_drive', 'google_calendar', 'gmail', 'google_docs', 
-    'google_sheets', 'google_slides', 'google_tasks', 'google_chat', 
-    'google_forms', 'google_keep', 'google_meet', 'google_contacts', 'google_classroom'
-  ]);
+  const [activePlugins, setActivePlugins] = useState<string[]>(['web_search', 'code_sandbox', 'charts']);
   const [isDragging, setIsDragging] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<VoiceCommandResult | null>(null);
   const [weatherMap, setWeatherMap] = useState<Record<string, WeatherData>>({});
   const [isDrivePickerOpen, setIsDrivePickerOpen] = useState(false);
+  const [isConnectorsMenuOpen, setIsConnectorsMenuOpen] = useState(false);
+  const [isConnectorsStoreOpen, setIsConnectorsStoreOpen] = useState(false);
+  const [activeConnectorTags, setActiveConnectorTags] = useState<string[]>([]);
+  const [showMentionPicker, setShowMentionPicker] = useState<boolean>(false);
+  const [mentionQuery, setMentionQuery] = useState<string>('');
+  const [mentionIndex, setMentionIndex] = useState<number>(0);
   const dragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setInput(val);
+
+    const lastAt = val.lastIndexOf('@');
+    if (lastAt !== -1 && (lastAt === 0 || val[lastAt - 1] === ' ')) {
+      const queryAfterAt = val.slice(lastAt);
+      if (!queryAfterAt.includes(' ')) {
+        setShowMentionPicker(true);
+        setMentionQuery(queryAfterAt);
+        setMentionIndex(0);
+        return;
+      }
+    }
+    setShowMentionPicker(false);
+  };
+
+  const handleSelectConnectorOption = (option: WorkspaceConnectorOption) => {
+    const lastAt = input.lastIndexOf('@');
+    let newInput = input;
+    if (lastAt !== -1) {
+      newInput = input.slice(0, lastAt) + option.tag + ' ';
+    } else {
+      newInput = input + ' ' + option.tag + ' ';
+    }
+    setInput(newInput.trimStart());
+    setShowMentionPicker(false);
+
+    if (!activeConnectorTags.includes(option.id)) {
+      setActiveConnectorTags(prev => [...prev, option.id]);
+      toast.success(`Attached ${option.label} context`);
+    }
+  };
+
+  const removeConnectorTag = (tagId: string) => {
+    setActiveConnectorTags(prev => prev.filter(t => t !== tagId));
+  };
 
   const handleDriveFileSelect = (driveFile: GoogleDriveFileItem) => {
     const driveText = `[Selected Google Drive File: ${driveFile.name}]\nLink: ${driveFile.webViewLink || 'N/A'}\nType: ${driveFile.mimeType}`;
@@ -191,8 +236,32 @@ export function ChatView({
   };
 
   const handleSend = async () => {
-    if (!input.trim() && !attachedFile) return;
+    if (!input.trim() && !attachedFile && activeConnectorTags.length === 0) return;
     let message = input.trim();
+
+    // Check input or active tags for connectors (@calendar, @gmail, @drive, @workspace, @docs, @sheets, @tasks)
+    const detectedTags = new Set<string>(activeConnectorTags);
+    const mentions = message.match(/@(calendar|gmail|drive|docs|sheets|tasks|workspace|all|schedule|mail)/gi);
+    if (mentions) {
+      mentions.forEach(m => detectedTags.add(m.replace('@', '').toLowerCase()));
+    }
+
+    if (detectedTags.size > 0) {
+      const tagsArray = Array.from(detectedTags);
+      const toastId = toast.loading(`Fetching live ${tagsArray.join(', ')} context...`);
+      try {
+        const workspaceContext = await fetchWorkspaceContextSummary(tagsArray);
+        if (workspaceContext) {
+          message = `${message}\n${workspaceContext}`.trim();
+          toast.success(`Connected Google Workspace context (${tagsArray.join(', ')})`, { id: toastId });
+        } else {
+          toast.dismiss(toastId);
+        }
+      } catch (err: any) {
+        toast.error(`Workspace Context Warning: ${err.message || 'Failed to pull Google context'}`, { id: toastId });
+      }
+    }
+
     if (attachedFile) {
       try {
         const isTextFile = attachedFile.type.startsWith('text/') || 
@@ -219,6 +288,8 @@ export function ChatView({
     onSubmit(message);
     setInput('');
     setAttachedFile(null);
+    setActiveConnectorTags([]);
+    setShowMentionPicker(false);
   };
 
   // Auto-scroll to bottom
@@ -511,66 +582,6 @@ export function ChatView({
                       />
                     )}
 
-                    {/* Google Doc Card Detection */}
-                    {/(create doc|google doc|new document)/i.test(cleanedContent || '') && (
-                      <WorkspaceToolCard
-                        type="google_doc"
-                        data={{
-                          title: 'Project Brief & Strategy Document',
-                          content: 'This document contains strategic notes and operational plans created by Manus AI Assistant.',
-                        }}
-                      />
-                    )}
-
-                    {/* Google Sheet Card Detection */}
-                    {/(create sheet|google sheet|spreadsheet)/i.test(cleanedContent || '') && (
-                      <WorkspaceToolCard
-                        type="google_sheet"
-                        data={{
-                          title: 'Data Summary & Metrics Sheet',
-                          values: [
-                            ['Category', 'Status', 'Score'],
-                            ['Performance', 'Optimal', '98%'],
-                            ['Security', 'Passed', '100%']
-                          ],
-                        }}
-                      />
-                    )}
-
-                    {/* Google Task Card Detection */}
-                    {/(add task|google task|create task)/i.test(cleanedContent || '') && (
-                      <WorkspaceToolCard
-                        type="google_task"
-                        data={{
-                          title: 'Follow up on project deliverable',
-                          notes: 'Created via Manus AI Assistant',
-                        }}
-                      />
-                    )}
-
-                    {/* Google Meet Card Detection */}
-                    {/(google meet|video call|schedule meet)/i.test(cleanedContent || '') && (
-                      <WorkspaceToolCard
-                        type="google_meet"
-                        data={{
-                          summary: 'Video Conference & Discussion',
-                          startDateTime: new Date(Date.now() + 3600000).toISOString(),
-                          endDateTime: new Date(Date.now() + 7200000).toISOString(),
-                        }}
-                      />
-                    )}
-
-                    {/* Google Keep Note Detection */}
-                    {/(keep note|google keep|take note)/i.test(cleanedContent || '') && (
-                      <WorkspaceToolCard
-                        type="google_keep"
-                        data={{
-                          title: 'Quick Brainstorming Note',
-                          content: 'Important takeaways and follow-up items from current research session.',
-                        }}
-                      />
-                    )}
-
                     {/* Google Maps Widget Detection */}
                     {/(map of|location of|show map|google map)/i.test(cleanedContent || '') && (
                       <GoogleMapWidgetCard locationName="Google Headquarters, Mountain View" latitude={37.4220} longitude={-122.0841} />
@@ -684,7 +695,7 @@ export function ChatView({
 
       {/* Input Area - Floating Bottom */}
       <div className="absolute bottom-6 left-0 right-0 px-4 flex flex-col items-center gap-2 z-20">
-        {(attachedFile || isThinkHarder) && (
+        {(attachedFile || isThinkHarder || activeConnectorTags.length > 0) && (
           <div className="flex items-center gap-2 flex-wrap max-w-3xl w-full px-2">
             {isThinkHarder && (
               <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-600 text-white rounded-full text-xs font-semibold shadow-md animate-in fade-in zoom-in duration-200">
@@ -695,6 +706,20 @@ export function ChatView({
                 </button>
               </div>
             )}
+            {activeConnectorTags.map((tagId) => {
+              const opt = WORKSPACE_CONNECTOR_OPTIONS.find(o => o.id === tagId);
+              if (!opt) return null;
+              const IconComp = opt.icon;
+              return (
+                <div key={tagId} className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-500/10 border border-blue-500/30 text-blue-700 dark:text-blue-300 rounded-full text-xs font-semibold shadow-xs animate-in fade-in zoom-in duration-200">
+                  <IconComp size={13} />
+                  <span>{opt.tag}</span>
+                  <button onClick={() => removeConnectorTag(tagId)} className="p-0.5 hover:bg-blue-500/20 rounded-full ml-0.5">
+                    <X size={10} />
+                  </button>
+                </div>
+              );
+            })}
             {attachedFile && (
               <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white dark:bg-card border border-border rounded-full text-xs font-medium shadow-md animate-in fade-in zoom-in duration-200">
                 <FileText size={13} className="text-primary" />
@@ -716,6 +741,14 @@ export function ChatView({
             isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30"
           )}
         >
+          {showMentionPicker && (
+            <WorkspaceMentionPicker
+              query={mentionQuery}
+              selectedIndex={mentionIndex}
+              onSelect={handleSelectConnectorOption}
+            />
+          )}
+
           {isDragging && (
             <div className="absolute inset-0 bg-slate-100/95 dark:bg-slate-900/95 border-2 border-dashed border-foreground rounded-[2rem] flex items-center justify-center gap-3 z-30 backdrop-blur-xs transition-all animate-in fade-in zoom-in duration-200 pointer-events-none">
               <Upload className="w-5 h-5 text-foreground animate-bounce" />
@@ -732,23 +765,72 @@ export function ChatView({
             onOpenGoogleDrivePicker={() => setIsDrivePickerOpen(true)}
           >
             <button 
-              className="p-2 hover:bg-manus-soft dark:hover:bg-accent rounded-full transition-colors text-muted-foreground relative"
+              className="p-2 hover:bg-manus-soft dark:hover:bg-accent rounded-full transition-colors text-muted-foreground relative cursor-pointer"
               title="Camera, Photos, Files, Plugins, Think harder"
               aria-label="Add attachments or options"
             >
               <Plus size={20} />
             </button>
           </AttachmentMenu>
+
+          {/* Dedicated @ Connectors Button (Matches Reference Image 1) */}
+          <ConnectorsPopupMenu
+            isOpen={isConnectorsMenuOpen}
+            onOpenChange={setIsConnectorsMenuOpen}
+            activeConnectors={activePlugins}
+            onToggleConnector={handleTogglePlugin}
+            onOpenStore={() => setIsConnectorsStoreOpen(true)}
+          >
+            <button
+              type="button"
+              className="p-2 hover:bg-manus-soft dark:hover:bg-accent rounded-full transition-colors text-muted-foreground relative cursor-pointer"
+              title="Connectors & Plugins (@)"
+              aria-label="Connectors and Plugins"
+            >
+              <AtSign size={19} />
+            </button>
+          </ConnectorsPopupMenu>
           <input 
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={(e) => {
+              if (showMentionPicker) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setMentionIndex(prev => prev + 1);
+                  return;
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setMentionIndex(prev => Math.max(0, prev - 1));
+                  return;
+                }
+                if (e.key === 'Tab' || e.key === 'Enter') {
+                  e.preventDefault();
+                  const searchTerm = mentionQuery.toLowerCase().replace('@', '');
+                  const filteredOptions = WORKSPACE_CONNECTOR_OPTIONS.filter(opt => 
+                    opt.tag.toLowerCase().includes(searchTerm) || 
+                    opt.label.toLowerCase().includes(searchTerm) ||
+                    opt.id.toLowerCase().includes(searchTerm)
+                  );
+                  if (filteredOptions.length > 0) {
+                    const selected = filteredOptions[mentionIndex % filteredOptions.length];
+                    handleSelectConnectorOption(selected);
+                  }
+                  return;
+                }
+                if (e.key === 'Escape') {
+                  setShowMentionPicker(false);
+                  return;
+                }
+              }
+
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 handleSend();
               }
             }}
-            placeholder={isThinkHarder ? "Ask with deep reasoning..." : "Send message to Manus..."}
+            placeholder={isThinkHarder ? "Ask with deep reasoning..." : "Send message to Manus or type @ for Google Workspace connectors..."}
             className="flex-1 bg-transparent border-none outline-none text-base placeholder:text-muted-foreground/50 h-10 text-foreground"
             disabled={isLoading}
           />
@@ -760,10 +842,10 @@ export function ChatView({
              />
              <button 
                onClick={handleSend}
-               disabled={(!input.trim() && !attachedFile) || isLoading}
+               disabled={(!input.trim() && !attachedFile && activeConnectorTags.length === 0) || isLoading}
                className={cn(
                  "p-2 rounded-full transition-all flex items-center justify-center w-10 h-10",
-                 (input.trim() || attachedFile) ? "bg-primary text-white" : "bg-manus-soft dark:bg-muted text-muted-foreground"
+                 (input.trim() || attachedFile || activeConnectorTags.length > 0) ? "bg-primary text-white" : "bg-manus-soft dark:bg-muted text-muted-foreground"
                )}
              >
                <ArrowUp size={20} />
@@ -777,6 +859,14 @@ export function ChatView({
         isOpen={isDrivePickerOpen}
         onClose={() => setIsDrivePickerOpen(false)}
         onSelectFile={handleDriveFileSelect}
+      />
+
+      {/* Connectors & Plugins Store Panel */}
+      <ConnectorsStorePanel
+        isOpen={isConnectorsStoreOpen}
+        onClose={() => setIsConnectorsStoreOpen(false)}
+        activeConnectors={activePlugins}
+        onToggleConnector={handleTogglePlugin}
       />
     </div>
   );

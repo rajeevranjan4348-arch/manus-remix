@@ -28,8 +28,10 @@ import {
   Edit3,
   FolderKanban,
   Check,
-  ChevronRight
+  ChevronRight,
+  Plug
 } from 'lucide-react';
+import { ConnectorsStorePanel } from '../connectors/ConnectorsStorePanel';
 import { cn } from '@/lib/utils';
 import { Logo } from './Logo';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -168,6 +170,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isConnectorsOpen, setIsConnectorsOpen] = useState(false);
   const [taskToDelete, setTaskToDelete] = useState<{ id: string; title: string } | null>(null);
   const [taskToRename, setTaskToRename] = useState<{ id: string; title: string } | null>(null);
   const [newChatTitle, setNewChatTitle] = useState('');
@@ -326,6 +329,12 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
 
   const navItems = [
     { id: 'new', label: 'New Chat', icon: MessageSquarePlus, action: onNewTask },
+    { 
+      id: 'connectors', 
+      label: 'Connectors & Plugins', 
+      icon: Plug, 
+      action: () => setIsConnectorsOpen(true) 
+    },
     { 
       id: 'search', 
       label: 'Search', 
@@ -985,6 +994,11 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {/* Connectors & Plugins Store Panel */}
+      <ConnectorsStorePanel
+        isOpen={isConnectorsOpen}
+        onClose={() => setIsConnectorsOpen(false)}
+      />
     </>
   );
 }
