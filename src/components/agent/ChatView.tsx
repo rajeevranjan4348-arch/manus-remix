@@ -24,7 +24,7 @@ import { Logo, ManusLogo } from '../layout/Logo';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ChartResult } from './ChartResult';
 import { FileAttachments } from './FileAttachments';
-import { HorizontalLoader } from '../common/HorizontalLoader';
+import { ContextualThinking } from './ContextualThinking';
 import { AttachmentMenu } from '../chat/AttachmentMenu';
 import { ThoughtProcess } from './ThoughtProcess';
 import { Step } from '@/hooks/useAgentTask';
@@ -476,27 +476,18 @@ export function ChatView({
           );
         })()}
 
-        {/* Horizontal Loader Animation for Generating */}
+        {/* Prompt-aware thinking animation: stages adapt to the user's request */}
         {isAssistantWorking && (
           <div className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="flex-1 space-y-2.5 min-w-0">
               <div className="flex items-center gap-2.5">
                 <ManusLogo showBadge={true} />
-                <span className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 animate-pulse">
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-black dark:bg-white animate-ping" />
-                  {typingStatus}
-                </span>
               </div>
-              
               <div className="pt-1">
-                <HorizontalLoader 
-                  label={
-                    typingStatus.toLowerCase().includes('image')
-                      ? "Generating Image"
-                      : typingStatus.toLowerCase().includes('graph') || typingStatus.toLowerCase().includes('chart') || typingStatus.toLowerCase().includes('data')
-                        ? "Generating Graph"
-                        : "Generating"
-                  } 
+                <ContextualThinking
+                  prompt={prompt}
+                  activeStep={activeRunningStep?.label}
+                  deepMode={isThinkHarder}
                 />
               </div>
             </div>
