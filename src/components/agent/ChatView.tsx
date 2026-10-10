@@ -77,7 +77,14 @@ export function ChatView({
   const [expandedSteps, setExpandedSteps] = React.useState<Record<string, boolean>>({});
   const [isThinkHarder, setIsThinkHarder] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
-  const [activePlugins, setActivePlugins] = useState<string[]>(['web_search', 'code_sandbox', 'charts']);
+  const [activePlugins, setActivePlugins] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('manus_enabled_connectors');
+      return saved ? JSON.parse(saved) as string[] : ['web_search', 'code_sandbox', 'charts'];
+    } catch {
+      return ['web_search', 'code_sandbox', 'charts'];
+    }
+  });
   const [isDragging, setIsDragging] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<VoiceCommandResult | null>(null);
   const [weatherMap, setWeatherMap] = useState<Record<string, WeatherData>>({});
