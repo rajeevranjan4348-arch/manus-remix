@@ -622,8 +622,9 @@ export function useAgentTask() {
 
     setSteps(initialSteps);
 
-    // Start agent execution
-    agentSendMessage(enhancedPrompt);
+    // Use the same GitHub connector routing for the first prompt and follow-up chat messages.
+    const githubPrompt = await routeGitHubRead(prompt);
+    agentSendMessage(githubPrompt || enhancedPrompt);
 
     // Initial DB update with steps
     if (newTaskId && initialSteps.length > 0) {
