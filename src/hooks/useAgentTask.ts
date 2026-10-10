@@ -607,45 +607,66 @@ export function useAgentTask() {
       setTaskId(id);
       currentTaskIdRef.current = id;
 
-      // 1. Load permanent messages from IndexedDB / chatDatabase
+      // 1. Load permanent messages first, then recover from the saved task snapshot if needed.
       const storedMsgs = await getMessages(id);
-      if (storedMsgs && storedMsgs.length > 0) {
-        setPersistentMessages(
-          storedMsgs.map(m => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            timestamp: m.timestamp,
-            status: m.status
-          }))
-        );
-      }
-
-      // 2. Load task data
       const task = await (blink.db as any).tasks.get(id);
       if (task) {
-        setCurrentTask({ 
-          prompt: task.prompt || task.title, 
-          options: { format: task.outputFormat, chartType: task.chartType } 
+        const taskPrompt = task.prompt || task.title || 'Recovered conversation';
+        setCurrentTask({
+          prompt: taskPrompt,
+          options: { format: task.outputFormat || 'report', chartType: task.chartType || 'auto' }
         });
         setTaskStatus(task.status as any);
-        
         if (task.steps) {
-          try {
-            setSteps(JSON.parse(task.steps));
-          } catch { setSteps([]); }
+          try { setSteps(JSON.parse(task.steps)); } catch { setSteps([]); }
         }
-        
+
+        let parsedResult: any = null;
         if (task.result) {
           try {
-            const parsedResult = JSON.parse(task.result);
+            parsedResult = JSON.parse(task.result);
             setResult(parsedResult);
-            setChartData(parsedResult.chartData);
-            if ((!storedMsgs || storedMsgs.length === 0) && parsedResult.messages && parsedResult.messages.length > 0) {
-              setPersistentMessages(parsedResult.messages);
-            }
+            setChartData(parsedResult.chartData || null);
           } catch { setResult(null); }
         }
+
+        if (storedMsgs && storedMsgs.length > 0) {
+          setPersistentMessages(storedMsgs.map(m => ({
+            id: m.id, role: m.role, content: m.content, timestamp: m.timestamp, status: m.status
+          })));
+        } else {
+          const recovered: any[] = [];
+          if (task.prompt || task.title) {
+            recovered.push({
+              id: 'recovered-user-' + id, role: 'user', content: taskPrompt,
+              timestamp: task.created_at || task.createdAt || new Date().toISOString(), status: 'success'
+            });
+          }
+          const answer = parsedResult?.content || parsedResult?.answer ||
+            (typeof parsedResult?.result === 'string' ? parsedResult.result : '');
+          if (answer) {
+            recovered.push({
+              id: 'recovered-assistant-' + id, role: 'assistant', content: answer,
+              timestamp: task.updated_at || task.updatedAt || new Date().toISOString(), status: 'success'
+            });
+          } else if (Array.isArray(parsedResult?.messages)) {
+            recovered.push(...parsedResult.messages);
+          }
+          setPersistentMessages(recovered);
+          for (const message of recovered) {
+            if (message.role === 'user' || message.role === 'assistant') {
+              await saveMessage({
+                id: message.id, conversationId: id, userId: user?.id || 'usr_manus_default',
+                role: message.role, content: String(message.content || ''), status: 'success',
+                timestamp: message.timestamp
+              }).catch(() => {});
+            }
+          }
+        }
+      } else if (storedMsgs?.length) {
+        setPersistentMessages(storedMsgs.map(m => ({
+          id: m.id, role: m.role, content: m.content, timestamp: m.timestamp, status: m.status
+        })));
       }
     } catch (e) {
       console.error('Failed to load task:', e);
