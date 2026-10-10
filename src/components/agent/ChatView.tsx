@@ -31,6 +31,8 @@ import { ConversationActionBar } from './ConversationActionBar';
 import { Step } from '@/hooks/useAgentTask';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
+import { listenForSpeech } from '@/lib/voiceInput';
+import { speakCleanHumanVoice } from '@/lib/speechSynthesis';
 
 interface ChatViewProps {
   prompt: string;
@@ -65,6 +67,7 @@ export function ChatView({
   const [isDragging, setIsDragging] = useState(false);
   const dragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const autoSpeakNextRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Prevent default browser behavior for global drag/drop to stop browser opening dropped files
@@ -130,6 +133,31 @@ export function ChatView({
       handleFileSelect(files[0]);
     }
   };
+
+  const handleVoiceInput = async () => {
+    try {
+      const { transcript } = await listenForSpeech('en-IN');
+      autoSpeakNextRef.current = true;
+      setInput('');
+      try { sessionStorage.setItem('manus_voice_reply_pending', '1'); } catch {}
+      onSubmit(transcript);
+      toast.success('Voice message sent. Manus will reply aloud when ready.');
+    } catch (error: any) {
+      toast.error(error?.message || 'Voice input is unavailable.');
+    }
+  };
+
+  useEffect(() => {
+    if (!result?.content || typeof result.content !== 'string') return;
+    let pending = autoSpeakNextRef.current;
+    try {
+      pending = pending || sessionStorage.getItem('manus_voice_reply_pending') === '1';
+      if (pending) sessionStorage.removeItem('manus_voice_reply_pending');
+    } catch {}
+    if (!pending) return;
+    autoSpeakNextRef.current = false;
+    speakCleanHumanVoice(result.content, { volume: 1, onError: () => toast.error('Audio playback is not supported by this browser.') });
+  }, [result?.content]);
 
   const handleSend = async () => {
     if (!input.trim() && !attachedFile) return;
