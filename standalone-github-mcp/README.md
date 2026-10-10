@@ -35,7 +35,7 @@ Optional allowlist:
 GITHUB_ALLOWED_REPOS=owner/repo,owner/another-repo
 ```
 
-When set, repository-scoped tools refuse repositories outside the list. Keep the list narrow.
+When set, repository-scoped tools and code search refuse repositories outside the list. Keep the list narrow.
 
 ## Example MCP client configuration
 
@@ -60,13 +60,13 @@ Prefer your client's secret manager/environment UI over storing tokens in a shar
 
 ## Explicit write approval
 
-Write tools require an exact operation-specific phrase in addition to their parameters:
+Each write operation requires an operation- and target-specific phrase. The server returns the expected phrase if it is missing or incorrect. The client must show the exact proposed change to the user and only retry after explicit approval.
 
-- Create issue: `APPROVE create_issue owner/repo`
-- Create/update file: `APPROVE write_file owner/repo`
-- Create pull request: `APPROVE create_pull_request owner/repo`
+- Create issue: `APPROVE create_issue owner/repo:<exact-title>`
+- Create/update file: `APPROVE write_file owner/repo:<path>@<branch>`
+- Create pull request: `APPROVE create_pull_request owner/repo:<head>-><base>:<title>`
 
-Before calling a write tool, the AI client must show the user the repository, target, and complete proposed change, then obtain explicit approval. The approval phrase is a safeguard against accidental calls, not cryptographic proof of human consent: a trusted MCP client/agent must enforce the approval interaction. Do not configure agents to automatically fabricate approval phrases.
+Replace placeholders with the exact target values. Before calling a write tool, show the repository, target, and complete proposed change, then obtain approval. This phrase is a safeguard against accidental calls, not cryptographic proof of human consent: a trusted MCP client/agent must enforce the approval interaction. Do not configure agents to automatically fabricate approval phrases.
 
 File updates require the existing file SHA to avoid accidental blind overwrites. This server does not expose delete, merge, force-push, workflow dispatch, secrets, or organization-administration tools.
 
