@@ -3,6 +3,7 @@ import { useAgent, Agent, webSearch, sandboxTools, fetchUrl, useBlinkAuth } from
 import { blink } from '@/lib/blink';
 import type { Sandbox } from '@blinkdotnew/sdk';
 import { getSettings, playNotificationSound } from '@/lib/settingsStore';
+import { PUBLIC_API_AGENT_GUIDE } from '@/lib/publicApiCatalog';
 
 export interface Step {
   id: string;
@@ -48,6 +49,8 @@ export function useAgentTask() {
     model: 'google/gemini-3-flash',
     system: `You are Manus, a premium AI workspace agent. Your goal is to turn prompts, file uploads (CSV, Excel, PDF), or URLs into actionable data analyses, charts, and reports.
     
+    ${PUBLIC_API_AGENT_GUIDE}
+
     Guidelines:
     1. When given file content or CSV data, ALWAYS parse it, analyze the context, compute statistics if numeric, and identify insights.
     2. When given a URL, use web_search or fetch_url to research it thoroughly, extract key information, and if needed, structure findings as CSV data.
