@@ -14,6 +14,12 @@
   status = 200
 
 [[redirects]]
+  from = "/api/secure-tools"
+  to = "/.netlify/functions/secure-tools"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/api/iris"
   to = "/.netlify/functions/iris"
   status = 200
