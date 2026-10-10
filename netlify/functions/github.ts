@@ -198,7 +198,12 @@ export default async (req: Request) => {
     if (action === 'disconnect') {
       return json({ connected: false }, 200, { 'set-cookie': cookie(COOKIE, '', 0, secure) });
     }
-    if (req.method !== 'POST') return json({ error: 'Use POST for GitHub tools.' }, 405, { allow: 'POST', 'set-cookie': cookie(COOKIE, '', 0, secure) });
+    if (action === 'status' && req.method === 'GET') {
+      const session = getSession(req);
+      if (!session) return json({ connected: false });
+      return json({ connected: true, user: session.user, expiresAt: session.expiresAt });
+    }
+    if (req.method !== 'POST') return json({ error: 'Use POST for GitHub tools.' }, 405, { allow: 'POST' });
     const session = getSession(req);
     if (!session) return json({ error: 'GitHub account is not connected or the session expired. Start with ?action=connect.' }, 401);
     const body = await req.json().catch(() => null);
