@@ -1,0 +1,7 @@
+{
+  "name": "Manus AI Agent Clone",
+  "description": "Autonomous AI agent workspace with multi-step reasoning, research, data analysis, and live preview.",
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

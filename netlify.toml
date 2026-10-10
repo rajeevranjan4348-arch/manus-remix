@@ -1,6 +1,17 @@
 [build]
   command = "npm run build"
   publish = "dist"
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/gemini/*"
+  to = "/.netlify/functions/agent"
+  status = 200
+
+[[redirects]]
+  from = "/api/ai/*"
+  to = "/.netlify/functions/agent"
+  status = 200
 
 [[redirects]]
   from = "/*"

@@ -318,7 +318,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
   // Collapsed Sidebar (Icon Mode)
   if (!isOpen) {
     return (
-      <aside className="w-16 h-screen border-r border-border bg-manus-soft dark:bg-sidebar flex flex-col items-center py-6 hidden lg:flex shrink-0 transition-colors">
+      <aside className="w-16 h-screen border-r border-border/40 bg-manus-soft dark:bg-sidebar flex flex-col items-center py-6 hidden lg:flex shrink-0 transition-colors">
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -443,7 +443,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
         className="fixed inset-0 bg-black/40 z-30 lg:hidden backdrop-blur-xs animate-in fade-in"
       />
 
-      <aside className="w-64 h-screen border-r border-border bg-manus-soft dark:bg-sidebar flex flex-col fixed inset-y-0 left-0 lg:static z-40 shrink-0 transition-colors shadow-xl lg:shadow-none">
+      <aside className="w-64 h-screen border-r border-border/40 bg-manus-soft dark:bg-sidebar flex flex-col fixed inset-y-0 left-0 lg:static z-40 shrink-0 transition-colors shadow-xl lg:shadow-none">
         {/* Header with Logo and Close Toggle */}
         <div className="p-5 flex items-center justify-between">
           <button 

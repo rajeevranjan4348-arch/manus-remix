@@ -34,7 +34,7 @@ export function useWebsiteBuilder() {
 
   // Define the website builder agent
   const agent = useMemo(() => new Agent({
-    model: 'google/gemini-3-flash',
+    model: 'google/gemini-2.5-flash',
     system: `You are Manus Website Builder, an expert at creating beautiful websites quickly.
 
 Your mission: Build a complete, production-ready website based on user requirements.

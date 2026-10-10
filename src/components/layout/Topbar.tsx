@@ -70,7 +70,7 @@ export function Topbar({ onToggleSidebar, onNewTask, onOpenSettings, showNewTask
   };
 
   return (
-    <header className="h-16 border-b border-border bg-manus-cream dark:bg-background px-4 sm:px-6 flex items-center justify-between relative transition-colors z-30">
+    <header className="h-16 bg-manus-cream dark:bg-background px-4 sm:px-6 flex items-center justify-between relative transition-colors z-30">
       {/* Left section: Sidebar toggle */}
       <div className="flex items-center gap-3 z-10">
         {onToggleSidebar && (

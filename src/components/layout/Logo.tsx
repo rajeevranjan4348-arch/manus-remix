@@ -3,7 +3,7 @@ import React from 'react';
 export function ManusLogo({ showBadge = false }: { showBadge?: boolean }) {
   return (
     <div className="flex items-center gap-2">
-      <div className="w-8 h-8 rounded-full bg-white border border-border flex items-center justify-center shadow-sm">
+      <div className="w-8 h-8 rounded-full bg-card border border-border/60 flex items-center justify-center shadow-xs">
         <Logo size={16} />
       </div>
       <div className="flex items-center gap-2">

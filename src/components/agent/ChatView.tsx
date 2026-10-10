@@ -247,6 +247,26 @@ export function ChatView({
     return { thought, content };
   };
 
+  // Helper to strip internal prompt instructions or wrappers from user bubbles
+  const cleanUserMessage = (raw: string) => {
+    if (!raw) return '';
+    let text = raw;
+
+    const userMatch = text.match(/(?:User Prompt|User):\s*([\s\S]+)$/i);
+    if (userMatch) {
+      text = userMatch[1].trim();
+    }
+
+    text = text.replace(/\[(?:USER INSTRUCTIONS & PREFERENCES|MODE|USER PROFILE|TONE REQUIREMENT|PROJECT CONTEXT|INSTRUCTION)[\s\S]*?\]\n*/gi, '').trim();
+
+    const fileHeaderMatch = text.match(/^([\s\S]*?)\n\n(?:File Content to analyze|URL to research):/i);
+    if (fileHeaderMatch) {
+      text = fileHeaderMatch[1].trim();
+    }
+
+    return text || raw;
+  };
+
   // Render a single step (Task Progress Item)
   const renderStep = (step: Step) => {
     const isCompleted = step.status === 'completed';
@@ -254,7 +274,7 @@ export function ChatView({
     const isExpanded = expandedSteps[step.id] || isRunning;
 
     return (
-      <div key={step.id} className="border border-border/50 rounded-xl bg-white overflow-hidden my-2 animate-in fade-in slide-in-from-bottom-2">
+      <div key={step.id} className="border border-border/40 rounded-xl bg-card/60 dark:bg-card/60 backdrop-blur-xs overflow-hidden my-2 animate-in fade-in slide-in-from-bottom-2">
         <button 
           onClick={() => toggleStep(step.id)}
           className="w-full flex items-center justify-between p-3 hover:bg-manus-soft/50 transition-colors text-left"
@@ -311,7 +331,7 @@ export function ChatView({
                     type === 'web' ? "bg-green-50 text-green-700 border-green-100" :
                     type === 'file' ? "bg-orange-50 text-orange-700 border-orange-100" :
                     type === 'action' ? "bg-purple-50 text-purple-700 border-purple-100" :
-                    "bg-white border-border text-muted-foreground"
+                    "bg-muted/50 border-border/40 text-muted-foreground"
                   )}>
                     {icon}
                     <span className="truncate">{text}</span>
@@ -344,7 +364,7 @@ export function ChatView({
             return (
               <div key={msg.id || i} className="flex justify-end my-2">
                 <div className="bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium max-w-[80%] shadow-xs leading-relaxed">
-                  {msg.content}
+                  {cleanUserMessage(msg.content)}
                 </div>
               </div>
             );
