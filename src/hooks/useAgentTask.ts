@@ -482,7 +482,7 @@ export function useAgentTask() {
       // Check if content specifically requests a graph or chart
       const lower = content.toLowerCase();
       if (lower.includes('graph') || lower.includes('chart') || lower.includes('plot') || lower.includes('diagram') || lower.includes('bar') || lower.includes('pie') || lower.includes('line')) {
-        const chartPrompt = `${content}\n\n[INSTRUCTION: Format your chart data as a JSON code block using the format below so it renders as an interactive chart]\n```json\n{\n  "graph": {\n    "type": "bar",\n    "labels": ["Category A", "Category B", "Category C", "Category D"],\n    "datasets": [{\n      "label": "Metric",\n      "data": [45, 72, 88, 95]\n    }]\n  }\n}\n````;
+        const chartPrompt = content + '\n\n[INSTRUCTION: Return chart data as JSON so it renders as an interactive chart.]\n{\n  "graph": {\n    "type": "bar",\n    "labels": ["Category A", "Category B", "Category C", "Category D"],\n    "datasets": [{ "label": "Metric", "data": [45, 72, 88, 95] }]\n  }\n}';
         agentSendMessage(chartPrompt);
       } else {
         agentSendMessage(content);
@@ -490,7 +490,8 @@ export function useAgentTask() {
     }).catch((error) => {
       console.warn('GitHub intent routing failed; falling back to normal agent:', error);
       agentSendMessage(content);
-    });;
+    });
+  }, [agentSendMessage, taskId, user]);
 
   const startTask = useCallback(async (prompt: string, options: any) => {
     // Start fresh
