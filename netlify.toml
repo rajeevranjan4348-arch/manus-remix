@@ -4,6 +4,16 @@
   functions = "netlify/functions"
 
 [[redirects]]
+  from = "/api/github"
+  to = "/.netlify/functions/github"
+  status = 200
+
+[[redirects]]
+  from = "/api/github/*"
+  to = "/.netlify/functions/github/:splat"
+  status = 200
+
+[[redirects]]
   from = "/api/gemini/*"
   to = "/.netlify/functions/agent"
   status = 200

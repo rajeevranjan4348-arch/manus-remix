@@ -20,7 +20,10 @@ import {
   Globe, 
   Terminal, 
   VolumeX, 
-  Keyboard
+  Keyboard,
+  Github,
+  Loader2,
+  ExternalLink
 } from 'lucide-react';
 import { 
   UserSettings, 
@@ -47,7 +50,7 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
-type SettingsTab = 'general' | 'ai' | 'personalization' | 'voice' | 'data' | 'about';
+type SettingsTab = 'general' | 'ai' | 'personalization' | 'voice' | 'data' | 'github' | 'about';
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { theme, setTheme } = useTheme();
@@ -55,6 +58,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [isExporting, setIsExporting] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [githubStatus, setGithubStatus] = useState<{ connected: boolean; user?: { login?: string; avatar_url?: string }; expiresAt?: number }>({ connected: false });
+  const [githubLoading, setGithubLoading] = useState(false);
+  const [githubSetup, setGithubSetup] = useState<{ configured: boolean; missing: string[]; invalidKey?: boolean }>({ configured: false, missing: [], invalidKey: false });
 
   useEffect(() => {
     if (isOpen) {
@@ -63,6 +69,28 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'github') return;
+    let cancelled = false;
+    setGithubLoading(true);
+    Promise.all([
+      fetch('/api/github?action=status', { credentials: 'same-origin' }).then(async response => ({ response, payload: await response.json().catch(() => ({})) })),
+      fetch('/api/github?action=setup-status', { credentials: 'same-origin' }).then(async response => ({ response, payload: await response.json().catch(() => ({})) })),
+    ])
+      .then(([session, setup]) => {
+        if (cancelled) return;
+        setGithubStatus(session.response.ok ? session.payload : { connected: false });
+        setGithubSetup(setup.response.ok ? setup.payload : { configured: false, missing: ['Netlify function setup status unavailable'], invalidKey: false });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setGithubStatus({ connected: false });
+          setGithubSetup({ configured: false, missing: ['Cannot reach GitHub connector endpoint'], invalidKey: false });
+        }
+      })
+      .finally(() => { if (!cancelled) setGithubLoading(false); });
+    return () => { cancelled = true; };
+  }, [isOpen, activeTab]);
   // Close on Escape key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -159,6 +187,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     { id: 'personalization', label: 'Personalization', icon: User },
     { id: 'voice', label: 'Voice & Audio', icon: Volume2 },
     { id: 'data', label: 'Data & Privacy', icon: Shield },
+    { id: 'github', label: 'GitHub', icon: Github },
     { id: 'about', label: 'About', icon: Info },
   ];
 
@@ -756,6 +785,52 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               </div>
             )}
 
+            {/* GITHUB CONNECTOR TAB */}
+            {activeTab === 'github' && (
+              <div className="space-y-5 animate-in fade-in duration-100">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl border border-border bg-muted/30 flex items-center justify-center shrink-0"><Github size={18} /></div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground">GitHub Connector</p>
+                    <p className="text-xs text-muted-foreground mt-1 leading-relaxed">Connect your GitHub account so Manus can inspect repositories, read files, search code, and review issues, pull requests, commits, and workflow runs.</p>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-border/70 p-3.5 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    {githubStatus.connected && githubStatus.user?.avatar_url ? <img src={githubStatus.user.avatar_url} alt="GitHub avatar" className="w-8 h-8 rounded-full" /> : <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center"><Github size={16} /></div>}
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-foreground">{githubLoading ? 'Checking connection…' : githubStatus.connected ? 'Connected as @' + (githubStatus.user?.login || 'GitHub user') : 'Not connected'}</p>
+                      <p className="text-[11px] text-muted-foreground">{githubStatus.connected ? 'Server-side encrypted session' : 'OAuth connection required'}</p>
+                    </div>
+                  </div>
+                  {githubLoading ? <Loader2 size={16} className="animate-spin text-muted-foreground" /> : githubStatus.connected ? (
+                    <button onClick={async () => { setGithubLoading(true); try { const response = await fetch('/api/github?action=disconnect', { credentials: 'same-origin' }); if (!response.ok) throw new Error('Disconnect failed'); setGithubStatus({ connected: false }); toast.success('GitHub disconnected'); } catch { toast.error('Could not disconnect GitHub'); } finally { setGithubLoading(false); } }} className="px-3 py-1.5 rounded-lg border border-border text-xs font-medium hover:bg-muted/50 transition-colors">Disconnect</button>
+                  ) : (
+                    <button onClick={() => window.location.assign('/api/github?action=connect')} className="px-3 py-1.5 rounded-lg bg-foreground text-background text-xs font-medium hover:opacity-90 transition-opacity inline-flex items-center gap-1.5">Connect <ExternalLink size={12} /></button>
+                  )}
+                </div>
+                <div className="rounded-lg bg-muted/30 p-3 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs font-medium text-foreground">OAuth setup</p>
+                    <span className={cn("text-[10px] rounded-full px-2 py-0.5", githubSetup.configured ? "bg-emerald-500/10 text-emerald-600" : "bg-amber-500/10 text-amber-600")}>{githubSetup.configured ? 'Configured' : 'Needs setup'}</span>
+                  </div>
+                  {githubSetup.configured ? (
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">Server-side OAuth settings are present. Connect your account above to start using the live GitHub API.</p>
+                  ) : (
+                    <>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">Live connection is blocked until the missing Netlify server-side settings are added and the site is redeployed:</p>
+                      <ul className="list-disc pl-4 text-[11px] text-muted-foreground space-y-0.5">
+                        {githubSetup.missing.map(name => <li key={name}>{name}</li>)}
+                        {githubSetup.invalidKey && <li>GITHUB_SESSION_ENCRYPTION_KEY must decode to exactly 32 bytes (base64)</li>}
+                      </ul>
+                    </>
+                  )}
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">Create a GitHub OAuth App and set its callback URL to the exact GITHUB_OAUTH_CALLBACK_URL value. Keep the client secret and encryption key only in Netlify server-side environment variables—never VITE_*.</p>
+                  <a href="https://github.com/settings/developers" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-medium underline underline-offset-2 text-foreground">GitHub Developer Settings <ExternalLink size={11} /></a>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">Repository changes are not automatically made by chat. Any supported write operation must require explicit confirmation and repository write permission.</p>
+              </div>
+            )}
             {/* ABOUT TAB */}
             {activeTab === 'about' && (
               <div className="space-y-6 animate-in fade-in duration-100">
