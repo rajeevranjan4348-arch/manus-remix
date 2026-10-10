@@ -178,10 +178,11 @@ export default async (req: Request) => {
       const jar = parseCookies(req.headers.get('cookie'));
       const state = url.searchParams.get('state') || '';
       const code = url.searchParams.get('code') || '';
-      if (!state || !jar[STATE_COOKIE] || !safeEqual(state, jar[STATE_COOKIE]) || !code) {
+      if (!state || !jar[STATE_COOKIE] || !safeEqual(state, jar[STATE_COOKIE])) {
         return new Response('GitHub authorization could not be validated. Restart connection from Manus Remix.', { status: 400, headers: { 'cache-control': 'no-store', 'set-cookie': cookie(STATE_COOKIE, '', 0, secure) } });
       }
-      if (url.searchParams.has('error')) return new Response('GitHub authorization was declined. You can close this tab.', { status: 400, headers: { 'cache-control': 'no-store', 'set-cookie': cookie(STATE_COOKIE, '', 0, secure) } });
+      if (url.searchParams.has('error')) return new Response('GitHub authorization was declined. You can close this tab and retry from Manus Remix.', { status: 400, headers: { 'cache-control': 'no-store', 'set-cookie': cookie(STATE_COOKIE, '', 0, secure) } });
+      if (!code) return new Response('GitHub did not return an authorization code. Restart connection from Manus Remix.', { status: 400, headers: { 'cache-control': 'no-store', 'set-cookie': cookie(STATE_COOKIE, '', 0, secure) } });
       const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
         method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' },
         body: JSON.stringify({ client_id: env('GITHUB_OAUTH_CLIENT_ID'), client_secret: env('GITHUB_OAUTH_CLIENT_SECRET'), code, redirect_uri: env('GITHUB_OAUTH_CALLBACK_URL') }),
@@ -197,6 +198,13 @@ export default async (req: Request) => {
     }
     if (action === 'disconnect') {
       return json({ connected: false }, 200, { 'set-cookie': cookie(COOKIE, '', 0, secure) });
+    }
+    if (action === 'setup-status' && req.method === 'GET') {
+      const required = ['GITHUB_OAUTH_CLIENT_ID', 'GITHUB_OAUTH_CLIENT_SECRET', 'GITHUB_OAUTH_CALLBACK_URL', 'GITHUB_SESSION_ENCRYPTION_KEY'];
+      const missing = required.filter(name => !process.env[name]);
+      const keyBytes = process.env.GITHUB_SESSION_ENCRYPTION_KEY ? Buffer.from(process.env.GITHUB_SESSION_ENCRYPTION_KEY, 'base64') : Buffer.alloc(0);
+      const invalidKey = keyBytes.length > 0 && keyBytes.length !== 32;
+      return json({ configured: missing.length === 0 && !invalidKey, missing, invalidKey });
     }
     if (action === 'status' && req.method === 'GET') {
       const session = getSession(req);
