@@ -471,6 +471,7 @@ export function useAgentTask() {
         userId,
         prompt: prompt,
         outputFormat: options.format,
+        mode: options.mode || (options.format === 'website' ? 'work' : 'chat'),
         chartType: options.chartType,
         projectId: options.projectId || null,
         status: 'running',
