@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, useNavigate, useParams, useLocation } fro
 import { Sidebar } from './components/layout/Sidebar';
 import { Topbar } from './components/layout/Topbar';
 import { Home } from './pages/Home';
+import { GalaxyLibraryPage } from './pages/GalaxyLibraryPage';
 import { ChatView } from './components/agent/ChatView';
 import { WebsiteBuilderView } from './components/agent/WebsiteBuilderView';
 import { HistoryPanel } from './components/history/HistoryPanel';
@@ -159,6 +160,7 @@ function AppContent() {
           ) : (
             <Routes>
               <Route path="/" element={<Home onStartTask={handleStartTask} />} />
+              <Route path="/galaxy-library" element={<GalaxyLibraryPage />} />
               <Route 
                 path="/task/:taskId" 
                 element={

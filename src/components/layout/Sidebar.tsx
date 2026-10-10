@@ -300,6 +300,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
       } 
     },
     { id: 'library', label: 'Library', icon: Library, action: onOpenHistory },
+    { id: 'galaxy-ui', label: 'Galaxy UI', icon: Layers, action: () => navigate('/galaxy-library') },
     { 
       id: 'settings', 
       label: 'Settings', 
