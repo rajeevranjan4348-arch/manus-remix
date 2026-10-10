@@ -21,7 +21,8 @@ const STEP_ORDER = [
 ];
 
 export function useWebsiteBuilder() {
-  const { isAuthenticated } = useBlinkAuth();
+  const { isAuthenticated, user } = useBlinkAuth();
+  const workTaskIdRef = useRef<string | null>(null);
   const [sandbox, setSandbox] = useState<Sandbox | null>(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [isInitializing, setIsInitializing] = useState(false);
@@ -156,6 +157,8 @@ Be efficient, create clean code, and ensure the preview works perfectly.`,
       setPreviewUrl(blobUrl);
       setTaskStatus('completed');
       setSteps(prev => prev.map(s => ({ ...s, status: 'completed' as const })));
+      const activeId = workTaskIdRef.current;
+      if (activeId) (blink.db as any).tasks.update(activeId, { status: 'completed', result: JSON.stringify({ type: 'website', websiteName: title, prompt: promptText, html: mockHtml }), steps: JSON.stringify(STEP_ORDER.map((label, index) => ({ id: String(index + 1), label, status: 'completed' }))) }).catch((err: unknown) => console.warn('Failed to persist website work history:', err));
     },
     onError: (err) => {
       console.warn('[AI Studio] Website builder agent notice:', err);
@@ -218,12 +221,10 @@ Be efficient, create clean code, and ensure the preview works perfectly.`,
       const blobUrl = URL.createObjectURL(previewBlob);
       setPreviewUrl(blobUrl);
       setTaskStatus('completed');
-      setSteps(STEP_ORDER.map((label, idx) => ({
-        id: String(idx + 1),
-        label,
-        status: 'completed',
-        trace: [`Verified: ${label}`],
-      })));
+      const errorSteps = STEP_ORDER.map((label, idx) => ({ id: String(idx + 1), label, status: 'completed' as const, trace: [`Verified: ${label}`] }));
+      setSteps(errorSteps);
+      const activeId = workTaskIdRef.current;
+      if (activeId) (blink.db as any).tasks.update(activeId, { status: 'completed', result: JSON.stringify({ type: 'website', websiteName: title, prompt: promptText, html: mockHtml, fallback: true }), steps: JSON.stringify(errorSteps) }).catch(() => {});
     }
   });
 
@@ -313,6 +314,14 @@ Be efficient, create clean code, and ensure the preview works perfectly.`,
 
     setCurrentTask({ prompt, websiteName });
     setTaskStatus('running');
+    try {
+      const activeUser = user || await blink.auth.me();
+      const taskRecord = await (blink.db as any).tasks.create({ userId: activeUser?.id || 'usr_manus_default', prompt, title: websiteName, websiteName, outputFormat: 'website', mode: 'work', status: 'running', result: null, steps: JSON.stringify(STEP_ORDER.map((label, index) => ({ id: String(index + 1), label, status: index === 0 ? 'running' : 'pending', trace: [] }))) });
+      workTaskIdRef.current = taskRecord.id;
+      window.dispatchEvent(new Event('manus_tasks_updated'));
+    } catch (error) {
+      console.error('Failed to create Work-mode history entry:', error);
+    }
     setPreviewUrl(''); // Reset preview URL
     setSandboxError(null);
     
@@ -369,6 +378,7 @@ The website should be production-ready, responsive, and beautiful. Use Tailwind 
 
   const resetBuilder = useCallback(() => {
     setCurrentTask(null);
+    workTaskIdRef.current = null;
     setTaskStatus('idle');
     setSteps([]);
     setPreviewUrl('');
