@@ -16,7 +16,8 @@ import {
   Send, 
   Check, 
   Sparkles,
-  Volume2
+  Volume2,
+  ExternalLink
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -28,6 +29,8 @@ import { CobpChatInput } from './CobpChatInput';
 import { HorizontalLoader } from '../common/HorizontalLoader';
 import { blink } from '@/lib/blink';
 import { speakCleanHumanVoice, stopCleanSpeech } from '@/lib/speechSynthesis';
+import { matchVoiceCommand, executeOpenUrl, executeDeviceCommand } from '@/lib/voiceCommands';
+import { extractWeatherQuery, fetchWeatherByCity } from '@/lib/weatherService';
 
 export interface VoiceMessage {
   id: string;
@@ -310,7 +313,130 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
   };
 
   // Generate Conversational Reply
-  const generateVoiceReply = (query: string) => {
+  const generateVoiceReply = async (query: string) => {
+    // 1. Check for voice/phone command (e.g. "open youtube", "call 123", "vibrate", "check battery")
+    const cmd = matchVoiceCommand(query);
+    if (cmd && cmd.matched) {
+      if (cmd.action === 'open_url' || cmd.action === 'search') {
+        if (cmd.url) executeOpenUrl(cmd.url);
+      } else {
+        await executeDeviceCommand(cmd);
+      }
+
+      const reply = cmd.feedbackSpeech;
+      const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      toast.success(`${cmd.targetName}: ${reply}`, {
+        icon: <ExternalLink size={16} />,
+        duration: 4000,
+      });
+
+      const aiMsg: VoiceMessage = {
+        id: (Date.now() + 1).toString(),
+        sender: 'ai',
+        text: `${reply} ${cmd.url ? `(${cmd.url})` : ''}`,
+        time,
+      };
+
+      setMessages(prev => {
+        const next = [...prev, aiMsg];
+        void persistVoiceConversation(next);
+        return next;
+      });
+
+      speakText(reply);
+      return;
+    }
+
+    // 2. Check for live weather query
+    const weatherCheck = extractWeatherQuery(query);
+    if (weatherCheck.isWeather && weatherCheck.city) {
+      setStatusText(`Checking weather in ${weatherCheck.city}...`);
+      const wData = await fetchWeatherByCity(weatherCheck.city);
+      if (wData) {
+        const reply = `Currently in ${wData.locationName}, it's ${wData.temperature} degrees Celsius with ${wData.condition.toLowerCase()}. Humidity is ${wData.humidity} percent and wind speed is ${wData.windSpeed} kilometers per hour.`;
+        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const aiMsg: VoiceMessage = {
+          id: (Date.now() + 1).toString(),
+          sender: 'ai',
+          text: reply,
+          time,
+        };
+        setMessages(prev => {
+          const next = [...prev, aiMsg];
+          void persistVoiceConversation(next);
+          return next;
+        });
+        speakText(reply);
+        return;
+      }
+    }
+
+    // 3. Query Gemini for authentic, intelligent conversational response
+    setStatusText('Gemini is responding...');
+    try {
+      const response = await fetch('/api/gemini/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            ...messages.slice(-4).map(m => ({
+              role: m.sender === 'user' ? 'user' : 'assistant',
+              content: m.text,
+            })),
+            { role: 'user', content: query }
+          ],
+          prompt: query,
+          systemInstruction: 'You are Manus in Voice Call mode. Give a concise, warm, natural, and helpful spoken answer in 2 to 4 sentences without code blocks or markdown lists.',
+        }),
+      });
+
+      if (response.ok && response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let fullReply = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const dataStr = line.slice(6).trim();
+              if (dataStr === '[DONE]') break;
+              try {
+                const parsed = JSON.parse(dataStr);
+                if (parsed.type === 'text-delta' && parsed.delta) {
+                  fullReply += parsed.delta;
+                }
+              } catch {}
+            }
+          }
+        }
+
+        if (fullReply.trim()) {
+          const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const aiMsg: VoiceMessage = {
+            id: (Date.now() + 1).toString(),
+            sender: 'ai',
+            text: fullReply.trim(),
+            time,
+          };
+          setMessages(prev => {
+            const next = [...prev, aiMsg];
+            void persistVoiceConversation(next);
+            return next;
+          });
+          speakText(fullReply.trim());
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('[Voice Call] Gemini stream fallback:', err);
+    }
+
+    // 4. Fallback intelligent response if stream was unreachable
     const q = query.toLowerCase();
     let reply = "I'm on it. I'll analyze that and give you the key insights.";
 
@@ -320,12 +446,8 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
       reply = "Hello there! Assign me any research, report, or data task, and I'll handle the rest.";
     } else if (q.includes('what can you do') || q.includes('who are you')) {
       reply = "I am Manus, your autonomous AI workspace agent. I build websites, analyze data, generate reports, and research the web.";
-    } else if (q.includes('chart') || q.includes('graph') || q.includes('data')) {
-      reply = "I can create interactive charts including bar, line, pie, and scatter plots. Would you like me to process a dataset for you?";
-    } else if (q.includes('website') || q.includes('build')) {
-      reply = "I can design and deploy a complete website prototype in seconds. Tell me what you'd like to build.";
     } else {
-      reply = `Understood. I will process "${query}" and generate the results for you.`;
+      reply = `Understood. I've noted "${query}" and I am ready for your next request.`;
     }
 
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });

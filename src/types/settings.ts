@@ -30,7 +30,15 @@ export interface UserSettings {
   // Voice & Audio
   voicePersona: VoicePersona;
   speechSpeed: number; // 0.75, 1.0, 1.25, 1.5
-  autoPlayAudio: boolean;
+  voicePitch: number; // 0.5 to 1.5 (default: 1.0)
+  enableAudioFilter: boolean; // audio processing filter for noise reduction & clarity
+  autoPlayAudio: boolean; // Auto-play audio playback on Gemini responses
+  enableHandsFreeVoice?: boolean; // Mic input immediately sends to Gemini and plays audio
+
+  // Security, Authorization & Permissions
+  toolApprovalPolicy?: 'ask_all' | 'ask_sensitive' | 'auto_approve';
+  enableBackgroundNotifications?: boolean;
+  enablePhoneCommands?: boolean;
 
   // System / Updated
   lastUpdated?: string;

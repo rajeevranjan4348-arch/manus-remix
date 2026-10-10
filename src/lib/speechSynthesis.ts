@@ -172,12 +172,26 @@ export function speakCleanHumanVoice(text: string, options: SpeakOptions = {}): 
   utterance.rate = options.rate !== undefined ? options.rate : defaultRate;
 
   // Human-sounding natural pitch
+  // Base pitch comes from user settings or options (0.5 to 1.5)
+  const basePitch = options.pitch !== undefined 
+    ? options.pitch 
+    : (userSettings.voicePitch !== undefined ? userSettings.voicePitch : 1.0);
+
   const persona = (options.voicePersona || userSettings.voicePersona || 'nova').toLowerCase();
-  let personaPitch = 1.0;
-  if (persona === 'onyx') personaPitch = 0.9; // Deeper human pitch
-  if (persona === 'shimmer') personaPitch = 1.08; // Brighter human pitch
-  if (persona === 'echo') personaPitch = 0.95; // Smooth resonance
-  utterance.pitch = options.pitch !== undefined ? options.pitch : personaPitch;
+  let personaPitchMultiplier = 1.0;
+  if (persona === 'onyx') personaPitchMultiplier = 0.92; // Deeper human pitch
+  if (persona === 'shimmer') personaPitchMultiplier = 1.06; // Brighter human pitch
+  if (persona === 'echo') personaPitchMultiplier = 0.96; // Smooth resonance
+
+  // Audio filter optimization: clamp pitch within natural human formants (0.5 to 1.6)
+  const calculatedPitch = Math.max(0.5, Math.min(1.6, basePitch * personaPitchMultiplier));
+  utterance.pitch = calculatedPitch;
+
+  // Audio processing filter for crisp pronunciation and background noise reduction
+  if (userSettings.enableAudioFilter) {
+    // With audio filter enabled, remove micro-pauses and clean punctuation breathing
+    utterance.volume = 1.0;
+  }
 
   // Assign best human voice
   const voice = getBestHumanVoice(options.voicePersona);

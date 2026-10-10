@@ -31,6 +31,7 @@ import { blink } from '@/lib/blink';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { syncTasksToLibrary, getLibraryItems } from '@/lib/libraryStore';
+import { listConversations, deleteConversation, exportAllChatHistory, recoverChatHistory } from '@/lib/chatDatabase';
 import {
   Sheet,
   SheetContent,
@@ -233,16 +234,48 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
   const loadLibraryData = async () => {
     setIsLoading(true);
     try {
-      // 1. Load tasks from DB
-      const result = await (blink.db as any).tasks.list({
-        orderBy: { created_at: 'desc' },
-        limit: 100
-      });
-      setTasks(result || []);
+      // 1. Load tasks from DB and IndexedDB
+      let blinkTasks: any[] = [];
+      try {
+        blinkTasks = await (blink.db as any).tasks.list({
+          orderBy: { created_at: 'desc' },
+          limit: 100
+        });
+      } catch (err) {
+        console.warn('Blink tasks list fallback:', err);
+      }
+
+      // Also retrieve persistent conversations from IndexedDB
+      let localConversations: any[] = [];
+      try {
+        const idbList = await listConversations();
+        localConversations = idbList.map(c => ({
+          id: c.id,
+          prompt: c.title,
+          title: c.title,
+          created_at: c.createdAt,
+          status: c.status,
+          outputFormat: c.outputFormat,
+          mode: c.mode,
+        }));
+      } catch (err) {
+        console.warn('IndexedDB list error:', err);
+      }
+
+      // Combine and deduplicate
+      const combined = [...(blinkTasks || [])];
+      for (const conv of localConversations) {
+        if (!combined.some(t => t.id === conv.id)) {
+          combined.push(conv);
+        }
+      }
+      // Sort newest first
+      combined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      setTasks(combined);
 
       // Automatically convert task artifacts & shared docs into Library items
-      if (result && result.length > 0) {
-        syncTasksToLibrary(result);
+      if (combined.length > 0) {
+        syncTasksToLibrary(combined);
       }
 
       // 2. Load voice transcripts
@@ -394,7 +427,12 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
     setIsDeleting(true);
     try {
       if (itemToDelete.type === 'session') {
-        await (blink.db as any).tasks.delete(itemToDelete.id);
+        try {
+          await (blink.db as any).tasks.delete(itemToDelete.id);
+        } catch {}
+        try {
+          await deleteConversation(itemToDelete.id);
+        } catch {}
         setTasks(prev => prev.filter(t => t.id !== itemToDelete.id));
         toast.success('Session deleted from history');
       } else {
@@ -410,6 +448,43 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
     } finally {
       setIsDeleting(false);
     }
+  };
+
+  const handleExportHistory = async () => {
+    try {
+      const dataStr = await exportAllChatHistory();
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `manus-conversation-backup-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success('Conversation history exported successfully');
+    } catch (err) {
+      toast.error('Failed to export conversations');
+    }
+  };
+
+  const handleRecoverHistory = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.onchange = async (e: any) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const text = await file.text();
+      const res = await recoverChatHistory(text);
+      if (res.success) {
+        toast.success(`Recovered ${res.restoredCount} conversation(s) into database!`);
+        loadLibraryData();
+      } else {
+        toast.error('Invalid backup file');
+      }
+    };
+    input.click();
   };
 
   // Filtered files & items
@@ -806,6 +881,32 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
             ) : (
               /* Chat & Task Sessions Tab */
               <TabsContent value="sessions" className="flex-1 overflow-y-auto p-4 space-y-2.5 custom-scrollbar m-0">
+                {/* Conversation Persistence & Recovery Bar */}
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-muted/40 border border-border/50 mb-2">
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium">
+                    <Clock size={13} className="text-primary" />
+                    <span>Permanent History ({filteredTasks.length})</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={handleExportHistory}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-background hover:bg-muted text-foreground border border-border/60 text-[11px] font-semibold transition-all cursor-pointer shadow-2xs"
+                      title="Export conversation history to JSON backup"
+                    >
+                      <Download size={12} />
+                      <span>Backup</span>
+                    </button>
+                    <button
+                      onClick={handleRecoverHistory}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary hover:text-primary-foreground text-primary text-[11px] font-semibold transition-all cursor-pointer"
+                      title="Restore conversations from a backup file"
+                    >
+                      <Upload size={12} />
+                      <span>Recover</span>
+                    </button>
+                  </div>
+                </div>
+
                 {filteredTasks.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-56 text-center px-4 space-y-3">
                     <div className="w-12 h-12 rounded-2xl bg-muted/60 text-muted-foreground flex items-center justify-center">

@@ -13,6 +13,7 @@ import { BlinkProvider, BlinkAuthProvider, useBlinkAuth } from '@blinkdotnew/rea
 import { ThemeProvider } from './context/ThemeContext';
 import { Toaster } from './components/ui/sonner';
 import { blink } from './lib/blink';
+import { configureHighQualityTTS } from './lib/audioPipeline';
 
 const PROJECT_ID = (import.meta as any).env?.VITE_BLINK_PROJECT_ID || 'manus-agent-clone-tkzhogvs';
 const PUBLISHABLE_KEY = (import.meta as any).env?.VITE_BLINK_PUBLISHABLE_KEY || 'blnk_pk_dummy';
@@ -63,6 +64,11 @@ function AppContent() {
   // Data analysis hook
   const agentTask = useAgentTask();
   const { startTask, resetTask } = agentTask;
+
+  // Initialize Web Speech API & audio processing clarity pipeline
+  React.useEffect(() => {
+    configureHighQualityTTS();
+  }, []);
 
   // Global keyboard shortcuts (Ctrl+H: History, Ctrl+, : Settings)
   React.useEffect(() => {

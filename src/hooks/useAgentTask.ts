@@ -3,6 +3,8 @@ import { useAgent, Agent, webSearch, sandboxTools, fetchUrl, useBlinkAuth } from
 import { blink } from '@/lib/blink';
 import type { Sandbox } from '@blinkdotnew/sdk';
 import { getSettings, playNotificationSound } from '@/lib/settingsStore';
+import { speakCleanHumanVoice } from '@/lib/speechSynthesis';
+import { sendBackgroundNotification } from '@/lib/permissionsManager';
 import {
   saveMessage,
   getMessages,
@@ -224,7 +226,7 @@ export function useAgentTask() {
         }).catch(err => console.warn('Failed to save assistant response to DB:', err));
       }
 
-      // Save to database
+      // Save to database (Blink + IndexedDB)
       if (activeId) {
         try {
           await (blink.db as any).tasks.update(activeId, {
@@ -235,10 +237,34 @@ export function useAgentTask() {
         } catch (e) {
           console.error('Failed to update task in DB:', e);
         }
+        try {
+          await updateConversation(activeId, {
+            status: 'completed',
+            result: finalResult,
+            steps: steps.map(s => ({ ...s, status: 'completed' }))
+          });
+        } catch {}
       }
       
       // Update ALL steps to completed when task finishes
       setSteps(prev => prev.map(s => ({ ...s, status: 'completed' as const })));
+
+      // Audio playback & Background notification
+      const curSettings = getSettings();
+      if (curSettings.autoPlayAudio || currentTask?.options?.voicePlayback) {
+        speakCleanHumanVoice(assistantText, {
+          voicePersona: curSettings.voicePersona,
+          rate: curSettings.speechSpeed,
+          pitch: curSettings.voicePitch,
+        });
+      }
+
+      if (typeof document !== 'undefined' && document.hidden && curSettings.enableBackgroundNotifications) {
+        sendBackgroundNotification(
+          'Manus AI Agent',
+          `Task completed: ${cleanChatTitle(assistantText)}`
+        );
+      }
     },
     onError: (err) => {
       console.warn('[AI Studio] Agent stream notice:', err);
@@ -467,23 +493,41 @@ export function useAgentTask() {
     try {
       const activeUser = user || (await blink.auth.me());
       const userId = activeUser?.id || 'usr_manus_default';
-      const taskRecord = await (blink.db as any).tasks.create({
-        userId,
-        prompt: prompt,
-        outputFormat: options.format,
-        mode: options.mode || (options.format === 'website' ? 'work' : 'chat'),
-        chartType: options.chartType,
-        projectId: options.projectId || null,
-        status: 'running',
-        result: null,
-        steps: JSON.stringify([]),
-        skipInitialMessage: true,
-      });
-      newTaskId = taskRecord.id;
+      let generatedId = 'task_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+      try {
+        const taskRecord = await (blink.db as any).tasks.create({
+          userId,
+          prompt: prompt,
+          outputFormat: options.format,
+          mode: options.mode || (options.format === 'website' ? 'work' : 'chat'),
+          chartType: options.chartType,
+          projectId: options.projectId || null,
+          status: 'running',
+          result: null,
+          steps: JSON.stringify([]),
+          skipInitialMessage: true,
+        });
+        if (taskRecord?.id) generatedId = taskRecord.id;
+      } catch (err) {
+        console.warn('Blink task create fallback to local DB:', err);
+      }
+
+      newTaskId = generatedId;
       setTaskId(newTaskId);
       currentTaskIdRef.current = newTaskId;
 
-      // Save user message to DB before AI generation (Requirement 3)
+      // Ensure conversation is permanently registered in IndexedDB
+      await createConversation({
+        id: newTaskId,
+        userId,
+        title: cleanChatTitle(prompt),
+        mode: options.mode || (options.format === 'website' ? 'work' : 'chat'),
+        outputFormat: options.format,
+        chartType: options.chartType,
+        projectId: options.projectId || null,
+      });
+
+      // Save user message to DB before AI generation
       await saveMessage({
         id: userMsgId,
         conversationId: newTaskId,

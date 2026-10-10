@@ -520,3 +520,62 @@ export async function updateMessage(id: string, updates: Partial<StoredMessage>)
   notifyDbUpdated(existing.conversationId);
   return updated;
 }
+
+/**
+ * Full conversation & messages backup export
+ */
+export async function exportAllChatHistory(): Promise<string> {
+  const conversations = await listConversations();
+  const allMessages: Record<string, StoredMessage[]> = {};
+  for (const c of conversations) {
+    allMessages[c.id] = await getMessages(c.id);
+  }
+  return JSON.stringify({
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    conversations,
+    messages: allMessages,
+  }, null, 2);
+}
+
+/**
+ * Restores conversation history from a backup JSON payload
+ */
+export async function recoverChatHistory(jsonString: string): Promise<{ success: boolean; restoredCount: number }> {
+  try {
+    const data = JSON.parse(jsonString);
+    if (!data.conversations || !Array.isArray(data.conversations)) {
+      return { success: false, restoredCount: 0 };
+    }
+
+    let count = 0;
+    for (const conv of data.conversations) {
+      await createConversation({
+        id: conv.id,
+        userId: conv.userId,
+        title: conv.title,
+        mode: conv.mode,
+        outputFormat: conv.outputFormat,
+        chartType: conv.chartType,
+      });
+
+      const msgs = data.messages?.[conv.id] || [];
+      for (const m of msgs) {
+        await saveMessage({
+          id: m.id,
+          conversationId: conv.id,
+          userId: m.userId,
+          role: m.role,
+          content: m.content,
+          status: m.status || 'success',
+        });
+      }
+      count++;
+    }
+    return { success: true, restoredCount: count };
+  } catch (err) {
+    console.error('Failed to recover chat history:', err);
+    return { success: false, restoredCount: 0 };
+  }
+}
+

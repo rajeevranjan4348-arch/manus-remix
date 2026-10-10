@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
 import { AttachmentMenu } from '@/components/chat/AttachmentMenu';
+import { VoiceInputButton } from '@/components/voice/VoiceInputButton';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
 
 export type PersonalityMode = 'chat' | 'work';
@@ -71,7 +72,12 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   const [fileData, setFileData] = useState<string | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [isThinkHarder, setIsThinkHarder] = useState(false);
-  const [activePlugins, setActivePlugins] = useState<string[]>(['web_search', 'code_sandbox', 'charts']);
+  const [activePlugins, setActivePlugins] = useState<string[]>([
+    'web_search', 'code_sandbox', 'charts', 'deep_research', 
+    'google_drive', 'google_calendar', 'gmail', 'google_docs', 
+    'google_sheets', 'google_slides', 'google_tasks', 'google_chat', 
+    'google_forms', 'google_keep', 'google_meet', 'google_contacts', 'google_classroom'
+  ]);
   const [chatWorkMode, setChatWorkMode] = useState<PersonalityMode>(() => {
     return (localStorage.getItem('manus_chat_work_mode') as PersonalityMode) || personality || 'chat';
   });
@@ -440,9 +446,11 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
               </div>
               <div className="min-w-0 flex gap-2 ml-auto flex-shrink-0 items-center">
                 <div className="flex items-center gap-2">
-                  <div className="flex items-center justify-center cursor-pointer hover:bg-[var(--fill-tsp-gray-main)] size-8 flex-shrink-0 rounded-full">
-                    <Mic size={20} className="text-[var(--icon-primary)]"/>
-                  </div>
+                  <VoiceInputButton 
+                    onTranscript={(text) => setPrompt(text)}
+                    className="size-8"
+                    size={18}
+                  />
                   <button 
                     onClick={handleStart}
                     disabled={!prompt.trim()}

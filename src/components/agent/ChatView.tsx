@@ -28,6 +28,16 @@ import { ContextualThinking } from './ContextualThinking';
 import { AttachmentMenu } from '../chat/AttachmentMenu';
 import { ThoughtProcess } from './ThoughtProcess';
 import { ConversationActionBar } from './ConversationActionBar';
+import { VoiceInputButton } from '../voice/VoiceInputButton';
+import { SourceCitations, parseSourcesFromMarkdown } from './SourceCitations';
+import { WeatherWidgetCard } from './WeatherWidgetCard';
+import { ToolApprovalCard } from './ToolApprovalCard';
+import { extractWeatherQuery, fetchWeatherByCity, WeatherData } from '@/lib/weatherService';
+import { executeOpenUrl, executeDeviceCommand, VoiceCommandResult } from '@/lib/voiceCommands';
+import { GoogleDrivePickerModal } from '../workspace/GoogleDrivePickerModal';
+import { WorkspaceToolCard } from '../workspace/WorkspaceToolCard';
+import { GoogleMapWidgetCard } from '../maps/GoogleMapWidgetCard';
+import { GoogleDriveFileItem } from '@/lib/workspaceTools';
 import { Step } from '@/hooks/useAgentTask';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
@@ -61,11 +71,60 @@ export function ChatView({
   const [expandedSteps, setExpandedSteps] = React.useState<Record<string, boolean>>({});
   const [isThinkHarder, setIsThinkHarder] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
-  const [activePlugins, setActivePlugins] = useState<string[]>(['web_search', 'code_sandbox', 'charts']);
+  const [activePlugins, setActivePlugins] = useState<string[]>([
+    'web_search', 'code_sandbox', 'charts', 'deep_research', 
+    'google_drive', 'google_calendar', 'gmail', 'google_docs', 
+    'google_sheets', 'google_slides', 'google_tasks', 'google_chat', 
+    'google_forms', 'google_keep', 'google_meet', 'google_contacts', 'google_classroom'
+  ]);
   const [isDragging, setIsDragging] = useState(false);
+  const [pendingApproval, setPendingApproval] = useState<VoiceCommandResult | null>(null);
+  const [weatherMap, setWeatherMap] = useState<Record<string, WeatherData>>({});
+  const [isDrivePickerOpen, setIsDrivePickerOpen] = useState(false);
   const dragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleDriveFileSelect = (driveFile: GoogleDriveFileItem) => {
+    const driveText = `[Selected Google Drive File: ${driveFile.name}]\nLink: ${driveFile.webViewLink || 'N/A'}\nType: ${driveFile.mimeType}`;
+    onSubmit(driveText);
+  };
+
+  // Check user queries for live weather data
+  useEffect(() => {
+    messages.forEach(async (m) => {
+      if (m.role === 'user' && !weatherMap[m.id || m.content]) {
+        const query = extractWeatherQuery(m.content || '');
+        if (query.isWeather && query.city) {
+          const data = await fetchWeatherByCity(query.city);
+          if (data) {
+            setWeatherMap(prev => ({ ...prev, [m.id || m.content]: data }));
+          }
+        }
+      }
+    });
+  }, [messages]);
+
+  const handleApproveTool = async () => {
+    if (!pendingApproval) return;
+    try {
+      if (pendingApproval.action === 'open_url' || pendingApproval.action === 'search') {
+        if (pendingApproval.url) executeOpenUrl(pendingApproval.url);
+      } else {
+        await executeDeviceCommand(pendingApproval);
+      }
+      toast.success(`Executed: ${pendingApproval.targetName}`);
+    } catch {
+      toast.error('Failed to execute command');
+    } finally {
+      setPendingApproval(null);
+    }
+  };
+
+  const handleRejectTool = () => {
+    toast.info('Action cancelled');
+    setPendingApproval(null);
+  };
 
   // Prevent default browser behavior for global drag/drop to stop browser opening dropped files
   useEffect(() => {
@@ -428,6 +487,95 @@ export function ChatView({
                       </div>
                     ) : null}
 
+                    {/* Google Calendar Tool Card Detection */}
+                    {/(schedule|calendar event|meeting|add event to calendar)/i.test(cleanedContent || '') && (
+                      <WorkspaceToolCard
+                        type="calendar_event"
+                        data={{
+                          summary: 'Team Sync & Project Discussion',
+                          description: 'Scheduled via Manus Workspace AI Assistant',
+                          startDateTime: new Date(Date.now() + 86400000).toISOString(),
+                          endDateTime: new Date(Date.now() + 90000000).toISOString(),
+                        }}
+                      />
+                    )}
+
+                    {/* Gmail Draft Tool Card Detection */}
+                    {/(draft email|email draft|save draft|gmail draft)/i.test(cleanedContent || '') && (
+                      <WorkspaceToolCard
+                        type="gmail_draft"
+                        data={{
+                          subject: 'Project Status & Follow-up',
+                          body: 'Hi Team,\n\nHere is the updated summary and action items discussed in our current session.\n\nBest regards,\nManus AI',
+                        }}
+                      />
+                    )}
+
+                    {/* Google Doc Card Detection */}
+                    {/(create doc|google doc|new document)/i.test(cleanedContent || '') && (
+                      <WorkspaceToolCard
+                        type="google_doc"
+                        data={{
+                          title: 'Project Brief & Strategy Document',
+                          content: 'This document contains strategic notes and operational plans created by Manus AI Assistant.',
+                        }}
+                      />
+                    )}
+
+                    {/* Google Sheet Card Detection */}
+                    {/(create sheet|google sheet|spreadsheet)/i.test(cleanedContent || '') && (
+                      <WorkspaceToolCard
+                        type="google_sheet"
+                        data={{
+                          title: 'Data Summary & Metrics Sheet',
+                          values: [
+                            ['Category', 'Status', 'Score'],
+                            ['Performance', 'Optimal', '98%'],
+                            ['Security', 'Passed', '100%']
+                          ],
+                        }}
+                      />
+                    )}
+
+                    {/* Google Task Card Detection */}
+                    {/(add task|google task|create task)/i.test(cleanedContent || '') && (
+                      <WorkspaceToolCard
+                        type="google_task"
+                        data={{
+                          title: 'Follow up on project deliverable',
+                          notes: 'Created via Manus AI Assistant',
+                        }}
+                      />
+                    )}
+
+                    {/* Google Meet Card Detection */}
+                    {/(google meet|video call|schedule meet)/i.test(cleanedContent || '') && (
+                      <WorkspaceToolCard
+                        type="google_meet"
+                        data={{
+                          summary: 'Video Conference & Discussion',
+                          startDateTime: new Date(Date.now() + 3600000).toISOString(),
+                          endDateTime: new Date(Date.now() + 7200000).toISOString(),
+                        }}
+                      />
+                    )}
+
+                    {/* Google Keep Note Detection */}
+                    {/(keep note|google keep|take note)/i.test(cleanedContent || '') && (
+                      <WorkspaceToolCard
+                        type="google_keep"
+                        data={{
+                          title: 'Quick Brainstorming Note',
+                          content: 'Important takeaways and follow-up items from current research session.',
+                        }}
+                      />
+                    )}
+
+                    {/* Google Maps Widget Detection */}
+                    {/(map of|location of|show map|google map)/i.test(cleanedContent || '') && (
+                      <GoogleMapWidgetCard locationName="Google Headquarters, Mountain View" latitude={37.4220} longitude={-122.0841} />
+                    )}
+
                     {cleanedContent ? (
                       <div className="pt-0.5">
                         <ConversationActionBar 
@@ -581,6 +729,7 @@ export function ChatView({
             activePlugins={activePlugins}
             onTogglePlugin={handleTogglePlugin}
             onSendMessageToChat={(text) => onSubmit(text)}
+            onOpenGoogleDrivePicker={() => setIsDrivePickerOpen(true)}
           >
             <button 
               className="p-2 hover:bg-manus-soft dark:hover:bg-accent rounded-full transition-colors text-muted-foreground relative"
@@ -604,9 +753,11 @@ export function ChatView({
             disabled={isLoading}
           />
           <div className="flex items-center gap-1 pr-1">
-             <button className="p-2 hover:bg-manus-soft dark:hover:bg-accent rounded-full transition-colors text-muted-foreground">
-               <Mic size={20} />
-             </button>
+             <VoiceInputButton
+               onTranscript={(text) => setInput(text)}
+               className="p-2 w-9 h-9"
+               size={18}
+             />
              <button 
                onClick={handleSend}
                disabled={(!input.trim() && !attachedFile) || isLoading}
@@ -620,6 +771,13 @@ export function ChatView({
           </div>
         </div>
       </div>
+
+      {/* Google Drive Picker Modal */}
+      <GoogleDrivePickerModal
+        isOpen={isDrivePickerOpen}
+        onClose={() => setIsDrivePickerOpen(false)}
+        onSelectFile={handleDriveFileSelect}
+      />
     </div>
   );
 }

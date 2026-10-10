@@ -28,7 +28,15 @@ export const DEFAULT_SETTINGS: UserSettings = {
   // Voice & Audio
   voicePersona: 'nova',
   speechSpeed: 1.0,
+  voicePitch: 1.0,
+  enableAudioFilter: true,
   autoPlayAudio: false,
+  enableHandsFreeVoice: false,
+
+  // Security, Authorization & Permissions
+  toolApprovalPolicy: 'ask_sensitive',
+  enableBackgroundNotifications: true,
+  enablePhoneCommands: true,
 
   lastUpdated: new Date().toISOString(),
 };

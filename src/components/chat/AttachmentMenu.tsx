@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Camera, Image, Paperclip, Blocks, Gauge, Brain, Check, X, Sparkles, Globe, Terminal, BarChart2, PhoneCall } from 'lucide-react';
+import { Camera, Image, Paperclip, Blocks, Gauge, Brain, Check, X, Sparkles, Globe, Terminal, BarChart2, PhoneCall, Plug, HardDrive } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
@@ -15,6 +15,7 @@ export interface AttachmentMenuProps {
   activePlugins?: string[];
   onTogglePlugin?: (pluginId: string) => void;
   onSendMessageToChat?: (text: string) => void;
+  onOpenGoogleDrivePicker?: () => void;
   children?: React.ReactNode;
 }
 
@@ -32,6 +33,7 @@ export function AttachmentMenu({
   activePlugins = ['web_search', 'code_sandbox', 'charts'],
   onTogglePlugin,
   onSendMessageToChat,
+  onOpenGoogleDrivePicker,
   children,
 }: AttachmentMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -162,6 +164,27 @@ export function AttachmentMenu({
                 <Paperclip size={20} />
               </div>
               <span className="font-semibold text-base text-slate-900 dark:text-white tracking-tight">Files</span>
+            </button>
+
+            {/* Connectors Option (replaced Google Drive) */}
+            <button
+              onClick={() => {
+                setIsOpen(false);
+                if (onOpenGoogleDrivePicker) {
+                  onOpenGoogleDrivePicker();
+                } else {
+                  toast.info('Opening Connectors...');
+                }
+              }}
+              className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer"
+            >
+              <div className="w-10 h-10 rounded-full bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <Plug size={20} />
+              </div>
+              <div className="flex flex-col">
+                <span className="font-semibold text-base text-slate-900 dark:text-white tracking-tight">Connectors</span>
+                <span className="text-[11px] text-muted-foreground leading-tight">Google Drive & Workspace tools</span>
+              </div>
             </button>
 
             {/* Plugins Option */}

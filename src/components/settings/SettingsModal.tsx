@@ -41,6 +41,8 @@ import {
 import { useTheme } from '@/context/ThemeContext';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { Slider } from '@/components/ui/slider';
+import { Checkbox } from '@/components/ui/checkbox';
 import { speakCleanHumanVoice, stopCleanSpeech } from '@/lib/speechSynthesis';
 
 interface SettingsModalProps {
@@ -661,6 +663,74 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         {spd}x
                       </button>
                     ))}
+                  </div>
+                </div>
+
+                {/* Voice Pitch Adjustment Slider */}
+                <div className="pt-4 border-t border-border/50">
+                  <div className="flex items-center justify-between mb-2.5">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Voice Pitch</p>
+                      <p className="text-[11px] text-muted-foreground">Fine-tune vocal tone to sound more natural or clear</p>
+                    </div>
+                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-muted text-foreground font-semibold">
+                      {(settings.voicePitch ?? 1.0).toFixed(2)}x
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    <Slider
+                      value={[settings.voicePitch ?? 1.0]}
+                      min={0.5}
+                      max={1.5}
+                      step={0.05}
+                      onValueChange={([val]) => {
+                        updateSetting('voicePitch', val);
+                      }}
+                      onValueCommit={([val]) => {
+                        speakCleanHumanVoice(`Voice pitch adjusted to ${val.toFixed(2)}`, {
+                          voicePersona: settings.voicePersona,
+                          pitch: val,
+                          rate: settings.speechSpeed,
+                          volume: 1.0,
+                        });
+                      }}
+                    />
+                    <div className="flex justify-between text-[10px] text-muted-foreground font-medium pt-1">
+                      <span>0.5x (Deeper)</span>
+                      <span>1.0x (Natural)</span>
+                      <span>1.5x (Higher)</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Audio Processing Filter Checkbox */}
+                <div className="pt-4 border-t border-border/50">
+                  <div className="flex items-start gap-3 p-3 rounded-xl border border-border/60 bg-card/40 hover:bg-card/70 transition-colors">
+                    <Checkbox
+                      id="enable-audio-filter"
+                      checked={settings.enableAudioFilter ?? true}
+                      onCheckedChange={(checked) => {
+                        const isChecked = checked === true;
+                        updateSetting('enableAudioFilter', isChecked);
+                        if (isChecked) {
+                          toast.success('Audio clarity filter enabled (Noise reduced & speech enhanced)');
+                        } else {
+                          toast.info('Audio filter disabled');
+                        }
+                      }}
+                      className="mt-0.5"
+                    />
+                    <label htmlFor="enable-audio-filter" className="cursor-pointer select-none space-y-0.5">
+                      <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                        Audio Processing Filter
+                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.2 rounded font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                          Recommended
+                        </span>
+                      </p>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Reduces background noise, equalizes frequency bands, and sharpens vocal articulation for clean human speech.
+                      </p>
+                    </label>
                   </div>
                 </div>
 

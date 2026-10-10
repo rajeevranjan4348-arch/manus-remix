@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { ChevronDown, PanelLeft, Plus, Check, Sparkles, Zap, Brain, Cpu, MessageSquare, Briefcase, Settings2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { WorkspaceConnectButton } from '../workspace/WorkspaceConnectButton';
 
 interface TopbarProps {
   onToggleSidebar?: () => void;
@@ -141,8 +142,9 @@ export function Topbar({ onToggleSidebar, onOpenHistory, onNewTask, onOpenSettin
         )}
       </div>
 
-      {/* Right section: New Task button */}
+      {/* Right section: Workspace Connect & New Task button */}
       <div className="flex items-center gap-2 z-10">
+        <WorkspaceConnectButton />
         {shouldShowNewTask && (
           <button
             onClick={() => {
