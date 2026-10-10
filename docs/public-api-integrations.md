@@ -9,7 +9,8 @@ This integration is based on an analysis of [public-apis/public-apis](https://gi
 | Current weather and 7-day forecast | [Open-Meteo Forecast](https://open-meteo.com/) | No key for standard use | Geocode the place first, then request current/daily values |
 | Place-name lookup | [Open-Meteo Geocoding](https://open-meteo.com/) | No key for standard use | Resolve a city to latitude/longitude |
 | Country facts | [REST Countries](https://restcountries.com/) | No key | Capitals, currencies, population, region and flags |
-| General knowledge summary | [Wikipedia REST](https://en.wikipedia.org/api/rest_v1/) | No key | Background overview; cross-check current claims |
+| Wikipedia article search | [Wikipedia Search API](https://www.mediawiki.org/wiki/API:REST_API/Reference/en) | No key | Search page titles and snippets, then select a result |
+| General knowledge summary | [Wikipedia REST](https://en.wikipedia.org/api/rest_v1/) | No key | Fetch article summaries; cross-check current claims |
 | Books and authors | [Open Library](https://openlibrary.org/developers/api) | No key for search | Search book titles and author metadata |
 | Public holidays | [Nager.Date](https://date.nager.at/) | No key | Country/year holiday lookup |
 | Recent earthquake feeds | [USGS Earthquake Hazards](https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php) | No key | Recent event feeds and GeoJSON data |
@@ -17,12 +18,12 @@ This integration is based on an analysis of [public-apis/public-apis](https://gi
 
 ## Files added
 
-- `src/lib/publicApiCatalog.ts`: typed catalog, example endpoints, category helpers, and agent-routing guidance.
+- `src/lib/publicApiCatalog.ts`: typed catalog, example endpoints, category helpers, and agent-routing guidance. Wikipedia now has separate search and article-summary entries.
 - `src/hooks/useAgentTask.ts`: includes the catalog guidance in the existing agent system prompt, so the agent can select the appropriate API through its existing `fetch_url` / `web_search` tools.
 
 ## Environment configuration
 
-- The existing `.env.example` keeps the app's current Blink variables and adds optional public API endpoint overrides.
+- The existing `.env.example` keeps the app's current Blink variables and adds optional public API endpoint overrides, including `VITE_WIKIPEDIA_SEARCH_API_URL`.
 - Copy `.env.example` to `.env.local` for local development; the catalog falls back to built-in endpoint defaults if overrides are unset.
 - In Netlify, add these non-secret variables under **Site configuration → Environment variables** only if you need to override defaults; they are optional.
 - Never put private credentials in `VITE_*` variables because Vite bundles them into browser-visible code. A provider requiring a secret needs a server-side environment variable and server-side proxy.
