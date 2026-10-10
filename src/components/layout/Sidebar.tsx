@@ -181,6 +181,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
   const [projectToEdit, setProjectToEdit] = useState<Project | null>(null);
   const [selectedProjectView, setSelectedProjectView] = useState<Project | null>(null);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [showAllProjects, setShowAllProjects] = useState(false);
 
   const { isAuthenticated, user } = useBlinkAuth();
   const navigate = useNavigate();
@@ -537,8 +538,8 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
             </button>
           </div>
 
-          <div className="space-y-1 max-h-44 overflow-y-auto pr-1 custom-scrollbar">
-            {projects.map((proj) => {
+          <div className={cn("space-y-1 overflow-y-auto pr-1 custom-scrollbar", showAllProjects ? "max-h-72" : "max-h-44")}>
+            {projects.slice(0, showAllProjects ? projects.length : 4).map((proj) => {
               const IconComp = PROJECT_ICON_MAP[proj.icon] || Folder;
               const colorTheme = PROJECT_COLOR_MAP[proj.color] || PROJECT_COLOR_MAP.indigo;
               const isFiltered = activeProjectId === proj.id;
@@ -628,6 +629,18 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
               <Plus size={14} className="text-primary" />
               <span>New project</span>
             </button>
+
+            {projects.length > 4 && (
+              <button
+                type="button"
+                onClick={() => setShowAllProjects((current) => !current)}
+                className="w-full flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded-xl hover:bg-manus-cream dark:hover:bg-accent font-medium"
+                aria-expanded={showAllProjects}
+              >
+                <span>{showAllProjects ? "Show less" : `Show more (${projects.length - 4})`}</span>
+                <ChevronRight size={13} className={cn("transition-transform", showAllProjects && "rotate-90")} />
+              </button>
+            )}
           </div>
         </div>
 
