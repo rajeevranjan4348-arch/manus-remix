@@ -92,7 +92,7 @@ export default async (req: Request) => {
   const url = new URL(req.url);
   const pathAction = url.pathname.split('/').filter(Boolean).pop() || 'status';
   const action = url.searchParams.get('action') || pathAction;
-  const clearAuth = `${clearCookie(COOKIE)}, ${clearCookie(STATE_COOKIE)}`;
+  const clearAuth = clearCookie(COOKIE);
 
   try {
     const clientId = process.env.GITHUB_CLIENT_ID;
@@ -133,7 +133,7 @@ export default async (req: Request) => {
       return new Response(null, { status: 302, headers: {
         Location: '/?github=connected',
         'Cache-Control': 'no-store',
-        'Set-Cookie': `${cookie(COOKIE, session, Math.min(expiresIn, 8 * 60 * 60))}, ${clearCookie(STATE_COOKIE)}`,
+        'Set-Cookie': cookie(COOKIE, session, Math.min(expiresIn, 8 * 60 * 60)),
       }});
     }
 
