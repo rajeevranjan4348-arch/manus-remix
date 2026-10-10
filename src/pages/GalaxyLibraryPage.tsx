@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ArrowLeft, ExternalLink, Search, Layers, LoaderCircle, Eye, Code2, Sparkles, Check, Bell, Copy, MousePointer2, LayoutGrid } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Search, Layers, LoaderCircle, Eye, Code2, Sparkles, Check, Bell, MousePointer2, LayoutGrid } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import catalog from '@/data/galaxy-components.json';
