@@ -190,7 +190,10 @@ export default async (req: Request) => {
       if (!tokenResponse.ok || !tokenData.access_token || tokenData.error) return json({ error: 'GitHub token exchange failed. Check OAuth configuration and try again.' }, 502, { 'set-cookie': cookie(STATE_COOKIE, '', 0, secure) });
       const profile = await github(tokenData.access_token, '/user');
       const encrypted = encryptSession({ token: tokenData.access_token, user: { login: profile.login, id: profile.id, avatar_url: profile.avatar_url }, expiresAt: Date.now() + SESSION_SECONDS * 1000 });
-      return new Response(null, { status: 302, headers: { location: '/', 'cache-control': 'no-store', 'set-cookie': [cookie(COOKIE, encrypted, SESSION_SECONDS, secure), cookie(STATE_COOKIE, '', 0, secure)].join(', ') } });
+      const headers = new Headers({ location: '/', 'cache-control': 'no-store' });
+      headers.append('set-cookie', cookie(COOKIE, encrypted, SESSION_SECONDS, secure));
+      headers.append('set-cookie', cookie(STATE_COOKIE, '', 0, secure));
+      return new Response(null, { status: 302, headers });
     }
     if (action === 'disconnect') {
       return json({ connected: false }, 200, { 'set-cookie': cookie(COOKIE, '', 0, secure) });
