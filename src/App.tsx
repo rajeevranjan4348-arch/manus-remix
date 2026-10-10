@@ -1,4 +1,6 @@
 import React, { useEffect } from 'react';
+import { Github } from 'lucide-react';
+import { GitHubConnector } from './components/connectors/GitHubConnector';
 import { BrowserRouter, Routes, Route, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { Sidebar } from './components/layout/Sidebar';
 import { Topbar } from './components/layout/Topbar';
@@ -164,6 +166,7 @@ function AppContent() {
           ) : (
             <Routes>
               <Route path="/" element={<Home onStartTask={handleStartTask} />} />
+              <Route path="/connectors/github" element={<GitHubConnector />} />
               <Route 
                 path="/task/:taskId" 
                 element={
@@ -194,6 +197,11 @@ function AppContent() {
         onClose={() => setIsSettingsOpen(false)}
       />
 
+      {location.pathname !== '/connectors/github' && (
+        <button type="button" onClick={() => navigate('/connectors/github')} title="GitHub Connector" aria-label="Open GitHub Connector" className="fixed bottom-4 right-4 z-40 inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-2 text-xs font-medium text-foreground shadow-lg transition-colors hover:bg-muted">
+          <Github size={15} /> GitHub
+        </button>
+      )}
       <Toaster />
     </div>
   );
