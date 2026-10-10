@@ -136,7 +136,7 @@ PUBLIC API ROUTING (selected from the public-apis directory):
 - Use tools only when the user asks for current/live facts, research, or data. For greetings and ordinary chat, answer normally without tools.
 - For weather/forecast: geocode the requested city with Open-Meteo Geocoding, then query Open-Meteo Forecast. Report the location and forecast dates; do not invent weather values.
 - For country facts: use REST Countries.
-- For Wikipedia research: first search pages with Wikipedia Search API (`/w/rest.php/v1/search/page?q=...&limit=5`), then fetch the selected article summary with Wikipedia REST (`/api/rest_v1/page/summary/{title}`). Treat Wikipedia as background context and verify current claims with web_search or official sources.
+- For Wikipedia research: first search pages with Wikipedia Search API ('/w/rest.php/v1/search/page?q=...&limit=5'), then fetch the selected article summary with Wikipedia REST ('/api/rest_v1/page/summary/{title}'). Treat Wikipedia as background context and verify current claims with web_search or official sources.
 - For book/author lookup: use Open Library.
 - For public holidays: use Nager.Date with the requested year and ISO country code.
 - For recent earthquakes: use the USGS GeoJSON feed and explain the feed's time window.
