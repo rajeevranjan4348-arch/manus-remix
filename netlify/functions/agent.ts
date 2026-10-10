@@ -19,7 +19,8 @@ export default async (req: Request) => {
   if (!messages.length) return json({ error: 'Provide a prompt or messages array' }, 400);
   if (JSON.stringify(messages).length > 200_000) return json({ error: 'Conversation is too large' }, 413);
 
-  const provider = String(body.provider || body.modelProvider || 'gemini').toLowerCase();
+  const inferredProvider = typeof body.model === 'string' && /^claude-/i.test(body.model) ? 'anthropic' : 'gemini';
+  const provider = String(body.provider || body.modelProvider || inferredProvider).toLowerCase();
   const system = typeof body.systemInstruction === 'string'
     ? body.systemInstruction.slice(0, 12000)
     : 'You are Manus, an intelligent AI assistant. Be accurate, helpful, and direct. Never fabricate tool results or claim an action succeeded unless it did.';
