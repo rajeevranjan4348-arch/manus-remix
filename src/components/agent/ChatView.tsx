@@ -21,7 +21,7 @@ import {
   Plug
 } from 'lucide-react';
 import { ConnectorsPopupMenu } from '../chat/ConnectorsPopupMenu';
-import { ConnectorsStorePanel } from '../connectors/ConnectorsStorePanel';
+import { ConnectorsStorePanel, CONNECTOR_CATALOG } from '../connectors/ConnectorsStorePanel';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
 import { cn } from '@/lib/utils';
 import { Logo, ManusLogo } from '../layout/Logo';
@@ -99,7 +99,21 @@ export function ChatView({
     const lastAt = val.lastIndexOf('@');
     if (lastAt !== -1 && (lastAt === 0 || val[lastAt - 1] === ' ')) {
       const queryAfterAt = val.slice(lastAt);
-      if (!queryAfterAt.includes(' ')) {
+      if (queryAfterAt.includes(' ')) {
+        const potentialTag = queryAfterAt.trim().toLowerCase();
+        const matchedOpt = WORKSPACE_CONNECTOR_OPTIONS.find(o => o.tag.toLowerCase() === potentialTag);
+        if (matchedOpt) {
+          const prefix = val.slice(0, lastAt);
+          const suffix = val.slice(lastAt + queryAfterAt.length);
+          setInput((prefix + suffix).trimStart());
+          setShowMentionPicker(false);
+          if (!activeConnectorTags.includes(matchedOpt.id)) {
+            setActiveConnectorTags(prev => [...prev, matchedOpt.id]);
+            toast.success(`Attached ${matchedOpt.label} context`);
+          }
+          return;
+        }
+      } else {
         setShowMentionPicker(true);
         setMentionQuery(queryAfterAt);
         setMentionIndex(0);
@@ -113,9 +127,7 @@ export function ChatView({
     const lastAt = input.lastIndexOf('@');
     let newInput = input;
     if (lastAt !== -1) {
-      newInput = input.slice(0, lastAt) + option.tag + ' ';
-    } else {
-      newInput = input + ' ' + option.tag + ' ';
+      newInput = input.slice(0, lastAt);
     }
     setInput(newInput.trimStart());
     setShowMentionPicker(false);
@@ -695,7 +707,7 @@ export function ChatView({
 
       {/* Input Area - Floating Bottom */}
       <div className="absolute bottom-6 left-0 right-0 px-4 flex flex-col items-center gap-2 z-20">
-        {(attachedFile || isThinkHarder || activeConnectorTags.length > 0) && (
+        {(attachedFile || isThinkHarder) && (
           <div className="flex items-center gap-2 flex-wrap max-w-3xl w-full px-2">
             {isThinkHarder && (
               <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-600 text-white rounded-full text-xs font-semibold shadow-md animate-in fade-in zoom-in duration-200">
@@ -706,20 +718,6 @@ export function ChatView({
                 </button>
               </div>
             )}
-            {activeConnectorTags.map((tagId) => {
-              const opt = WORKSPACE_CONNECTOR_OPTIONS.find(o => o.id === tagId);
-              if (!opt) return null;
-              const IconComp = opt.icon;
-              return (
-                <div key={tagId} className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-500/10 border border-blue-500/30 text-blue-700 dark:text-blue-300 rounded-full text-xs font-semibold shadow-xs animate-in fade-in zoom-in duration-200">
-                  <IconComp size={13} />
-                  <span>{opt.tag}</span>
-                  <button onClick={() => removeConnectorTag(tagId)} className="p-0.5 hover:bg-blue-500/20 rounded-full ml-0.5">
-                    <X size={10} />
-                  </button>
-                </div>
-              );
-            })}
             {attachedFile && (
               <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white dark:bg-card border border-border rounded-full text-xs font-medium shadow-md animate-in fade-in zoom-in duration-200">
                 <FileText size={13} className="text-primary" />
@@ -790,6 +788,54 @@ export function ChatView({
               <AtSign size={19} />
             </button>
           </ConnectorsPopupMenu>
+
+          {/* Selected Connector Badges / Pills inside Typing Bar */}
+          <div className="flex items-center gap-1.5 shrink-0 flex-wrap my-1">
+            {activeConnectorTags.map((tagId) => {
+              const opt = WORKSPACE_CONNECTOR_OPTIONS.find(o => o.id === tagId);
+              if (!opt) return null;
+              const IconComp = opt.icon;
+              return (
+                <div key={tagId} className="inline-flex items-center gap-1.5 px-3 py-1 bg-primary/10 border border-primary/20 text-primary dark:text-primary-foreground rounded-full text-xs font-semibold shadow-xs animate-in fade-in zoom-in duration-200 select-none">
+                  <IconComp size={13} className="shrink-0 text-primary" />
+                  <span>{opt.tag}</span>
+                  <button 
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeConnectorTag(tagId);
+                    }} 
+                    className="p-0.5 hover:bg-primary/20 rounded-full ml-0.5 transition-colors cursor-pointer"
+                    title="Remove connector tag"
+                  >
+                    <X size={10} />
+                  </button>
+                </div>
+              );
+            })}
+            {activePlugins.filter(pId => !activeConnectorTags.includes(pId)).map((pluginId) => {
+              const item = CONNECTOR_CATALOG.find(c => c.id === pluginId);
+              if (!item) return null;
+              const IconComp = item.icon;
+              return (
+                <div key={pluginId} className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 dark:bg-white/10 border border-border text-foreground rounded-full text-xs font-semibold shadow-xs animate-in fade-in zoom-in duration-200 select-none">
+                  <IconComp size={13} className="shrink-0 text-primary" />
+                  <span>{item.name}</span>
+                  <button 
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleTogglePlugin(pluginId);
+                    }} 
+                    className="p-0.5 hover:bg-muted-foreground/20 rounded-full ml-0.5 transition-colors cursor-pointer"
+                    title="Remove connector"
+                  >
+                    <X size={10} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
           <input 
             value={input}
             onChange={handleInputChange}

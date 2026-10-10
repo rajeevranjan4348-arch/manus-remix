@@ -44,6 +44,7 @@ import { cn } from '@/lib/utils';
 import { Slider } from '@/components/ui/slider';
 import { Checkbox } from '@/components/ui/checkbox';
 import { speakCleanHumanVoice, stopCleanSpeech } from '@/lib/speechSynthesis';
+import { WorkspaceConnectButton } from '../workspace/WorkspaceConnectButton';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -373,6 +374,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       )}
                     />
                   </button>
+                </div>
+
+                {/* Google Workspace Account */}
+                <div className="pt-4 border-t border-border/50 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-foreground">Google Workspace Account</p>
+                    <p className="text-[11px] text-muted-foreground">Sign in to connect Calendar, Gmail & Drive</p>
+                  </div>
+                  <WorkspaceConnectButton />
                 </div>
               </div>
             )}

@@ -48,13 +48,13 @@ export function WorkspaceConnectButton() {
 
   if (user && token) {
     return (
-      <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 px-3 py-1.5 rounded-xl text-xs">
-        <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-        <span className="font-medium truncate max-w-[120px] sm:max-w-[180px]">{user.email || 'Google Connected'}</span>
+      <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 px-3 py-1.5 rounded-full text-xs">
+        <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+        <span className="font-medium truncate max-w-[140px] sm:max-w-[220px]">{user.email || 'Google Connected'}</span>
         <button
           onClick={handleDisconnect}
-          className="p-1 text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md transition-colors"
-          title="Sign out"
+          className="p-1 text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-full transition-colors cursor-pointer"
+          title="Sign out of Google Workspace"
         >
           <LogOut size={12} />
         </button>
