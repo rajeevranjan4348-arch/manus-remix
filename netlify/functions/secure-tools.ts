@@ -41,6 +41,30 @@ function safeEqual(a: string, b: string): boolean {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
+function validateCommandArgs(command: CommandId, args: Record<string, unknown>): Record<string, unknown> | null {
+  if (command === 'open_app') {
+    const packageName = args.packageName;
+    const allowedPackages = new Set([
+      'com.android.settings', 'com.whatsapp', 'com.google.android.youtube',
+      'com.google.android.apps.maps', 'com.android.chrome', 'com.google.android.gm'
+    ]);
+    return typeof packageName === 'string' && allowedPackages.has(packageName) ? { packageName } : null;
+  }
+  if (command === 'set_volume') {
+    const level = args.level;
+    return typeof level === 'number' && Number.isInteger(level) && level >= 0 && level <= 100 ? { level } : null;
+  }
+  if (command === 'set_torch') {
+    return typeof args.enabled === 'boolean' ? { enabled: args.enabled } : null;
+  }
+  if (command === 'open_settings') {
+    const page = args.page;
+    const allowedPages = new Set(['main', 'wifi', 'bluetooth', 'display', 'sound', 'privacy']);
+    return typeof page === 'string' && allowedPages.has(page) ? { page } : null;
+  }
+  return null;
+}
+
 function issueApproval(uid: string, command: CommandId, args: Record<string, unknown>) {
   const payload = Buffer.from(JSON.stringify({
     uid, command, args, exp: Date.now() + 2 * 60 * 1000, nonce: crypto.randomUUID(),
@@ -69,8 +93,10 @@ export default async (req: Request) => {
     const body: any = await req.json();
     if (body.action === 'request-approval') {
       const command = body.command as CommandId;
-      const args = body.args && typeof body.args === 'object' && !Array.isArray(body.args) ? body.args : {};
+      const rawArgs = body.args && typeof body.args === 'object' && !Array.isArray(body.args) ? body.args : {};
       if (!allowedCommands.has(command)) return json({ error: 'This device command is not allowlisted.' }, 400);
+      const args = validateCommandArgs(command, rawArgs);
+      if (!args) return json({ error: 'Command arguments are invalid or outside the allowlist.' }, 400);
       if (JSON.stringify(args).length > 1000) return json({ error: 'Command arguments are too large.' }, 413);
       return json({
         approved: false,
