@@ -18,7 +18,8 @@ This integration is based on an analysis of [public-apis/public-apis](https://gi
 
 ## Files added
 
-- `src/lib/publicApiCatalog.ts`: typed catalog, example endpoints, category helpers, and agent-routing guidance. Wikipedia now has separate search and article-summary entries.
+- `src/lib/publicApiCatalog.ts`: typed catalog of 9 selected endpoints, example URLs, and agent-routing guidance. Wikipedia has separate search and article-summary entries.
+- `src/lib/publicApiDirectory.ts`: index of the 51 categories visible in the supplied screenshots, with a link to the upstream directory. This is a category index—not 51 working integrations or API keys.
 - `src/hooks/useAgentTask.ts`: includes the catalog guidance in the existing agent system prompt, so the agent can select the appropriate API through its existing `fetch_url` / `web_search` tools.
 
 ## Environment configuration
@@ -41,4 +42,4 @@ This integration is based on an analysis of [public-apis/public-apis](https://gi
 
 ## Upstream directory
 
-The full upstream directory is intentionally not copied wholesale into the app runtime: it contains hundreds of unrelated APIs with varying authentication, terms, reliability, and data sensitivity. The catalog selects services that fit Manus' existing research and question-answering workflows. More providers should be added only with a clear use case and safe credential handling.
+The upstream source is [public-apis/public-apis](https://github.com/public-apis/public-apis). Manus Remix now includes a category index in `src/lib/publicApiDirectory.ts` matching the categories shown in the screenshots, while `src/lib/publicApiCatalog.ts` contains 9 selected API endpoint integrations. The full upstream directory is not copied wholesale into the runtime because it contains hundreds of unrelated providers with different authentication, pricing, terms, CORS behavior, and reliability. Each additional provider needs its own verified endpoint and implemented call path. API keys are issued by the individual providers; they cannot be imported from the directory and must be configured securely when required.
