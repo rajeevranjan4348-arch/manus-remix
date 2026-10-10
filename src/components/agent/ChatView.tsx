@@ -27,6 +27,7 @@ import { FileAttachments } from './FileAttachments';
 import { HorizontalLoader } from '../common/HorizontalLoader';
 import { AttachmentMenu } from '../chat/AttachmentMenu';
 import { ThoughtProcess } from './ThoughtProcess';
+import { AdaptiveResponseWidgets } from './AdaptiveResponseWidgets';
 import { Step } from '@/hooks/useAgentTask';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
@@ -395,6 +396,10 @@ export function ChatView({
                       <MarkdownRenderer content={cleanedContent} />
                     </div>
                   ) : null}
+                  {cleanedContent && <AdaptiveResponseWidgets
+                    question={[...messages.slice(0, i)].reverse().find((item: any) => item.role === 'user')?.content || prompt}
+                    answer={cleanedContent}
+                  />}
                 </div>
               </div>
             );
