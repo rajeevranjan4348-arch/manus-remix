@@ -20,6 +20,13 @@ This integration is based on an analysis of [public-apis/public-apis](https://gi
 - `src/lib/publicApiCatalog.ts`: typed catalog, example endpoints, category helpers, and agent-routing guidance.
 - `src/hooks/useAgentTask.ts`: includes the catalog guidance in the existing agent system prompt, so the agent can select the appropriate API through its existing `fetch_url` / `web_search` tools.
 
+## Environment configuration
+
+- The existing `.env.example` keeps the app's current Blink variables and adds optional public API endpoint overrides.
+- Copy `.env.example` to `.env.local` for local development; the catalog falls back to built-in endpoint defaults if overrides are unset.
+- In Netlify, add these non-secret variables under **Site configuration → Environment variables** only if you need to override defaults; they are optional.
+- Never put private credentials in `VITE_*` variables because Vite bundles them into browser-visible code. A provider requiring a secret needs a server-side environment variable and server-side proxy.
+
 ## Runtime and safety rules
 
 - Existing UI and routes remain unchanged.
