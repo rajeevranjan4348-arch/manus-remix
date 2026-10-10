@@ -436,28 +436,8 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                     aria-label="Add attachments or options"
                   >
                     <Plus size={18} className="text-[var(--icon-primary)]"/>
-                    {(uploadedFile || isThinkHarder) && (
-                      <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-4 h-[2px] bg-black dark:bg-white rounded-full shadow-[0_0_8px_rgba(0,0,0,0.3)]" />
-                    )}
                   </button>
                 </AttachmentMenu>
-                <div 
-                  onClick={() => setIsThinkHarder(prev => !prev)}
-                  title={isThinkHarder ? "Think harder enabled (click to toggle)" : "Toggle Think harder mode"}
-                  className={cn(
-                    "flex items-center gap-[4px] p-[8px] pl-[8px] cursor-pointer rounded-[100px] border border-[var(--border-main)] hover:bg-[var(--fill-tsp-gray-main)] relative transition-colors",
-                    isThinkHarder && "bg-black/10 dark:bg-white/10 border-black/40 dark:border-white/40"
-                  )} 
-                  aria-expanded="false" 
-                  aria-haspopup="dialog"
-                >
-                  <div className="flex items-center gap-[4px]">
-                    <Cable size={16} className={cn("text-[var(--icon-primary)]", isThinkHarder && "text-black dark:text-white font-bold")}/>
-                  </div>
-                  {activeIntent && (
-                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-4 h-[2px] bg-black dark:bg-white rounded-full shadow-[0_0_8px_rgba(0,0,0,0.3)]" />
-                  )}
-                </div>
               </div>
               <div className="min-w-0 flex gap-2 ml-auto flex-shrink-0 items-center">
                 <div className="flex items-center gap-2">

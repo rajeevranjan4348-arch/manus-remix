@@ -3,6 +3,14 @@ import { useAgent, Agent, webSearch, sandboxTools, fetchUrl, useBlinkAuth } from
 import { blink } from '@/lib/blink';
 import type { Sandbox } from '@blinkdotnew/sdk';
 import { getSettings, playNotificationSound } from '@/lib/settingsStore';
+import {
+  saveMessage,
+  getMessages,
+  createConversation,
+  updateConversation,
+  cleanChatTitle,
+  StoredMessage,
+} from '@/lib/chatDatabase';
 
 export interface Step {
   id: string;
@@ -22,7 +30,7 @@ export interface ChartData {
 }
 
 export function useAgentTask() {
-  const { isAuthenticated } = useBlinkAuth();
+  const { isAuthenticated, user } = useBlinkAuth();
   const [taskId, setTaskId] = useState<string | null>(null);
   const [currentTask, setCurrentTask] = useState<{ prompt: string; options: any; fileData?: string; url?: string } | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
@@ -30,7 +38,10 @@ export function useAgentTask() {
   const [result, setResult] = useState<any>(null);
   const [chartData, setChartData] = useState<ChartData | null>(null);
   const [sandbox, setSandbox] = useState<Sandbox | null>(null);
+  const [persistentMessages, setPersistentMessages] = useState<any[]>([]);
   const messagesRef = useRef<any[]>([]);
+  const currentTaskIdRef = useRef<string | null>(null);
+  currentTaskIdRef.current = taskId;
 
   // Initialize sandbox
   useEffect(() => {
@@ -183,10 +194,40 @@ export function useAgentTask() {
       setResult(finalResult);
       setTaskStatus('completed');
       
+      const activeId = taskId || currentTaskIdRef.current;
+      const assistantText = finalResult.content || text;
+
+      // Save assistant message to permanent database immediately upon completion
+      if (activeId && assistantText) {
+        const assistantMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+        const assistantMsg = {
+          id: assistantMsgId,
+          role: 'assistant' as const,
+          content: assistantText,
+          timestamp: new Date().toISOString(),
+          status: 'success' as const
+        };
+        setPersistentMessages(prev => {
+          if (prev.some(m => m.id === assistantMsgId || (m.role === 'assistant' && m.content === assistantText))) {
+            return prev;
+          }
+          return [...prev, assistantMsg];
+        });
+
+        saveMessage({
+          id: assistantMsgId,
+          conversationId: activeId,
+          userId: user?.id || 'usr_manus_default',
+          role: 'assistant',
+          content: assistantText,
+          status: 'success'
+        }).catch(err => console.warn('Failed to save assistant response to DB:', err));
+      }
+
       // Save to database
-      if (taskId) {
+      if (activeId) {
         try {
-          await (blink.db as any).tasks.update(taskId, {
+          await (blink.db as any).tasks.update(activeId, {
             status: 'completed',
             result: JSON.stringify(finalResult),
             steps: JSON.stringify(steps.map(s => ({ ...s, status: 'completed' })))
@@ -244,9 +285,34 @@ export function useAgentTask() {
       setSteps(prev => prev.map(s => ({ ...s, status: 'completed' as const })));
       playNotificationSound('success');
 
-      if (taskId) {
+      const activeId = taskId || currentTaskIdRef.current;
+      if (activeId && fallbackContent) {
+        const assistantMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+        const assistantMsg = {
+          id: assistantMsgId,
+          role: 'assistant' as const,
+          content: fallbackContent,
+          timestamp: new Date().toISOString(),
+          status: 'success' as const
+        };
+        setPersistentMessages(prev => {
+          if (prev.some(m => m.id === assistantMsgId || (m.role === 'assistant' && m.content === fallbackContent))) {
+            return prev;
+          }
+          return [...prev, assistantMsg];
+        });
+
+        saveMessage({
+          id: assistantMsgId,
+          conversationId: activeId,
+          userId: user?.id || 'usr_manus_default',
+          role: 'assistant',
+          content: fallbackContent,
+          status: 'success'
+        }).catch(() => {});
+
         (blink.db as any).tasks
-          .update(taskId, {
+          .update(activeId, {
             status: 'completed',
             result: JSON.stringify(finalResult),
             steps: JSON.stringify(steps.map(s => ({ ...s, status: 'completed' as const }))),
@@ -336,6 +402,37 @@ export function useAgentTask() {
     setTaskStatus('running');
     setResult(null); // Clear previous result card while running new prompt
 
+    const activeId = taskId || currentTaskIdRef.current;
+    const userMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+    const userMsg = {
+      id: userMsgId,
+      role: 'user' as const,
+      content,
+      timestamp: new Date().toISOString(),
+      status: 'success' as const
+    };
+
+    // Optimistically record user message immediately in state (avoiding duplicate adjacent appends)
+    setPersistentMessages(prev => {
+      const last = prev[prev.length - 1];
+      if (last && last.role === 'user' && last.content.trim() === content.trim()) {
+        return prev;
+      }
+      return [...prev, userMsg];
+    });
+
+    // Save user message to database BEFORE starting AI generation (Requirement 3)
+    if (activeId) {
+      saveMessage({
+        id: userMsgId,
+        conversationId: activeId,
+        userId: user?.id || 'usr_manus_default',
+        role: 'user',
+        content,
+        status: 'success'
+      }).catch(err => console.warn('Failed to save user message to DB:', err));
+    }
+
     // Check if content specifically requests a graph or chart
     const lower = content.toLowerCase();
     if (lower.includes('graph') || lower.includes('chart') || lower.includes('plot') || lower.includes('diagram') || lower.includes('bar') || lower.includes('pie') || lower.includes('line')) {
@@ -344,7 +441,7 @@ export function useAgentTask() {
     } else {
       agentSendMessage(content);
     }
-  }, [agentSendMessage]);
+  }, [agentSendMessage, taskId, user]);
 
   const startTask = useCallback(async (prompt: string, options: any) => {
     // Start fresh
@@ -354,30 +451,52 @@ export function useAgentTask() {
       setMessages([]);
     }
 
-    // Create task in DB immediately
+    // Create task & conversation in DB immediately
     let newTaskId: string | null = null;
-    try {
-      const user = await blink.auth.me();
-      if (user) {
-        const taskRecord = await (blink.db as any).tasks.create({
-          userId: user.id,
-          prompt: prompt,
-          outputFormat: options.format,
-          chartType: options.chartType,
-          projectId: options.projectId || null,
-          status: 'running',
-          result: null,
-          steps: JSON.stringify([])
-        });
-        newTaskId = taskRecord.id;
-        setTaskId(newTaskId);
+    const userMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+    const userMsg = {
+      id: userMsgId,
+      role: 'user' as const,
+      content: prompt,
+      timestamp: new Date().toISOString(),
+      status: 'success' as const
+    };
 
-        if (options.projectId) {
-          try {
-            const { addTaskToProject } = await import('@/lib/projectStore');
-            addTaskToProject(options.projectId, newTaskId);
-          } catch {}
-        }
+    setPersistentMessages([userMsg]);
+
+    try {
+      const activeUser = user || (await blink.auth.me());
+      const userId = activeUser?.id || 'usr_manus_default';
+      const taskRecord = await (blink.db as any).tasks.create({
+        userId,
+        prompt: prompt,
+        outputFormat: options.format,
+        chartType: options.chartType,
+        projectId: options.projectId || null,
+        status: 'running',
+        result: null,
+        steps: JSON.stringify([]),
+        skipInitialMessage: true,
+      });
+      newTaskId = taskRecord.id;
+      setTaskId(newTaskId);
+      currentTaskIdRef.current = newTaskId;
+
+      // Save user message to DB before AI generation (Requirement 3)
+      await saveMessage({
+        id: userMsgId,
+        conversationId: newTaskId,
+        userId,
+        role: 'user',
+        content: prompt,
+        status: 'success'
+      });
+
+      if (options.projectId) {
+        try {
+          const { addTaskToProject } = await import('@/lib/projectStore');
+          addTaskToProject(options.projectId, newTaskId);
+        } catch {}
       }
     } catch (e) {
       console.error('Failed to create task in DB:', e);
@@ -480,15 +599,32 @@ export function useAgentTask() {
     
     return newTaskId;
 
-  }, [isAuthenticated, agentSendMessage]);
+  }, [isAuthenticated, user, agentSendMessage]);
 
   const loadTask = useCallback(async (id: string) => {
     try {
+      setTaskId(id);
+      currentTaskIdRef.current = id;
+
+      // 1. Load permanent messages from IndexedDB / chatDatabase
+      const storedMsgs = await getMessages(id);
+      if (storedMsgs && storedMsgs.length > 0) {
+        setPersistentMessages(
+          storedMsgs.map(m => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            timestamp: m.timestamp,
+            status: m.status
+          }))
+        );
+      }
+
+      // 2. Load task data
       const task = await (blink.db as any).tasks.get(id);
       if (task) {
-        setTaskId(task.id);
         setCurrentTask({ 
-          prompt: task.prompt, 
+          prompt: task.prompt || task.title, 
           options: { format: task.outputFormat, chartType: task.chartType } 
         });
         setTaskStatus(task.status as any);
@@ -504,8 +640,8 @@ export function useAgentTask() {
             const parsedResult = JSON.parse(task.result);
             setResult(parsedResult);
             setChartData(parsedResult.chartData);
-            if (parsedResult.messages && setMessages) {
-                setMessages(parsedResult.messages);
+            if ((!storedMsgs || storedMsgs.length === 0) && parsedResult.messages && parsedResult.messages.length > 0) {
+              setPersistentMessages(parsedResult.messages);
             }
           } catch { setResult(null); }
         }
@@ -517,11 +653,13 @@ export function useAgentTask() {
 
   const resetTask = () => {
     setTaskId(null);
+    currentTaskIdRef.current = null;
     setCurrentTask(null);
     setTaskStatus('idle');
     setSteps([]);
     setResult(null);
     setChartData(null);
+    setPersistentMessages([]);
     if (clearMessages) {
       clearMessages();
     } else if (setMessages) {
@@ -568,6 +706,48 @@ Report generated by Manus AI Workspace
     }
   }, [isAuthenticated]);
 
+  const displayMessages = useMemo(() => {
+    let rawList: any[] = [];
+    if (persistentMessages.length === 0) {
+      rawList = messages;
+    } else if (isLoading && messages.length > 0) {
+      const lastAgentMsg = messages[messages.length - 1];
+      if (lastAgentMsg.role === 'assistant') {
+        const lastPersistent = persistentMessages[persistentMessages.length - 1];
+        if (lastPersistent && lastPersistent.role === 'assistant') {
+          rawList = persistentMessages.map((m, idx) =>
+            idx === persistentMessages.length - 1 ? { ...m, content: lastAgentMsg.content } : m
+          );
+        } else {
+          rawList = [...persistentMessages, lastAgentMsg];
+        }
+      } else {
+        rawList = persistentMessages;
+      }
+    } else {
+      rawList = persistentMessages;
+    }
+
+    // Strict deduplication: remove identical consecutive messages
+    const deduped: any[] = [];
+    const seenIds = new Set<string>();
+    for (const msg of rawList) {
+      if (!msg) continue;
+      if (msg.id && seenIds.has(msg.id)) continue;
+      const prev = deduped[deduped.length - 1];
+      if (
+        prev &&
+        prev.role === msg.role &&
+        (prev.content || '').trim() === (msg.content || '').trim()
+      ) {
+        continue;
+      }
+      if (msg.id) seenIds.add(msg.id);
+      deduped.push(msg);
+    }
+    return deduped;
+  }, [persistentMessages, messages, isLoading]);
+
   return {
     taskId,
     loadTask,
@@ -581,7 +761,7 @@ Report generated by Manus AI Workspace
     taskStatus,
     result,
     chartData,
-    messages,
+    messages: displayMessages,
     isLoading
   };
 }

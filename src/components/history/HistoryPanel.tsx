@@ -384,12 +384,13 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
     setItemToDelete({
       type: 'session',
       id: taskId,
-      name: title || (targetTask ? formatTitle(targetTask) : 'Chat Session')
+      name: title || (targetTask ? formatTitle(targetTask) : 'Chat Session'),
     });
   };
 
   const confirmDeleteItem = async () => {
     if (!itemToDelete) return;
+
     setIsDeleting(true);
     try {
       if (itemToDelete.type === 'session') {
@@ -909,10 +910,17 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
         )}
 
         {/* Delete Confirmation Alert Dialog */}
-        <AlertDialog open={!!itemToDelete} onOpenChange={(open) => !open && setItemToDelete(null)}>
+        <AlertDialog 
+          open={!!itemToDelete} 
+          onOpenChange={(open) => {
+            if (!open) {
+              setItemToDelete(null);
+            }
+          }}
+        >
           <AlertDialogContent className="max-w-md rounded-2xl p-6 bg-card border border-border">
             <AlertDialogHeader>
-              <div className="w-11 h-11 rounded-2xl bg-destructive/10 text-destructive flex items-center justify-center mb-2 mx-auto sm:mx-0">
+              <div className="w-11 h-11 rounded-2xl flex items-center justify-center mb-2 mx-auto sm:mx-0 bg-destructive/10 text-destructive">
                 <Trash2 size={22} />
               </div>
               <AlertDialogTitle className="text-base sm:text-lg font-bold text-foreground">
@@ -925,10 +933,13 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
                   : ' This file will be permanently removed from your shared workspace assets.'}
               </AlertDialogDescription>
             </AlertDialogHeader>
+
             <AlertDialogFooter className="mt-4 gap-2 sm:gap-2">
               <AlertDialogCancel 
                 disabled={isDeleting}
-                onClick={() => setItemToDelete(null)}
+                onClick={() => {
+                  setItemToDelete(null);
+                }}
                 className="rounded-xl text-xs cursor-pointer border border-border hover:bg-muted"
               >
                 Cancel

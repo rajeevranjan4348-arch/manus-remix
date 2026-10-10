@@ -38,6 +38,7 @@ import { useBlinkAuth } from '@blinkdotnew/react';
 import { blink } from '@/lib/blink';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import { renameConversation } from '@/lib/chatDatabase';
 import { Project } from '@/types/project';
 import { getProjects, deleteProject, addTaskToProject } from '@/lib/projectStore';
 import { ProjectModal } from '@/components/projects/ProjectModal';
@@ -168,8 +169,11 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [taskToDelete, setTaskToDelete] = useState<{ id: string; title: string } | null>(null);
+  const [taskToRename, setTaskToRename] = useState<{ id: string; title: string } | null>(null);
+  const [newChatTitle, setNewChatTitle] = useState('');
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [isDeletingTask, setIsDeletingTask] = useState(false);
+  const [isRenamingTask, setIsRenamingTask] = useState(false);
   
   // Projects states
   const [projects, setProjects] = useState<Project[]>([]);
@@ -193,11 +197,18 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
     const handleOpenSettingsEvent = () => {
       setIsSettingsOpen(true);
     };
+    const handleChatDbUpdated = () => {
+      loadTasks();
+    };
     window.addEventListener('manus_projects_updated', handleProjectsUpdated);
     window.addEventListener('manus_open_settings', handleOpenSettingsEvent);
+    window.addEventListener('chat_db_updated', handleChatDbUpdated);
+    window.addEventListener('manus_tasks_updated', handleChatDbUpdated);
     return () => {
       window.removeEventListener('manus_projects_updated', handleProjectsUpdated);
       window.removeEventListener('manus_open_settings', handleOpenSettingsEvent);
+      window.removeEventListener('chat_db_updated', handleChatDbUpdated);
+      window.removeEventListener('manus_tasks_updated', handleChatDbUpdated);
     };
   }, []);
 
@@ -217,6 +228,29 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
     }
   };
 
+  const handleStartRename = (taskId: string, e: React.MouseEvent, currentTitle: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setTaskToRename({ id: taskId, title: currentTitle });
+    setNewChatTitle(currentTitle);
+  };
+
+  const confirmRenameTask = async () => {
+    if (!taskToRename || !newChatTitle.trim()) return;
+    setIsRenamingTask(true);
+    try {
+      await renameConversation(taskToRename.id, newChatTitle.trim());
+      await (blink.db as any).tasks.update(taskToRename.id, { title: newChatTitle.trim() });
+      setTasks(prev => prev.map(t => t.id === taskToRename.id ? { ...t, title: newChatTitle.trim() } : t));
+      toast.success('Chat renamed successfully');
+      setTaskToRename(null);
+    } catch (error) {
+      toast.error('Failed to rename chat');
+    } finally {
+      setIsRenamingTask(false);
+    }
+  };
+
   const handleDeleteTask = (taskId: string, e: React.MouseEvent, title?: string) => {
     e.preventDefault();
     e.stopPropagation();
@@ -229,6 +263,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
 
   const confirmDeleteTask = async () => {
     if (!taskToDelete) return;
+
     setIsDeletingTask(true);
     try {
       await (blink.db as any).tasks.delete(taskToDelete.id);
@@ -747,6 +782,14 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                           </DropdownMenuItem>
                           
                           <DropdownMenuItem
+                            onClick={(e) => handleStartRename(task.id, e as any, formatTaskTitle(task))}
+                            className="flex items-center gap-2 cursor-pointer text-xs"
+                          >
+                            <Edit3 size={13} />
+                            <span>Rename chat</span>
+                          </DropdownMenuItem>
+
+                          <DropdownMenuItem
                             onClick={(e) => handleCopyTaskId(task.id, e as any)}
                             className="flex items-center gap-2 cursor-pointer text-xs"
                           >
@@ -849,10 +892,17 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
       />
 
       {/* Delete Session Confirmation Alert Dialog */}
-      <AlertDialog open={!!taskToDelete} onOpenChange={(open) => !open && setTaskToDelete(null)}>
+      <AlertDialog 
+        open={!!taskToDelete} 
+        onOpenChange={(open) => {
+          if (!open) {
+            setTaskToDelete(null);
+          }
+        }}
+      >
         <AlertDialogContent className="max-w-md rounded-2xl p-6 bg-card border border-border">
           <AlertDialogHeader>
-            <div className="w-11 h-11 rounded-2xl bg-destructive/10 text-destructive flex items-center justify-center mb-2 mx-auto sm:mx-0">
+            <div className="w-11 h-11 rounded-2xl flex items-center justify-center mb-2 mx-auto sm:mx-0 bg-destructive/10 text-destructive">
               <Trash2 size={22} />
             </div>
             <AlertDialogTitle className="text-base sm:text-lg font-bold text-foreground">
@@ -862,10 +912,13 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
               Are you sure you want to delete <span className="font-semibold text-foreground">"{taskToDelete?.title}"</span>? This action cannot be undone and all data from this session will be permanently removed.
             </AlertDialogDescription>
           </AlertDialogHeader>
+
           <AlertDialogFooter className="mt-4 gap-2 sm:gap-2">
             <AlertDialogCancel 
               disabled={isDeletingTask}
-              onClick={() => setTaskToDelete(null)}
+              onClick={() => {
+                setTaskToDelete(null);
+              }}
               className="rounded-xl text-xs cursor-pointer border border-border hover:bg-muted"
             >
               Cancel

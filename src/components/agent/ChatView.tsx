@@ -359,48 +359,67 @@ export function ChatView({
       <div ref={containerRef} className="flex-1 overflow-y-auto px-4 sm:px-20 py-6 space-y-8 custom-scrollbar scroll-smooth">
         
         {/* Render Conversation Messages in Chronological Order */}
-        {messages.map((msg, i) => {
-          if (msg.role === 'user') {
-            return (
-              <div key={msg.id || i} className="flex justify-end my-2">
-                <div className="bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium max-w-[80%] shadow-xs leading-relaxed">
-                  {cleanUserMessage(msg.content)}
-                </div>
-              </div>
-            );
+        {(() => {
+          const list: any[] = [];
+          const seenIds = new Set<string>();
+          for (const msg of messages) {
+            if (!msg) continue;
+            if (msg.id && seenIds.has(msg.id)) continue;
+            const prev = list[list.length - 1];
+            if (
+              prev &&
+              prev.role === msg.role &&
+              cleanUserMessage(prev.content || '').trim().toLowerCase() === cleanUserMessage(msg.content || '').trim().toLowerCase()
+            ) {
+              continue;
+            }
+            if (msg.id) seenIds.add(msg.id);
+            list.push(msg);
           }
 
-          if (msg.role === 'assistant') {
-            const raw = msg.content || '';
-            const { thought, content: extracted } = extractThoughtProcess(raw);
-            const cleanedContent = cleanMessageContent(extracted || raw);
-            if (!cleanedContent && !thought && raw && (result || chartData)) return null;
-
-            return (
-              <div key={msg.id || i} className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-1">
-                <div className="flex-1 space-y-3 min-w-0">
-                  <div className="flex items-center gap-3">
-                    <ManusLogo showBadge={true} />
+          return list.map((msg, i) => {
+            if (msg.role === 'user') {
+              return (
+                <div key={msg.id || i} className="flex justify-end my-2">
+                  <div className="bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium max-w-[80%] shadow-xs leading-relaxed">
+                    {cleanUserMessage(msg.content)}
                   </div>
-
-                  {thought && (
-                    <ThoughtProcess
-                      thoughtText={thought}
-                      defaultExpanded={false}
-                    />
-                  )}
-
-                  {cleanedContent ? (
-                    <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
-                      <MarkdownRenderer content={cleanedContent} />
-                    </div>
-                  ) : null}
                 </div>
-              </div>
-            );
-          }
-          return null;
-        })}
+              );
+            }
+
+            if (msg.role === 'assistant') {
+              const raw = msg.content || '';
+              const { thought, content: extracted } = extractThoughtProcess(raw);
+              const cleanedContent = cleanMessageContent(extracted || raw);
+              if (!cleanedContent && !thought && raw && (result || chartData)) return null;
+
+              return (
+                <div key={msg.id || i} className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-1">
+                  <div className="flex-1 space-y-3 min-w-0">
+                    <div className="flex items-center gap-3">
+                      <ManusLogo showBadge={true} />
+                    </div>
+
+                    {thought && (
+                      <ThoughtProcess
+                        thoughtText={thought}
+                        defaultExpanded={false}
+                      />
+                    )}
+
+                    {cleanedContent ? (
+                      <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
+                        <MarkdownRenderer content={cleanedContent} />
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            }
+            return null;
+          });
+        })()}
 
         {/* Steps / Task Progress */}
         {steps.length > 0 && (
@@ -412,40 +431,50 @@ export function ChatView({
           </div>
         )}
 
-        {/* Final Result (Chart / Interactive Visualizations / Files) */}
-        {result && (
-          <div className="flex gap-4 max-w-3xl mx-auto my-4 animate-in fade-in slide-in-from-bottom-3 duration-500">
-            <div className="w-8 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <div className="border border-border/60 rounded-2xl bg-white dark:bg-card overflow-hidden shadow-sm hover:shadow-md transition-all p-5">
-                {/* Show Chart if available */}
-                {(result.type === 'graph' || result.chartData || chartData) && (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                      <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-black dark:bg-white inline-block animate-pulse" />
-                        {result.detectedChartType ? `${result.detectedChartType.toUpperCase()} CHART` : 'DATA VISUALIZATION'}
-                      </span>
+        {/* Final Result (Chart / Interactive Visualizations / Files) - Only rendered if valid chart or files exist */}
+        {(() => {
+          const hasChart = Boolean(
+            (result?.type === 'graph' || result?.chartData || chartData) &&
+            ((result?.chartData?.labels && result.chartData.labels.length > 0) || (chartData?.labels && chartData.labels.length > 0))
+          );
+          const hasFiles = Boolean(result?.files && Array.isArray(result.files) && result.files.length > 0);
+
+          if (!result || (!hasChart && !hasFiles)) return null;
+
+          return (
+            <div className="flex gap-4 max-w-3xl mx-auto my-4 animate-in fade-in slide-in-from-bottom-3 duration-500">
+              <div className="w-8 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="border border-border/60 rounded-2xl bg-white dark:bg-card overflow-hidden shadow-sm hover:shadow-md transition-all p-5">
+                  {/* Show Chart if available */}
+                  {hasChart && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between border-b border-border/40 pb-2">
+                        <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-black dark:bg-white inline-block animate-pulse" />
+                          {result.detectedChartType ? `${result.detectedChartType.toUpperCase()} CHART` : 'DATA VISUALIZATION'}
+                        </span>
+                      </div>
+                      <div className="h-[320px] w-full pt-2">
+                        <ChartResult 
+                          type={result.detectedChartType || result.type || 'bar'} 
+                          data={result.chartData || chartData} 
+                        />
+                      </div>
                     </div>
-                    <div className="h-[320px] w-full pt-2">
-                      <ChartResult 
-                        type={result.detectedChartType || result.type || 'bar'} 
-                        data={result.chartData || chartData} 
-                      />
+                  )}
+                  
+                  {/* Show Files if available */}
+                  {hasFiles && (
+                    <div className={cn("pt-2", hasChart && "mt-4 pt-4 border-t border-border/40")}>
+                      <FileAttachments files={result.files} />
                     </div>
-                  </div>
-                )}
-                
-                {/* Show Files if available */}
-                {result.files && result.files.length > 0 && (
-                  <div className="mt-4 pt-4 border-t border-border/40">
-                    <FileAttachments files={result.files} />
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Horizontal Loader Animation for Generating */}
         {isAssistantWorking && (
@@ -531,14 +560,8 @@ export function ChatView({
               aria-label="Add attachments or options"
             >
               <Plus size={20} />
-              {(attachedFile || isThinkHarder) && (
-                <div className="absolute bottom-1 right-1 w-2 h-2 bg-black dark:bg-white rounded-full" />
-              )}
             </button>
           </AttachmentMenu>
-          <button className="p-2 hover:bg-manus-soft dark:hover:bg-accent rounded-full transition-colors text-muted-foreground">
-            <Workflow size={20} />
-          </button>
           <input 
             value={input}
             onChange={(e) => setInput(e.target.value)}

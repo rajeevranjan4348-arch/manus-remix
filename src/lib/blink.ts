@@ -247,37 +247,177 @@ if (typeof window !== 'undefined' && window.fetch) {
   };
 }
 
+import {
+  createConversation,
+  getConversation,
+  updateConversation,
+  deleteConversation,
+  listConversations,
+  saveMessage,
+  getMessages,
+  cleanChatTitle,
+} from './chatDatabase';
+
 const localTasksDb = {
   list: async (opts?: any) => {
-    let list = getStoredTasks();
-    if (opts?.where?.userId) {
-      list = list.filter((t) => !t.userId || t.userId === opts.where.userId);
+    try {
+      const dbList = await listConversations({
+        userId: opts?.where?.userId,
+        limit: opts?.limit,
+        searchQuery: opts?.searchQuery,
+      });
+
+      // Map DB conversations to TaskHistory shape expected by existing UI
+      const mapped = await Promise.all(
+        dbList.map(async (c) => {
+          let messages: any[] = [];
+          try {
+            messages = await getMessages(c.id);
+          } catch {}
+          return {
+            id: c.id,
+            userId: c.userId,
+            prompt: c.title,
+            title: c.title,
+            outputFormat: c.outputFormat || 'chat',
+            chartType: c.chartType || 'auto',
+            projectId: c.projectId,
+            status: c.status,
+            result: typeof c.result === 'string' ? c.result : JSON.stringify(c.result || {}),
+            steps: typeof c.steps === 'string' ? c.steps : JSON.stringify(c.steps || []),
+            created_at: c.createdAt,
+            updated_at: c.updatedAt,
+            messages,
+          };
+        })
+      );
+
+      // Merge with any tasks in localStorage if not already present
+      const stored = getStoredTasks();
+      const existingIds = new Set(mapped.map((t) => t.id));
+      for (const t of stored) {
+        if (!existingIds.has(t.id)) {
+          mapped.push(t);
+        }
+      }
+
+      if (opts?.where?.userId) {
+        return mapped.filter((t) => !t.userId || t.userId === opts.where.userId);
+      }
+      if (opts?.orderBy?.created_at === 'desc') {
+        mapped.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+      }
+      if (opts?.limit && typeof opts.limit === 'number') {
+        return mapped.slice(0, opts.limit);
+      }
+      return mapped;
+    } catch (e) {
+      console.warn('[BlinkDB] Fallback to stored tasks:', e);
+      let list = getStoredTasks();
+      if (opts?.where?.userId) {
+        list = list.filter((t) => !t.userId || t.userId === opts.where.userId);
+      }
+      if (opts?.orderBy?.created_at === 'desc') {
+        list.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+      }
+      if (opts?.limit && typeof opts.limit === 'number') {
+        list = list.slice(0, opts.limit);
+      }
+      return list;
     }
-    if (opts?.orderBy?.created_at === 'desc') {
-      list.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
-    }
-    if (opts?.limit && typeof opts.limit === 'number') {
-      list = list.slice(0, opts.limit);
-    }
-    return list;
   },
   get: async (id: string) => {
+    try {
+      const conv = await getConversation(id);
+      const messages = await getMessages(id);
+      if (conv) {
+        return {
+          id: conv.id,
+          userId: conv.userId,
+          prompt: conv.title,
+          title: conv.title,
+          outputFormat: conv.outputFormat || 'chat',
+          chartType: conv.chartType || 'auto',
+          projectId: conv.projectId,
+          status: conv.status,
+          result: typeof conv.result === 'string' ? conv.result : JSON.stringify(conv.result || {}),
+          steps: typeof conv.steps === 'string' ? conv.steps : JSON.stringify(conv.steps || []),
+          created_at: conv.createdAt,
+          updated_at: conv.updatedAt,
+          messages,
+        };
+      }
+    } catch {}
+
     const list = getStoredTasks();
-    return list.find((t) => t.id === id) || null;
+    const found = list.find((t) => t.id === id);
+    if (found) {
+      try {
+        const msgs = await getMessages(id);
+        if (msgs.length > 0) {
+          found.messages = msgs;
+        }
+      } catch {}
+    }
+    return found || null;
   },
   create: async (data: any) => {
-    const id = 'task_' + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
+    const id = data.id || 'chat_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+    const title = data.title || cleanChatTitle(data.prompt || 'New Conversation');
+    const now = new Date().toISOString();
+
     const newTask = {
       id,
-      created_at: new Date().toISOString(),
+      created_at: now,
+      updated_at: now,
+      prompt: data.prompt || title,
+      title,
       ...data,
     };
+
+    try {
+      await createConversation({
+        id,
+        userId: data.userId || 'usr_manus_default',
+        title,
+        mode: data.mode || 'chat',
+        outputFormat: data.outputFormat,
+        chartType: data.chartType,
+        projectId: data.projectId || null,
+        metadata: data,
+      });
+
+      // If initial user prompt is present and caller didn't manage message saving, save initial message in DB
+      if (data.prompt && !data.skipInitialMessage) {
+        const existingMsgs = await getMessages(id);
+        if (existingMsgs.length === 0) {
+          await saveMessage({
+            conversationId: id,
+            userId: data.userId || 'usr_manus_default',
+            role: 'user',
+            content: data.prompt,
+            status: 'success',
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[BlinkDB] Permanent conversation creation notice:', e);
+    }
+
     const list = getStoredTasks();
     list.unshift(newTask);
     saveStoredTasks(list);
     return newTask;
   },
   update: async (id: string, updateData: any) => {
+    try {
+      const dbUpdates: any = { ...updateData };
+      if (updateData.prompt && !updateData.title) {
+        dbUpdates.title = cleanChatTitle(updateData.prompt);
+      }
+      await updateConversation(id, dbUpdates);
+    } catch {}
+
     const list = getStoredTasks();
     const index = list.findIndex((t) => t.id === id);
     if (index !== -1) {
@@ -288,6 +428,9 @@ const localTasksDb = {
     return null;
   },
   delete: async (id: string) => {
+    try {
+      await deleteConversation(id);
+    } catch {}
     let list = getStoredTasks();
     list = list.filter((t) => t.id !== id);
     saveStoredTasks(list);

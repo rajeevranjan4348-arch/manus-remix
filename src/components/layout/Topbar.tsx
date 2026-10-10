@@ -3,7 +3,6 @@ import { useLocation } from 'react-router-dom';
 import { ChevronDown, PanelLeft, Plus, Check, Sparkles, Zap, Brain, Cpu, MessageSquare, Briefcase, Settings2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import { SegmentedChatIcon } from './SegmentedChatIcon';
 
 interface TopbarProps {
   onToggleSidebar?: () => void;
@@ -142,23 +141,8 @@ export function Topbar({ onToggleSidebar, onOpenHistory, onNewTask, onOpenSettin
         )}
       </div>
 
-      {/* Right section: Chat history and Plus buttons */}
+      {/* Right section: New Task button */}
       <div className="flex items-center gap-2 z-10">
-        <button
-          onClick={() => {
-            if (onOpenHistory) {
-              onOpenHistory();
-            } else {
-              window.dispatchEvent(new CustomEvent('manus_open_history'));
-            }
-          }}
-          className="w-9 h-9 rounded-full border border-border/80 bg-white dark:bg-[#1e1f23] text-foreground hover:bg-manus-soft dark:hover:bg-[#27282d] flex items-center justify-center transition-all cursor-pointer shadow-xs active:scale-95 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          title="Chat History"
-          aria-label="Chat History"
-        >
-          <SegmentedChatIcon size={19} className="text-foreground" />
-        </button>
-
         {shouldShowNewTask && (
           <button
             onClick={() => {

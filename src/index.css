@@ -348,7 +348,7 @@
     transform: rotateY(calc(var(--index, 0) * 27.69deg)) translateZ(112px) translateY(-7px);
     opacity: 1;
     color: #ffffff;
-    text-shadow: 0 0 14px rgba(255, 255, 255, 1), 0 0 26px var(--sphere-glow, rgba(59, 130, 246, 0.9));
+    text-shadow: 0 0 14px rgba(255, 255, 255, 1), 0 0 26px var(--sphere-glow, rgba(0, 0, 0, 0.8));
   }
 }
 
