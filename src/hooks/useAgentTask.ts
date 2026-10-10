@@ -12,15 +12,21 @@ import {
   StoredMessage,
 } from '@/lib/chatDatabase';
 
+function extractGitHubRepository(text: string): string {
+  const urlMatch = text.match(/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i);
+  if (urlMatch?.[1]) return urlMatch[1].replace(/\.git$/i, '');
+  const labeledMatch = text.match(/\b(?:in|for|repository|repo)\s+([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i);
+  if (labeledMatch?.[1] && !/\.(tsx?|jsx?|json|md|css|html|yml|yaml|py|go|rs|java|kt|toml|sh)$/i.test(labeledMatch[1].split('/')[1])) return labeledMatch[1];
+  const candidates = [...text.matchAll(/\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/g)].map(match => match[1]);
+  return (candidates.find(candidate => !/\.(tsx?|jsx?|json|md|css|html|yml|yaml|py|go|rs|java|kt|toml|sh)$/i.test(candidate.split('/')[1])) || '').replace(/\.git$/i, '');
+}
 type GitHubReadRequest = { action: string; repository?: string; path?: string; query?: string; state?: string; branch?: string; base?: string; head?: string; title?: string; body?: string; confirm?: boolean };
 
 function detectGitHubReadRequest(prompt: string): GitHubReadRequest | null {
   const text = prompt.trim();
   if (!/(github|\brepos?\b|repositories|pull requests?|\bissues?\b|commits?|workflow runs?|actions runs?|read (the )?file|search (the )?code)/i.test(text)) return null;
   if (/\b(create|make|open|push|commit|merge|delete|remove|update|edit|write|modify|close)\b.{0,45}\b(branch|file|pull request|pr|issue|commit|repository|repo|github)\b/i.test(text)) return null;
-  const urlMatch = text.match(/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i);
-  const repoMatch = text.match(/\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/);
-  const repository = (urlMatch?.[1] || repoMatch?.[1] || '').replace(/\.git$/i, '');
+  const repository = extractGitHubRepository(text);
   if (/\b(list|show|find|my|all)\b.{0,35}\b(repositories|repos)\b|\bmy repos\b/i.test(text)) return { action: 'list_repositories' };
   if (!repository) return { action: 'list_repositories' };
   const fileMatch = text.match(/(?:file|read|open|show|contents? of)\s+['"]?([A-Za-z0-9_./-]+\.(?:tsx?|jsx?|json|md|css|html|yml|yaml|py|go|rs|java|kt|toml|sh))['"]?/i);
@@ -42,9 +48,7 @@ async function routeGitHubRead(prompt: string): Promise<string | null> {
   if (writeIntent) {
     const confirmed = /\b(confirm|approve|approved|yes,? do it|go ahead)\b/i.test(prompt);
     if (!confirmed) return '[GITHUB WRITE CONFIRMATION REQUIRED] No repository changes were made. Before any write, Manus must show the exact repository, branch/file/PR details and ask you to confirm that exact operation. To create a branch, send: “Create branch BRANCH in OWNER/REPO from BASE — confirm”. To create a pull request, include the exact head branch, base branch, title, and the word confirm.';
-    const urlMatch = prompt.match(/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/i);
-    const repoMatch = prompt.match(/\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/);
-    const repository = (urlMatch?.[1] || repoMatch?.[1] || '').replace(/\.git$/i, '');
+    const repository = extractGitHubRepository(prompt);
     if (!repository) return '[GITHUB WRITE CONFIRMATION REQUIRED] No changes made. Include the exact owner/repository name and operation details.';
     if (/\b(branch)\b/i.test(prompt) && /\b(create|make|open)\b/i.test(prompt)) {
       const branchMatch = prompt.match(/\bbranch\s+(?:named\s+)?([A-Za-z0-9._/-]+)/i);
