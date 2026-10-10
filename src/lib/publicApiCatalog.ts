@@ -67,6 +67,17 @@ export const PUBLIC_API_CATALOG: PublicApiEntry[] = [
     examples: ['https://restcountries.com/v3.1/name/India'],
   },
   {
+    id: 'wikipedia-search',
+    name: 'Wikipedia Search API',
+    category: 'knowledge',
+    description: 'Search Wikipedia pages and return matching article titles and snippets.',
+    baseUrl: import.meta.env.VITE_WIKIPEDIA_SEARCH_API_URL || 'https://en.wikipedia.org/w/rest.php/v1/search/page',
+    auth: 'none',
+    browserCors: 'yes',
+    examples: ['https://en.wikipedia.org/w/rest.php/v1/search/page?q=India&limit=5'],
+    notes: 'Use the returned article title to request a summary from Wikipedia REST API.',
+  },
+  {
     id: 'wikipedia',
     name: 'Wikipedia REST API',
     category: 'knowledge',
@@ -125,7 +136,7 @@ PUBLIC API ROUTING (selected from the public-apis directory):
 - Use tools only when the user asks for current/live facts, research, or data. For greetings and ordinary chat, answer normally without tools.
 - For weather/forecast: geocode the requested city with Open-Meteo Geocoding, then query Open-Meteo Forecast. Report the location and forecast dates; do not invent weather values.
 - For country facts: use REST Countries.
-- For an encyclopedia overview: use Wikipedia REST, and verify current claims with web_search or official sources.
+- For Wikipedia research: first search pages with Wikipedia Search API (`/w/rest.php/v1/search/page?q=...&limit=5`), then fetch the selected article summary with Wikipedia REST (`/api/rest_v1/page/summary/{title}`). Treat Wikipedia as background context and verify current claims with web_search or official sources.
 - For book/author lookup: use Open Library.
 - For public holidays: use Nager.Date with the requested year and ISO country code.
 - For recent earthquakes: use the USGS GeoJSON feed and explain the feed's time window.
