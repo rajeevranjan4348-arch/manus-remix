@@ -60,6 +60,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [githubStatus, setGithubStatus] = useState<{ connected: boolean; user?: { login?: string; avatar_url?: string }; expiresAt?: number }>({ connected: false });
   const [githubLoading, setGithubLoading] = useState(false);
+  const [githubSetup, setGithubSetup] = useState<{ configured: boolean; missing: string[]; invalidKey?: boolean }>({ configured: false, missing: [], invalidKey: false });
 
   useEffect(() => {
     if (isOpen) {
@@ -72,10 +73,21 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     if (!isOpen || activeTab !== 'github') return;
     let cancelled = false;
     setGithubLoading(true);
-    fetch('/api/github?action=status', { credentials: 'same-origin' })
-      .then(async response => ({ response, payload: await response.json().catch(() => ({})) }))
-      .then(({ response, payload }) => { if (!cancelled) setGithubStatus(response.ok ? payload : { connected: false }); })
-      .catch(() => { if (!cancelled) setGithubStatus({ connected: false }); })
+    Promise.all([
+      fetch('/api/github?action=status', { credentials: 'same-origin' }).then(async response => ({ response, payload: await response.json().catch(() => ({})) })),
+      fetch('/api/github?action=setup-status', { credentials: 'same-origin' }).then(async response => ({ response, payload: await response.json().catch(() => ({})) })),
+    ])
+      .then(([session, setup]) => {
+        if (cancelled) return;
+        setGithubStatus(session.response.ok ? session.payload : { connected: false });
+        setGithubSetup(setup.response.ok ? setup.payload : { configured: false, missing: ['Netlify function setup status unavailable'], invalidKey: false });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setGithubStatus({ connected: false });
+          setGithubSetup({ configured: false, missing: ['Cannot reach GitHub connector endpoint'], invalidKey: false });
+        }
+      })
       .finally(() => { if (!cancelled) setGithubLoading(false); });
     return () => { cancelled = true; };
   }, [isOpen, activeTab]);
@@ -798,8 +810,22 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   )}
                 </div>
                 <div className="rounded-lg bg-muted/30 p-3 space-y-1.5">
-                  <p className="text-xs font-medium text-foreground">Setup required on Netlify</p>
-                  <p className="text-[11px] text-muted-foreground leading-relaxed">Set GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET, GITHUB_OAUTH_CALLBACK_URL, and GITHUB_SESSION_ENCRYPTION_KEY as server-side environment variables. Then redeploy. Never put OAuth secrets in VITE_* variables.</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs font-medium text-foreground">OAuth setup</p>
+                    <span className={cn("text-[10px] rounded-full px-2 py-0.5", githubSetup.configured ? "bg-emerald-500/10 text-emerald-600" : "bg-amber-500/10 text-amber-600")}>{githubSetup.configured ? 'Configured' : 'Needs setup'}</span>
+                  </div>
+                  {githubSetup.configured ? (
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">Server-side OAuth settings are present. Connect your account above to start using the live GitHub API.</p>
+                  ) : (
+                    <>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">Live connection is blocked until the missing Netlify server-side settings are added and the site is redeployed:</p>
+                      <ul className="list-disc pl-4 text-[11px] text-muted-foreground space-y-0.5">
+                        {githubSetup.missing.map(name => <li key={name}>{name}</li>)}
+                        {githubSetup.invalidKey && <li>GITHUB_SESSION_ENCRYPTION_KEY must decode to exactly 32 bytes (base64)</li>}
+                      </ul>
+                    </>
+                  )}
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">Create a GitHub OAuth App and set its callback URL to the exact GITHUB_OAUTH_CALLBACK_URL value. Keep the client secret and encryption key only in Netlify server-side environment variables—never VITE_*.</p>
                   <a href="https://github.com/settings/developers" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-medium underline underline-offset-2 text-foreground">GitHub Developer Settings <ExternalLink size={11} /></a>
                 </div>
                 <p className="text-[11px] text-muted-foreground leading-relaxed">Repository changes are not automatically made by chat. Any supported write operation must require explicit confirmation and repository write permission.</p>
