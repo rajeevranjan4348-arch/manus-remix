@@ -485,7 +485,7 @@ export function ChatView({
               </div>
               <div className="pt-1">
                 <ContextualThinking
-                  prompt={prompt}
+                  prompt={messages.filter((message: any) => message?.role === 'user').slice(-1)[0]?.content || prompt}
                   activeStep={activeRunningStep?.label}
                   deepMode={isThinkHarder}
                 />
