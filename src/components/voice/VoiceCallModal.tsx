@@ -27,6 +27,7 @@ import { VoicePulseOrb } from './VoicePulseOrb';
 import { CobpChatInput } from './CobpChatInput';
 import { HorizontalLoader } from '../common/HorizontalLoader';
 import { blink } from '@/lib/blink';
+import { speakCleanHumanVoice, stopCleanSpeech } from '@/lib/speechSynthesis';
 
 export interface VoiceMessage {
   id: string;
@@ -345,38 +346,28 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
 
   // Text-to-Speech Playback
   const speakText = (text: string) => {
-    if (!synthRef.current) {
-      setCallStatus('listening');
-      setStatusText('Start speaking...');
-      return;
-    }
-
-    synthRef.current.cancel();
+    stopCleanSpeech();
     setCallStatus('speaking');
     setStatusText(text);
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = parseFloat(speechRate) || 1.0;
-    utterance.pitch = 1.0;
+    const started = speakCleanHumanVoice(text, {
+      voicePersona: selectedVoice,
+      rate: parseFloat(speechRate) || 1.0,
+      volume: 1.0, // Maximum loud, crisp human audio
+      onEnd: () => {
+        setCallStatus('listening');
+        setStatusText('Start speaking...');
+      },
+      onError: () => {
+        setCallStatus('listening');
+        setStatusText('Start speaking...');
+      },
+    });
 
-    // Pick voice if available
-    const voices = synthRef.current.getVoices();
-    if (voices.length > 0) {
-      const match = voices.find(v => v.lang.startsWith('en')) || voices[0];
-      if (match) utterance.voice = match;
+    if (!started) {
+      setCallStatus('listening');
+      setStatusText('Start speaking...');
     }
-
-    utterance.onend = () => {
-      setCallStatus('listening');
-      setStatusText('Start speaking...');
-    };
-
-    utterance.onerror = () => {
-      setCallStatus('listening');
-      setStatusText('Start speaking...');
-    };
-
-    synthRef.current.speak(utterance);
   };
 
   // Pause / Resume Toggle

@@ -27,6 +27,7 @@ import { FileAttachments } from './FileAttachments';
 import { ContextualThinking } from './ContextualThinking';
 import { AttachmentMenu } from '../chat/AttachmentMenu';
 import { ThoughtProcess } from './ThoughtProcess';
+import { ConversationActionBar } from './ConversationActionBar';
 import { Step } from '@/hooks/useAgentTask';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
@@ -426,6 +427,19 @@ export function ChatView({
                         <MarkdownRenderer content={cleanedContent} />
                       </div>
                     ) : null}
+
+                    {cleanedContent ? (
+                      <div className="pt-0.5">
+                        <ConversationActionBar 
+                          content={cleanedContent}
+                          onRegenerate={() => {
+                            const lastUser = list.slice(0, i).reverse().find((m: any) => m.role === 'user');
+                            const promptToReRun = lastUser?.content ? cleanUserMessage(lastUser.content) : prompt;
+                            if (promptToReRun) onSubmit(promptToReRun);
+                          }}
+                        />
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               );
@@ -481,6 +495,16 @@ export function ChatView({
                   {hasFiles && (
                     <div className={cn("pt-2", hasChart && "mt-4 pt-4 border-t border-border/40")}>
                       <FileAttachments files={result.files} />
+                    </div>
+                  )}
+
+                  {/* Action bar after standalone result */}
+                  {!messages.some((m: any) => m?.role === 'assistant') && (
+                    <div className="pt-3 mt-3 border-t border-border/40">
+                      <ConversationActionBar
+                        content={result?.summary || result?.content || result?.text || `${result.detectedChartType || 'Visual'} analysis generated`}
+                        onRegenerate={() => onSubmit(cleanUserMessage(prompt))}
+                      />
                     </div>
                   )}
                 </div>

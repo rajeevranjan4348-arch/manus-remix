@@ -20,8 +20,7 @@ import {
   Globe, 
   Terminal, 
   VolumeX, 
-  Keyboard,
-  Github
+  Keyboard
 } from 'lucide-react';
 import { 
   UserSettings, 
@@ -42,13 +41,14 @@ import {
 import { useTheme } from '@/context/ThemeContext';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { speakCleanHumanVoice, stopCleanSpeech } from '@/lib/speechSynthesis';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-type SettingsTab = 'general' | 'ai' | 'personalization' | 'voice' | 'data' | 'github' | 'about';
+type SettingsTab = 'general' | 'ai' | 'personalization' | 'voice' | 'data' | 'about';
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { theme, setTheme } = useTheme();
@@ -56,9 +56,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [isExporting, setIsExporting] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const [githubStatus, setGithubStatus] = useState<{ connected: boolean; user?: { login: string; avatar_url?: string } }>({ connected: false });
-  const [githubRepos, setGithubRepos] = useState<Array<{ full_name: string; private: boolean; html_url: string; permissions?: { push?: boolean } }>>([]);
-  const [isGitHubLoading, setIsGitHubLoading] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -66,33 +63,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setShowClearConfirm(false);
     }
   }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen || activeTab !== 'github') return;
-    let cancelled = false;
-    const loadGitHub = async () => {
-      setIsGitHubLoading(true);
-      try {
-        const statusResponse = await fetch('/api/github/status', { credentials: 'same-origin' });
-        const status = await statusResponse.json();
-        if (cancelled) return;
-        setGithubStatus(status);
-        if (status.connected) {
-          const reposResponse = await fetch('/api/github/repos?page=1', { credentials: 'same-origin' });
-          const reposData = await reposResponse.json();
-          if (!cancelled) setGithubRepos(Array.isArray(reposData.repositories) ? reposData.repositories : []);
-        } else {
-          setGithubRepos([]);
-        }
-      } catch {
-        if (!cancelled) toast.error('Could not load GitHub connection status');
-      } finally {
-        if (!cancelled) setIsGitHubLoading(false);
-      }
-    };
-    void loadGitHub();
-    return () => { cancelled = true; };
-  }, [isOpen, activeTab]);
 
   // Close on Escape key
   useEffect(() => {
@@ -190,7 +160,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     { id: 'personalization', label: 'Personalization', icon: User },
     { id: 'voice', label: 'Voice & Audio', icon: Volume2 },
     { id: 'data', label: 'Data & Privacy', icon: Shield },
-    { id: 'github', label: 'GitHub Connector', icon: Github },
     { id: 'about', label: 'About', icon: Info },
   ];
 
@@ -629,22 +598,29 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {[
-                      { id: 'nova', name: 'Nova', desc: 'Warm' },
-                      { id: 'alloy', name: 'Alloy', desc: 'Neutral' },
-                      { id: 'echo', name: 'Echo', desc: 'Smooth' },
-                      { id: 'fable', name: 'Fable', desc: 'Clear' },
-                      { id: 'onyx', name: 'Onyx', desc: 'Deep' },
-                      { id: 'shimmer', name: 'Shimmer', desc: 'Bright' },
+                      { id: 'nova', name: 'Nova', desc: 'Warm Human' },
+                      { id: 'alloy', name: 'Alloy', desc: 'Neutral Human' },
+                      { id: 'echo', name: 'Echo', desc: 'Smooth Male' },
+                      { id: 'fable', name: 'Fable', desc: 'Clear Natural' },
+                      { id: 'onyx', name: 'Onyx', desc: 'Deep Male' },
+                      { id: 'shimmer', name: 'Shimmer', desc: 'Bright Female' },
                     ].map((v) => {
                       const isSelected = settings.voicePersona === v.id;
                       return (
                         <button
                           key={v.id}
-                          onClick={() => updateSetting('voicePersona', v.id as VoicePersona)}
+                          onClick={() => {
+                            updateSetting('voicePersona', v.id as VoicePersona);
+                            speakCleanHumanVoice(`Hello! This is ${v.name}, speaking clearly in high-fidelity audio.`, {
+                              voicePersona: v.id,
+                              rate: settings.speechSpeed,
+                              volume: 1.0,
+                            });
+                          }}
                           className={cn(
-                            "flex items-center justify-between p-2.5 rounded-lg border text-left cursor-pointer transition-colors",
+                            "flex items-center justify-between p-2.5 rounded-lg border text-left cursor-pointer transition-colors group",
                             isSelected
-                              ? "border-foreground/30 bg-muted/70 text-foreground font-semibold"
+                              ? "border-foreground/30 bg-muted/70 text-foreground font-semibold ring-1 ring-foreground/20"
                               : "border-border/60 hover:border-border text-muted-foreground hover:text-foreground bg-card/40"
                           )}
                         >
@@ -652,7 +628,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             <p className="text-xs font-medium text-foreground">{v.name}</p>
                             <p className="text-[10px] text-muted-foreground">{v.desc}</p>
                           </div>
-                          {isSelected && <Check size={12} className="text-foreground" />}
+                          {isSelected ? (
+                            <Check size={12} className="text-foreground" />
+                          ) : (
+                            <Volume2 size={12} className="opacity-0 group-hover:opacity-60 transition-opacity text-muted-foreground" />
+                          )}
                         </button>
                       );
                     })}
@@ -785,52 +765,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     </button>
                   </div>
                 </div>
-              </div>
-            )}
-
-            {/* GITHUB CONNECTOR TAB */}
-            {activeTab === 'github' && (
-              <div className="space-y-5 animate-in fade-in duration-100">
-                <div>
-                  <p className="text-xs font-semibold text-foreground">GitHub Connector</p>
-                  <p className="text-[11px] text-muted-foreground mt-1">Connect repositories to inspect code and prepare agent-assisted changes. Your GitHub token stays server-side.</p>
-                </div>
-                <div className="rounded-xl border border-border/60 p-4 space-y-3">
-                  {isGitHubLoading ? (
-                    <p className="text-xs text-muted-foreground">Checking GitHub connection…</p>
-                  ) : githubStatus.connected ? (
-                    <>
-                      <div className="flex items-center gap-3">
-                        {githubStatus.user?.avatar_url && <img src={githubStatus.user.avatar_url} alt="GitHub avatar" className="w-9 h-9 rounded-full" />}
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-medium text-foreground">Connected as @{githubStatus.user?.login || 'GitHub user'}</p>
-                          <p className="text-[11px] text-muted-foreground">Repository access is controlled by your GitHub permissions.</p>
-                        </div>
-                        <span className="text-[10px] rounded-full px-2 py-1 bg-emerald-500/10 text-emerald-600">Connected</span>
-                      </div>
-                      <button type="button" onClick={async () => { try { await fetch('/api/github/disconnect', { method: 'GET', credentials: 'same-origin' }); setGithubStatus({ connected: false }); setGithubRepos([]); toast.success('GitHub disconnected'); } catch { toast.error('Could not disconnect GitHub'); } }} className="px-3 py-1.5 rounded-lg border border-border/60 text-xs hover:bg-muted/50 transition-colors">Disconnect</button>
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-xs text-muted-foreground">No GitHub account is connected.</p>
-                      <button type="button" onClick={() => { window.location.href = '/api/github/connect'; }} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-foreground text-background text-xs font-medium hover:opacity-90 transition-opacity"><Github size={14} /> Connect GitHub</button>
-                    </>
-                  )}
-                </div>
-                {githubStatus.connected && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between"><p className="text-xs font-medium text-foreground">Accessible repositories</p><span className="text-[10px] text-muted-foreground">First 100</span></div>
-                    {githubRepos.length === 0 ? <p className="text-[11px] text-muted-foreground">No repositories returned, or repository access is still loading.</p> : githubRepos.slice(0, 12).map(repo => (
-                      <div key={repo.full_name} className="flex items-center gap-2 rounded-lg border border-border/50 px-3 py-2">
-                        <Github size={13} className="text-muted-foreground shrink-0" />
-                        <a href={repo.html_url} target="_blank" rel="noreferrer" className="text-xs text-foreground hover:underline truncate flex-1">{repo.full_name}</a>
-                        <span className="text-[10px] text-muted-foreground">{repo.private ? 'Private' : 'Public'}</span>
-                        {repo.permissions?.push && <span className="text-[10px] text-emerald-600">Write</span>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <p className="text-[10px] text-muted-foreground leading-relaxed">Setup required: configure GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, and GITHUB_OAUTH_SECRET in Netlify. See docs/github-connector.md for OAuth callback and permissions.</p>
               </div>
             )}
 

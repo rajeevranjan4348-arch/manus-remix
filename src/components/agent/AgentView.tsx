@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import { gsap } from 'gsap';
 import { ChartResult } from './ChartResult';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { ConversationActionBar } from './ConversationActionBar';
 
 interface AgentViewProps {
   prompt: string;
@@ -228,6 +229,11 @@ export function AgentView({ prompt, steps, result, status, onReset, onExport, op
                       <MarkdownRenderer 
                         content={result.content || 'Processing analysis...'} 
                       />
+                      {result.content && (
+                        <div className="pt-4 border-t border-border/40 mt-4">
+                          <ConversationActionBar content={result.content} />
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
