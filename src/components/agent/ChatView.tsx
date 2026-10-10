@@ -402,6 +402,9 @@ export function ChatView({
               const raw = msg.content || '';
               const { thought, content: extracted } = extractThoughtProcess(raw);
               const cleanedContent = cleanMessageContent(extracted || raw);
+              // While a response is streaming, the hook may include an empty assistant placeholder.
+              // Do not render its Manus header alongside the dedicated thinking indicator.
+              if (!cleanedContent && !thought && isAssistantWorking) return null;
               if (!cleanedContent && !thought && raw && (result || chartData)) return null;
 
               return (
