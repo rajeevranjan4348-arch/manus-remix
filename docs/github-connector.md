@@ -23,8 +23,9 @@ Create an OAuth App under GitHub Developer Settings. Set its Authorization callb
 - OAuth callback: `/.netlify/functions/github?action=callback`
 - Disconnect: `/.netlify/functions/github?action=disconnect`
 - Connection status: `GET /api/github?action=status`.
+- Safe configuration readiness (variable names only; no secret values): `GET /api/github?action=setup-status`. The Settings → GitHub tab uses this to show which server-side variables are missing or whether the encryption key length is invalid.
 - Tool API: `POST /api/github` with JSON body containing an `action`.
-- The Settings → GitHub tab starts OAuth, displays the connected account, and disconnects the local session.
+- The Settings → GitHub tab starts OAuth, displays the connected account, disconnects the local session, and shows whether server-side OAuth configuration is ready.
 - Chat routing sends explicit repository read requests through the same-origin connector for repository metadata, file reads, code search, issues, pull requests, commits, and workflow runs.
 
 Supported tool actions: `profile`, `list_repositories`, `repository`, `list_files`, `read_file`, `search_code`, `issues`, `pull_requests`, `commits`, `workflow_runs`, `create_branch`, `create_file`, `create_pull_request`.
