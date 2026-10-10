@@ -50,3 +50,10 @@ The upstream source is [public-apis/public-apis](https://github.com/public-apis/
 See [`.env.api-categories.example`](../.env.api-categories.example) for server-side placeholder variables for each of the 51 categories shown in the reference screenshots. These are intentionally blank placeholders, not provider-issued API keys or working integrations. Set only the values for providers you choose, in the deployment's server-side environment settings. Do not expose secrets through `VITE_*` variables.
 
 Adding an environment variable does not automatically create a runtime integration. Each provider still needs a verified endpoint, auth handling, a server-side call path, rate-limit/error handling, and tests. Many entries in the upstream directory are keyless, some require keys, and some are paid or have usage restrictions.
+
+
+## 51-category provider registry
+
+`src/lib/publicApiProviders.ts` now contains one representative provider and example endpoint for every category in the supplied screenshots. `src/hooks/useAgentTask.ts` includes its routing guide in the agent system prompt, so the agent can select relevant examples for its existing `fetch_url` / `web_search` tools.
+
+This is not 51 independently tested API integrations and does not provision keys. Some providers require credentials, some endpoints may have changed, and some services have rate limits or usage restrictions. URLs containing `YOUR_KEY` are examples only. Before production use, each endpoint must be smoke-tested and any required credential wired through a server-side secret, not a `VITE_*` variable.
