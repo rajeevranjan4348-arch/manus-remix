@@ -3,7 +3,6 @@ import {
   Plus, 
   ArrowUp,
   Mic, 
-  Cable,
   Layout, 
   FileText, 
   BarChart3, 
@@ -419,7 +418,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                 placeholder={activeIntent?.placeholder || (chatWorkMode === 'chat' ? "Type a message or ask anything..." : (isThinkHarder ? "Assign a deep reasoning task or question..." : "Assign a building task or ask anything"))} 
               />
             </div>
-            <div className="px-3 flex gap-2 item-center">
+            <div className="px-3 flex gap-2 items-center">
               <div className="flex gap-2 items-center flex-shrink-0">
                 <AttachmentMenu
                   onFileSelect={handleProcessFile}

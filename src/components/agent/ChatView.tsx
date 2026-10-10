@@ -196,9 +196,10 @@ export function ChatView({
   };
 
   // Helper to clean message content (hide raw JSON outputs that are rendered as UI)
-  const cleanMessageContent = (content: string) => {
+  const cleanMessageContent = (content: any) => {
     if (!content) return '';
-    return content.replace(/```(json)?\n[\s\S]*?\n```/g, (match) => {
+    const text = typeof content === 'string' ? content : (typeof content === 'object' ? JSON.stringify(content) : String(content));
+    return text.replace(/```(json)?\n[\s\S]*?\n```/g, (match) => {
       if (
         match.includes('"graph"') || 
         match.includes('"labels"') || 
@@ -212,32 +213,34 @@ export function ChatView({
   };
 
   // Helper to extract AI thought process (<think>...</think> or [THOUGHTS]...[/THOUGHTS])
-  const extractThoughtProcess = (rawContent: string) => {
+  const extractThoughtProcess = (rawContent: any) => {
     if (!rawContent) return { thought: '', content: '' };
+    const rawText = typeof rawContent === 'string' ? rawContent : (typeof rawContent === 'object' ? JSON.stringify(rawContent) : String(rawContent));
+    if (!rawText) return { thought: '', content: '' };
 
     let thought = '';
-    let content = rawContent;
+    let content = rawText;
 
     // Match closed <think>...</think>
-    const thinkMatch = rawContent.match(/<think>([\s\S]*?)<\/think>/i);
+    const thinkMatch = rawText.match(/<think>([\s\S]*?)<\/think>/i);
     if (thinkMatch) {
       thought = thinkMatch[1].trim();
-      content = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+      content = rawText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
     } else {
       // Match unclosed <think> tag (e.g. streaming thoughts)
-      const unclosedMatch = rawContent.match(/<think>([\s\S]*)$/i);
+      const unclosedMatch = rawText.match(/<think>([\s\S]*)$/i);
       if (unclosedMatch) {
         thought = unclosedMatch[1].trim();
-        content = rawContent.replace(/<think>[\s\S]*$/i, '').trim();
+        content = rawText.replace(/<think>[\s\S]*$/i, '').trim();
       }
     }
 
     // Match [THOUGHTS]...[/THOUGHTS]
     if (!thought) {
-      const thoughtsMatch = rawContent.match(/\[THOUGHTS?\]([\s\S]*?)\[\/THOUGHTS?\]/i);
+      const thoughtsMatch = rawText.match(/\[THOUGHTS?\]([\s\S]*?)\[\/THOUGHTS?\]/i);
       if (thoughtsMatch) {
         thought = thoughtsMatch[1].trim();
-        content = rawContent.replace(/\[THOUGHTS?\][\s\S]*?\[\/THOUGHTS?\]/gi, '').trim();
+        content = rawText.replace(/\[THOUGHTS?\][\s\S]*?\[\/THOUGHTS?\]/gi, '').trim();
       }
     }
 
@@ -248,23 +251,30 @@ export function ChatView({
   };
 
   // Helper to strip internal prompt instructions or wrappers from user bubbles
-  const cleanUserMessage = (raw: string) => {
+  const cleanUserMessage = (raw: any) => {
     if (!raw) return '';
-    let text = raw;
+    let text = typeof raw === 'string' ? raw : (typeof raw === 'object' ? JSON.stringify(raw) : String(raw));
+
+    // Strip [Think Harder ...] tags regardless of formatting
+    text = text.replace(/^\[Think Harder[^\]]*\]\s*/gi, '');
+    text = text.replace(/\[Think Harder[^\]]*\]\s*/gi, '');
 
     const userMatch = text.match(/(?:User Prompt|User):\s*([\s\S]+)$/i);
     if (userMatch) {
       text = userMatch[1].trim();
     }
 
-    text = text.replace(/\[(?:USER INSTRUCTIONS & PREFERENCES|MODE|USER PROFILE|TONE REQUIREMENT|PROJECT CONTEXT|INSTRUCTION)[\s\S]*?\]\n*/gi, '').trim();
+    text = text.replace(/\[(?:USER INSTRUCTIONS & PREFERENCES|MODE|USER PROFILE|TONE REQUIREMENT|PROJECT CONTEXT|INSTRUCTION|Attached File)[^\]]*\]\n*/gi, '').trim();
+
+    // Strip any lingering Think Harder mode lines
+    text = text.replace(/^\[(?:Think Harder|MODE:[^\]]*THINK HARDER)[^\]]*\]\s*/gim, '').trim();
 
     const fileHeaderMatch = text.match(/^([\s\S]*?)\n\n(?:File Content to analyze|URL to research):/i);
     if (fileHeaderMatch) {
       text = fileHeaderMatch[1].trim();
     }
 
-    return text || raw;
+    return text || (typeof raw === 'string' ? raw : '');
   };
 
   // Render a single step (Task Progress Item)
