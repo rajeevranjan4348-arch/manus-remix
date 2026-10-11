@@ -264,24 +264,41 @@ export function ChatView({
 
     // Check input or active tags for connectors (@calendar, @gmail, @drive, @workspace, @docs, @sheets, @tasks)
     const detectedTags = new Set<string>(activeConnectorTags);
-    const mentions = message.match(/@(calendar|gmail|drive|docs|sheets|tasks|workspace|all|schedule|mail)/gi);
+    const mentions = message.match(/@(github|calendar|gmail|drive|docs|sheets|tasks|workspace|all|schedule|mail)/gi);
     if (mentions) {
       mentions.forEach(m => detectedTags.add(m.replace('@', '').toLowerCase()));
     }
 
     if (detectedTags.size > 0) {
       const tagsArray = Array.from(detectedTags);
-      const toastId = toast.loading(`Fetching live ${tagsArray.join(', ')} context...`);
-      try {
-        const workspaceContext = await fetchWorkspaceContextSummary(tagsArray);
-        if (workspaceContext) {
-          message = `${message}\n${workspaceContext}`.trim();
-          toast.success(`Connected Google Workspace context (${tagsArray.join(', ')})`, { id: toastId });
-        } else {
-          toast.dismiss(toastId);
+      const workspaceTags = tagsArray.filter(tag =>
+        ['calendar', 'gmail', 'drive', 'docs', 'sheets', 'tasks', 'workspace', 'all', 'schedule', 'mail'].includes(tag)
+      );
+      const appConnectorTags = tagsArray.filter(tag => !workspaceTags.includes(tag));
+      if (workspaceTags.length > 0) {
+        const toastId = toast.loading(`Fetching live ${workspaceTags.join(', ')} context...`);
+        try {
+          const workspaceContext = await fetchWorkspaceContextSummary(workspaceTags);
+          if (workspaceContext) {
+            message = `${message}\n${workspaceContext}`.trim();
+            toast.success(`Connected Google Workspace context (${workspaceTags.join(', ')})`, { id: toastId });
+          } else {
+            toast.dismiss(toastId);
+          }
+        } catch (err: any) {
+          toast.error(`Workspace Context Warning: ${err.message || 'Failed to pull Google context'}`, { id: toastId });
         }
-      } catch (err: any) {
-        toast.error(`Workspace Context Warning: ${err.message || 'Failed to pull Google context'}`, { id: toastId });
+      }
+
+      // Keep non-Workspace connector selections attached to the request instead of
+      // silently dropping them when there is no Google Workspace context to append.
+      if (appConnectorTags.length > 0) {
+        const connectorNames = appConnectorTags.map(tag => {
+          const option = WORKSPACE_CONNECTOR_OPTIONS.find(item => item.id === tag) ||
+            CONNECTOR_CATALOG.find(item => item.id === tag);
+          return option && 'label' in option ? option.label : (option && 'name' in option ? option.name : tag);
+        });
+        message = `[Requested connectors: ${connectorNames.join(', ')}. Use only integrations/tools that are actually connected and available. If an integration is unavailable, say so clearly and do not claim to have accessed it.]\n${message}`.trim();
       }
     }
 
