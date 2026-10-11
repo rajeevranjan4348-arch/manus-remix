@@ -523,9 +523,17 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
         {/* PROJECTS SECTION */}
         <div className="mt-5 px-3">
           <div className="flex items-center justify-between px-2 mb-1.5">
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Projects ({projects.length})
-            </h3>
+            <button
+              type="button"
+              onClick={() => setShowAllProjects((current) => !current)}
+              aria-expanded={showAllProjects}
+              aria-label={showAllProjects ? "Show less projects" : "Show all projects"}
+              className="flex items-center gap-2 text-left rounded-md text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            >
+              <Folder size={18} />
+              <h3 className="text-sm font-semibold tracking-wide">Projects</h3>
+              <ChevronRight size={14} className={cn("transition-transform", showAllProjects && "rotate-90")} />
+            </button>
             <button 
               onClick={() => {
                 setProjectToEdit(null);
@@ -538,8 +546,9 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
             </button>
           </div>
 
-          <div className={cn("space-y-1 overflow-y-auto pr-1 custom-scrollbar", showAllProjects ? "max-h-72" : "max-h-44")}>
-            {projects.slice(0, showAllProjects ? projects.length : 4).map((proj) => {
+          {showAllProjects && (
+          <div className="space-y-1 overflow-y-auto pr-1 custom-scrollbar max-h-72">
+            {projects.map((proj) => {
               const IconComp = PROJECT_ICON_MAP[proj.icon] || Folder;
               const colorTheme = PROJECT_COLOR_MAP[proj.color] || PROJECT_COLOR_MAP.indigo;
               const isFiltered = activeProjectId === proj.id;
@@ -630,18 +639,16 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
               <span>New project</span>
             </button>
 
-            {projects.length > 4 && (
-              <button
-                type="button"
-                onClick={() => setShowAllProjects((current) => !current)}
-                className="w-full flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded-xl hover:bg-manus-cream dark:hover:bg-accent font-medium"
-                aria-expanded={showAllProjects}
-              >
-                <span>{showAllProjects ? "Show less" : `Show more (${projects.length - 4})`}</span>
-                <ChevronRight size={13} className={cn("transition-transform", showAllProjects && "rotate-90")} />
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => setShowAllProjects(false)}
+              className="w-full flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded-xl hover:bg-manus-cream dark:hover:bg-accent font-medium"
+            >
+              <span>Show less</span>
+              <ChevronRight size={13} className=" -rotate-90" />
+            </button>
           </div>
+          )}
         </div>
 
         {/* All Tasks Section (Previous Sessions) */}
