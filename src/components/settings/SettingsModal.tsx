@@ -46,18 +46,27 @@ import { Slider } from '@/components/ui/slider';
 import { Checkbox } from '@/components/ui/checkbox';
 import { speakCleanHumanVoice, stopCleanSpeech } from '@/lib/speechSynthesis';
 import { WorkspaceConnectButton } from '../workspace/WorkspaceConnectButton';
+import { RobotHead } from 'robot-heads';
+
+const ROBOT_THEMES = [
+  { label: 'Manus blue', shell: '#2b49a3', trim: '#93a6c8', screen: '#e8f2ff' },
+  { label: 'Graphite', shell: '#30343b', trim: '#9299a5', screen: '#e9f1ff' },
+  { label: 'Mint', shell: '#176b5b', trim: '#9bd8c7', screen: '#e2fff5' },
+  { label: 'Violet', shell: '#593c9b', trim: '#b9a7ed', screen: '#f1eaff' },
+];
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialTab?: SettingsTab;
 }
 
 type SettingsTab = 'general' | 'robot' | 'ai' | 'personalization' | 'voice' | 'data' | 'about';
 
-export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
+export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProps) {
   const { theme, setTheme } = useTheme();
   const [settings, setSettings] = useState<UserSettings>(getSettings());
-  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab || 'general');
   const [isExporting, setIsExporting] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
@@ -65,8 +74,21 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     if (isOpen) {
       setSettings(getSettings());
       setShowClearConfirm(false);
+      if (initialTab) {
+        setActiveTab(initialTab);
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, initialTab]);
+
+  useEffect(() => {
+    const handleOpenSettingsEvent = (e: any) => {
+      if (e.detail?.tab) {
+        setActiveTab(e.detail.tab);
+      }
+    };
+    window.addEventListener('manus_open_settings', handleOpenSettingsEvent);
+    return () => window.removeEventListener('manus_open_settings', handleOpenSettingsEvent);
+  }, []);
 
   // Close on Escape key
   useEffect(() => {
@@ -395,6 +417,28 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <div>
                   <p className="text-xs font-medium text-foreground mb-1">Customize Robot</p>
                   <p className="text-[11px] text-muted-foreground">Personalize the robot face shown on the home page. Changes save automatically.</p>
+                </div>
+
+                {/* Live Interactive Robot Avatar Preview */}
+                <div className="flex flex-col items-center justify-center p-4 rounded-2xl border border-border/60 bg-muted/20 backdrop-blur-xs">
+                  <RobotHead
+                    state={(settings.robotState as any) || 'idle'}
+                    shape={(settings.robotShape as any) || 'rectangle'}
+                    size={128}
+                    color={ROBOT_THEMES[settings.robotTheme ?? 0]?.shell || ROBOT_THEMES[0].shell}
+                    trimColor={ROBOT_THEMES[settings.robotTheme ?? 0]?.trim || ROBOT_THEMES[0].trim}
+                    screenColor={ROBOT_THEMES[settings.robotTheme ?? 0]?.screen || ROBOT_THEMES[0].screen}
+                    speed={settings.robotSpeed ?? 1}
+                    paused={settings.robotPaused ?? false}
+                    interactive={settings.robotInteractive ?? true}
+                    antenna={settings.robotAntenna ?? true}
+                    floorShadow={settings.robotFloorShadow ?? true}
+                    seed={settings.robotSeed ?? 0.3}
+                    className="shrink-0"
+                  />
+                  <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider mt-2">
+                    Live Robot Preview
+                  </span>
                 </div>
 
                 <div className="space-y-3">

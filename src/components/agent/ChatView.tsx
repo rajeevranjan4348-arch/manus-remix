@@ -84,6 +84,26 @@ export function ChatView({
   const [isDragging, setIsDragging] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<VoiceCommandResult | null>(null);
   const [weatherMap, setWeatherMap] = useState<Record<string, WeatherData>>({});
+  const [completedTypewriters, setCompletedTypewriters] = useState<Record<string, boolean>>({});
+
+  const handleTypewriterComplete = React.useCallback((msgKey: string) => {
+    setCompletedTypewriters(prev => prev[msgKey] ? prev : { ...prev, [msgKey]: true });
+  }, []);
+
+  // Sync robot reaction with chat execution and error status
+  useEffect(() => {
+    if (status === 'error') {
+      window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'error' }));
+    } else if (status === 'running' || isLoading) {
+      window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'thinking' }));
+    } else if (status === 'completed') {
+      window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'happy' }));
+      const timer = setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
+      }, 3500);
+      return () => clearTimeout(timer);
+    }
+  }, [status, isLoading]);
   const [isDrivePickerOpen, setIsDrivePickerOpen] = useState(false);
   const [isConnectorsMenuOpen, setIsConnectorsMenuOpen] = useState(false);
   const [isConnectorsStoreOpen, setIsConnectorsStoreOpen] = useState(false);
@@ -578,6 +598,11 @@ export function ChatView({
               if (!cleanedContent && !thought && isAssistantWorking) return null;
               if (!cleanedContent && !thought && raw && (result || chartData)) return null;
 
+              const msgKey = msg.id || `msg-${i}-${cleanedContent.slice(0, 20)}`;
+              const isCompleted = Boolean(completedTypewriters[msgKey]);
+              const isLatestAssistant = i === list.length - 1 || (i === list.length - 2 && list[list.length - 1]?.role !== 'assistant');
+              const shouldAnimate = !isCompleted && isLatestAssistant;
+
               return (
                 <div key={msg.id || i} className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-1">
                   <div className="flex-1 space-y-3 min-w-0">
@@ -594,7 +619,11 @@ export function ChatView({
 
                     {cleanedContent ? (
                       <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
-                        <MarkdownRenderer content={cleanedContent} />
+                        <MarkdownRenderer 
+                          content={cleanedContent} 
+                          animateTypewriter={shouldAnimate}
+                          onTypewriterComplete={() => handleTypewriterComplete(msgKey)}
+                        />
                       </div>
                     ) : null}
 
@@ -772,6 +801,7 @@ export function ChatView({
               query={mentionQuery}
               selectedIndex={mentionIndex}
               onSelect={handleSelectConnectorOption}
+              activeConnectors={activePlugins}
             />
           )}
 
@@ -892,8 +922,8 @@ export function ChatView({
           />
           <div className="flex items-center gap-1 pr-1">
              <VoiceInputButton
-               onTranscript={(text) => setInput(text)}
-               className="p-2 w-9 h-9"
+               onTranscript={(text) => setInput(prev => prev ? `${prev} ${text}` : text)}
+               className="p-2 w-9 h-9 text-muted-foreground hover:text-foreground dark:text-muted-foreground dark:hover:text-white transition-colors"
                size={18}
              />
              <button 

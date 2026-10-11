@@ -200,14 +200,17 @@ export function speakCleanHumanVoice(text: string, options: SpeakOptions = {}): 
   }
 
   utterance.onstart = () => {
+    window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'speaking' }));
     options.onStart?.();
   };
 
   utterance.onend = () => {
+    window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
     options.onEnd?.();
   };
 
   utterance.onerror = (e) => {
+    window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
     // Only fire if not an intentional cancel
     if (e.error !== 'interrupted' && e.error !== 'canceled') {
       options.onError?.(e);

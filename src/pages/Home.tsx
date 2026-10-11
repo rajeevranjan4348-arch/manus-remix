@@ -36,6 +36,7 @@ import { ConnectorConfigModal } from '@/components/connectors/ConnectorConfigMod
 import { GoogleDrivePickerModal } from '@/components/workspace/GoogleDrivePickerModal';
 import { WorkspaceMentionPicker, WORKSPACE_CONNECTOR_OPTIONS, WorkspaceConnectorOption } from '@/components/chat/WorkspaceMentionPicker';
 import { GoogleDriveFileItem } from '@/lib/workspaceTools';
+import { getSettings } from '@/lib/settingsStore';
 
 export type PersonalityMode = 'chat' | 'work';
 
@@ -104,15 +105,54 @@ interface HomeProps {
 
 export function Home({ onStartTask, personality, onPersonalityChange }: HomeProps) {
   const [prompt, setPrompt] = useState('');
-  const [robotState, setRobotState] = useState<RobotHeadState>('idle');
-  const [robotShape, setRobotShape] = useState<RobotHeadShape>('rectangle');
-  const [robotTheme, setRobotTheme] = useState(0);
-  const [robotSpeed, setRobotSpeed] = useState(1);
-  const [robotPaused, setRobotPaused] = useState(false);
-  const [robotInteractive, setRobotInteractive] = useState(true);
-  const [robotAntenna, setRobotAntenna] = useState(true);
-  const [robotFloorShadow, setRobotFloorShadow] = useState(true);
-  const [robotSeed, setRobotSeed] = useState(0.3);
+  const [robotState, setRobotState] = useState<RobotHeadState>(() => (getSettings().robotState as RobotHeadState) || 'idle');
+  const [robotShape, setRobotShape] = useState<RobotHeadShape>(() => (getSettings().robotShape as RobotHeadShape) || 'rectangle');
+  const [robotTheme, setRobotTheme] = useState(() => getSettings().robotTheme ?? 0);
+  const [robotSpeed, setRobotSpeed] = useState(() => getSettings().robotSpeed ?? 1);
+  const [robotPaused, setRobotPaused] = useState(() => getSettings().robotPaused ?? false);
+  const [robotInteractive, setRobotInteractive] = useState(() => getSettings().robotInteractive ?? true);
+  const [robotAntenna, setRobotAntenna] = useState(() => getSettings().robotAntenna ?? true);
+  const [robotFloorShadow, setRobotFloorShadow] = useState(() => getSettings().robotFloorShadow ?? true);
+  const [robotSeed, setRobotSeed] = useState(() => getSettings().robotSeed ?? 0.3);
+  const [isHappyExpression, setIsHappyExpression] = useState(false);
+
+  const handleRobotTap = () => {
+    setIsHappyExpression(true);
+    toast.success("Robot is happy! 😊", {
+      icon: "😊",
+      duration: 2500,
+    });
+    window.dispatchEvent(new CustomEvent('manus_open_settings', { detail: { tab: 'robot' } }));
+    setTimeout(() => {
+      setIsHappyExpression(false);
+    }, 3500);
+  };
+
+  React.useEffect(() => {
+    const handleSettingsUpdated = (e: any) => {
+      const s = e.detail || getSettings();
+      if (s.robotState) setRobotState(s.robotState as RobotHeadState);
+      if (s.robotShape) setRobotShape(s.robotShape as RobotHeadShape);
+      if (s.robotTheme !== undefined) setRobotTheme(s.robotTheme);
+      if (s.robotSpeed !== undefined) setRobotSpeed(s.robotSpeed);
+      if (s.robotPaused !== undefined) setRobotPaused(s.robotPaused);
+      if (s.robotInteractive !== undefined) setRobotInteractive(s.robotInteractive);
+      if (s.robotAntenna !== undefined) setRobotAntenna(s.robotAntenna);
+      if (s.robotFloorShadow !== undefined) setRobotFloorShadow(s.robotFloorShadow);
+      if (s.robotSeed !== undefined) setRobotSeed(s.robotSeed);
+    };
+    const handleRobotStateChange = (e: any) => {
+      if (e.detail) {
+        setRobotState(e.detail as RobotHeadState);
+      }
+    };
+    window.addEventListener('manus_settings_updated', handleSettingsUpdated);
+    window.addEventListener('manus_robot_state_change', handleRobotStateChange);
+    return () => {
+      window.removeEventListener('manus_settings_updated', handleSettingsUpdated);
+      window.removeEventListener('manus_robot_state_change', handleRobotStateChange);
+    };
+  }, []);
 
   const [activeIntent, setActiveIntent] = useState<{ label: string, icon: any, placeholder?: string } | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<string | null>(null);
@@ -464,71 +504,22 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
 
         <div className="flex flex-col items-center -my-5 animate-on-load" aria-label="Manus AI robot assistant">
           <RobotHead
-            state={isExtracting ? 'thinking' : activeIntent?.label === 'Research' ? 'searching' : chatWorkMode === 'work' && robotState === 'idle' ? 'working' : robotState}
+            state={isHappyExpression ? 'happy' : isExtracting ? 'thinking' : activeIntent?.label === 'Research' ? 'searching' : chatWorkMode === 'work' && robotState === 'idle' ? 'working' : robotState}
             shape={robotShape}
             size={148}
-            color={ROBOT_THEMES[robotTheme].shell}
-            trimColor={ROBOT_THEMES[robotTheme].trim}
-            screenColor={ROBOT_THEMES[robotTheme].screen}
+            color={ROBOT_THEMES[robotTheme]?.shell || ROBOT_THEMES[0].shell}
+            trimColor={ROBOT_THEMES[robotTheme]?.trim || ROBOT_THEMES[0].trim}
+            screenColor={ROBOT_THEMES[robotTheme]?.screen || ROBOT_THEMES[0].screen}
             speed={robotSpeed}
             paused={robotPaused}
             interactive={robotInteractive}
             antenna={robotAntenna}
             floorShadow={robotFloorShadow}
             seed={robotSeed}
-            aria-label={`Manus AI robot assistant, ${robotState}`}
-            className="shrink-0"
+            aria-label={`Manus AI robot assistant, ${isHappyExpression ? 'happy' : robotState}`}
+            className="shrink-0 cursor-pointer transform hover:scale-105 active:scale-95 transition-transform"
+            onClick={handleRobotTap}
           />
-          <details className="mt-1 text-xs text-muted-foreground">
-            <summary className="cursor-pointer select-none rounded-full px-3 py-1 hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
-              Customize robot
-            </summary>
-            <div className="mt-2 flex max-w-2xl flex-wrap items-center justify-center gap-2 rounded-2xl border border-slate-200/80 dark:border-border bg-white/80 dark:bg-card/80 p-3 shadow-sm backdrop-blur-sm">
-              <label className="flex items-center gap-1.5">
-                <span>State</span>
-                <select aria-label="Robot animation state" value={robotState} onChange={(e) => setRobotState(e.target.value as RobotHeadState)} className="rounded-lg border border-slate-200 dark:border-border bg-transparent px-2 py-1 text-foreground">
-                  {ROBOT_STATES.map((state) => <option key={state.value} value={state.value}>{state.label}</option>)}
-                </select>
-              </label>
-              <label className="flex items-center gap-1.5">
-                <span>Shape</span>
-                <select aria-label="Robot shape" value={robotShape} onChange={(e) => setRobotShape(e.target.value as RobotHeadShape)} className="rounded-lg border border-slate-200 dark:border-border bg-transparent px-2 py-1 text-foreground">
-                  {ROBOT_SHAPES.map((shape) => <option key={shape.value} value={shape.value}>{shape.label}</option>)}
-                </select>
-              </label>
-              <label className="flex items-center gap-1.5">
-                <span>Style</span>
-                <select aria-label="Robot color theme" value={robotTheme} onChange={(e) => setRobotTheme(Number(e.target.value))} className="rounded-lg border border-slate-200 dark:border-border bg-transparent px-2 py-1 text-foreground">
-                  {ROBOT_THEMES.map((theme, index) => <option key={theme.label} value={index}>{theme.label}</option>)}
-                </select>
-              </label>
-              <label className="flex items-center gap-1.5">
-                <span>Speed</span>
-                <input aria-label="Robot animation speed" type="range" min="0.5" max="1.8" step="0.1" value={robotSpeed} onChange={(e) => setRobotSpeed(Number(e.target.value))} className="w-20 accent-current" />
-                <span className="w-7 tabular-nums">{robotSpeed.toFixed(1)}×</span>
-              </label>
-              <label className="flex items-center gap-1.5">
-                <span>Timing</span>
-                <input aria-label="Robot animation timing" type="range" min="0" max="1" step="0.1" value={robotSeed} onChange={(e) => setRobotSeed(Number(e.target.value))} className="w-16 accent-current" />
-              </label>
-              <label className="flex items-center gap-1.5">
-                <input type="checkbox" checked={robotPaused} onChange={(e) => setRobotPaused(e.target.checked)} />
-                <span>Pause</span>
-              </label>
-              <label className="flex items-center gap-1.5">
-                <input type="checkbox" checked={robotInteractive} onChange={(e) => setRobotInteractive(e.target.checked)} />
-                <span>Pointer / click</span>
-              </label>
-              <label className="flex items-center gap-1.5">
-                <input type="checkbox" checked={robotAntenna} onChange={(e) => setRobotAntenna(e.target.checked)} />
-                <span>Antenna</span>
-              </label>
-              <label className="flex items-center gap-1.5">
-                <input type="checkbox" checked={robotFloorShadow} onChange={(e) => setRobotFloorShadow(e.target.checked)} />
-                <span>Shadow</span>
-              </label>
-            </div>
-          </details>
         </div>
 
         <div className="space-y-6 animate-on-load">
@@ -559,6 +550,15 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
               isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30"
             )}
           >
+            {showMentionPicker && (
+              <WorkspaceMentionPicker
+                query={mentionQuery}
+                selectedIndex={mentionIndex}
+                onSelect={handleSelectConnectorOption}
+                activeConnectors={activePlugins}
+              />
+            )}
+
             {isDragging && (
               <div className="absolute inset-0 bg-slate-100/95 dark:bg-slate-900/95 border-2 border-dashed border-foreground rounded-[22px] flex items-center justify-center gap-3 z-30 backdrop-blur-xs transition-all animate-in fade-in zoom-in duration-200 pointer-events-none">
                 <Upload className="w-6 h-6 text-foreground animate-bounce" />
@@ -566,16 +566,8 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
               </div>
             )}
             <div className="overflow-y-auto px-3 py-1 relative flex items-center gap-2.5 flex-wrap min-h-[52px]">
-              {showMentionPicker && (
-                <WorkspaceMentionPicker
-                  query={mentionQuery}
-                  selectedIndex={mentionIndex}
-                  onSelect={handleSelectConnectorOption}
-                />
-              )}
-
               {/* Left Attachment (+) Button */}
-              <div className="flex items-center shrink-0">
+              <div className="flex items-center shrink-0 relative">
                 <AttachmentMenu
                   onFileSelect={handleProcessFile}
                   isThinkHarder={isThinkHarder}
@@ -584,7 +576,9 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                   onTogglePlugin={handleTogglePlugin}
                   onSendMessageToChat={(text) => setPrompt(text)}
                   onOpenGoogleDrivePicker={() => setIsDrivePickerOpen(true)}
-                  onOpenConnectors={() => setIsConnectorsMenuOpen(true)}
+                  onOpenConnectors={() => {
+                    setTimeout(() => setIsConnectorsMenuOpen(true), 10);
+                  }}
                 >
                   <button 
                     disabled={isExtracting}
@@ -604,7 +598,9 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                   onToggleConnector={handleTogglePlugin}
                   onOpenStore={() => setIsConnectorsStoreOpen(true)}
                   onOpenConfigModal={(id) => setSelectedConfigConnectorId(id)}
-                />
+                >
+                  <span className="w-0 h-0 inline-block pointer-events-none opacity-0" aria-hidden="true" />
+                </ConnectorsPopupMenu>
               </div>
 
               {/* Selected Connector Tag (Matches Reference Screenshot: Icon + Connector Name in Light Blue Text) */}
@@ -731,8 +727,8 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
               {/* Right Controls: Voice Mic & Send Button */}
               <div className="flex items-center gap-2 ml-auto shrink-0">
                 <VoiceInputButton 
-                  onTranscript={(text) => setPrompt(text)}
-                  className="size-8 text-foreground/80 hover:text-foreground dark:text-white/80 dark:hover:text-white"
+                  onTranscript={(text) => setPrompt(prev => prev ? `${prev} ${text}` : text)}
+                  className="size-8 text-foreground/80 hover:text-foreground dark:text-white/80 dark:hover:text-white transition-colors"
                   size={18}
                 />
                 <button 

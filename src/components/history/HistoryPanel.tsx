@@ -508,9 +508,47 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
     return tasks.filter(task => {
       const title = formatTitle(task).toLowerCase();
       const prompt = (task.prompt || '').toLowerCase();
-      return title.includes(q) || prompt.includes(q);
+      const status = (task.status || '').toLowerCase();
+      const mode = ((task as any).mode || '').toLowerCase();
+      return title.includes(q) || prompt.includes(q) || status.includes(q) || mode.includes(q);
     });
   }, [tasks, searchQuery]);
+
+  // Group task sessions by date periods (Today, Yesterday, 7 Days, 30 Days, Older)
+  const groupedTasks = useMemo(() => {
+    const groups: { [key: string]: TaskHistoryItem[] } = {
+      'Today': [],
+      'Yesterday': [],
+      'Previous 7 Days': [],
+      'Previous 30 Days': [],
+      'Older': []
+    };
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const yesterdayStart = todayStart - 86400000;
+    const sevenDaysAgoStart = todayStart - 7 * 86400000;
+    const thirtyDaysAgoStart = todayStart - 30 * 86400000;
+
+    filteredTasks.forEach((task) => {
+      const time = new Date(task.created_at || Date.now()).getTime();
+      if (time >= todayStart) {
+        groups['Today'].push(task);
+      } else if (time >= yesterdayStart) {
+        groups['Yesterday'].push(task);
+      } else if (time >= sevenDaysAgoStart) {
+        groups['Previous 7 Days'].push(task);
+      } else if (time >= thirtyDaysAgoStart) {
+        groups['Previous 30 Days'].push(task);
+      } else {
+        groups['Older'].push(task);
+      }
+    });
+
+    return Object.entries(groups)
+      .filter(([_, list]) => list.length > 0)
+      .map(([label, list]) => ({ label, tasks: list }));
+  }, [filteredTasks]);
 
   return (
     <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -907,49 +945,70 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
                   </div>
                 </div>
 
-                {filteredTasks.length === 0 ? (
+                {groupedTasks.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-56 text-center px-4 space-y-3">
                     <div className="w-12 h-12 rounded-2xl bg-muted/60 text-muted-foreground flex items-center justify-center">
                       <MessageSquare size={20} />
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-foreground">No chat sessions found</p>
+                      <p className="text-sm font-semibold text-foreground">
+                        {searchQuery ? 'No matching sessions found' : 'No chat sessions found'}
+                      </p>
                       <p className="text-xs text-muted-foreground max-w-xs mt-1">
-                        All research and conversation tasks will be archived here.
+                        {searchQuery ? 'Try searching with another keyword or clear search filter.' : 'All research and conversation tasks will be archived here.'}
                       </p>
                     </div>
                   </div>
                 ) : (
-                  filteredTasks.map((task) => (
-                    <div
-                      key={task.id}
-                      onClick={() => handleOpenTask(task.id)}
-                      className="group relative p-3.5 rounded-2xl border border-border bg-white dark:bg-card hover:border-primary/50 hover:shadow-md transition-all cursor-pointer"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1 min-w-0 space-y-1.5">
-                          <div className="flex items-center gap-2">
-                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
-                              <MessageSquare size={11} /> {((task as any).mode === 'work' || task.outputFormat === 'website' || Boolean(task.websiteName)) ? 'Work' : 'Chat'}
-                            </span>
-                            <span className="text-[10px] text-muted-foreground font-mono">
-                              {getRelativeTime(task.created_at)}
-                            </span>
+                  groupedTasks.map((group) => (
+                    <div key={group.label} className="space-y-2 pt-1 mb-3">
+                      {/* Date Group Header */}
+                      <div className="flex items-center gap-2 px-1 sticky top-0 bg-background/95 backdrop-blur-xs py-1.5 z-10 border-b border-border/40">
+                        <Clock size={12} className="text-primary shrink-0" />
+                        <span className="text-[11px] font-bold tracking-tight text-foreground/80 uppercase">
+                          {group.label}
+                        </span>
+                        <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-muted font-mono text-muted-foreground font-semibold">
+                          {group.tasks.length}
+                        </span>
+                        <div className="h-px bg-border/40 flex-1 ml-1" />
+                      </div>
+
+                      {/* Grouped session cards */}
+                      <div className="space-y-2">
+                        {group.tasks.map((task) => (
+                          <div
+                            key={task.id}
+                            onClick={() => handleOpenTask(task.id)}
+                            className="group relative p-3.5 rounded-2xl border border-border bg-white dark:bg-card hover:border-primary/50 hover:shadow-md transition-all cursor-pointer"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1 min-w-0 space-y-1.5">
+                                <div className="flex items-center gap-2">
+                                  <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
+                                    <MessageSquare size={11} /> {((task as any).mode === 'work' || task.outputFormat === 'website' || Boolean(task.websiteName)) ? 'Work' : 'Chat'}
+                                  </span>
+                                  <span className="text-[10px] text-muted-foreground font-mono">
+                                    {getRelativeTime(task.created_at)}
+                                  </span>
+                                </div>
+                                <h4 className="font-semibold text-xs text-foreground line-clamp-1">
+                                  {formatTitle(task)}
+                                </h4>
+                                <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
+                                  {task.prompt}
+                                </p>
+                              </div>
+                              <button
+                                onClick={(e) => handleDeleteTask(task.id, e, formatTitle(task))}
+                                className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
+                                title="Delete session"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
                           </div>
-                          <h4 className="font-semibold text-xs text-foreground line-clamp-1">
-                            {formatTitle(task)}
-                          </h4>
-                          <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
-                            {task.prompt}
-                          </p>
-                        </div>
-                        <button
-                          onClick={(e) => handleDeleteTask(task.id, e, formatTitle(task))}
-                          className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
-                          title="Delete session"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        ))}
                       </div>
                     </div>
                   ))

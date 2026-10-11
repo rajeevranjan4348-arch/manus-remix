@@ -57,6 +57,7 @@ function AppContent() {
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = React.useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = React.useState<'general' | 'robot' | 'ai' | 'personalization' | 'voice' | 'data' | 'about'>('general');
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useBlinkAuth();
@@ -79,10 +80,13 @@ function AppContent() {
       }
       if ((e.ctrlKey || e.metaKey) && (e.key === ',' || e.key.toLowerCase() === 'p')) {
         e.preventDefault();
+        setSettingsInitialTab('general');
         setIsSettingsOpen(prev => !prev);
       }
     };
-    const handleOpenSettings = () => {
+    const handleOpenSettings = (e: any) => {
+      const tab = e?.detail?.tab || 'general';
+      setSettingsInitialTab(tab);
       setIsSettingsOpen(true);
     };
     const handleOpenHistory = () => {
@@ -198,6 +202,7 @@ function AppContent() {
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+        initialTab={settingsInitialTab}
       />
 
       <Toaster />

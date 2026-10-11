@@ -1,8 +1,25 @@
 import React from 'react';
+import { toast } from 'sonner';
 
-export function ManusLogo({ showBadge = false }: { showBadge?: boolean }) {
+export function ManusLogo({ showBadge = false, onClick }: { showBadge?: boolean; onClick?: () => void }) {
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onClick) {
+      onClick();
+    } else {
+      toast.success("Robot is happy! 😊", { icon: "😊", duration: 2500 });
+      window.dispatchEvent(new CustomEvent('manus_open_settings', { detail: { tab: 'robot' } }));
+    }
+  };
+
   return (
-    <div className="flex items-center gap-2">
+    <div 
+      onClick={handleClick}
+      className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
+      title="Tap robot logo to customize Robot settings"
+      role="button"
+      tabIndex={0}
+    >
       <div className="w-8 h-8 rounded-full bg-card border border-border/60 flex items-center justify-center shadow-xs">
         <Logo size={16} />
       </div>
@@ -18,7 +35,7 @@ export function ManusLogo({ showBadge = false }: { showBadge?: boolean }) {
   );
 }
 
-export function Logo({ className, size = 28 }: { className?: string; size?: number }) {
+export function Logo({ className, size = 28, onClick }: { className?: string; size?: number; onClick?: (e: React.MouseEvent) => void }) {
   const id = React.useId().replace(/:/g, "");
   return (
     <svg 
@@ -28,6 +45,7 @@ export function Logo({ className, size = 28 }: { className?: string; size?: numb
       viewBox="0 0 24 24" 
       xmlns="http://www.w3.org/2000/svg"
       className={className}
+      onClick={onClick}
     >
       <g clipPath={`url(#clip0_${id})`}>
         <g clipPath={`url(#clip1_${id})`}>

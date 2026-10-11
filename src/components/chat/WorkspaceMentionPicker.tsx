@@ -1,5 +1,21 @@
 import React from 'react';
-import { Calendar, Mail, HardDrive, FileText, FileSpreadsheet, CheckSquare, Sparkles, Layers, Github } from 'lucide-react';
+import { 
+  Calendar, 
+  Mail, 
+  HardDrive, 
+  FileText, 
+  FileSpreadsheet, 
+  CheckSquare, 
+  Sparkles, 
+  Globe, 
+  Terminal, 
+  BarChart2, 
+  Activity, 
+  Figma, 
+  Plug,
+  Check,
+  Github
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export interface WorkspaceConnectorOption {
@@ -13,12 +29,12 @@ export interface WorkspaceConnectorOption {
 
 export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
   {
-    id: 'github',
-    tag: '@github',
-    label: 'GitHub',
-    description: 'Triage pull requests, issues, CI logs, and repository code',
-    icon: Github,
-    colorClass: 'text-slate-800 dark:text-white bg-slate-800/10'
+    id: 'gmail',
+    tag: '@gmail',
+    label: 'Gmail',
+    description: 'Read, search, and generate email drafts directly from Gmail',
+    icon: Mail,
+    colorClass: 'text-red-500 bg-red-500/10'
   },
   {
     id: 'calendar',
@@ -27,14 +43,6 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     description: 'Fetch upcoming events, today\'s schedule & meetings',
     icon: Calendar,
     colorClass: 'text-blue-500 bg-blue-500/10'
-  },
-  {
-    id: 'gmail',
-    tag: '@gmail',
-    label: 'Gmail',
-    description: 'Search & summarize recent emails, inbox threads & drafts',
-    icon: Mail,
-    colorClass: 'text-red-500 bg-red-500/10'
   },
   {
     id: 'drive',
@@ -75,6 +83,62 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     description: 'Aggregate Calendar schedule, Gmail inbox & Drive files together',
     icon: Sparkles,
     colorClass: 'text-purple-500 bg-purple-500/10'
+  },
+  {
+    id: 'web_search',
+    tag: '@web_search',
+    label: 'Web Search',
+    description: 'Real-time live internet search & fact verification',
+    icon: Globe,
+    colorClass: 'text-indigo-500 bg-indigo-500/10'
+  },
+  {
+    id: 'code_sandbox',
+    tag: '@code_sandbox',
+    label: 'Python Sandbox',
+    description: 'Execute code scripts, process datasets & output files',
+    icon: Terminal,
+    colorClass: 'text-cyan-500 bg-cyan-500/10'
+  },
+  {
+    id: 'charts',
+    tag: '@charts',
+    label: 'Chart Visualizer',
+    description: 'Render interactive graphs, charts & visualizers',
+    icon: BarChart2,
+    colorClass: 'text-purple-500 bg-purple-500/10'
+  },
+  {
+    id: 'deep_research',
+    tag: '@deep_research',
+    label: 'Deep Research',
+    description: 'Multi-source document synthesis & deep web research',
+    icon: Sparkles,
+    colorClass: 'text-amber-500 bg-amber-500/10'
+  },
+  {
+    id: 'github',
+    tag: '@github',
+    label: 'GitHub',
+    description: 'Triage pull requests, issues, CI logs, and repository code',
+    icon: Github,
+    colorClass: 'text-slate-800 dark:text-white bg-slate-800/10'
+  },
+  {
+    id: 'health',
+    tag: '@health',
+    label: 'Health & Fitness',
+    description: 'Analyze health metrics, workout data & activity logs',
+    icon: Activity,
+    colorClass: 'text-rose-500 bg-rose-500/10'
+  },
+  {
+    id: 'figma',
+    tag: '@figma',
+    label: 'Figma Canvas',
+    description: 'Inspect design files, components & layout specs',
+    icon: Figma,
+    colorClass: 'text-purple-600 bg-purple-600/10'
   }
 ];
 
@@ -82,33 +146,59 @@ interface WorkspaceMentionPickerProps {
   query: string;
   onSelect: (option: WorkspaceConnectorOption) => void;
   selectedIndex: number;
+  activeConnectors?: string[];
 }
 
-export function WorkspaceMentionPicker({ query, onSelect, selectedIndex }: WorkspaceMentionPickerProps) {
+export function WorkspaceMentionPicker({ query, onSelect, selectedIndex, activeConnectors }: WorkspaceMentionPickerProps) {
   const searchTerm = query.toLowerCase().replace('@', '');
-  
-  const filteredOptions = WORKSPACE_CONNECTOR_OPTIONS.filter(opt => 
-    opt.tag.toLowerCase().includes(searchTerm) || 
-    opt.label.toLowerCase().includes(searchTerm) ||
-    opt.id.toLowerCase().includes(searchTerm)
-  );
+
+  // Helper to check if connector is enabled in activeConnectors
+  const isEnabled = (id: string) => {
+    if (!activeConnectors || activeConnectors.length === 0) return true;
+    const cleanId = id.toLowerCase();
+    return activeConnectors.some(active => {
+      const a = active.toLowerCase();
+      return a === cleanId || a === `google_${cleanId}` || cleanId === `google_${a}` || a.includes(cleanId) || cleanId.includes(a);
+    });
+  };
+
+  // Sort options: enabled ones first
+  const sortedOptions = [...WORKSPACE_CONNECTOR_OPTIONS].sort((a, b) => {
+    const aEnabled = isEnabled(a.id);
+    const bEnabled = isEnabled(b.id);
+    if (aEnabled && !bEnabled) return -1;
+    if (!aEnabled && bEnabled) return 1;
+    return 0;
+  });
+
+  // Filter by query
+  const filteredOptions = sortedOptions.filter(opt => {
+    if (!searchTerm) return true;
+    return (
+      opt.tag.toLowerCase().includes(searchTerm) || 
+      opt.label.toLowerCase().includes(searchTerm) ||
+      opt.id.toLowerCase().includes(searchTerm) ||
+      opt.description.toLowerCase().includes(searchTerm)
+    );
+  });
 
   if (filteredOptions.length === 0) return null;
 
   return (
-    <div className="absolute bottom-full mb-2 left-0 w-80 bg-popover border border-border/80 text-popover-foreground rounded-2xl shadow-2xl overflow-hidden z-50 p-1.5 backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2 duration-150">
-      <div className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground border-b border-border/40 flex items-center justify-between">
-        <span className="flex items-center gap-1.5">
-          <Layers size={13} className="text-primary" />
-          Google Workspace Connectors
+    <div className="absolute bottom-full mb-3 left-2 sm:left-4 w-80 sm:w-96 bg-white dark:bg-[#202124] border border-slate-200 dark:border-white/15 text-slate-900 dark:text-white rounded-2xl shadow-2xl overflow-hidden z-[100] p-1.5 backdrop-blur-2xl animate-in fade-in slide-in-from-bottom-2 duration-150">
+      <div className="px-3 py-2 border-b border-slate-200/80 dark:border-white/10 flex items-center justify-between bg-slate-50/80 dark:bg-white/5 rounded-t-xl">
+        <span className="flex items-center gap-1.5 text-xs font-bold text-foreground dark:text-white">
+          <Plug size={14} className="text-primary" />
+          Connectors ({filteredOptions.length})
         </span>
-        <span className="text-[10px] text-muted-foreground">Type or click to select</span>
+        <span className="text-[10px] text-muted-foreground font-medium">Use ↑↓ and Enter or click to attach</span>
       </div>
 
-      <div className="max-h-60 overflow-y-auto space-y-0.5 p-1">
+      <div className="max-h-64 overflow-y-auto space-y-1 p-1 custom-scrollbar">
         {filteredOptions.map((opt, idx) => {
           const Icon = opt.icon;
           const isSelected = idx === selectedIndex % filteredOptions.length;
+          const activeStatus = isEnabled(opt.id);
           
           return (
             <button
@@ -116,10 +206,10 @@ export function WorkspaceMentionPicker({ query, onSelect, selectedIndex }: Works
               type="button"
               onClick={() => onSelect(opt)}
               className={cn(
-                "w-full flex items-center gap-3 p-2 rounded-xl text-left transition-colors cursor-pointer group",
+                "w-full flex items-center gap-3 p-2 rounded-xl text-left transition-all cursor-pointer group",
                 isSelected 
-                  ? "bg-primary/10 text-primary font-medium border border-primary/20" 
-                  : "hover:bg-muted/70 text-foreground"
+                  ? "bg-primary/15 text-primary font-medium border border-primary/30" 
+                  : "hover:bg-slate-100 dark:hover:bg-white/10 text-foreground dark:text-white"
               )}
             >
               <div className={cn("p-2 rounded-xl shrink-0 transition-transform group-hover:scale-105", opt.colorClass)}>
@@ -127,9 +217,16 @@ export function WorkspaceMentionPicker({ query, onSelect, selectedIndex }: Works
               </div>
 
               <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-xs text-foreground truncate">{opt.label}</span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground">{opt.tag}</span>
+                <div className="flex items-center justify-between gap-1.5">
+                  <span className="font-semibold text-xs text-foreground dark:text-white truncate">{opt.label}</span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {activeStatus && (
+                      <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full">
+                        <Check size={9} /> Enabled
+                      </span>
+                    )}
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-white/10 text-muted-foreground">{opt.tag}</span>
+                  </div>
                 </div>
                 <p className="text-[10px] text-muted-foreground truncate leading-tight mt-0.5">{opt.description}</p>
               </div>
@@ -140,3 +237,4 @@ export function WorkspaceMentionPicker({ query, onSelect, selectedIndex }: Works
     </div>
   );
 }
+

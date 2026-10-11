@@ -51,18 +51,20 @@ export function ConnectorsPopupMenu({
           {children}
         </PopoverTrigger>
       ) : (
-        <PopoverTrigger className="hidden" />
+        <PopoverTrigger asChild>
+          <span className="inline-block w-0 h-0 opacity-0 pointer-events-none" aria-hidden="true" />
+        </PopoverTrigger>
       )}
       <PopoverContent 
         side="top" 
         align="start" 
         sideOffset={12}
-        className="w-72 p-2 rounded-[28px] border border-border dark:border-white/10 bg-white dark:bg-[#202124] text-foreground dark:text-white shadow-2xl overflow-hidden backdrop-blur-xl"
+        className="w-72 p-2 rounded-[28px] border border-border dark:border-white/10 bg-white dark:bg-[#202124] text-foreground dark:text-white shadow-2xl overflow-hidden backdrop-blur-xl z-50"
       >
         <div className="px-3 py-2 border-b border-border/40 dark:border-white/10 flex items-center justify-between">
           <span className="font-bold text-sm text-foreground dark:text-white flex items-center gap-1.5">
             <Plug size={15} className="text-primary" />
-            <span>Connectors & Plugins</span>
+            <span>Connectors</span>
           </span>
           <button
             onClick={() => {

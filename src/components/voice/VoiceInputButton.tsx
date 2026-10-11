@@ -38,14 +38,8 @@ export function VoiceInputButton({
     };
   }, []);
 
-  const toggleListening = () => {
+  const toggleListening = async () => {
     if (typeof window === 'undefined') return;
-
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      toast.error('Voice recognition is not supported in this browser. Please use Chrome or Edge.');
-      return;
-    }
 
     if (isListening) {
       if (recognitionRef.current) {
@@ -54,97 +48,129 @@ export function VoiceInputButton({
         } catch {}
       }
       setIsListening(false);
+      window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
+      return;
+    }
+
+    // Explicitly request microphone access first for permissions
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+    } catch (e) {
+      toast.error('Microphone permission denied. Please allow microphone access in browser settings.');
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      toast.error('Voice recognition is not supported in this browser. Please use Chrome, Edge, or Safari.');
       return;
     }
 
     try {
       const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = false;
+      recognition.continuous = true;
+      recognition.interimResults = true;
       recognition.lang = 'en-US';
 
       recognition.onstart = () => {
         setIsListening(true);
-        toast.info('Listening... Say "Open YouTube", "Call 123", or ask a question', {
-          duration: 3500,
-        });
+        window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'listening' }));
+        toast.info('🎙️ Listening... Speak into microphone', { duration: 3000 });
       };
 
       recognition.onresult = async (event: any) => {
-        const transcript = event.results?.[0]?.[0]?.transcript?.trim();
-        if (!transcript) return;
+        let finalTranscript = '';
+        let interimTranscript = '';
 
-        const settings = getSettings();
-        const policy = settings.toolApprovalPolicy || 'ask_sensitive';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const result = event.results[i];
+          const text = result[0]?.transcript || '';
+          if (result.isFinal) {
+            finalTranscript += text;
+          } else {
+            interimTranscript += text;
+          }
+        }
 
-        // 1. Check for voice/phone command (e.g. "open youtube", "call...", "check battery")
-        const cmd = matchVoiceCommand(transcript);
-        if (cmd && cmd.matched) {
-          // Check if tool approval is required
-          const needsApproval =
-            policy === 'ask_all' ||
-            (policy === 'ask_sensitive' && cmd.riskLevel === 'sensitive');
+        const currentText = (finalTranscript || interimTranscript).trim();
+        if (!currentText) return;
 
-          if (needsApproval && onRequestApproval) {
-            toast.info(`Approval required for ${cmd.targetName}`);
-            onRequestApproval(cmd);
-            onTranscript(transcript);
+        // Provide real-time live transcription to input area
+        onTranscript(currentText);
+
+        if (finalTranscript.trim()) {
+          const transcript = finalTranscript.trim();
+          const settings = getSettings();
+          const policy = settings.toolApprovalPolicy || 'ask_sensitive';
+
+          // Check for voice/device commands
+          const cmd = matchVoiceCommand(transcript);
+          if (cmd && cmd.matched) {
+            const needsApproval =
+              policy === 'ask_all' ||
+              (policy === 'ask_sensitive' && cmd.riskLevel === 'sensitive');
+
+            if (needsApproval && onRequestApproval) {
+              toast.info(`Approval required for ${cmd.targetName}`);
+              onRequestApproval(cmd);
+              return;
+            }
+
+            if (cmd.action === 'open_url' || cmd.action === 'search') {
+              if (cmd.url) executeOpenUrl(cmd.url);
+            } else {
+              await executeDeviceCommand(cmd);
+            }
+
+            toast.success(`${cmd.targetName}: ${cmd.feedbackSpeech}`, {
+              icon: cmd.action === 'phone_call' ? <Phone size={16} /> : <ExternalLink size={16} />,
+              duration: 4000,
+            });
+
+            speakCleanHumanVoice(cmd.feedbackSpeech, {
+              volume: 1.0,
+              voicePersona: settings.voicePersona,
+              rate: settings.speechSpeed,
+              pitch: settings.voicePitch,
+            });
+
+            onExecuteCommand?.(cmd);
             return;
           }
 
-          // Execute directly
-          if (cmd.action === 'open_url' || cmd.action === 'search') {
-            if (cmd.url) executeOpenUrl(cmd.url);
-          } else {
-            await executeDeviceCommand(cmd);
+          toast.success(`Dictated: "${transcript}"`);
+          const shouldAutoSubmit = autoSubmitOnSpeech || settings.enableHandsFreeVoice;
+          if (shouldAutoSubmit && onAutoSubmit) {
+            onAutoSubmit(transcript);
           }
-
-          toast.success(`${cmd.targetName}: ${cmd.feedbackSpeech}`, {
-            icon: cmd.action === 'phone_call' ? <Phone size={16} /> : <ExternalLink size={16} />,
-            duration: 4000,
-          });
-
-          speakCleanHumanVoice(cmd.feedbackSpeech, {
-            volume: 1.0,
-            voicePersona: settings.voicePersona,
-            rate: settings.speechSpeed,
-            pitch: settings.voicePitch,
-          });
-
-          onTranscript(transcript);
-          onExecuteCommand?.(cmd);
-          return;
-        }
-
-        // 2. Regular speech query: send to input or auto-submit for mic -> Gemini -> audio
-        onTranscript(transcript);
-        toast.success(`Heard: "${transcript}"`);
-
-        const shouldAutoSubmit = autoSubmitOnSpeech || settings.enableHandsFreeVoice;
-        if (shouldAutoSubmit && onAutoSubmit) {
-          toast.info('Sending to Gemini with auto-audio playback...');
-          onAutoSubmit(transcript);
         }
       };
 
       recognition.onerror = (event: any) => {
-        if (event.error !== 'no-speech') {
+        if (event.error !== 'no-speech' && event.error !== 'aborted') {
           console.warn('[Voice Recognition]', event.error);
-          toast.error(`Voice error: ${event.error}`);
+          toast.error(`Microphone error: ${event.error}`);
+          window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'error' }));
+        } else {
+          window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
         }
         setIsListening(false);
       };
 
       recognition.onend = () => {
         setIsListening(false);
+        window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
       };
 
       recognitionRef.current = recognition;
       recognition.start();
     } catch (err) {
       console.error('Speech recognition error:', err);
-      toast.error('Could not access microphone');
+      toast.error('Could not start microphone');
       setIsListening(false);
+      window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'error' }));
     }
   };
 

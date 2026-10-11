@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { ConnectorsStorePanel } from '../connectors/ConnectorsStorePanel';
 import { cn } from '@/lib/utils';
-import { Logo } from './Logo';
+import { Logo, ManusLogo } from './Logo';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent } from '@/components/ui/dropdown-menu';
 import { useBlinkAuth } from '@blinkdotnew/react';
@@ -491,16 +491,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
       <aside className="w-64 h-screen border-r border-border/40 bg-manus-soft dark:bg-sidebar flex flex-col fixed inset-y-0 left-0 lg:static z-40 shrink-0 transition-colors shadow-xl lg:shadow-none">
         {/* Header with Logo and Close Toggle */}
         <div className="p-5 flex items-center justify-between">
-          <button 
-            onClick={() => {
-              navigate('/');
-              if (onNewTask) onNewTask();
-            }}
-            className="flex items-center gap-2 hover:opacity-75 transition-opacity cursor-pointer"
-          >
-            <Logo />
-            <span className="font-serif text-xl font-bold tracking-tight text-foreground">Manus</span>
-          </button>
+          <ManusLogo showBadge={true} />
           <button 
             onClick={onToggle}
             className="p-2 text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent rounded-lg transition-colors cursor-pointer"
