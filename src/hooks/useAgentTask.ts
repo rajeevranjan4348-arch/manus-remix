@@ -1,3 +1,4 @@
+import { captureExplicitMemory, getAgentMemoryContext } from '@/lib/agentMemory';
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useAgent, Agent, webSearch, sandboxTools, fetchUrl, useBlinkAuth } from '@blinkdotnew/react';
 import { blink } from '@/lib/blink';
@@ -444,6 +445,12 @@ export function useAgentTask() {
     setResult(null); // Clear previous result card while running new prompt
 
     const activeId = taskId || currentTaskIdRef.current;
+    const memoryUserId = user?.id || 'usr_manus_default';
+    captureExplicitMemory(memoryUserId, content);
+    const memoryContext = getAgentMemoryContext(memoryUserId);
+    const contextualContent = memoryContext
+      ? `${content}\n\n[Relevant saved user preferences and instructions; apply only when relevant]\n${memoryContext}`
+      : content;
     const userMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
     const userMsg = {
       id: userMsgId,
@@ -477,10 +484,10 @@ export function useAgentTask() {
     // Check if content specifically requests a graph or chart
     const lower = content.toLowerCase();
     if (lower.includes('graph') || lower.includes('chart') || lower.includes('plot') || lower.includes('diagram') || lower.includes('bar') || lower.includes('pie') || lower.includes('line')) {
-      const chartPrompt = `${content}\n\n[INSTRUCTION: Format your chart data as a JSON code block using the format below so it renders as an interactive chart]\n\`\`\`json\n{\n  "graph": {\n    "type": "bar",\n    "labels": ["Category A", "Category B", "Category C", "Category D"],\n    "datasets": [{\n      "label": "Metric",\n      "data": [45, 72, 88, 95]\n    }]\n  }\n}\n\`\`\``;
+      const chartPrompt = `${contextualContent}\n\n[INSTRUCTION: Format your chart data as a JSON code block using the format below so it renders as an interactive chart]\n\`\`\`json\n{\n  "graph": {\n    "type": "bar",\n    "labels": ["Category A", "Category B", "Category C", "Category D"],\n    "datasets": [{\n      "label": "Metric",\n      "data": [45, 72, 88, 95]\n    }]\n  }\n}\n\`\`\``;
       agentSendMessage(chartPrompt);
     } else {
-      agentSendMessage(content);
+      agentSendMessage(contextualContent);
     }
   }, [agentSendMessage, taskId, user]);
 
@@ -632,8 +639,16 @@ export function useAgentTask() {
 
     setSteps(initialSteps);
 
+    // Add only explicitly requested saved preferences; keep the visible user message unchanged.
+    const memoryUserId = user?.id || 'usr_manus_default';
+    captureExplicitMemory(memoryUserId, prompt);
+    const memoryContext = getAgentMemoryContext(memoryUserId);
+    const promptWithMemory = memoryContext
+      ? `${enhancedPrompt}\n\n[Relevant saved user preferences and instructions; apply only when relevant]\n${memoryContext}`
+      : enhancedPrompt;
+
     // Start agent execution
-    agentSendMessage(enhancedPrompt);
+    agentSendMessage(promptWithMemory);
 
     // Initial DB update with steps
     if (newTaskId && initialSteps.length > 0) {
