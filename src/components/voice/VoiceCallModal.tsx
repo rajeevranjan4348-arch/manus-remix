@@ -128,10 +128,17 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
           const rec = new SpeechRecognition();
           rec.continuous = true;
           rec.interimResults = true;
-          rec.lang = 'en-US';
+          rec.maxAlternatives = 1;
+          // Match the device/browser language (e.g. hi-IN or en-IN) instead of
+          // forcing en-US, which can prevent recognition of the user's speech.
+          rec.lang = typeof navigator !== 'undefined' && navigator.language
+            ? navigator.language
+            : 'en-IN';
 
           rec.onstart = () => {
             isListeningRef.current = true;
+            setCallStatus('listening');
+            setStatusText('Listening… speak now');
           };
 
           rec.onresult = (event: any) => {
@@ -162,20 +169,49 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
           };
 
           rec.onerror = (e: any) => {
-            if (e.error !== 'no-speech') {
-              console.warn('[Voice Recognition]', e.error);
+            const error = String(e?.error || 'unknown');
+            console.warn('[Voice Recognition]', error);
+
+            if (error === 'no-speech') {
+              setStatusText('I didn’t hear speech. Please speak clearly and try again.');
+              return;
+            }
+
+            if (error === 'not-allowed' || error === 'service-not-allowed' || error === 'audio-capture') {
+              hasMicPermissionRef.current = false;
+              isCallPausedRef.current = true;
+              setCallStatus('paused');
+              setStatusText(error === 'audio-capture'
+                ? 'Microphone is unavailable. Check Android microphone access and try again.'
+                : 'Speech recognition is blocked. Allow microphone access for this site and try again.');
+              toast.error(error === 'audio-capture'
+                ? 'The browser cannot capture audio. Check Android and Chrome microphone permissions.'
+                : 'Speech recognition was blocked. Allow microphone access in Chrome site settings.');
+              return;
+            }
+
+            if (error === 'network') {
+              setStatusText('Speech recognition needs a working internet connection.');
+              toast.error('Speech recognition network error. Check your internet connection and try again.');
+            } else {
+              setStatusText('Speech recognition stopped. Please try speaking again.');
             }
           };
 
           rec.onend = () => {
             isListeningRef.current = false;
-            // Restart if call is still active and not paused
+            // Mobile Chrome can end a recognition session after a short silence.
+            // Restart with a small delay to avoid InvalidStateError on Android.
             if (isOpen && hasMicPermissionRef.current && !isCallPausedRef.current) {
-              try {
-                rec.start();
-              } catch (error) {
-                console.warn('[Speech Recognition] Restart failed:', error);
-              }
+              window.setTimeout(() => {
+                if (!isOpen || !hasMicPermissionRef.current || isCallPausedRef.current) return;
+                try {
+                  rec.start();
+                } catch (error) {
+                  console.warn('[Speech Recognition] Restart failed:', error);
+                  setStatusText('Tap to restart voice chat if listening does not resume.');
+                }
+              }, 250);
             }
           };
 
