@@ -112,8 +112,7 @@ const COMMAND_TARGETS: Record<string, { name: string; url: string; searchUrl?: (
  */
 export function matchVoiceCommand(rawQuery: string): VoiceCommandResult | null {
   if (!rawQuery) return null;
-  const raw = rawQuery.trim();
-  const q = raw.toLowerCase();
+  const q = rawQuery.trim().toLowerCase();
 
   // 1. Phone Call Command: "call [number or name]", "dial [number]"
   const callMatch = q.match(/^(?:please\s+)?(?:call|dial|phone)\s+(.+)$/i);
@@ -215,12 +214,12 @@ export function matchVoiceCommand(rawQuery: string): VoiceCommandResult | null {
     };
   }
 
-  // 8. Search [service] for [query]: "search youtube for jazz"
-  const searchPattern = /^(?:search|look\s+up|find)\s+([a-z\s]+)\s+(?:for|about|on)\s+(.+)$/i;
-  const searchMatch = raw.match(searchPattern);
-  if (searchMatch) {
-    const serviceKey = searchMatch[1].trim().toLowerCase();
-    const query = searchMatch[2].trim();
+  // 8. Search [service] for [query]: "search youtube for jazz", "search jazz on youtube", "play song on youtube"
+  const searchPattern1 = /^(?:search|look\s+up|find)\s+([a-z0-9\s]+?)\s+(?:for|about)\s+(.+)$/i;
+  const searchMatch1 = q.match(searchPattern1);
+  if (searchMatch1) {
+    const serviceKey = searchMatch1[1].trim();
+    const query = searchMatch1[2].trim();
     const target = COMMAND_TARGETS[serviceKey];
     if (target && target.searchUrl) {
       return {
@@ -235,11 +234,31 @@ export function matchVoiceCommand(rawQuery: string): VoiceCommandResult | null {
     }
   }
 
-  // 9. Open and Search: "open youtube and search [query]"
-  const openSearchPattern = /^(?:open|launch|go\s+to|start)\s+([a-z\s]+?)\s+(?:and\s+)?search\s+(?:for\s+)?(.+)$/i;
-  const openSearchMatch = raw.match(openSearchPattern);
+  // 8b. "search [query] on/in [service]", "play [query] on/in [service]", "find [query] on/in [service]"
+  const searchPattern2 = /^(?:search|look\s+up|find|play|listen\s+to|watch)\s+(?:for\s+)?(.+?)\s+(?:on|in|using)\s+([a-z0-9\s]+)$/i;
+  const searchMatch2 = q.match(searchPattern2);
+  if (searchMatch2) {
+    const query = searchMatch2[1].trim();
+    const serviceKey = searchMatch2[2].trim();
+    const target = COMMAND_TARGETS[serviceKey];
+    if (target && target.searchUrl) {
+      return {
+        matched: true,
+        action: 'search',
+        url: target.searchUrl(query),
+        targetName: target.name,
+        feedbackSpeech: `Searching ${target.name} for ${query}. Opening now.`,
+        riskLevel: 'safe',
+        parameters: { query, service: target.name },
+      };
+    }
+  }
+
+  // 9. Open and Search / Play: "open youtube and search [query]", "open youtube and play [query]"
+  const openSearchPattern = /^(?:open|launch|go\s+to|start)\s+([a-z0-9\s]+?)\s+(?:and\s+)?(?:search|play|find|look\s+for|listen\s+to)(?:\s+for|\s+a|\s+the)?\s+(.+)$/i;
+  const openSearchMatch = q.match(openSearchPattern);
   if (openSearchMatch) {
-    const serviceKey = openSearchMatch[1].trim().toLowerCase();
+    const serviceKey = openSearchMatch[1].trim();
     const query = openSearchMatch[2].trim();
     const target = COMMAND_TARGETS[serviceKey];
     if (target && target.searchUrl) {
@@ -320,62 +339,16 @@ export function matchVoiceCommand(rawQuery: string): VoiceCommandResult | null {
 }
 
 /**
- * On Android, prefer the installed native app for well-known HTTPS app links.
- * Android's intent URL includes a browser fallback, so the command still works
- * as a website when the app is not installed. Other platforms keep normal URLs.
- */
-function getAndroidAppIntentUrl(rawUrl: string): string {
-  if (typeof navigator === 'undefined' || !/Android/i.test(navigator.userAgent)) return rawUrl;
-
-  try {
-    const url = new URL(rawUrl);
-    if (url.protocol !== 'https:') return rawUrl;
-
-    const host = url.hostname.toLowerCase();
-    let packageName: string | undefined;
-
-    if (host === 'youtube.com' || host.endsWith('.youtube.com')) {
-      packageName = 'com.google.android.youtube';
-    } else if (host === 'open.spotify.com') {
-      packageName = 'com.spotify.music';
-    } else if (host === 'maps.google.com' || ((host === 'google.com' || host === 'www.google.com') && url.pathname.startsWith('/maps'))) {
-      packageName = 'com.google.android.apps.maps';
-    } else if (host === 'whatsapp.com' || host.endsWith('.whatsapp.com')) {
-      packageName = 'com.whatsapp';
-    } else if (host === 'mail.google.com') {
-      packageName = 'com.google.android.gm';
-    } else if (host === 'netflix.com' || host.endsWith('.netflix.com')) {
-      packageName = 'com.netflix.mediaclient';
-    } else if (host === 'instagram.com' || host.endsWith('.instagram.com')) {
-      packageName = 'com.instagram.android';
-    } else if (host === 'reddit.com' || host.endsWith('.reddit.com')) {
-      packageName = 'com.reddit.frontpage';
-    }
-
-    if (!packageName) return rawUrl;
-
-    const pathAndQuery = `${url.host}${url.pathname}${url.search}`;
-    const fallback = encodeURIComponent(url.href);
-    return `intent://${pathAndQuery}#Intent;scheme=https;package=${packageName};S.browser_fallback_url=${fallback};end`;
-  } catch {
-    return rawUrl;
-  }
-}
-
-/**
- * Safely executes the open URL command. On Android this launches a supported
- * installed app (for example YouTube) when possible, rather than always opening
- * the website in a browser.
+ * Safely executes the open url command
  */
 export function executeOpenUrl(url: string): { opened: boolean; url: string } {
   if (typeof window === 'undefined') return { opened: false, url };
 
   try {
-    const launchUrl = getAndroidAppIntentUrl(url);
-    const newWindow = window.open(launchUrl, '_blank', 'noopener,noreferrer');
+    const newWindow = window.open(url, '_blank', 'noopener,noreferrer');
     if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
       const a = document.createElement('a');
-      a.href = launchUrl;
+      a.href = url;
       a.target = '_blank';
       a.rel = 'noopener noreferrer';
       document.body.appendChild(a);

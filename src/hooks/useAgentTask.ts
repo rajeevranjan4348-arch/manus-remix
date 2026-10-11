@@ -6,6 +6,8 @@ import { getSettings, playNotificationSound } from '@/lib/settingsStore';
 import { speakCleanHumanVoice } from '@/lib/speechSynthesis';
 import { sendBackgroundNotification } from '@/lib/permissionsManager';
 import { emitRobotEvent } from '@/hooks/useRobotStateController';
+import { matchVoiceCommand, executeOpenUrl, executeDeviceCommand } from '@/lib/voiceCommands';
+import { toast } from 'sonner';
 import {
   saveMessage,
   getMessages,
@@ -290,7 +292,16 @@ export function useAgentTask() {
       const lowerPrompt = promptText.toLowerCase().trim();
       let fallbackContent = '';
 
-      if (/^(hi|hello|hey|greetings|hola|namaste)/i.test(lowerPrompt)) {
+      const cmdMatch = matchVoiceCommand(promptText);
+      if (cmdMatch && cmdMatch.matched) {
+        if (cmdMatch.action === 'search' && cmdMatch.parameters?.query) {
+          fallbackContent = `I have launched **${cmdMatch.targetName}** and searched for **"${cmdMatch.parameters.query}"**! 🚀\n\n- **Target App**: ${cmdMatch.targetName}\n- **Search Query**: ${cmdMatch.parameters.query}\n- **Status**: Opened in a new window/tab.\n\n[➡️ Open ${cmdMatch.targetName} Search Directly](${cmdMatch.url})`;
+        } else if (cmdMatch.url) {
+          fallbackContent = `I have opened **${cmdMatch.targetName}** for you! 🚀\n\n- **Target App**: ${cmdMatch.targetName}\n- **Status**: Launched successfully.\n\n[➡️ Click here to open ${cmdMatch.targetName}](${cmdMatch.url})`;
+        } else {
+          fallbackContent = `Executed **${cmdMatch.targetName}**: ${cmdMatch.feedbackSpeech}`;
+        }
+      } else if (/^(hi|hello|hey|greetings|hola|namaste)/i.test(lowerPrompt)) {
         fallbackContent = 'Hello! I am Manus, your AI workspace assistant. How can I help you today?';
       } else if (/prime minister of india/i.test(lowerPrompt)) {
         fallbackContent = 'The current Prime Minister of India is Narendra Modi.';
@@ -483,6 +494,17 @@ export function useAgentTask() {
       }).catch(err => console.warn('Failed to save user message to DB:', err));
     }
 
+    // Check for app launch or voice device commands
+    const cmd = matchVoiceCommand(content);
+    if (cmd && cmd.matched) {
+      if (cmd.action === 'open_url' || cmd.action === 'search') {
+        if (cmd.url) executeOpenUrl(cmd.url);
+      } else {
+        executeDeviceCommand(cmd);
+      }
+      toast.success(`${cmd.targetName}: ${cmd.feedbackSpeech}`);
+    }
+
     // Check if content specifically requests a graph or chart
     const lower = content.toLowerCase();
     if (lower.includes('graph') || lower.includes('chart') || lower.includes('plot') || lower.includes('diagram') || lower.includes('bar') || lower.includes('pie') || lower.includes('line')) {
@@ -640,6 +662,17 @@ export function useAgentTask() {
     }
 
     setSteps(initialSteps);
+
+    // Check for app launch or voice device commands
+    const cmd = matchVoiceCommand(prompt);
+    if (cmd && cmd.matched) {
+      if (cmd.action === 'open_url' || cmd.action === 'search') {
+        if (cmd.url) executeOpenUrl(cmd.url);
+      } else {
+        executeDeviceCommand(cmd);
+      }
+      toast.success(`${cmd.targetName}: ${cmd.feedbackSpeech}`);
+    }
 
     // Start agent execution
     agentSendMessage(enhancedPrompt);
