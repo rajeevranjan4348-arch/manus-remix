@@ -6,6 +6,7 @@
  */
 
 import { getSettings } from '@/lib/settingsStore';
+import { emitRobotEvent } from '@/hooks/useRobotStateController';
 
 export interface SpeakOptions {
   rate?: number;
@@ -200,16 +201,20 @@ export function speakCleanHumanVoice(text: string, options: SpeakOptions = {}): 
   }
 
   utterance.onstart = () => {
+    emitRobotEvent('VOICE_PLAYBACK_STARTED');
     window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'speaking' }));
     options.onStart?.();
   };
 
   utterance.onend = () => {
+    emitRobotEvent('VOICE_PLAYBACK_ENDED');
     window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
     options.onEnd?.();
   };
 
   utterance.onerror = (e) => {
+    emitRobotEvent('VOICE_PLAYBACK_ENDED');
+    if (e.error !== 'interrupted' && e.error !== 'canceled') emitRobotEvent('TASK_FAILED');
     window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
     // Only fire if not an intentional cancel
     if (e.error !== 'interrupted' && e.error !== 'canceled') {
