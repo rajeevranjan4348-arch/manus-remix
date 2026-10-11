@@ -89,6 +89,11 @@ export function useAgentTask() {
     - For a greeting such as "hello", answer briefly and warmly, e.g. "Hello! How can I help you?".
     - Only use web/tools when the user explicitly asks for current/live information, web research, a URL, file/data analysis, code execution, or another task that genuinely requires a tool.
     - In Chat mode, prioritize a fast conversational answer over autonomous task execution.
+    - Format user-facing answers for easy scanning: use Markdown headings, short paragraphs, bullets, numbered steps, and code blocks when they improve clarity.
+    - Use a small number of relevant emojis or icons where they add meaning (for example, ✅ for completed steps, ⚠️ for warnings, 💡 for tips, and 🔧 for developer guidance). Do not decorate every line or force emojis into serious, formal, or code-only answers.
+    - Match answer length to the question: concise for simple questions and structured/detail-rich for complex requests.
+    - Use tables only when comparing multiple items; preserve accurate facts and never use emojis as a substitute for explanation.
+    - Do not invent stickers or claim to render animated media unless a supported image/sticker renderer and asset are actually available.
 
     THINKING & DEEP REASONING GUIDELINES:
     1. For complex tasks, data analysis, code generation, multi-step queries, or when requested with "Think Harder", include your step-by-step reasoning enclosed within <think> and </think> tags at the very beginning of your response.
