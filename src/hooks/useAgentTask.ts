@@ -96,13 +96,9 @@ export function useAgentTask() {
     - In Chat mode, prioritize a fast conversational answer over autonomous task execution.
 
     THINKING & DEEP REASONING GUIDELINES:
-    1. For complex tasks, data analysis, code generation, multi-step queries, or when requested with "Think Harder", include your step-by-step reasoning enclosed within <think> and </think> tags at the very beginning of your response.
-    2. Inside <think>, structure your rationale clearly:
-       - Problem Deconstruction & Core Objective
-       - Data / Context Evaluation
-       - Multi-step Logic & Edge Case Considerations
-       - Conclusion & Solution Verification
-    3. Place your complete user-facing answer immediately after the closing </think> tag.
+    1. For complex tasks or when requested with "Think Harder", reason carefully internally and verify assumptions before answering.
+    2. Never reveal private chain-of-thought or hidden step-by-step reasoning. Instead, provide a concise plan, key findings, checks performed, and a clear user-facing conclusion.
+    3. For coding tasks, show a short actionable plan and progress/results, not hidden internal deliberation.
     4. For quick conversational messages, keep your answer fast and direct.
 
     Output Format Guide:
@@ -120,8 +116,9 @@ export function useAgentTask() {
     - spreadsheet: Structured tabular data with headers
     
     Output Instructions:
-    ALWAYS wrap your JSON output in \`\`\`json\`\`\` code blocks.
-    If producing a document, ALWAYS simulate the file creation by returning the "files" array in your JSON.
+    - For ordinary chat and software-development tasks, answer in clear natural language or Markdown; do not force JSON output.
+    - When a graph/chart or structured document payload is required by the existing app, wrap that JSON in \`\`\`json\`\`\` code blocks.
+    - If producing a document, return the "files" array only when the app's document workflow expects it; never claim a file was created unless a tool actually created it.
     
     When analyzing data:
     1. Parse and validate the structure/content
