@@ -31,6 +31,7 @@ import { blink } from '@/lib/blink';
 import { speakCleanHumanVoice, stopCleanSpeech } from '@/lib/speechSynthesis';
 import { matchVoiceCommand, executeOpenUrl, executeDeviceCommand } from '@/lib/voiceCommands';
 import { extractWeatherQuery, fetchWeatherByCity } from '@/lib/weatherService';
+import { requestMicrophonePermission } from '@/lib/permissionsManager';
 
 export interface VoiceMessage {
   id: string;
@@ -113,6 +114,8 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
   const recognitionRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesis | null>(null);
   const isListeningRef = useRef(false);
+  const hasMicPermissionRef = useRef(false);
+  const isCallPausedRef = useRef(false);
 
   // Initialize Speech
   useEffect(() => {
@@ -167,10 +170,12 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
           rec.onend = () => {
             isListeningRef.current = false;
             // Restart if call is still active and not paused
-            if (isOpen && callStatus !== 'paused') {
+            if (isOpen && hasMicPermissionRef.current && !isCallPausedRef.current) {
               try {
                 rec.start();
-              } catch {}
+              } catch (error) {
+                console.warn('[Speech Recognition] Restart failed:', error);
+              }
             }
           };
 
@@ -189,31 +194,70 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
     };
   }, [isOpen, voiceInterruptEnabled]);
 
-  // When call starts
+  // When call starts, obtain permission from an explicit user action before
+  // starting browser speech recognition. Stop the preflight stream immediately.
   useEffect(() => {
+    let cancelled = false;
+
     if (isOpen) {
+      isCallPausedRef.current = false;
+      hasMicPermissionRef.current = false;
       setCallStatus('listening');
-      setStatusText('Start speaking...');
+      setStatusText('Requesting microphone access...');
       setLiveTranscript('');
 
-      // Speak initial greeting if enabled
-      if (openingEnabled) {
-        speakText('Good to hear your voice! How are you?');
-      }
+      const startVoiceCall = async () => {
+        const granted = await requestMicrophonePermission();
+        if (cancelled || !isOpen) return;
 
-      // Start recognition
-      try {
-        if (recognitionRef.current && !isListeningRef.current) {
-          recognitionRef.current.start();
+        if (!granted) {
+          setCallStatus('paused');
+          isCallPausedRef.current = true;
+          setStatusText('Allow microphone access to start voice chat');
+          toast.error('Microphone permission is required for voice chat. Allow access in your browser settings and reopen voice chat.');
+          return;
         }
-      } catch {}
+
+        if (!recognitionRef.current) {
+          setCallStatus('paused');
+          isCallPausedRef.current = true;
+          setStatusText('Voice recognition is not supported in this browser');
+          toast.error('Voice recognition is not supported here. Please use an up-to-date Chrome or Edge browser over HTTPS.');
+          return;
+        }
+
+        hasMicPermissionRef.current = true;
+        setStatusText('Start speaking...');
+        if (openingEnabled) {
+          speakText('Good to hear your voice! How are you?');
+        }
+
+        try {
+          if (!isListeningRef.current) recognitionRef.current.start();
+        } catch (error) {
+          hasMicPermissionRef.current = false;
+          setCallStatus('paused');
+          isCallPausedRef.current = true;
+          setStatusText('Could not start microphone');
+          console.warn('[Voice Call] Could not start recognition:', error);
+          toast.error('Could not start voice chat. Check microphone permissions and try again.');
+        }
+      };
+
+      void startVoiceCall();
     } else {
-      // Cleanup on modal close
+      hasMicPermissionRef.current = false;
+      isCallPausedRef.current = false;
+      isListeningRef.current = false;
       try {
         if (recognitionRef.current) recognitionRef.current.stop();
         if (synthRef.current) synthRef.current.cancel();
       } catch {}
     }
+
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen]);
 
   // Save history to storage
@@ -495,6 +539,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
   // Pause / Resume Toggle
   const togglePause = () => {
     if (callStatus === 'paused') {
+      isCallPausedRef.current = false;
       setCallStatus('listening');
       setStatusText('Start speaking...');
       try {
@@ -502,6 +547,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
       } catch {}
       toast.info('Voice call resumed');
     } else {
+      isCallPausedRef.current = true;
       setCallStatus('paused');
       setStatusText('Call paused');
       try {

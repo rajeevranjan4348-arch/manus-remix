@@ -54,14 +54,31 @@ export function VoiceInputButton({
       return;
     }
 
-    // Explicitly request microphone access first for permissions
-    try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        await navigator.mediaDevices.getUserMedia({ audio: true });
-      }
-    } catch (e) {
-      toast.error('Microphone permission denied. Please allow microphone access in browser settings.');
+    // Request access from the user's click, then release the temporary stream
+    // before SpeechRecognition opens its own microphone session.
+    if (!window.isSecureContext) {
+      toast.error('Microphone access requires HTTPS or localhost. Open Manus through its secure site.');
       return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      toast.error('Microphone access is unavailable in this browser. Please use an up-to-date Chrome browser.');
+      return;
+    }
+    let permissionStream: MediaStream | null = null;
+    try {
+      permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (error) {
+      const name = error instanceof Error ? error.name : '';
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        toast.error('Microphone permission was blocked. Allow Microphone for this site in browser settings, then try again.');
+      } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+        toast.error('No microphone was found. Connect or enable a microphone and try again.');
+      } else {
+        toast.error('Could not access the microphone. Check site permissions and ensure no other app is using it.');
+      }
+      return;
+    } finally {
+      permissionStream?.getTracks().forEach((track) => track.stop());
     }
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
