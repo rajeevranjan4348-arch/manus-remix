@@ -19,7 +19,10 @@ import {
   Brain,
   MessageSquare,
   Briefcase,
-  Upload
+  Upload,
+  AtSign,
+  Plug,
+  Settings
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { gsap } from 'gsap';
@@ -27,7 +30,12 @@ import { toast } from 'sonner';
 import { AttachmentMenu } from '@/components/chat/AttachmentMenu';
 import { VoiceInputButton } from '@/components/voice/VoiceInputButton';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
-import { getSettings, saveSettings } from '@/lib/settingsStore';
+import { ConnectorsPopupMenu } from '@/components/chat/ConnectorsPopupMenu';
+import { ConnectorsStorePanel, CONNECTOR_CATALOG } from '@/components/connectors/ConnectorsStorePanel';
+import { ConnectorConfigModal } from '@/components/connectors/ConnectorConfigModal';
+import { GoogleDrivePickerModal } from '@/components/workspace/GoogleDrivePickerModal';
+import { WorkspaceMentionPicker, WORKSPACE_CONNECTOR_OPTIONS, WorkspaceConnectorOption } from '@/components/chat/WorkspaceMentionPicker';
+import { GoogleDriveFileItem } from '@/lib/workspaceTools';
 
 export type PersonalityMode = 'chat' | 'work';
 
@@ -96,15 +104,15 @@ interface HomeProps {
 
 export function Home({ onStartTask, personality, onPersonalityChange }: HomeProps) {
   const [prompt, setPrompt] = useState('');
-  const [robotState, setRobotState] = useState<RobotHeadState>(() => getSettings().robotState as RobotHeadState);
-  const [robotShape, setRobotShape] = useState<RobotHeadShape>(() => getSettings().robotShape as RobotHeadShape);
-  const [robotTheme, setRobotTheme] = useState(() => getSettings().robotTheme);
-  const [robotSpeed, setRobotSpeed] = useState(() => getSettings().robotSpeed);
-  const [robotPaused, setRobotPaused] = useState(() => getSettings().robotPaused);
-  const [robotInteractive, setRobotInteractive] = useState(() => getSettings().robotInteractive);
-  const [robotAntenna, setRobotAntenna] = useState(() => getSettings().robotAntenna);
-  const [robotFloorShadow, setRobotFloorShadow] = useState(() => getSettings().robotFloorShadow);
-  const [robotSeed, setRobotSeed] = useState(() => getSettings().robotSeed);
+  const [robotState, setRobotState] = useState<RobotHeadState>('idle');
+  const [robotShape, setRobotShape] = useState<RobotHeadShape>('rectangle');
+  const [robotTheme, setRobotTheme] = useState(0);
+  const [robotSpeed, setRobotSpeed] = useState(1);
+  const [robotPaused, setRobotPaused] = useState(false);
+  const [robotInteractive, setRobotInteractive] = useState(true);
+  const [robotAntenna, setRobotAntenna] = useState(true);
+  const [robotFloorShadow, setRobotFloorShadow] = useState(true);
+  const [robotSeed, setRobotSeed] = useState(0.3);
 
   const [activeIntent, setActiveIntent] = useState<{ label: string, icon: any, placeholder?: string } | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<string | null>(null);
@@ -119,31 +127,79 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
     'google_sheets', 'google_slides', 'google_tasks', 'google_chat', 
     'google_forms', 'google_keep', 'google_meet', 'google_contacts', 'google_classroom'
   ]);
+  const [isDrivePickerOpen, setIsDrivePickerOpen] = useState(false);
+  const [isConnectorsMenuOpen, setIsConnectorsMenuOpen] = useState(false);
+  const [isConnectorsStoreOpen, setIsConnectorsStoreOpen] = useState(false);
+  const [selectedConfigConnectorId, setSelectedConfigConnectorId] = useState<string | null>(null);
+  const [activeConnectorTags, setActiveConnectorTags] = useState<string[]>([]);
+  const [showMentionPicker, setShowMentionPicker] = useState<boolean>(false);
+  const [mentionQuery, setMentionQuery] = useState<string>('');
+  const [mentionIndex, setMentionIndex] = useState<number>(0);
+
   const [chatWorkMode, setChatWorkMode] = useState<PersonalityMode>(() => {
     return (localStorage.getItem('manus_chat_work_mode') as PersonalityMode) || personality || 'chat';
   });
   const [isDragging, setIsDragging] = useState(false);
   const dragCounterRef = useRef(0);
 
-  React.useEffect(() => {
-    const syncRobotSettings = (event?: Event) => {
-      const next = (event as CustomEvent<any> | undefined)?.detail || getSettings();
-      setRobotState((next.robotState || 'idle') as RobotHeadState);
-      setRobotShape((next.robotShape || 'rectangle') as RobotHeadShape);
-      setRobotTheme(Number(next.robotTheme ?? 0));
-      setRobotSpeed(Number(next.robotSpeed ?? 1));
-      setRobotPaused(Boolean(next.robotPaused));
-      setRobotInteractive(next.robotInteractive ?? true);
-      setRobotAntenna(next.robotAntenna ?? true);
-      setRobotFloorShadow(next.robotFloorShadow ?? true);
-      setRobotSeed(Number(next.robotSeed ?? 0.3));
-    };
-    window.addEventListener('manus_settings_updated', syncRobotSettings);
-    return () => window.removeEventListener('manus_settings_updated', syncRobotSettings);
-  }, []);
-
   const containerRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setPrompt(val);
+
+    const lastAt = val.lastIndexOf('@');
+    if (lastAt !== -1 && (lastAt === 0 || val[lastAt - 1] === ' ')) {
+      const queryAfterAt = val.slice(lastAt);
+      if (queryAfterAt.includes(' ')) {
+        const potentialTag = queryAfterAt.trim().toLowerCase();
+        const matchedOpt = WORKSPACE_CONNECTOR_OPTIONS.find(o => o.tag.toLowerCase() === potentialTag);
+        if (matchedOpt) {
+          const prefix = val.slice(0, lastAt);
+          const suffix = val.slice(lastAt + queryAfterAt.length);
+          setPrompt((prefix + suffix).trimStart());
+          setShowMentionPicker(false);
+          if (!activeConnectorTags.includes(matchedOpt.id)) {
+            setActiveConnectorTags(prev => [...prev, matchedOpt.id]);
+            toast.success(`Attached ${matchedOpt.label} context`);
+          }
+          return;
+        }
+      } else {
+        setShowMentionPicker(true);
+        setMentionQuery(queryAfterAt);
+        setMentionIndex(0);
+        return;
+      }
+    }
+    setShowMentionPicker(false);
+  };
+
+  const handleSelectConnectorOption = (option: WorkspaceConnectorOption) => {
+    const lastAt = prompt.lastIndexOf('@');
+    let newPrompt = prompt;
+    if (lastAt !== -1) {
+      newPrompt = prompt.slice(0, lastAt);
+    }
+    setPrompt(newPrompt.trimStart());
+    setShowMentionPicker(false);
+
+    if (!activeConnectorTags.includes(option.id)) {
+      setActiveConnectorTags(prev => [...prev, option.id]);
+      toast.success(`Attached ${option.label} context`);
+    }
+  };
+
+  const removeConnectorTag = (tagId: string) => {
+    setActiveConnectorTags(prev => prev.filter(t => t !== tagId));
+  };
+
+  const handleDriveFileSelect = (driveFile: GoogleDriveFileItem) => {
+    const driveText = `[Selected Google Drive File: ${driveFile.name}]\nLink: ${driveFile.webViewLink || 'N/A'}\nType: ${driveFile.mimeType}`;
+    setPrompt(prev => prev ? `${prev}\n${driveText}` : driveText);
+    toast.success(`Attached Google Drive file: ${driveFile.name}`);
+  };
 
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
@@ -184,9 +240,16 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   };
 
   const handleTogglePlugin = (pluginId: string) => {
-    setActivePlugins(prev => 
-      prev.includes(pluginId) ? prev.filter(p => p !== pluginId) : [...prev, pluginId]
-    );
+    setActivePlugins(prev => {
+      const isPresent = prev.includes(pluginId);
+      if (isPresent) {
+        setActiveConnectorTags(tags => tags.filter(t => t !== pluginId));
+        return prev.filter(p => p !== pluginId);
+      } else {
+        setActiveConnectorTags(tags => tags.includes(pluginId) ? tags : [...tags, pluginId]);
+        return [...prev, pluginId];
+      }
+    });
   };
 
   React.useEffect(() => {
@@ -363,6 +426,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
       intent: activeIntent?.label,
       thinkHarder: isThinkHarder,
       plugins: activePlugins,
+      connectorTags: activeConnectorTags,
       mode: chatWorkMode,
     };
 
@@ -422,45 +486,45 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
             <div className="mt-2 flex max-w-2xl flex-wrap items-center justify-center gap-2 rounded-2xl border border-slate-200/80 dark:border-border bg-white/80 dark:bg-card/80 p-3 shadow-sm backdrop-blur-sm">
               <label className="flex items-center gap-1.5">
                 <span>State</span>
-                <select aria-label="Robot animation state" value={robotState} onChange={(e) => { const value = e.target.value as RobotHeadState; setRobotState(value); saveSettings({ robotState: value }); }} className="rounded-lg border border-slate-200 dark:border-border bg-transparent px-2 py-1 text-foreground">
+                <select aria-label="Robot animation state" value={robotState} onChange={(e) => setRobotState(e.target.value as RobotHeadState)} className="rounded-lg border border-slate-200 dark:border-border bg-transparent px-2 py-1 text-foreground">
                   {ROBOT_STATES.map((state) => <option key={state.value} value={state.value}>{state.label}</option>)}
                 </select>
               </label>
               <label className="flex items-center gap-1.5">
                 <span>Shape</span>
-                <select aria-label="Robot shape" value={robotShape} onChange={(e) => { const value = e.target.value as RobotHeadShape; setRobotShape(value); saveSettings({ robotShape: value }); }} className="rounded-lg border border-slate-200 dark:border-border bg-transparent px-2 py-1 text-foreground">
+                <select aria-label="Robot shape" value={robotShape} onChange={(e) => setRobotShape(e.target.value as RobotHeadShape)} className="rounded-lg border border-slate-200 dark:border-border bg-transparent px-2 py-1 text-foreground">
                   {ROBOT_SHAPES.map((shape) => <option key={shape.value} value={shape.value}>{shape.label}</option>)}
                 </select>
               </label>
               <label className="flex items-center gap-1.5">
                 <span>Style</span>
-                <select aria-label="Robot color theme" value={robotTheme} onChange={(e) => { const value = Number(e.target.value); setRobotTheme(value); saveSettings({ robotTheme: value }); }} className="rounded-lg border border-slate-200 dark:border-border bg-transparent px-2 py-1 text-foreground">
+                <select aria-label="Robot color theme" value={robotTheme} onChange={(e) => setRobotTheme(Number(e.target.value))} className="rounded-lg border border-slate-200 dark:border-border bg-transparent px-2 py-1 text-foreground">
                   {ROBOT_THEMES.map((theme, index) => <option key={theme.label} value={index}>{theme.label}</option>)}
                 </select>
               </label>
               <label className="flex items-center gap-1.5">
                 <span>Speed</span>
-                <input aria-label="Robot animation speed" type="range" min="0.5" max="1.8" step="0.1" value={robotSpeed} onChange={(e) => { const value = Number(e.target.value); setRobotSpeed(value); saveSettings({ robotSpeed: value }); }} className="w-20 accent-current" />
+                <input aria-label="Robot animation speed" type="range" min="0.5" max="1.8" step="0.1" value={robotSpeed} onChange={(e) => setRobotSpeed(Number(e.target.value))} className="w-20 accent-current" />
                 <span className="w-7 tabular-nums">{robotSpeed.toFixed(1)}×</span>
               </label>
               <label className="flex items-center gap-1.5">
                 <span>Timing</span>
-                <input aria-label="Robot animation timing" type="range" min="0" max="1" step="0.1" value={robotSeed} onChange={(e) => { const value = Number(e.target.value); setRobotSeed(value); saveSettings({ robotSeed: value }); }} className="w-16 accent-current" />
+                <input aria-label="Robot animation timing" type="range" min="0" max="1" step="0.1" value={robotSeed} onChange={(e) => setRobotSeed(Number(e.target.value))} className="w-16 accent-current" />
               </label>
               <label className="flex items-center gap-1.5">
-                <input type="checkbox" checked={robotPaused} onChange={(e) => { const value = e.target.checked; setRobotPaused(value); saveSettings({ robotPaused: value }); }} />
+                <input type="checkbox" checked={robotPaused} onChange={(e) => setRobotPaused(e.target.checked)} />
                 <span>Pause</span>
               </label>
               <label className="flex items-center gap-1.5">
-                <input type="checkbox" checked={robotInteractive} onChange={(e) => { const value = e.target.checked; setRobotInteractive(value); saveSettings({ robotInteractive: value }); }} />
+                <input type="checkbox" checked={robotInteractive} onChange={(e) => setRobotInteractive(e.target.checked)} />
                 <span>Pointer / click</span>
               </label>
               <label className="flex items-center gap-1.5">
-                <input type="checkbox" checked={robotAntenna} onChange={(e) => { const value = e.target.checked; setRobotAntenna(value); saveSettings({ robotAntenna: value }); }} />
+                <input type="checkbox" checked={robotAntenna} onChange={(e) => setRobotAntenna(e.target.checked)} />
                 <span>Antenna</span>
               </label>
               <label className="flex items-center gap-1.5">
-                <input type="checkbox" checked={robotFloorShadow} onChange={(e) => { const value = e.target.checked; setRobotFloorShadow(value); saveSettings({ robotFloorShadow: value }); }} />
+                <input type="checkbox" checked={robotFloorShadow} onChange={(e) => setRobotFloorShadow(e.target.checked)} />
                 <span>Shadow</span>
               </label>
             </div>
@@ -501,11 +565,90 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                 <span className="font-semibold text-sm text-foreground">Drop files, images or datasets here</span>
               </div>
             )}
-            <div className="overflow-y-auto pl-4 pr-2">
+            <div className="overflow-y-auto px-3 py-1 relative flex items-center gap-2.5 flex-wrap min-h-[52px]">
+              {showMentionPicker && (
+                <WorkspaceMentionPicker
+                  query={mentionQuery}
+                  selectedIndex={mentionIndex}
+                  onSelect={handleSelectConnectorOption}
+                />
+              )}
+
+              {/* Left Attachment (+) Button */}
+              <div className="flex items-center shrink-0">
+                <AttachmentMenu
+                  onFileSelect={handleProcessFile}
+                  isThinkHarder={isThinkHarder}
+                  onToggleThinkHarder={() => setIsThinkHarder(prev => !prev)}
+                  activePlugins={activePlugins}
+                  onTogglePlugin={handleTogglePlugin}
+                  onSendMessageToChat={(text) => setPrompt(text)}
+                  onOpenGoogleDrivePicker={() => setIsDrivePickerOpen(true)}
+                  onOpenConnectors={() => setIsConnectorsMenuOpen(true)}
+                >
+                  <button 
+                    disabled={isExtracting}
+                    className="rounded-full border border-white/10 hover:border-white/20 inline-flex items-center justify-center clickable cursor-pointer text-white/90 hover:bg-white/10 w-8 h-8 p-0 shrink-0 relative transition-transform active:scale-95" 
+                    title="Add attachments or connectors"
+                    aria-label="Add attachments or options"
+                  >
+                    <Plus size={20} className="text-foreground dark:text-white"/>
+                  </button>
+                </AttachmentMenu>
+
+                {/* Connectors & Plugins Popup Menu */}
+                <ConnectorsPopupMenu
+                  isOpen={isConnectorsMenuOpen}
+                  onOpenChange={setIsConnectorsMenuOpen}
+                  activeConnectors={activePlugins}
+                  onToggleConnector={handleTogglePlugin}
+                  onOpenStore={() => setIsConnectorsStoreOpen(true)}
+                  onOpenConfigModal={(id) => setSelectedConfigConnectorId(id)}
+                />
+              </div>
+
+              {/* Selected Connector Tag (Matches Reference Screenshot: Icon + Connector Name in Light Blue Text) */}
+              {activeConnectorTags.length > 0 && (
+                <div className="flex items-center gap-2 shrink-0">
+                  {activeConnectorTags.map((tagId) => {
+                    const opt = WORKSPACE_CONNECTOR_OPTIONS.find(o => o.id === tagId) || CONNECTOR_CATALOG.find(c => c.id === tagId);
+                    if (!opt) return null;
+                    const IconComp = opt.icon;
+                    const rawName = 'label' in opt ? opt.label : ('name' in opt ? opt.name : tagId);
+                    const cleanName = rawName.replace(/^Google\s+/, '').replace(/^@/, '');
+                    const displayName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
+
+                    return (
+                      <div 
+                        key={tagId} 
+                        onClick={() => setSelectedConfigConnectorId(tagId)}
+                        className="inline-flex items-center gap-2 text-[#93c5fd] font-semibold text-base sm:text-lg cursor-pointer hover:opacity-80 transition-opacity select-none shrink-0"
+                        title="Click to view connector parameters or details"
+                      >
+                        <IconComp className="w-5 h-5 text-[#93c5fd] shrink-0" />
+                        <span>{displayName}</span>
+                        <button 
+                          type="button" 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeConnectorTag(tagId);
+                          }}
+                          className="p-0.5 hover:bg-white/10 rounded-full text-[#93c5fd]/70 hover:text-[#93c5fd]"
+                          title="Remove connector"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Badges for active intent or deep reasoning */}
               {activeIntent && (
-                <div className="inline-flex items-center gap-2 px-3 py-1 bg-black dark:bg-white text-white dark:text-black rounded-full mr-2 mb-2 align-middle animate-in fade-in zoom-in duration-200">
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-white text-black dark:bg-white dark:text-black rounded-full text-xs font-medium shrink-0 animate-in fade-in zoom-in duration-200">
                   <activeIntent.icon size={12} />
-                  <span className="text-xs font-medium">{activeIntent.label}</span>
+                  <span>{activeIntent.label}</span>
                   <button 
                     onClick={() => {
                       if (activeIntent.label === "Data analysis") {
@@ -518,15 +661,16 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                       setActiveIntent(null);
                       setPrompt('');
                     }} 
-                    className="p-0.5 hover:bg-white/20 dark:hover:bg-black/20 rounded-full transition-colors"
+                    className="p-0.5 hover:bg-black/10 rounded-full transition-colors"
                   >
                     <X size={10} />
                   </button>
                 </div>
               )}
+
               {isThinkHarder && (
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-500/15 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300 border border-purple-400/30 rounded-full mr-2 mb-2 align-middle animate-in fade-in zoom-in duration-200 text-xs font-semibold shadow-xs">
-                  <Brain size={14} className="text-purple-600 dark:text-purple-400 animate-pulse" />
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-500/20 text-purple-300 border border-purple-400/30 rounded-full text-xs font-semibold shrink-0 animate-in fade-in zoom-in duration-200">
+                  <Brain size={14} className="text-purple-400 animate-pulse" />
                   <span>Deep reasoning</span>
                   <button 
                     onClick={() => setIsThinkHarder(false)} 
@@ -537,58 +681,70 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                   </button>
                 </div>
               )}
+
+              {/* Text Area */}
               <textarea 
                 value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
+                onChange={handlePromptChange}
                 onKeyDown={(e) => {
+                  if (showMentionPicker) {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setMentionIndex(prev => prev + 1);
+                      return;
+                    }
+                    if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setMentionIndex(prev => Math.max(0, prev - 1));
+                      return;
+                    }
+                    if (e.key === 'Tab' || e.key === 'Enter') {
+                      e.preventDefault();
+                      const searchTerm = mentionQuery.toLowerCase().replace('@', '');
+                      const filteredOptions = WORKSPACE_CONNECTOR_OPTIONS.filter(opt => 
+                        opt.tag.toLowerCase().includes(searchTerm) || 
+                        opt.label.toLowerCase().includes(searchTerm) ||
+                        opt.id.toLowerCase().includes(searchTerm)
+                      );
+                      if (filteredOptions.length > 0) {
+                        const selected = filteredOptions[mentionIndex % filteredOptions.length];
+                        handleSelectConnectorOption(selected);
+                      }
+                      return;
+                    }
+                    if (e.key === 'Escape') {
+                      setShowMentionPicker(false);
+                      return;
+                    }
+                  }
+
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     handleStart();
                   }
                 }}
-                className="flex border-none focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-50 overflow-hidden bg-transparent px-0 w-full placeholder:text-[var(--text-disable)] text-foreground text-lg shadow-none resize-none leading-relaxed min-h-[48px]" 
+                className="flex-1 border-none focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-50 overflow-hidden bg-transparent px-1 min-w-[120px] placeholder:text-muted-foreground text-foreground text-base sm:text-lg shadow-none resize-none leading-relaxed py-1" 
                 rows={1}
-                placeholder={activeIntent?.placeholder || (chatWorkMode === 'chat' ? "Type a message or ask anything..." : (isThinkHarder ? "Assign a deep reasoning task or question..." : "Assign a building task or ask anything"))} 
+                placeholder={activeIntent?.placeholder || (chatWorkMode === 'chat' ? "Type a message or ask anything, type @ for connectors..." : (isThinkHarder ? "Assign a deep reasoning task or question..." : "Assign a building task or ask anything, type @ for connectors..."))} 
               />
-            </div>
-            <div className="px-3 flex gap-2 items-center">
-              <div className="flex gap-2 items-center flex-shrink-0">
-                <AttachmentMenu
-                  onFileSelect={handleProcessFile}
-                  isThinkHarder={isThinkHarder}
-                  onToggleThinkHarder={() => setIsThinkHarder(prev => !prev)}
-                  activePlugins={activePlugins}
-                  onTogglePlugin={handleTogglePlugin}
-                  onSendMessageToChat={(text) => setPrompt(text)}
+
+              {/* Right Controls: Voice Mic & Send Button */}
+              <div className="flex items-center gap-2 ml-auto shrink-0">
+                <VoiceInputButton 
+                  onTranscript={(text) => setPrompt(text)}
+                  className="size-8 text-foreground/80 hover:text-foreground dark:text-white/80 dark:hover:text-white"
+                  size={18}
+                />
+                <button 
+                  onClick={handleStart}
+                  disabled={!prompt.trim() && activeConnectorTags.length === 0}
+                  className={cn(
+                    "inline-flex items-center justify-center font-medium transition-transform active:scale-95 bg-foreground text-background dark:bg-white dark:text-black gap-1 rounded-full w-8 h-8 shrink-0",
+                    (prompt.trim() || activeConnectorTags.length > 0) ? "opacity-100 cursor-pointer" : "opacity-50 cursor-not-allowed"
+                  )}
                 >
-                  <button 
-                    disabled={isExtracting}
-                    className="rounded-full border border-[var(--border-main)] inline-flex items-center justify-center gap-1 clickable cursor-pointer text-xs text-[var(--text-secondary)] hover:bg-[var(--fill-tsp-gray-main)] w-8 h-8 p-0 data-[popover-trigger]:bg-[var(--fill-tsp-gray-main)] shrink-0 relative transition-transform active:scale-95" 
-                    title="Camera, Photos, Files, Plugins, Think harder"
-                    aria-label="Add attachments or options"
-                  >
-                    <Plus size={18} className="text-[var(--icon-primary)]"/>
-                  </button>
-                </AttachmentMenu>
-              </div>
-              <div className="min-w-0 flex gap-2 ml-auto flex-shrink-0 items-center">
-                <div className="flex items-center gap-2">
-                  <VoiceInputButton 
-                    onTranscript={(text) => setPrompt(text)}
-                    className="size-8"
-                    size={18}
-                  />
-                  <button 
-                    onClick={handleStart}
-                    disabled={!prompt.trim()}
-                    className={cn(
-                      "inline-flex items-center justify-center whitespace-nowrap font-medium transition-colors bg-[var(--Button-primary-black)] text-[var(--text-onblack)] gap-[6px] text-sm rounded-full p-0 w-8 h-8 min-w-0 disabled:bg-[var(--fill-tsp-white-dark)] disabled:opacity-100 disabled:hover:opacity-100 disabled:active:opacity-100",
-                      prompt.trim() ? "opacity-100 cursor-pointer" : "opacity-50 cursor-not-allowed"
-                    )}
-                  >
-                    <ArrowUp size={15} />
-                  </button>
-                </div>
+                  <ArrowUp size={18} className="text-background dark:text-black font-bold" />
+                </button>
               </div>
             </div>
           </div>
@@ -738,6 +894,37 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
           </div>
         )}
       </div>
+
+      {/* Google Drive Picker Modal */}
+      <GoogleDrivePickerModal
+        isOpen={isDrivePickerOpen}
+        onClose={() => setIsDrivePickerOpen(false)}
+        onSelectFile={handleDriveFileSelect}
+      />
+
+      {/* Connectors & Plugins Store Panel */}
+      <ConnectorsStorePanel
+        isOpen={isConnectorsStoreOpen}
+        onClose={() => setIsConnectorsStoreOpen(false)}
+        activeConnectors={activePlugins}
+        onToggleConnector={handleTogglePlugin}
+      />
+
+      {/* Interactive Connector Details & Configuration Modal */}
+      <ConnectorConfigModal
+        connectorId={selectedConfigConnectorId}
+        isOpen={!!selectedConfigConnectorId}
+        onClose={() => setSelectedConfigConnectorId(null)}
+        onRemoveConnector={(id) => {
+          removeConnectorTag(id);
+          if (activePlugins.includes(id)) {
+            handleTogglePlugin(id);
+          }
+        }}
+        onInsertPrompt={(promptText) => {
+          setPrompt(prev => prev ? `${prev} ${promptText}` : promptText);
+        }}
+      />
     </div>
   );
 }

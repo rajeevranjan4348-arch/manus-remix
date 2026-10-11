@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, Mail, HardDrive, FileText, FileSpreadsheet, CheckSquare, Sparkles, Layers } from 'lucide-react';
+import { Calendar, Mail, HardDrive, FileText, FileSpreadsheet, CheckSquare, Sparkles, Layers, Github } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export interface WorkspaceConnectorOption {
@@ -12,6 +12,14 @@ export interface WorkspaceConnectorOption {
 }
 
 export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
+  {
+    id: 'github',
+    tag: '@github',
+    label: 'GitHub',
+    description: 'Triage pull requests, issues, CI logs, and repository code',
+    icon: Github,
+    colorClass: 'text-slate-800 dark:text-white bg-slate-800/10'
+  },
   {
     id: 'calendar',
     tag: '@calendar',

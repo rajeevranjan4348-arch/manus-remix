@@ -46,9 +46,13 @@ export function ConnectorsPopupMenu({
 }: ConnectorsPopupMenuProps) {
   return (
     <Popover open={isOpen} onOpenChange={onOpenChange}>
-      <PopoverTrigger asChild>
-        {children}
-      </PopoverTrigger>
+      {children ? (
+        <PopoverTrigger asChild>
+          {children}
+        </PopoverTrigger>
+      ) : (
+        <PopoverTrigger className="hidden" />
+      )}
       <PopoverContent 
         side="top" 
         align="start" 
