@@ -115,6 +115,59 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   const [robotFloorShadow, setRobotFloorShadow] = useState(() => getSettings().robotFloorShadow ?? true);
   const [robotSeed, setRobotSeed] = useState(() => getSettings().robotSeed ?? 0.3);
   const [isHappyExpression, setIsHappyExpression] = useState(false);
+  const [showIndiaClock, setShowIndiaClock] = useState(false);
+  const [indiaClockTime, setIndiaClockTime] = useState(() =>
+    new Intl.DateTimeFormat('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(new Date())
+  );
+  const [indiaClockDate, setIndiaClockDate] = useState(() =>
+    new Intl.DateTimeFormat('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      weekday: 'short',
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }).format(new Date())
+  );
+  const robotTapCountRef = useRef(0);
+
+  React.useEffect(() => {
+    if (!showIndiaClock) return;
+    const updateIndiaClock = () => {
+      const now = new Date();
+      setIndiaClockTime(new Intl.DateTimeFormat('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }).format(now));
+      setIndiaClockDate(new Intl.DateTimeFormat('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        weekday: 'short',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      }).format(now));
+    };
+    updateIndiaClock();
+    const intervalId = window.setInterval(updateIndiaClock, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [showIndiaClock]);
+
+  const handleRobotTap = () => {
+    robotTapCountRef.current += 1;
+    if (robotTapCountRef.current >= 3) {
+      robotTapCountRef.current = 0;
+      setShowIndiaClock((visible) => !visible);
+      setIsHappyExpression(false);
+    }
+  };
 
   React.useEffect(() => {
     const handleSettingsUpdated = (e: any) => {
@@ -491,22 +544,47 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
         </div>
 
         <div className="flex flex-col items-center -my-5 animate-on-load" aria-label="Manus AI robot assistant">
-          <RobotHead
-            state={isHappyExpression ? 'happy' : isExtracting ? 'thinking' : activeIntent?.label === 'Research' ? 'searching' : chatWorkMode === 'work' && robotState === 'idle' ? 'working' : robotState}
-            shape={robotShape}
-            size={148}
-            color={ROBOT_THEMES[robotTheme]?.shell || ROBOT_THEMES[0].shell}
-            trimColor={ROBOT_THEMES[robotTheme]?.trim || ROBOT_THEMES[0].trim}
-            screenColor={ROBOT_THEMES[robotTheme]?.screen || ROBOT_THEMES[0].screen}
-            speed={robotSpeed}
-            paused={robotPaused}
-            interactive={robotInteractive}
-            antenna={robotAntenna}
-            floorShadow={robotFloorShadow}
-            seed={robotSeed}
-            aria-label={`Manus AI robot assistant, ${isHappyExpression ? 'happy' : robotState}`}
-            className="shrink-0 transform transition-transform"
-          />
+          <div
+            className="relative shrink-0 cursor-pointer select-none"
+            onClick={handleRobotTap}
+            role="button"
+            tabIndex={0}
+            aria-label="Manus robot. Tap three times to toggle India time."
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                handleRobotTap();
+              }
+            }}
+          >
+            <RobotHead
+              state={isHappyExpression ? 'happy' : isExtracting ? 'thinking' : activeIntent?.label === 'Research' ? 'searching' : chatWorkMode === 'work' && robotState === 'idle' ? 'working' : robotState}
+              shape={robotShape}
+              size={148}
+              color={ROBOT_THEMES[robotTheme]?.shell || ROBOT_THEMES[0].shell}
+              trimColor={ROBOT_THEMES[robotTheme]?.trim || ROBOT_THEMES[0].trim}
+              screenColor={ROBOT_THEMES[robotTheme]?.screen || ROBOT_THEMES[0].screen}
+              speed={robotSpeed}
+              paused={robotPaused}
+              interactive={robotInteractive}
+              antenna={robotAntenna}
+              floorShadow={robotFloorShadow}
+              seed={robotSeed}
+              aria-label={`Manus AI robot assistant, ${isHappyExpression ? 'happy' : robotState}`}
+              className={`shrink-0 transform transition-transform ${showIndiaClock ? 'opacity-20' : ''}`}
+            />
+            {showIndiaClock && (
+              <div
+                className="absolute inset-x-3 top-1/2 -translate-y-1/2 z-10 rounded-xl border border-sky-300/70 bg-slate-950 text-sky-100 px-2 py-3 text-center shadow-[0_0_18px_rgba(56,189,248,0.45)] pointer-events-none"
+                aria-live="off"
+              >
+                <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-sky-300">INDIA · IST</div>
+                <div className="font-mono text-[17px] font-bold leading-6 tabular-nums">{indiaClockTime}</div>
+                <div className="text-[9px] leading-3 text-sky-200/90">{indiaClockDate}</div>
+                <div className="mt-1 text-[8px] tracking-wide text-sky-300/80">UTC+05:30</div>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="space-y-6 animate-on-load">
