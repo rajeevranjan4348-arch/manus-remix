@@ -1,7 +1,9 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { 
   ArrowUp,
-  Square, 
+  Square,
+  SquarePen,
+  MoreVertical, 
   Plus, 
   Mic, 
   Search, 
@@ -78,6 +80,7 @@ export function ChatView({
   isLoading 
 }: ChatViewProps) {
   const [input, setInput] = React.useState('');
+  const [showChatMenu, setShowChatMenu] = useState(false);
   const [expandedSteps, setExpandedSteps] = React.useState<Record<string, boolean>>({});
   const [isThinkHarder, setIsThinkHarder] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
@@ -575,6 +578,67 @@ export function ChatView({
 
   return (
     <div className="flex flex-col h-full bg-manus-cream dark:bg-background relative">
+      {/* Chat page actions: new chat and overflow menu */}
+      <div className="absolute top-3 right-4 z-30 flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => {
+            setShowChatMenu(false);
+            setInput('');
+            setAttachedFile(null);
+            setActiveConnectorTags([]);
+            onReset();
+          }}
+          className="h-11 w-11 rounded-full flex items-center justify-center bg-white/90 dark:bg-[#292929] text-foreground border border-border/50 shadow-sm hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+          title="New chat"
+          aria-label="New chat"
+        >
+          <SquarePen size={21} strokeWidth={2.2} />
+        </button>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setShowChatMenu(prev => !prev)}
+            className="h-11 w-11 rounded-full flex items-center justify-center bg-white/90 dark:bg-[#292929] text-foreground border border-border/50 shadow-sm hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+            title="Chat options"
+            aria-label="Chat options"
+            aria-expanded={showChatMenu}
+          >
+            <MoreVertical size={21} strokeWidth={2.2} />
+          </button>
+          {showChatMenu && (
+            <div className="absolute right-0 top-12 min-w-44 rounded-xl border border-border bg-white dark:bg-[#242424] p-1.5 shadow-xl">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowChatMenu(false);
+                  setInput('');
+                  setAttachedFile(null);
+                  setActiveConnectorTags([]);
+                  onReset();
+                }}
+                className="w-full flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+              >
+                <SquarePen size={16} />
+                <span>New chat</span>
+              </button>
+              {onExport && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowChatMenu(false);
+                    onExport();
+                  }}
+                  className="w-full flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
+                >
+                  <FileText size={16} />
+                  <span>Export conversation</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
       {/* Chat Area */}
       <div ref={containerRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-20 pt-6 pb-40 space-y-8 custom-scrollbar scroll-smooth">
         
