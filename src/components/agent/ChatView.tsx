@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { 
-  ArrowUp, 
+  ArrowUp,
+  Square, 
   Plus, 
   Mic, 
   Search, 
@@ -968,15 +969,19 @@ export function ChatView({
                 onClick={handleSend}
                 disabled={(!input.trim() && !attachedFile && activeConnectorTags.length === 0) || isLoading}
                 className={cn(
-                  "w-10 h-10 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-2xs",
-                  (input.trim() || attachedFile || activeConnectorTags.length > 0)
-                    ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md"
-                    : "bg-[#e2e8f0]/80 dark:bg-muted text-slate-400 dark:text-muted-foreground cursor-not-allowed"
+                  "w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-2xs",
+                  isLoading || status === 'running'
+                    ? "bg-white text-black dark:bg-white dark:text-black cursor-wait"
+                    : (input.trim() || attachedFile || activeConnectorTags.length > 0)
+                      ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md cursor-pointer"
+                      : "bg-[#e2e8f0]/80 dark:bg-muted text-slate-400 dark:text-muted-foreground cursor-not-allowed"
                 )}
-                title="Send message"
-                aria-label="Send message"
+                title={isLoading || status === 'running' ? "AI is working" : "Send message"}
+                aria-label={isLoading || status === 'running' ? "AI is working" : "Send message"}
               >
-                <ArrowUp size={20} className="font-bold" />
+                {isLoading || status === 'running'
+                  ? <Square size={10} fill="currentColor" strokeWidth={2.5} />
+                  : <ArrowUp size={20} className="font-bold" />}
               </button>
             </div>
           </div>
