@@ -27,6 +27,7 @@ import { toast } from 'sonner';
 import { AttachmentMenu } from '@/components/chat/AttachmentMenu';
 import { VoiceInputButton } from '@/components/voice/VoiceInputButton';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
+import { getSettings, saveSettings } from '@/lib/settingsStore';
 
 export type PersonalityMode = 'chat' | 'work';
 
@@ -95,15 +96,15 @@ interface HomeProps {
 
 export function Home({ onStartTask, personality, onPersonalityChange }: HomeProps) {
   const [prompt, setPrompt] = useState('');
-  const [robotState, setRobotState] = useState<RobotHeadState>('idle');
-  const [robotShape, setRobotShape] = useState<RobotHeadShape>('rectangle');
-  const [robotTheme, setRobotTheme] = useState(0);
-  const [robotSpeed, setRobotSpeed] = useState(1);
-  const [robotPaused, setRobotPaused] = useState(false);
-  const [robotInteractive, setRobotInteractive] = useState(true);
-  const [robotAntenna, setRobotAntenna] = useState(true);
-  const [robotFloorShadow, setRobotFloorShadow] = useState(true);
-  const [robotSeed, setRobotSeed] = useState(0.3);
+  const [robotState, setRobotState] = useState<RobotHeadState>(() => getSettings().robotState as RobotHeadState);
+  const [robotShape, setRobotShape] = useState<RobotHeadShape>(() => getSettings().robotShape as RobotHeadShape);
+  const [robotTheme, setRobotTheme] = useState(() => getSettings().robotTheme);
+  const [robotSpeed, setRobotSpeed] = useState(() => getSettings().robotSpeed);
+  const [robotPaused, setRobotPaused] = useState(() => getSettings().robotPaused);
+  const [robotInteractive, setRobotInteractive] = useState(() => getSettings().robotInteractive);
+  const [robotAntenna, setRobotAntenna] = useState(() => getSettings().robotAntenna);
+  const [robotFloorShadow, setRobotFloorShadow] = useState(() => getSettings().robotFloorShadow);
+  const [robotSeed, setRobotSeed] = useState(() => getSettings().robotSeed);
 
   const [activeIntent, setActiveIntent] = useState<{ label: string, icon: any, placeholder?: string } | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<string | null>(null);
@@ -123,6 +124,23 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   });
   const [isDragging, setIsDragging] = useState(false);
   const dragCounterRef = useRef(0);
+
+  React.useEffect(() => {
+    const syncRobotSettings = (event?: Event) => {
+      const next = (event as CustomEvent<any> | undefined)?.detail || getSettings();
+      setRobotState((next.robotState || 'idle') as RobotHeadState);
+      setRobotShape((next.robotShape || 'rectangle') as RobotHeadShape);
+      setRobotTheme(Number(next.robotTheme ?? 0));
+      setRobotSpeed(Number(next.robotSpeed ?? 1));
+      setRobotPaused(Boolean(next.robotPaused));
+      setRobotInteractive(next.robotInteractive ?? true);
+      setRobotAntenna(next.robotAntenna ?? true);
+      setRobotFloorShadow(next.robotFloorShadow ?? true);
+      setRobotSeed(Number(next.robotSeed ?? 0.3));
+    };
+    window.addEventListener('manus_settings_updated', syncRobotSettings);
+    return () => window.removeEventListener('manus_settings_updated', syncRobotSettings);
+  }, []);
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -404,45 +422,45 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
             <div className="mt-2 flex max-w-2xl flex-wrap items-center justify-center gap-2 rounded-2xl border border-slate-200/80 dark:border-border bg-white/80 dark:bg-card/80 p-3 shadow-sm backdrop-blur-sm">
               <label className="flex items-center gap-1.5">
                 <span>State</span>
-                <select aria-label="Robot animation state" value={robotState} onChange={(e) => setRobotState(e.target.value as RobotHeadState)} className="rounded-lg border border-slate-200 dark:border-border bg-transparent px-2 py-1 text-foreground">
+                <select aria-label="Robot animation state" value={robotState} onChange={(e) => { const value = e.target.value as RobotHeadState; setRobotState(value); saveSettings({ robotState: value }); }} className="rounded-lg border border-slate-200 dark:border-border bg-transparent px-2 py-1 text-foreground">
                   {ROBOT_STATES.map((state) => <option key={state.value} value={state.value}>{state.label}</option>)}
                 </select>
               </label>
               <label className="flex items-center gap-1.5">
                 <span>Shape</span>
-                <select aria-label="Robot shape" value={robotShape} onChange={(e) => setRobotShape(e.target.value as RobotHeadShape)} className="rounded-lg border border-slate-200 dark:border-border bg-transparent px-2 py-1 text-foreground">
+                <select aria-label="Robot shape" value={robotShape} onChange={(e) => { const value = e.target.value as RobotHeadShape; setRobotShape(value); saveSettings({ robotShape: value }); }} className="rounded-lg border border-slate-200 dark:border-border bg-transparent px-2 py-1 text-foreground">
                   {ROBOT_SHAPES.map((shape) => <option key={shape.value} value={shape.value}>{shape.label}</option>)}
                 </select>
               </label>
               <label className="flex items-center gap-1.5">
                 <span>Style</span>
-                <select aria-label="Robot color theme" value={robotTheme} onChange={(e) => setRobotTheme(Number(e.target.value))} className="rounded-lg border border-slate-200 dark:border-border bg-transparent px-2 py-1 text-foreground">
+                <select aria-label="Robot color theme" value={robotTheme} onChange={(e) => { const value = Number(e.target.value); setRobotTheme(value); saveSettings({ robotTheme: value }); }} className="rounded-lg border border-slate-200 dark:border-border bg-transparent px-2 py-1 text-foreground">
                   {ROBOT_THEMES.map((theme, index) => <option key={theme.label} value={index}>{theme.label}</option>)}
                 </select>
               </label>
               <label className="flex items-center gap-1.5">
                 <span>Speed</span>
-                <input aria-label="Robot animation speed" type="range" min="0.5" max="1.8" step="0.1" value={robotSpeed} onChange={(e) => setRobotSpeed(Number(e.target.value))} className="w-20 accent-current" />
+                <input aria-label="Robot animation speed" type="range" min="0.5" max="1.8" step="0.1" value={robotSpeed} onChange={(e) => { const value = Number(e.target.value); setRobotSpeed(value); saveSettings({ robotSpeed: value }); }} className="w-20 accent-current" />
                 <span className="w-7 tabular-nums">{robotSpeed.toFixed(1)}×</span>
               </label>
               <label className="flex items-center gap-1.5">
                 <span>Timing</span>
-                <input aria-label="Robot animation timing" type="range" min="0" max="1" step="0.1" value={robotSeed} onChange={(e) => setRobotSeed(Number(e.target.value))} className="w-16 accent-current" />
+                <input aria-label="Robot animation timing" type="range" min="0" max="1" step="0.1" value={robotSeed} onChange={(e) => { const value = Number(e.target.value); setRobotSeed(value); saveSettings({ robotSeed: value }); }} className="w-16 accent-current" />
               </label>
               <label className="flex items-center gap-1.5">
-                <input type="checkbox" checked={robotPaused} onChange={(e) => setRobotPaused(e.target.checked)} />
+                <input type="checkbox" checked={robotPaused} onChange={(e) => { const value = e.target.checked; setRobotPaused(value); saveSettings({ robotPaused: value }); }} />
                 <span>Pause</span>
               </label>
               <label className="flex items-center gap-1.5">
-                <input type="checkbox" checked={robotInteractive} onChange={(e) => setRobotInteractive(e.target.checked)} />
+                <input type="checkbox" checked={robotInteractive} onChange={(e) => { const value = e.target.checked; setRobotInteractive(value); saveSettings({ robotInteractive: value }); }} />
                 <span>Pointer / click</span>
               </label>
               <label className="flex items-center gap-1.5">
-                <input type="checkbox" checked={robotAntenna} onChange={(e) => setRobotAntenna(e.target.checked)} />
+                <input type="checkbox" checked={robotAntenna} onChange={(e) => { const value = e.target.checked; setRobotAntenna(value); saveSettings({ robotAntenna: value }); }} />
                 <span>Antenna</span>
               </label>
               <label className="flex items-center gap-1.5">
-                <input type="checkbox" checked={robotFloorShadow} onChange={(e) => setRobotFloorShadow(e.target.checked)} />
+                <input type="checkbox" checked={robotFloorShadow} onChange={(e) => { const value = e.target.checked; setRobotFloorShadow(value); saveSettings({ robotFloorShadow: value }); }} />
                 <span>Shadow</span>
               </label>
             </div>
