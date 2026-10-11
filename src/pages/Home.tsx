@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { RobotHead } from 'robot-heads';
 import { 
   Plus, 
   ArrowUp,
@@ -338,6 +339,19 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
               ? 'Ask questions, brainstorm ideas, or share files for instant chat.' 
               : "Assign an autonomous task, build a website, or analyze datasets."}
           </p>
+        </div>
+
+        <div className="flex justify-center -my-5 animate-on-load" aria-label="Manus AI robot assistant">
+          <RobotHead
+            state="idle"
+            shape="rectangle"
+            size={148}
+            interactive
+            antenna
+            floorShadow
+            aria-label="Manus AI robot assistant"
+            className="shrink-0"
+          />
         </div>
 
         <div className="space-y-6 animate-on-load">
