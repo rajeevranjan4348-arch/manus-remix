@@ -8,7 +8,6 @@ from __future__ import annotations
 import base64
 import hmac
 import os
-import re
 import subprocess
 from typing import Literal
 from urllib.parse import quote
