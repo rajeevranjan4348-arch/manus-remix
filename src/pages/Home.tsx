@@ -30,6 +30,35 @@ import { saveSharedFileToLibrary } from '@/lib/libraryStore';
 
 export type PersonalityMode = 'chat' | 'work';
 
+type RobotHeadState = 'idle' | 'thinking' | 'searching' | 'listening' | 'speaking' | 'working' | 'happy' | 'error' | 'sleeping';
+type RobotHeadShape = 'rectangle' | 'square' | 'circle' | 'hexagon';
+
+const ROBOT_STATES: { value: RobotHeadState; label: string }[] = [
+  { value: 'idle', label: 'Idle' },
+  { value: 'thinking', label: 'Thinking' },
+  { value: 'searching', label: 'Searching' },
+  { value: 'listening', label: 'Listening' },
+  { value: 'speaking', label: 'Speaking' },
+  { value: 'working', label: 'Working' },
+  { value: 'happy', label: 'Happy' },
+  { value: 'error', label: 'Error' },
+  { value: 'sleeping', label: 'Sleeping' },
+];
+
+const ROBOT_SHAPES: { value: RobotHeadShape; label: string }[] = [
+  { value: 'rectangle', label: 'TV / Rectangle' },
+  { value: 'square', label: 'Square' },
+  { value: 'circle', label: 'Circle' },
+  { value: 'hexagon', label: 'Hexagon' },
+];
+
+const ROBOT_THEMES = [
+  { label: 'Manus blue', shell: '#2b49a3', trim: '#93a6c8', screen: '#e8f2ff' },
+  { label: 'Graphite', shell: '#30343b', trim: '#9299a5', screen: '#e9f1ff' },
+  { label: 'Mint', shell: '#176b5b', trim: '#9bd8c7', screen: '#e2fff5' },
+  { label: 'Violet', shell: '#593c9b', trim: '#b9a7ed', screen: '#f1eaff' },
+];
+
 const CHAT_WORK_MODES = [
   { id: 'chat' as PersonalityMode, label: 'Chat', icon: MessageSquare, desc: 'Normal conversation' },
   { id: 'work' as PersonalityMode, label: 'Work', icon: Briefcase, desc: 'Autonomous task mode' },
@@ -66,6 +95,16 @@ interface HomeProps {
 
 export function Home({ onStartTask, personality, onPersonalityChange }: HomeProps) {
   const [prompt, setPrompt] = useState('');
+  const [robotState, setRobotState] = useState<RobotHeadState>('idle');
+  const [robotShape, setRobotShape] = useState<RobotHeadShape>('rectangle');
+  const [robotTheme, setRobotTheme] = useState(0);
+  const [robotSpeed, setRobotSpeed] = useState(1);
+  const [robotPaused, setRobotPaused] = useState(false);
+  const [robotInteractive, setRobotInteractive] = useState(true);
+  const [robotAntenna, setRobotAntenna] = useState(true);
+  const [robotFloorShadow, setRobotFloorShadow] = useState(true);
+  const [robotSeed, setRobotSeed] = useState(0.3);
+
   const [activeIntent, setActiveIntent] = useState<{ label: string, icon: any, placeholder?: string } | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<string | null>(null);
   const [selectedChart, setSelectedChart] = useState<string | null>(null);
@@ -341,17 +380,73 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
           </p>
         </div>
 
-        <div className="flex justify-center -my-5 animate-on-load" aria-label="Manus AI robot assistant">
+        <div className="flex flex-col items-center -my-5 animate-on-load" aria-label="Manus AI robot assistant">
           <RobotHead
-            state="idle"
-            shape="rectangle"
+            state={isExtracting ? 'thinking' : activeIntent?.label === 'Research' ? 'searching' : chatWorkMode === 'work' && robotState === 'idle' ? 'working' : robotState}
+            shape={robotShape}
             size={148}
-            interactive
-            antenna
-            floorShadow
-            aria-label="Manus AI robot assistant"
+            color={ROBOT_THEMES[robotTheme].shell}
+            trimColor={ROBOT_THEMES[robotTheme].trim}
+            screenColor={ROBOT_THEMES[robotTheme].screen}
+            speed={robotSpeed}
+            paused={robotPaused}
+            interactive={robotInteractive}
+            antenna={robotAntenna}
+            floorShadow={robotFloorShadow}
+            seed={robotSeed}
+            aria-label={`Manus AI robot assistant, ${robotState}`}
             className="shrink-0"
           />
+          <details className="mt-1 text-xs text-muted-foreground">
+            <summary className="cursor-pointer select-none rounded-full px-3 py-1 hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+              Customize robot
+            </summary>
+            <div className="mt-2 flex max-w-2xl flex-wrap items-center justify-center gap-2 rounded-2xl border border-slate-200/80 dark:border-border bg-white/80 dark:bg-card/80 p-3 shadow-sm backdrop-blur-sm">
+              <label className="flex items-center gap-1.5">
+                <span>State</span>
+                <select aria-label="Robot animation state" value={robotState} onChange={(e) => setRobotState(e.target.value as RobotHeadState)} className="rounded-lg border border-slate-200 dark:border-border bg-transparent px-2 py-1 text-foreground">
+                  {ROBOT_STATES.map((state) => <option key={state.value} value={state.value}>{state.label}</option>)}
+                </select>
+              </label>
+              <label className="flex items-center gap-1.5">
+                <span>Shape</span>
+                <select aria-label="Robot shape" value={robotShape} onChange={(e) => setRobotShape(e.target.value as RobotHeadShape)} className="rounded-lg border border-slate-200 dark:border-border bg-transparent px-2 py-1 text-foreground">
+                  {ROBOT_SHAPES.map((shape) => <option key={shape.value} value={shape.value}>{shape.label}</option>)}
+                </select>
+              </label>
+              <label className="flex items-center gap-1.5">
+                <span>Style</span>
+                <select aria-label="Robot color theme" value={robotTheme} onChange={(e) => setRobotTheme(Number(e.target.value))} className="rounded-lg border border-slate-200 dark:border-border bg-transparent px-2 py-1 text-foreground">
+                  {ROBOT_THEMES.map((theme, index) => <option key={theme.label} value={index}>{theme.label}</option>)}
+                </select>
+              </label>
+              <label className="flex items-center gap-1.5">
+                <span>Speed</span>
+                <input aria-label="Robot animation speed" type="range" min="0.5" max="1.8" step="0.1" value={robotSpeed} onChange={(e) => setRobotSpeed(Number(e.target.value))} className="w-20 accent-current" />
+                <span className="w-7 tabular-nums">{robotSpeed.toFixed(1)}×</span>
+              </label>
+              <label className="flex items-center gap-1.5">
+                <span>Timing</span>
+                <input aria-label="Robot animation timing" type="range" min="0" max="1" step="0.1" value={robotSeed} onChange={(e) => setRobotSeed(Number(e.target.value))} className="w-16 accent-current" />
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input type="checkbox" checked={robotPaused} onChange={(e) => setRobotPaused(e.target.checked)} />
+                <span>Pause</span>
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input type="checkbox" checked={robotInteractive} onChange={(e) => setRobotInteractive(e.target.checked)} />
+                <span>Pointer / click</span>
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input type="checkbox" checked={robotAntenna} onChange={(e) => setRobotAntenna(e.target.checked)} />
+                <span>Antenna</span>
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input type="checkbox" checked={robotFloorShadow} onChange={(e) => setRobotFloorShadow(e.target.checked)} />
+                <span>Shadow</span>
+              </label>
+            </div>
+          </details>
         </div>
 
         <div className="space-y-6 animate-on-load">
