@@ -219,7 +219,7 @@ export function matchVoiceCommand(rawQuery: string): VoiceCommandResult | null {
   const searchPattern = /^(?:search|look\s+up|find)\s+([a-z\s]+)\s+(?:for|about|on)\s+(.+)$/i;
   const searchMatch = raw.match(searchPattern);
   if (searchMatch) {
-    const serviceKey = searchMatch[1].trim();
+    const serviceKey = searchMatch[1].trim().toLowerCase();
     const query = searchMatch[2].trim();
     const target = COMMAND_TARGETS[serviceKey];
     if (target && target.searchUrl) {
@@ -239,7 +239,7 @@ export function matchVoiceCommand(rawQuery: string): VoiceCommandResult | null {
   const openSearchPattern = /^(?:open|launch|go\s+to|start)\s+([a-z\s]+)\s+(?:and\s+)?search\s+(?:for\s+)?(.+)$/i;
   const openSearchMatch = raw.match(openSearchPattern);
   if (openSearchMatch) {
-    const serviceKey = openSearchMatch[1].trim();
+    const serviceKey = openSearchMatch[1].trim().toLowerCase();
     const query = openSearchMatch[2].trim();
     const target = COMMAND_TARGETS[serviceKey];
     if (target && target.searchUrl) {
