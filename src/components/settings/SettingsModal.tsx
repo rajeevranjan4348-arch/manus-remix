@@ -20,7 +20,8 @@ import {
   Globe, 
   Terminal, 
   VolumeX, 
-  Keyboard
+  Keyboard,
+  Bot
 } from 'lucide-react';
 import { 
   UserSettings, 
@@ -51,7 +52,7 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
-type SettingsTab = 'general' | 'ai' | 'personalization' | 'voice' | 'data' | 'about';
+type SettingsTab = 'general' | 'robot' | 'ai' | 'personalization' | 'voice' | 'data' | 'about';
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { theme, setTheme } = useTheme();
@@ -159,6 +160,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   const tabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
     { id: 'general', label: 'General', icon: Sun },
+    { id: 'robot', label: 'Robot', icon: Bot },
     { id: 'ai', label: 'AI & Models', icon: Brain },
     { id: 'personalization', label: 'Personalization', icon: User },
     { id: 'voice', label: 'Voice & Audio', icon: Volume2 },
@@ -383,6 +385,86 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <p className="text-[11px] text-muted-foreground">Sign in to connect Calendar, Gmail & Drive</p>
                   </div>
                   <WorkspaceConnectButton />
+                </div>
+              </div>
+            )}
+
+            {/* ROBOT CUSTOMIZATION TAB */}
+            {activeTab === 'robot' && (
+              <div className="space-y-5 animate-in fade-in duration-100">
+                <div>
+                  <p className="text-xs font-medium text-foreground mb-1">Customize Robot</p>
+                  <p className="text-[11px] text-muted-foreground">Personalize the robot face shown on the home page. Changes save automatically.</p>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Animation State</p>
+                      <p className="text-[11px] text-muted-foreground">Choose the robot's expression and activity</p>
+                    </div>
+                    <select aria-label="Robot animation state" value={settings.robotState} onChange={(e) => updateSetting('robotState', e.target.value)} className="text-xs bg-muted/40 border border-border/60 rounded-lg px-2.5 py-1.5 text-foreground">
+                      {[
+                        { value: 'idle', label: 'Idle' }, { value: 'thinking', label: 'Thinking' },
+                        { value: 'searching', label: 'Searching' }, { value: 'listening', label: 'Listening' },
+                        { value: 'speaking', label: 'Speaking' }, { value: 'working', label: 'Working' },
+                        { value: 'happy', label: 'Happy' }, { value: 'error', label: 'Error' },
+                        { value: 'sleeping', label: 'Sleeping' },
+                      ].map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 pt-3 border-t border-border/40">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Robot Shape</p>
+                      <p className="text-[11px] text-muted-foreground">Change the face outline</p>
+                    </div>
+                    <select aria-label="Robot shape" value={settings.robotShape} onChange={(e) => updateSetting('robotShape', e.target.value)} className="text-xs bg-muted/40 border border-border/60 rounded-lg px-2.5 py-1.5 text-foreground">
+                      <option value="rectangle">TV / Rectangle</option><option value="square">Square</option><option value="circle">Circle</option><option value="hexagon">Hexagon</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 pt-3 border-t border-border/40">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Color Style</p>
+                      <p className="text-[11px] text-muted-foreground">Choose the robot's shell and screen colors</p>
+                    </div>
+                    <select aria-label="Robot color theme" value={settings.robotTheme} onChange={(e) => updateSetting('robotTheme', Number(e.target.value))} className="text-xs bg-muted/40 border border-border/60 rounded-lg px-2.5 py-1.5 text-foreground">
+                      <option value={0}>Manus blue</option><option value={1}>Graphite</option><option value={2}>Mint</option><option value={3}>Violet</option>
+                    </select>
+                  </div>
+
+                  <div className="pt-3 border-t border-border/40">
+                    <div className="flex items-center justify-between mb-2">
+                      <div><p className="text-xs font-medium text-foreground">Animation Speed</p><p className="text-[11px] text-muted-foreground">Adjust how quickly the robot moves</p></div>
+                      <span className="text-xs font-mono text-muted-foreground">{settings.robotSpeed.toFixed(1)}×</span>
+                    </div>
+                    <input aria-label="Robot animation speed" type="range" min="0.5" max="1.8" step="0.1" value={settings.robotSpeed} onChange={(e) => updateSetting('robotSpeed', Number(e.target.value))} className="w-full accent-foreground" />
+                  </div>
+
+                  <div className="pt-3 border-t border-border/40">
+                    <div className="flex items-center justify-between mb-2">
+                      <div><p className="text-xs font-medium text-foreground">Animation Timing</p><p className="text-[11px] text-muted-foreground">Fine-tune the animation variation</p></div>
+                      <span className="text-xs font-mono text-muted-foreground">{settings.robotSeed.toFixed(1)}</span>
+                    </div>
+                    <input aria-label="Robot animation timing" type="range" min="0" max="1" step="0.1" value={settings.robotSeed} onChange={(e) => updateSetting('robotSeed', Number(e.target.value))} className="w-full accent-foreground" />
+                  </div>
+
+                  <div className="pt-3 border-t border-border/40 space-y-3">
+                    {[
+                      { key: 'robotPaused' as const, label: 'Pause Animation', desc: 'Keep the robot face still' },
+                      { key: 'robotInteractive' as const, label: 'Pointer / Click Interaction', desc: 'Allow the robot to react to pointer and click input' },
+                      { key: 'robotAntenna' as const, label: 'Show Antenna', desc: 'Display the robot antenna' },
+                      { key: 'robotFloorShadow' as const, label: 'Floor Shadow', desc: 'Show a shadow beneath the robot' },
+                    ].map((item) => (
+                      <div key={item.key} className="flex items-center justify-between gap-4">
+                        <div><p className="text-xs font-medium text-foreground">{item.label}</p><p className="text-[11px] text-muted-foreground">{item.desc}</p></div>
+                        <button type="button" onClick={() => updateSetting(item.key, !settings[item.key])} role="switch" aria-checked={settings[item.key]} aria-label={item.label} className={cn("relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none", settings[item.key] ? "bg-foreground" : "bg-muted")}>
+                          <span className={cn("pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-xs transform transition duration-200 ease-in-out", settings[item.key] ? "translate-x-4" : "translate-x-0")} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
