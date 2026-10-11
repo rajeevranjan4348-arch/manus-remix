@@ -63,3 +63,18 @@ The sidecar API is ready to be called by a server-side connector, but this commi
 ## Validation checklist
 
 Before production use, run the Manus Remix Vite build/lint and the Python service tests, then test against a disposable emulator and a non-sensitive app. Do not test device-control actions on a personal device until the action flow and permissions have been reviewed.
+
+
+## Voice commands: launch installed Android apps and search
+
+The existing voice-command engine now prefers native app links on Android for supported services while keeping the original HTTPS URL as a browser fallback. Examples:
+
+- “Open YouTube” — opens the YouTube app when installed; otherwise opens YouTube in the browser.
+- “Open YouTube and search Shape of You” — opens the YouTube app directly to results for the requested song.
+- “Search YouTube for lofi music” — opens YouTube search results.
+- “Open Spotify and search Arijit Singh” — opens Spotify search when installed.
+- Google Maps, WhatsApp, Gmail, Netflix, Instagram, and Reddit use Android app links when the URL matches a supported domain.
+
+Voice queries preserve the original capitalization and wording of the search phrase. On desktop/iOS, the normal web/app-link URL is used. App launching depends on Android browser support, app installation, and OS link-handling settings; it cannot be guaranteed from every browser.
+
+This feature uses the existing voice-command path and does not change the UI. It opens the requested app/search screen only; it does not automatically start playback or take further actions inside the app.
