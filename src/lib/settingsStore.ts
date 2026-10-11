@@ -10,6 +10,17 @@ export const DEFAULT_SETTINGS: UserSettings = {
   soundEffects: true,
   reducedMotion: false,
 
+  // Robot appearance and animation
+  robotState: 'idle',
+  robotShape: 'rectangle',
+  robotTheme: 0,
+  robotSpeed: 1,
+  robotSeed: 0.3,
+  robotPaused: false,
+  robotInteractive: true,
+  robotAntenna: true,
+  robotFloorShadow: true,
+
   // AI & Intelligence
   defaultModel: 'manus-1.6-lite',
   temperature: 0.7,
