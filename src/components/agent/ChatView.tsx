@@ -676,7 +676,7 @@ export function ChatView({
           return list.map((msg, i) => {
             if (msg.role === 'user') {
               return (
-                <div key={msg.id || i} className="flex justify-end my-2">
+                <div key={msg.id || i} className="flex justify-end my-2 chat-message-enter">
                   <div className="bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium max-w-[80%] shadow-xs leading-relaxed">
                     {cleanUserMessage(msg.content)}
                   </div>
@@ -700,7 +700,7 @@ export function ChatView({
               const shouldAnimate = !isCompleted && isLatestAssistant;
 
               return (
-                <div key={msg.id || i} className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-1">
+                <div key={msg.id || i} className="flex gap-4 max-w-3xl mx-auto my-3 chat-message-enter">
                   <div className="flex-1 space-y-3 min-w-0">
                     <div className="flex items-center gap-3">
                       <ManusLogo showBadge={true} />
