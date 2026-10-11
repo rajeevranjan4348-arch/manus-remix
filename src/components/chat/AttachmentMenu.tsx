@@ -16,6 +16,7 @@ export interface AttachmentMenuProps {
   onTogglePlugin?: (pluginId: string) => void;
   onSendMessageToChat?: (text: string) => void;
   onOpenGoogleDrivePicker?: () => void;
+  onOpenConnectors?: () => void;
   children?: React.ReactNode;
 }
 
@@ -34,6 +35,7 @@ export function AttachmentMenu({
   onTogglePlugin,
   onSendMessageToChat,
   onOpenGoogleDrivePicker,
+  onOpenConnectors,
   children,
 }: AttachmentMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -170,7 +172,9 @@ export function AttachmentMenu({
             <button
               onClick={() => {
                 setIsOpen(false);
-                if (onOpenGoogleDrivePicker) {
+                if (onOpenConnectors) {
+                  onOpenConnectors();
+                } else if (onOpenGoogleDrivePicker) {
                   onOpenGoogleDrivePicker();
                 } else {
                   toast.info('Opening Connectors...');

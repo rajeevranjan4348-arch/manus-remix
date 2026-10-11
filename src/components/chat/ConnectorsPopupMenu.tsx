@@ -19,7 +19,8 @@ import {
   Plug, 
   Plus, 
   Check, 
-  Layers
+  Layers,
+  Settings
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CONNECTOR_CATALOG } from '../connectors/ConnectorsStorePanel';
@@ -30,6 +31,7 @@ interface ConnectorsPopupMenuProps {
   activeConnectors: string[];
   onToggleConnector: (id: string) => void;
   onOpenStore: () => void;
+  onOpenConfigModal?: (connectorId: string) => void;
   children?: React.ReactNode;
 }
 
@@ -39,6 +41,7 @@ export function ConnectorsPopupMenu({
   activeConnectors,
   onToggleConnector,
   onOpenStore,
+  onOpenConfigModal,
   children
 }: ConnectorsPopupMenuProps) {
   return (
@@ -74,35 +77,58 @@ export function ConnectorsPopupMenu({
             const Icon = item.icon;
 
             return (
-              <button
+              <div
                 key={item.id}
-                onClick={() => {
-                  onToggleConnector(item.id);
-                }}
                 className={cn(
-                  "w-full flex items-center justify-between px-3 py-2.5 rounded-2xl transition-colors text-left group cursor-pointer",
+                  "w-full flex items-center justify-between px-3 py-2 rounded-2xl transition-all text-left group",
                   isEnabled 
                     ? "bg-primary/10 dark:bg-primary/20 text-primary font-semibold" 
                     : "hover:bg-slate-100 dark:hover:bg-white/10 text-slate-800 dark:text-white"
                 )}
               >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform", item.iconBg)}>
-                    <Icon size={18} />
+                <button
+                  type="button"
+                  onClick={() => {
+                    onToggleConnector(item.id);
+                  }}
+                  className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer"
+                >
+                  <div className={cn("w-8 h-8 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform", item.iconBg)}>
+                    <Icon size={16} />
                   </div>
                   <div className="flex flex-col min-w-0">
                     <span className="font-semibold text-xs tracking-tight truncate">{item.name}</span>
                     <span className="text-[10px] text-muted-foreground truncate leading-tight">{item.desc}</span>
                   </div>
-                </div>
+                </button>
 
-                <div className={cn(
-                  "w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ml-2 transition-colors",
-                  isEnabled ? "border-primary bg-primary text-primary-foreground" : "border-slate-300 dark:border-white/20"
-                )}>
-                  {isEnabled && <Check size={11} strokeWidth={3} />}
+                <div className="flex items-center gap-1 shrink-0 ml-1">
+                  {onOpenConfigModal && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenChange(false);
+                        onOpenConfigModal(item.id);
+                      }}
+                      className="p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors cursor-pointer"
+                      title={`Configure ${item.name}`}
+                    >
+                      <Settings size={13} />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => onToggleConnector(item.id)}
+                    className={cn(
+                      "w-5 h-5 rounded-full border flex items-center justify-center shrink-0 transition-colors cursor-pointer",
+                      isEnabled ? "border-primary bg-primary text-primary-foreground" : "border-slate-300 dark:border-white/20"
+                    )}
+                  >
+                    {isEnabled && <Check size={11} strokeWidth={3} />}
+                  </button>
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>

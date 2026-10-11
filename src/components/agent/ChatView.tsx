@@ -18,10 +18,13 @@ import {
   FileText,
   Upload,
   AtSign,
-  Plug
+  Plug,
+  Settings,
+  Zap
 } from 'lucide-react';
 import { ConnectorsPopupMenu } from '../chat/ConnectorsPopupMenu';
 import { ConnectorsStorePanel, CONNECTOR_CATALOG } from '../connectors/ConnectorsStorePanel';
+import { ConnectorConfigModal } from '../connectors/ConnectorConfigModal';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
 import { cn } from '@/lib/utils';
 import { Logo, ManusLogo } from '../layout/Logo';
@@ -84,6 +87,7 @@ export function ChatView({
   const [isDrivePickerOpen, setIsDrivePickerOpen] = useState(false);
   const [isConnectorsMenuOpen, setIsConnectorsMenuOpen] = useState(false);
   const [isConnectorsStoreOpen, setIsConnectorsStoreOpen] = useState(false);
+  const [selectedConfigConnectorId, setSelectedConfigConnectorId] = useState<string | null>(null);
   const [activeConnectorTags, setActiveConnectorTags] = useState<string[]>([]);
   const [showMentionPicker, setShowMentionPicker] = useState<boolean>(false);
   const [mentionQuery, setMentionQuery] = useState<string>('');
@@ -761,6 +765,7 @@ export function ChatView({
             onTogglePlugin={handleTogglePlugin}
             onSendMessageToChat={(text) => onSubmit(text)}
             onOpenGoogleDrivePicker={() => setIsDrivePickerOpen(true)}
+            onOpenConnectors={() => setIsConnectorsMenuOpen(true)}
           >
             <button 
               className="p-2 hover:bg-manus-soft dark:hover:bg-accent rounded-full transition-colors text-muted-foreground relative cursor-pointer"
@@ -778,6 +783,7 @@ export function ChatView({
             activeConnectors={activePlugins}
             onToggleConnector={handleTogglePlugin}
             onOpenStore={() => setIsConnectorsStoreOpen(true)}
+            onOpenConfigModal={(id) => setSelectedConfigConnectorId(id)}
           >
             <button
               type="button"
@@ -796,42 +802,99 @@ export function ChatView({
               if (!opt) return null;
               const IconComp = opt.icon;
               return (
-                <div key={tagId} className="inline-flex items-center gap-1.5 px-3 py-1 bg-primary/10 border border-primary/20 text-primary dark:text-primary-foreground rounded-full text-xs font-semibold shadow-xs animate-in fade-in zoom-in duration-200 select-none">
+                <div 
+                  key={tagId} 
+                  onClick={() => setSelectedConfigConnectorId(tagId)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-primary/10 border border-primary/40 text-primary dark:text-primary-foreground rounded-full text-xs font-semibold ring-2 ring-primary/30 shadow-[0_0_12px_rgba(59,130,246,0.3)] hover:shadow-[0_0_16px_rgba(59,130,246,0.45)] hover:bg-primary/20 transition-all duration-200 select-none cursor-pointer group"
+                  title="Click to view metadata, status, or configure parameters"
+                >
+                  {/* Live Status Indicator Dot */}
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+
                   <IconComp size={13} className="shrink-0 text-primary" />
                   <span>{opt.tag}</span>
-                  <button 
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeConnectorTag(tagId);
-                    }} 
-                    className="p-0.5 hover:bg-primary/20 rounded-full ml-0.5 transition-colors cursor-pointer"
-                    title="Remove connector tag"
-                  >
-                    <X size={10} />
-                  </button>
+
+                  <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-bold uppercase tracking-tight">
+                    Active
+                  </span>
+
+                  <div className="flex items-center gap-0.5 ml-0.5">
+                    <button 
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedConfigConnectorId(tagId);
+                      }} 
+                      className="p-0.5 hover:bg-primary/20 text-primary/70 hover:text-primary rounded-full transition-colors cursor-pointer"
+                      title="Configure connector parameters & docs"
+                    >
+                      <Settings size={10} />
+                    </button>
+
+                    <button 
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeConnectorTag(tagId);
+                      }} 
+                      className="p-0.5 hover:bg-primary/20 rounded-full transition-colors cursor-pointer"
+                      title="Remove connector tag"
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
                 </div>
               );
             })}
+
             {activePlugins.filter(pId => !activeConnectorTags.includes(pId)).map((pluginId) => {
               const item = CONNECTOR_CATALOG.find(c => c.id === pluginId);
               if (!item) return null;
               const IconComp = item.icon;
               return (
-                <div key={pluginId} className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 dark:bg-white/10 border border-border text-foreground rounded-full text-xs font-semibold shadow-xs animate-in fade-in zoom-in duration-200 select-none">
+                <div 
+                  key={pluginId} 
+                  onClick={() => setSelectedConfigConnectorId(pluginId)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 dark:bg-white/10 border border-border text-foreground rounded-full text-xs font-semibold ring-1 ring-border/50 hover:ring-primary/40 hover:border-primary/40 shadow-xs hover:shadow-[0_0_10px_rgba(59,130,246,0.2)] transition-all duration-200 select-none cursor-pointer group"
+                  title="Click to view metadata, status, or configure parameters"
+                >
+                  {/* Live Status Indicator Dot */}
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+
                   <IconComp size={13} className="shrink-0 text-primary" />
                   <span>{item.name}</span>
-                  <button 
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleTogglePlugin(pluginId);
-                    }} 
-                    className="p-0.5 hover:bg-muted-foreground/20 rounded-full ml-0.5 transition-colors cursor-pointer"
-                    title="Remove connector"
-                  >
-                    <X size={10} />
-                  </button>
+
+                  <div className="flex items-center gap-0.5 ml-0.5">
+                    <button 
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedConfigConnectorId(pluginId);
+                      }} 
+                      className="p-0.5 hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground rounded-full transition-colors cursor-pointer"
+                      title="Configure connector parameters & docs"
+                    >
+                      <Settings size={10} />
+                    </button>
+
+                    <button 
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleTogglePlugin(pluginId);
+                      }} 
+                      className="p-0.5 hover:bg-muted-foreground/20 rounded-full transition-colors cursor-pointer"
+                      title="Remove connector"
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -913,6 +976,22 @@ export function ChatView({
         onClose={() => setIsConnectorsStoreOpen(false)}
         activeConnectors={activePlugins}
         onToggleConnector={handleTogglePlugin}
+      />
+
+      {/* Interactive Connector Details & Configuration Modal */}
+      <ConnectorConfigModal
+        connectorId={selectedConfigConnectorId}
+        isOpen={!!selectedConfigConnectorId}
+        onClose={() => setSelectedConfigConnectorId(null)}
+        onRemoveConnector={(id) => {
+          removeConnectorTag(id);
+          if (activePlugins.includes(id)) {
+            handleTogglePlugin(id);
+          }
+        }}
+        onInsertPrompt={(promptText) => {
+          setInput(prev => prev ? `${prev} ${promptText}` : promptText);
+        }}
       />
     </div>
   );
