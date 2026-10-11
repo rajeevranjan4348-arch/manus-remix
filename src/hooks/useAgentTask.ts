@@ -5,6 +5,7 @@ import type { Sandbox } from '@blinkdotnew/sdk';
 import { getSettings, playNotificationSound } from '@/lib/settingsStore';
 import { speakCleanHumanVoice } from '@/lib/speechSynthesis';
 import { sendBackgroundNotification } from '@/lib/permissionsManager';
+import { emitRobotEvent } from '@/hooks/useRobotStateController';
 import {
   saveMessage,
   getMessages,
@@ -206,6 +207,7 @@ export function useAgentTask() {
       
       setResult(finalResult);
       setTaskStatus('completed');
+      emitRobotEvent('TASK_SUCCEEDED');
       
       const activeId = taskId || currentTaskIdRef.current;
       const assistantText = finalResult.content || text;
@@ -437,6 +439,7 @@ export function useAgentTask() {
 
   const sendMessage = useCallback((content: string) => {
     setTaskStatus('running');
+    emitRobotEvent('USER_SUBMITTED');
     setResult(null); // Clear previous result card while running new prompt
 
     const activeId = taskId || currentTaskIdRef.current;
