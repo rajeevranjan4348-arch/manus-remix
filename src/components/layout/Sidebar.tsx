@@ -399,7 +399,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                         : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
                     )}
                   >
-                    <item.icon size={20} />
+                    <item.icon size={23} strokeWidth={2.5} />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right">{item.label}</TooltipContent>
