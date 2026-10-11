@@ -148,7 +148,7 @@ function AppContent() {
         onToggle={() => setIsSidebarOpen(!isSidebarOpen)} 
         onNewTask={handleReset}
         onOpenHistory={() => setIsHistoryOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenSettings={() => { setSettingsInitialTab('general'); setIsSettingsOpen(true); }}
         activeTaskId={location.pathname.startsWith('/task/') ? location.pathname.split('/')[2] : undefined}
       />
       <div className="flex-1 flex flex-col min-w-0">
@@ -157,7 +157,7 @@ function AppContent() {
             onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
             onOpenHistory={() => setIsHistoryOpen(true)} 
             onNewTask={handleReset}
-            onOpenSettings={() => setIsSettingsOpen(true)}
+            onOpenSettings={() => { setSettingsInitialTab('general'); setIsSettingsOpen(true); }}
             showNewTask={hasSentMessage}
           />
         )}
