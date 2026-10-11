@@ -90,20 +90,38 @@ export function ChatView({
     setCompletedTypewriters(prev => prev[msgKey] ? prev : { ...prev, [msgKey]: true });
   }, []);
 
-  // Sync robot reaction with chat execution and error status
+  // Granular robot reaction sync with task status and active execution step
   useEffect(() => {
     if (status === 'error') {
       window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'error' }));
-    } else if (status === 'running' || isLoading) {
-      window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'thinking' }));
-    } else if (status === 'completed') {
+      return;
+    }
+    
+    if (status === 'running' || isLoading) {
+      const runningStep = steps.find(s => s.status === 'running');
+      if (runningStep) {
+        const label = runningStep.label.toLowerCase();
+        if (label.includes('search') || label.includes('fetch') || label.includes('research') || label.includes('url')) {
+          window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'searching' }));
+        } else if (label.includes('code') || label.includes('data') || label.includes('chart') || label.includes('building') || label.includes('execut') || label.includes('script')) {
+          window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'working' }));
+        } else {
+          window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'thinking' }));
+        }
+      } else {
+        window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'thinking' }));
+      }
+      return;
+    }
+
+    if (status === 'completed') {
       window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'happy' }));
       const timer = setTimeout(() => {
         window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
-      }, 3500);
+      }, 4000);
       return () => clearTimeout(timer);
     }
-  }, [status, isLoading]);
+  }, [status, isLoading, steps]);
   const [isDrivePickerOpen, setIsDrivePickerOpen] = useState(false);
   const [isConnectorsMenuOpen, setIsConnectorsMenuOpen] = useState(false);
   const [isConnectorsStoreOpen, setIsConnectorsStoreOpen] = useState(false);
@@ -792,7 +810,7 @@ export function ChatView({
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           className={cn(
-            "w-full max-w-3xl bg-white dark:bg-card rounded-[2rem] shadow-xl border border-border/50 p-2 pl-4 flex items-center gap-2 transition-all focus-within:ring-1 focus-within:ring-primary/20 relative",
+            "w-full max-w-3xl bg-white dark:bg-[#1a1b1e] rounded-[2.2rem] shadow-xl border border-slate-200/80 dark:border-border/60 p-4 sm:p-5 flex flex-col gap-3 transition-all focus-within:ring-2 focus-within:ring-primary/20 relative",
             isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30"
           )}
         >
@@ -806,29 +824,11 @@ export function ChatView({
           )}
 
           {isDragging && (
-            <div className="absolute inset-0 bg-slate-100/95 dark:bg-slate-900/95 border-2 border-dashed border-foreground rounded-[2rem] flex items-center justify-center gap-3 z-30 backdrop-blur-xs transition-all animate-in fade-in zoom-in duration-200 pointer-events-none">
+            <div className="absolute inset-0 bg-slate-100/95 dark:bg-slate-900/95 border-2 border-dashed border-foreground rounded-[2.2rem] flex items-center justify-center gap-3 z-30 backdrop-blur-xs transition-all animate-in fade-in zoom-in duration-200 pointer-events-none">
               <Upload className="w-5 h-5 text-foreground animate-bounce" />
               <span className="font-semibold text-sm text-foreground">Drop files, images or datasets here</span>
             </div>
           )}
-          <AttachmentMenu
-            onFileSelect={handleFileSelect}
-            isThinkHarder={isThinkHarder}
-            onToggleThinkHarder={() => setIsThinkHarder(prev => !prev)}
-            activePlugins={activePlugins}
-            onTogglePlugin={handleTogglePlugin}
-            onSendMessageToChat={(text) => onSubmit(text)}
-            onOpenGoogleDrivePicker={() => setIsDrivePickerOpen(true)}
-            onOpenConnectors={() => setIsConnectorsMenuOpen(true)}
-          >
-            <button 
-              className="p-2 hover:bg-manus-soft dark:hover:bg-accent rounded-full transition-colors text-muted-foreground relative cursor-pointer"
-              title="Camera, Photos, Files, Plugins, Think harder"
-              aria-label="Add attachments or options"
-            >
-              <Plus size={20} />
-            </button>
-          </AttachmentMenu>
 
           {/* Connectors & Plugins Popup Menu */}
           <ConnectorsPopupMenu
@@ -840,102 +840,140 @@ export function ChatView({
             onOpenConfigModal={(id) => setSelectedConfigConnectorId(id)}
           />
 
-          {/* Selected Connector Tag (Matches Reference Screenshot: Icon + Connector Name in Light Blue Text) */}
-          {activeConnectorTags.length > 0 && (
-            <div className="flex items-center gap-2 shrink-0">
-              {activeConnectorTags.map((tagId) => {
-                const opt = WORKSPACE_CONNECTOR_OPTIONS.find(o => o.id === tagId) || CONNECTOR_CATALOG.find(c => c.id === tagId);
-                if (!opt) return null;
-                const IconComp = opt.icon;
-                const rawName = 'label' in opt ? opt.label : ('name' in opt ? opt.name : tagId);
-                const cleanName = rawName.replace(/^Google\s+/, '').replace(/^@/, '');
-                const displayName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
-
-                return (
-                  <div 
-                    key={tagId} 
-                    onClick={() => setSelectedConfigConnectorId(tagId)}
-                    className="inline-flex items-center gap-2 text-[#93c5fd] font-semibold text-base sm:text-lg cursor-pointer hover:opacity-80 transition-opacity select-none shrink-0"
-                    title="Click to view connector parameters or details"
-                  >
-                    <IconComp className="w-5 h-5 text-[#93c5fd] shrink-0" />
-                    <span>{displayName}</span>
-                    <button 
-                      type="button" 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeConnectorTag(tagId);
-                      }}
-                      className="p-0.5 hover:bg-white/10 rounded-full text-[#93c5fd]/70 hover:text-[#93c5fd]"
-                      title="Remove connector"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          <input 
-            value={input}
-            onChange={handleInputChange}
-            onKeyDown={(e) => {
-              if (showMentionPicker) {
-                if (e.key === 'ArrowDown') {
-                  e.preventDefault();
-                  setMentionIndex(prev => prev + 1);
-                  return;
-                }
-                if (e.key === 'ArrowUp') {
-                  e.preventDefault();
-                  setMentionIndex(prev => Math.max(0, prev - 1));
-                  return;
-                }
-                if (e.key === 'Tab' || e.key === 'Enter') {
-                  e.preventDefault();
-                  const searchTerm = mentionQuery.toLowerCase().replace('@', '');
-                  const filteredOptions = WORKSPACE_CONNECTOR_OPTIONS.filter(opt => 
-                    opt.tag.toLowerCase().includes(searchTerm) || 
-                    opt.label.toLowerCase().includes(searchTerm) ||
-                    opt.id.toLowerCase().includes(searchTerm)
-                  );
-                  if (filteredOptions.length > 0) {
-                    const selected = filteredOptions[mentionIndex % filteredOptions.length];
-                    handleSelectConnectorOption(selected);
+          {/* Top Row: Textarea for typing message */}
+          <div className="w-full flex flex-col min-h-[44px]">
+            <textarea
+              value={input}
+              onChange={(e) => handleInputChange(e as any)}
+              onKeyDown={(e) => {
+                if (showMentionPicker) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setMentionIndex(prev => prev + 1);
+                    return;
                   }
-                  return;
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setMentionIndex(prev => Math.max(0, prev - 1));
+                    return;
+                  }
+                  if (e.key === 'Tab' || e.key === 'Enter') {
+                    e.preventDefault();
+                    const searchTerm = mentionQuery.toLowerCase().replace('@', '');
+                    const filteredOptions = WORKSPACE_CONNECTOR_OPTIONS.filter(opt => 
+                      opt.tag.toLowerCase().includes(searchTerm) || 
+                      opt.label.toLowerCase().includes(searchTerm) ||
+                      opt.id.toLowerCase().includes(searchTerm)
+                    );
+                    if (filteredOptions.length > 0) {
+                      const selected = filteredOptions[mentionIndex % filteredOptions.length];
+                      handleSelectConnectorOption(selected);
+                    }
+                    return;
+                  }
+                  if (e.key === 'Escape') {
+                    setShowMentionPicker(false);
+                    return;
+                  }
                 }
-                if (e.key === 'Escape') {
-                  setShowMentionPicker(false);
-                  return;
-                }
-              }
 
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            placeholder={isThinkHarder ? "Ask with deep reasoning..." : "Send message to Manus or type @ for Google Workspace connectors..."}
-            className="flex-1 bg-transparent border-none outline-none text-base placeholder:text-muted-foreground/50 h-10 text-foreground"
-            disabled={isLoading}
-          />
-          <div className="flex items-center gap-1 pr-1">
-             <VoiceInputButton
-               onTranscript={(text) => setInput(prev => prev ? `${prev} ${text}` : text)}
-               className="p-2 w-9 h-9 text-muted-foreground hover:text-foreground dark:text-muted-foreground dark:hover:text-white transition-colors"
-               size={18}
-             />
-             <button 
-               onClick={handleSend}
-               disabled={(!input.trim() && !attachedFile && activeConnectorTags.length === 0) || isLoading}
-               className={cn(
-                 "p-2 rounded-full transition-all flex items-center justify-center w-10 h-10",
-                 (input.trim() || attachedFile || activeConnectorTags.length > 0) ? "bg-primary text-white" : "bg-manus-soft dark:bg-muted text-muted-foreground"
-               )}
-             >
-               <ArrowUp size={20} />
-             </button>
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              rows={2}
+              placeholder={isThinkHarder ? "Ask with deep reasoning..." : "Type a message or ask anything..."}
+              className="w-full bg-transparent border-none outline-none resize-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-base sm:text-lg leading-relaxed p-0 focus:ring-0 focus:outline-none min-h-[48px] max-h-[140px]"
+              disabled={isLoading}
+            />
+          </div>
+
+          {/* Bottom Row: Controls */}
+          <div className="flex items-center justify-between pt-1 border-t border-transparent">
+            {/* Left Controls: Circular + Button & Attached Connector Tags */}
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <AttachmentMenu
+                onFileSelect={handleFileSelect}
+                isThinkHarder={isThinkHarder}
+                onToggleThinkHarder={() => setIsThinkHarder(prev => !prev)}
+                activePlugins={activePlugins}
+                onTogglePlugin={handleTogglePlugin}
+                onSendMessageToChat={(text) => onSubmit(text)}
+                onOpenGoogleDrivePicker={() => setIsDrivePickerOpen(true)}
+                onOpenConnectors={() => setIsConnectorsMenuOpen(true)}
+              >
+                <button 
+                  type="button"
+                  className="w-8 h-8 rounded-full border border-slate-200/90 dark:border-white/15 bg-white dark:bg-[#141518] hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 shadow-2xs cursor-pointer active:scale-95"
+                  title="Add attachments or options"
+                  aria-label="Add attachments or options"
+                >
+                  <Plus size={16} className="text-slate-800 dark:text-slate-200" />
+                </button>
+              </AttachmentMenu>
+
+              {/* Selected Connector Tags */}
+              {activeConnectorTags.length > 0 && (
+                <div className="flex items-center gap-2 shrink-0">
+                  {activeConnectorTags.map((tagId) => {
+                    const opt = WORKSPACE_CONNECTOR_OPTIONS.find(o => o.id === tagId) || CONNECTOR_CATALOG.find(c => c.id === tagId);
+                    if (!opt) return null;
+                    const IconComp = opt.icon;
+                    const rawName = 'label' in opt ? opt.label : ('name' in opt ? opt.name : tagId);
+                    const cleanName = rawName.replace(/^Google\s+/, '').replace(/^@/, '');
+                    const displayName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
+
+                    return (
+                      <div 
+                        key={tagId} 
+                        onClick={() => setSelectedConfigConnectorId(tagId)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-800/40 text-[#2563eb] dark:text-[#93c5fd] font-semibold text-xs rounded-full cursor-pointer hover:opacity-80 transition-opacity select-none shrink-0"
+                        title="Click to view connector parameters or details"
+                      >
+                        <IconComp className="w-3.5 h-3.5 shrink-0" />
+                        <span>{displayName}</span>
+                        <button 
+                          type="button" 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeConnectorTag(tagId);
+                          }}
+                          className="p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full text-current/70 hover:text-current"
+                          title="Remove connector"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Right Controls: Mic & Circular Send Button */}
+            <div className="flex items-center gap-2.5">
+              <VoiceInputButton
+                onTranscript={(text) => setInput(prev => prev ? `${prev} ${text}` : text)}
+                className="w-10 h-10 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer"
+                size={20}
+              />
+              <button 
+                type="button"
+                onClick={handleSend}
+                disabled={(!input.trim() && !attachedFile && activeConnectorTags.length === 0) || isLoading}
+                className={cn(
+                  "w-10 h-10 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-2xs",
+                  (input.trim() || attachedFile || activeConnectorTags.length > 0)
+                    ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md"
+                    : "bg-[#e2e8f0]/80 dark:bg-muted text-slate-400 dark:text-muted-foreground cursor-not-allowed"
+                )}
+                title="Send message"
+                aria-label="Send message"
+              >
+                <ArrowUp size={20} className="font-bold" />
+              </button>
+            </div>
           </div>
         </div>
       </div>
