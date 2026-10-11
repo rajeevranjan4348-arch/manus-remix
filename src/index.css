@@ -766,4 +766,32 @@
   .contextual-thinking__dots i, .contextual-thinking__label, .contextual-thinking__pulse { animation: none; }
 }
 
+/* Smooth entrance for newly added conversation messages */
+.chat-message-enter {
+  animation: chat-message-slide-in 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: center bottom;
+  will-change: opacity, transform;
+}
 
+@keyframes chat-message-slide-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0);
+  }
+  65% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+    will-change: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-message-enter {
+    animation: none;
+    transform: none;
+    will-change: auto;
+  }
+}
