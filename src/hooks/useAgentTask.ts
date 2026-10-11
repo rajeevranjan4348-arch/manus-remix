@@ -321,6 +321,7 @@ export function useAgentTask() {
       setChartData(fallbackChart);
       setResult(finalResult);
       setTaskStatus('completed');
+      emitRobotEvent('TASK_SUCCEEDED');
       setSteps(prev => prev.map(s => ({ ...s, status: 'completed' as const })));
       playNotificationSound('success');
 
@@ -406,6 +407,7 @@ export function useAgentTask() {
           }
           
           if (stepLabel) {
+            emitRobotEvent(toolName === 'web_search' ? 'SEARCH_STARTED' : 'TOOL_STARTED');
             setSteps(prev => {
               const nextSteps: Step[] = prev.map(s => {
                 if (s.label === stepLabel) {
