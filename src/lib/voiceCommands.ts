@@ -236,7 +236,7 @@ export function matchVoiceCommand(rawQuery: string): VoiceCommandResult | null {
   }
 
   // 9. Open and Search: "open youtube and search [query]"
-  const openSearchPattern = /^(?:open|launch|go\s+to|start)\s+([a-z\s]+)\s+(?:and\s+)?search\s+(?:for\s+)?(.+)$/i;
+  const openSearchPattern = /^(?:open|launch|go\s+to|start)\s+([a-z\s]+?)\s+(?:and\s+)?search\s+(?:for\s+)?(.+)$/i;
   const openSearchMatch = raw.match(openSearchPattern);
   if (openSearchMatch) {
     const serviceKey = openSearchMatch[1].trim().toLowerCase();
