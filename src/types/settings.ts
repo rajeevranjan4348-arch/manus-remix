@@ -12,6 +12,17 @@ export interface UserSettings {
   soundEffects: boolean;
   reducedMotion: boolean;
 
+  // Robot appearance and animation
+  robotState: string;
+  robotShape: string;
+  robotTheme: number;
+  robotSpeed: number;
+  robotSeed: number;
+  robotPaused: boolean;
+  robotInteractive: boolean;
+  robotAntenna: boolean;
+  robotFloorShadow: boolean;
+
   // AI & Intelligence
   defaultModel: string;
   temperature: number; // 0.0 to 1.0
