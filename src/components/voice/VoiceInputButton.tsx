@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { matchVoiceCommand, executeOpenUrl, executeDeviceCommand, VoiceCommandResult } from '@/lib/voiceCommands';
 import { speakCleanHumanVoice } from '@/lib/speechSynthesis';
 import { getSettings } from '@/lib/settingsStore';
+import { emitRobotEvent } from '@/hooks/useRobotStateController';
 
 interface VoiceInputButtonProps {
   onTranscript: (text: string) => void;
@@ -48,6 +49,7 @@ export function VoiceInputButton({
         } catch {}
       }
       setIsListening(false);
+      emitRobotEvent('VOICE_LISTENING_STOPPED');
       window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
       return;
     }
@@ -76,6 +78,7 @@ export function VoiceInputButton({
 
       recognition.onstart = () => {
         setIsListening(true);
+        emitRobotEvent('VOICE_LISTENING_STARTED');
         window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'listening' }));
         toast.info('🎙️ Listening... Speak into microphone', { duration: 3000 });
       };
@@ -152,6 +155,7 @@ export function VoiceInputButton({
         if (event.error !== 'no-speech' && event.error !== 'aborted') {
           console.warn('[Voice Recognition]', event.error);
           toast.error(`Microphone error: ${event.error}`);
+          emitRobotEvent('TASK_FAILED');
           window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'error' }));
         } else {
           window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
@@ -161,6 +165,7 @@ export function VoiceInputButton({
 
       recognition.onend = () => {
         setIsListening(false);
+        emitRobotEvent('VOICE_LISTENING_STOPPED');
         window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
       };
 
