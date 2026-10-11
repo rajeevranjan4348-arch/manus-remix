@@ -214,7 +214,13 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
           setCallStatus('paused');
           isCallPausedRef.current = true;
           setStatusText('Allow microphone access to start voice chat');
-          toast.error('Microphone permission is required for voice chat. Allow access in your browser settings and reopen voice chat.');
+          if (!window.isSecureContext) {
+            toast.error('Microphone access requires HTTPS. Open Manus using its secure https:// address.');
+          } else if (!navigator.mediaDevices?.getUserMedia) {
+            toast.error('This browser or embedded preview does not support microphone access. Open Manus directly in Chrome.');
+          } else {
+            toast.error('Microphone access was blocked. In Chrome, open Site settings → Microphone → Allow, then reload Manus and try again.');
+          }
           return;
         }
 

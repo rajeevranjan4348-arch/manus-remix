@@ -100,16 +100,59 @@ export function sendBackgroundNotification(title: string, body: string, icon?: s
  * Request microphone access (prompts browser permission dialog)
  */
 export async function requestMicrophonePermission(): Promise<boolean> {
-  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
     return false;
   }
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    // Stop tracks immediately after granting
-    stream.getTracks().forEach(t => t.stop());
-    return true;
-  } catch {
+
+  // Browsers only expose getUserMedia on secure origins (HTTPS or localhost).
+  if (!window.isSecureContext) {
+    console.warn('[Microphone Permission] A secure HTTPS context is required.');
     return false;
+  }
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    console.warn('[Microphone Permission] getUserMedia is unavailable in this browser or embedded frame.');
+    return false;
+  }
+
+  // Embedded previews can deny microphone access through Permissions Policy.
+  try {
+    const policy = (document as Document & {
+      permissionsPolicy?: { allowsFeature: (feature: string) => boolean };
+      featurePolicy?: { allowsFeature: (feature: string) => boolean };
+    }).permissionsPolicy ?? (document as Document & {
+      featurePolicy?: { allowsFeature: (feature: string) => boolean };
+    }).featurePolicy;
+
+    if (policy && !policy.allowsFeature('microphone')) {
+      console.warn('[Microphone Permission] This embedded page is not allowed to use the microphone.');
+      return false;
+    }
+  } catch {
+    // Policy inspection is not supported by every browser; let getUserMedia decide.
+  }
+
+  let stream: MediaStream | null = null;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    return stream.getAudioTracks().some((track) => track.readyState === 'live');
+  } catch (error) {
+    const name = error instanceof DOMException ? error.name : '';
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
+      console.warn('[Microphone Permission] Access was denied. Check browser site permissions and any device-level microphone privacy setting.');
+    } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+      console.warn('[Microphone Permission] No microphone device was found.');
+    } else if (name === 'NotReadableError' || name === 'TrackStartError') {
+      console.warn('[Microphone Permission] The microphone is busy or unavailable to the browser.');
+    } else {
+      console.warn('[Microphone Permission] Could not obtain microphone access:', error);
+    }
+    return false;
+  } finally {
+    // Never leave a permission-check stream holding the microphone open.
+    stream?.getTracks().forEach((track) => track.stop());
   }
 }
 
