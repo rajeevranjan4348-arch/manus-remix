@@ -575,7 +575,7 @@ export function ChatView({
   return (
     <div className="flex flex-col h-full bg-manus-cream dark:bg-background relative">
       {/* Chat Area */}
-      <div ref={containerRef} className="flex-1 overflow-y-auto px-4 sm:px-20 py-6 space-y-8 custom-scrollbar scroll-smooth">
+      <div ref={containerRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-20 pt-6 pb-40 space-y-8 custom-scrollbar scroll-smooth">
         
         {/* Render Conversation Messages in Chronological Order */}
         {(() => {
@@ -611,6 +611,7 @@ export function ChatView({
               const raw = msg.content || '';
               const { thought, content: extracted } = extractThoughtProcess(raw);
               const cleanedContent = cleanMessageContent(extracted || raw);
+              const parsedSources = parseSourcesFromMarkdown(cleanedContent);
               // While a response is streaming, the hook may include an empty assistant placeholder.
               // Do not render its Manus header alongside the dedicated thinking indicator.
               if (!cleanedContent && !thought && isAssistantWorking) return null;
@@ -638,7 +639,7 @@ export function ChatView({
                     {cleanedContent ? (
                       <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
                         <MarkdownRenderer 
-                          content={cleanedContent} 
+                          content={parsedSources.cleanedContent} 
                           animateTypewriter={shouldAnimate}
                           onTypewriterComplete={() => handleTypewriterComplete(msgKey)}
                         />
@@ -672,6 +673,10 @@ export function ChatView({
                     {/* Google Maps Widget Detection */}
                     {/(map of|location of|show map|google map)/i.test(cleanedContent || '') && (
                       <GoogleMapWidgetCard locationName="Google Headquarters, Mountain View" latitude={37.4220} longitude={-122.0841} />
+                    )}
+
+                    {parsedSources.sources.length > 0 && (
+                      <SourceCitations sources={parsedSources.sources} />
                     )}
 
                     {cleanedContent ? (
@@ -777,11 +782,11 @@ export function ChatView({
           </div>
         )}
 
-        <div ref={bottomRef} className="h-24" /> {/* Spacer for bottom input */}
+        <div ref={bottomRef} className="h-36 shrink-0" /> {/* Spacer for bottom input */}
       </div>
 
       {/* Input Area - Floating Bottom */}
-      <div className="absolute bottom-6 left-0 right-0 px-4 flex flex-col items-center gap-2 z-20">
+      <div className="absolute bottom-3 left-0 right-0 px-4 flex flex-col items-center gap-2 z-20">
         {(attachedFile || isThinkHarder) && (
           <div className="flex items-center gap-2 flex-wrap max-w-3xl w-full px-2">
             {isThinkHarder && (
