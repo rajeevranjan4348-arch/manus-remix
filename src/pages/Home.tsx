@@ -37,6 +37,7 @@ import { GoogleDrivePickerModal } from '@/components/workspace/GoogleDrivePicker
 import { WorkspaceMentionPicker, WORKSPACE_CONNECTOR_OPTIONS, WorkspaceConnectorOption } from '@/components/chat/WorkspaceMentionPicker';
 import { GoogleDriveFileItem } from '@/lib/workspaceTools';
 import { getSettings } from '@/lib/settingsStore';
+import { useRobotStateController, emitRobotEvent } from '@/hooks/useRobotStateController';
 
 export type PersonalityMode = 'chat' | 'work';
 
@@ -105,6 +106,7 @@ interface HomeProps {
 
 export function Home({ onStartTask, personality, onPersonalityChange }: HomeProps) {
   const [prompt, setPrompt] = useState('');
+  const robotController = useRobotStateController();
   const [robotState, setRobotState] = useState<RobotHeadState>(() => (getSettings().robotState as RobotHeadState) || 'idle');
   const [robotShape, setRobotShape] = useState<RobotHeadShape>(() => (getSettings().robotShape as RobotHeadShape) || 'rectangle');
   const [robotTheme, setRobotTheme] = useState(() => getSettings().robotTheme ?? 0);
@@ -188,6 +190,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setPrompt(val);
+    robotController.onDraftChange(val);
 
     const lastAt = val.lastIndexOf('@');
     if (lastAt !== -1 && (lastAt === 0 || val[lastAt - 1] === ' ')) {
@@ -485,6 +488,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
       options.url = prompt.trim();
     }
 
+    emitRobotEvent('USER_SUBMITTED');
     onStartTask(prompt, options);
   };
 
@@ -504,7 +508,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
 
         <div className="flex flex-col items-center -my-5 animate-on-load" aria-label="Manus AI robot assistant">
           <RobotHead
-            state={isHappyExpression ? 'happy' : isExtracting ? 'thinking' : activeIntent?.label === 'Research' ? 'searching' : chatWorkMode === 'work' && robotState === 'idle' ? 'working' : robotState}
+            state={isHappyExpression ? 'happy' : isExtracting ? 'thinking' : robotController.state !== 'idle' ? robotController.state : activeIntent?.label === 'Research' ? 'searching' : chatWorkMode === 'work' && robotState === 'idle' ? 'working' : robotState}
             shape={robotShape}
             size={148}
             color={ROBOT_THEMES[robotTheme]?.shell || ROBOT_THEMES[0].shell}
