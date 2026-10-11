@@ -106,6 +106,7 @@ interface HomeProps {
 
 export function Home({ onStartTask, personality, onPersonalityChange }: HomeProps) {
   const [prompt, setPrompt] = useState('');
+  const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const robotController = useRobotStateController();
   const [robotState, setRobotState] = useState<RobotHeadState>(() => (getSettings().robotState as RobotHeadState) || 'idle');
   const [robotShape, setRobotShape] = useState<RobotHeadShape>(() => (getSettings().robotShape as RobotHeadShape) || 'rectangle');
@@ -191,6 +192,12 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
     const val = e.target.value;
     setPrompt(val);
     robotController.onDraftChange(val);
+    // Grow with the draft, then scroll internally once the composer reaches its cap.
+    const textarea = e.currentTarget;
+    textarea.style.height = "auto";
+    const maxHeight = Math.max(160, Math.floor(window.innerHeight * 0.35));
+    textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
 
     const lastAt = val.lastIndexOf('@');
     if (lastAt !== -1 && (lastAt === 0 || val[lastAt - 1] === ' ')) {
@@ -684,6 +691,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
 
               {/* Text Area */}
               <textarea 
+                ref={promptTextareaRef}
                 value={prompt}
                 onChange={handlePromptChange}
                 onKeyDown={(e) => {
@@ -724,6 +732,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                   }
                 }}
                 className="flex-1 border-none focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-50 overflow-hidden bg-transparent px-1 min-w-[120px] placeholder:text-muted-foreground text-foreground text-base sm:text-lg shadow-none resize-none leading-relaxed py-1" 
+                style={{ maxHeight: "35vh", overflowY: "hidden" }}
                 rows={1}
                 placeholder={activeIntent?.placeholder || (chatWorkMode === 'chat' ? "Type a message or ask anything, type @ for connectors..." : (isThinkHarder ? "Assign a deep reasoning task or question..." : "Assign a building task or ask anything, type @ for connectors..."))} 
               />
