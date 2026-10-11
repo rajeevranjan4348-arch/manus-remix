@@ -40,6 +40,7 @@ export function useRobotStateController(inactivityMs = 60_000) {
   const typingRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const happyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
 
   const publish = useCallback(() => {
@@ -69,6 +70,13 @@ export function useRobotStateController(inactivityMs = 60_000) {
   const dispatch = useCallback((event: RobotEvent) => {
     if (event === 'USER_TYPING') {
       typingRef.current = true; sleepingRef.current = false; errorRef.current = false;
+      if (typingPauseTimerRef.current) clearTimeout(typingPauseTimerRef.current);
+      typingPauseTimerRef.current = setTimeout(() => {
+        typingPauseTimerRef.current = null;
+        typingRef.current = false;
+        publish();
+        scheduleInactivity();
+      }, 1800);
       clearInactivity();
     } else if (event === 'USER_SUBMITTED' || event === 'AI_GENERATION_STARTED') {
       typingRef.current = false; sleepingRef.current = false; errorRef.current = false;
@@ -120,6 +128,7 @@ export function useRobotStateController(inactivityMs = 60_000) {
       mountedRef.current = false;
       clearInactivity();
       if (happyTimerRef.current) clearTimeout(happyTimerRef.current);
+      if (typingPauseTimerRef.current) clearTimeout(typingPauseTimerRef.current);
       activityEvents.forEach(name => window.removeEventListener(name, onActivity));
       document.removeEventListener('visibilitychange', onVisibility);
     };
