@@ -114,6 +114,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
   const recognitionRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesis | null>(null);
   const isListeningRef = useRef(false);
+  const isSpeakingRef = useRef(false);
   const hasMicPermissionRef = useRef(false);
   const isCallPausedRef = useRef(false);
 
@@ -200,18 +201,20 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
 
           rec.onend = () => {
             isListeningRef.current = false;
-            // Mobile Chrome can end a recognition session after a short silence.
-            // Restart with a small delay to avoid InvalidStateError on Android.
+            // Do not restart speech recognition while the AI is speaking. On
+            // Android Chrome, recognition and speech synthesis can otherwise
+            // compete for the audio session and the reply may be silent.
+            if (isSpeakingRef.current) return;
             if (isOpen && hasMicPermissionRef.current && !isCallPausedRef.current) {
               window.setTimeout(() => {
-                if (!isOpen || !hasMicPermissionRef.current || isCallPausedRef.current) return;
+                if (!isOpen || !hasMicPermissionRef.current || isCallPausedRef.current || isSpeakingRef.current) return;
                 try {
                   rec.start();
                 } catch (error) {
                   console.warn('[Speech Recognition] Restart failed:', error);
                   setStatusText('Tap to restart voice chat if listening does not resume.');
                 }
-              }, 250);
+              }, 300);
             }
           };
 
@@ -270,19 +273,22 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
 
         hasMicPermissionRef.current = true;
         setStatusText('Start speaking...');
+
+        // Play the greeting before opening recognition; the browser may silence
+        // speech synthesis if recognition grabs the audio session first.
         if (openingEnabled) {
           speakText('Good to hear your voice! How are you?');
-        }
-
-        try {
-          if (!isListeningRef.current) recognitionRef.current.start();
-        } catch (error) {
-          hasMicPermissionRef.current = false;
-          setCallStatus('paused');
-          isCallPausedRef.current = true;
-          setStatusText('Could not start microphone');
-          console.warn('[Voice Call] Could not start recognition:', error);
-          toast.error('Could not start voice chat. Check microphone permissions and try again.');
+        } else {
+          try {
+            if (!isListeningRef.current) recognitionRef.current.start();
+          } catch (error) {
+            hasMicPermissionRef.current = false;
+            setCallStatus('paused');
+            isCallPausedRef.current = true;
+            setStatusText('Could not start microphone');
+            console.warn('[Voice Call] Could not start recognition:', error);
+            toast.error('Could not start voice chat. Check microphone permissions and try again.');
+          }
         }
       };
 
@@ -554,27 +560,58 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
 
   // Text-to-Speech Playback
   const speakText = (text: string) => {
-    stopCleanSpeech();
-    setCallStatus('speaking');
-    setStatusText(text);
+    const cleanedText = text?.trim();
+    if (!cleanedText) return;
 
-    const started = speakCleanHumanVoice(text, {
+    isSpeakingRef.current = true;
+    setCallStatus('speaking');
+    setStatusText('Preparing audio reply…');
+
+    // Release the speech-recognition audio session before TTS playback.
+    try {
+      if (recognitionRef.current && isListeningRef.current) {
+        recognitionRef.current.stop();
+      }
+    } catch (error) {
+      console.warn('[Voice Call] Could not pause recognition for audio playback:', error);
+    }
+
+    stopCleanSpeech();
+    const resumeListening = () => {
+      isSpeakingRef.current = false;
+      if (!isOpen || !hasMicPermissionRef.current || isCallPausedRef.current) return;
+      setCallStatus('listening');
+      setStatusText('Listening… speak now');
+      window.setTimeout(() => {
+        if (!isOpen || !hasMicPermissionRef.current || isCallPausedRef.current || isSpeakingRef.current) return;
+        try {
+          if (recognitionRef.current && !isListeningRef.current) recognitionRef.current.start();
+        } catch (error) {
+          console.warn('[Voice Call] Could not resume recognition after audio playback:', error);
+          setStatusText('Audio reply finished. Tap to restart listening if needed.');
+        }
+      }, 300);
+    };
+
+    const started = speakCleanHumanVoice(cleanedText, {
       voicePersona: selectedVoice,
       rate: parseFloat(speechRate) || 1.0,
-      volume: 1.0, // Maximum loud, crisp human audio
-      onEnd: () => {
-        setCallStatus('listening');
-        setStatusText('Start speaking...');
+      volume: 1.0,
+      onStart: () => {
+        setCallStatus('speaking');
+        setStatusText('Speaking…');
       },
-      onError: () => {
-        setCallStatus('listening');
-        setStatusText('Start speaking...');
+      onEnd: resumeListening,
+      onError: (error) => {
+        console.warn('[Voice Call] Text-to-speech failed:', error);
+        resumeListening();
+        toast.error('Could not play the AI audio reply. Check your phone media volume and try again.');
       },
     });
 
     if (!started) {
-      setCallStatus('listening');
-      setStatusText('Start speaking...');
+      resumeListening();
+      toast.error('Speech audio is unavailable in this browser.');
     }
   };
 
