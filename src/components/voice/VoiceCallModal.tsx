@@ -114,9 +114,43 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
   const recognitionRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesis | null>(null);
   const isListeningRef = useRef(false);
+  const isRecognitionStartingRef = useRef(false);
   const isSpeakingRef = useRef(false);
   const hasMicPermissionRef = useRef(false);
   const isCallPausedRef = useRef(false);
+  const restartTimerRef = useRef<number | null>(null);
+
+  // Maintain a single restart timer to prevent overlapping start/stop loops.
+  const clearRecognitionRestart = () => {
+    if (restartTimerRef.current !== null) {
+      window.clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+  };
+
+  const startRecognitionSafely = () => {
+    const recognition = recognitionRef.current;
+    if (!recognition || !isOpen || !hasMicPermissionRef.current ||
+        isCallPausedRef.current || isSpeakingRef.current ||
+        isListeningRef.current || isRecognitionStartingRef.current) return;
+    clearRecognitionRestart();
+    isRecognitionStartingRef.current = true;
+    try {
+      recognition.start();
+    } catch (error) {
+      isRecognitionStartingRef.current = false;
+      console.warn('[Speech Recognition] Start deferred:', error);
+    }
+  };
+
+  const scheduleRecognitionRestart = (delay = 500) => {
+    clearRecognitionRestart();
+    if (!isOpen || !hasMicPermissionRef.current || isCallPausedRef.current || isSpeakingRef.current) return;
+    restartTimerRef.current = window.setTimeout(() => {
+      restartTimerRef.current = null;
+      startRecognitionSafely();
+    }, delay);
+  };
 
   // Initialize Speech
   useEffect(() => {
@@ -137,6 +171,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
             : 'en-IN';
 
           rec.onstart = () => {
+            isRecognitionStartingRef.current = false;
             isListeningRef.current = true;
             setCallStatus('listening');
             setStatusText('Listening… speak now');
@@ -201,21 +236,10 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
 
           rec.onend = () => {
             isListeningRef.current = false;
-            // Do not restart speech recognition while the AI is speaking. On
-            // Android Chrome, recognition and speech synthesis can otherwise
-            // compete for the audio session and the reply may be silent.
-            if (isSpeakingRef.current) return;
-            if (isOpen && hasMicPermissionRef.current && !isCallPausedRef.current) {
-              window.setTimeout(() => {
-                if (!isOpen || !hasMicPermissionRef.current || isCallPausedRef.current || isSpeakingRef.current) return;
-                try {
-                  rec.start();
-                } catch (error) {
-                  console.warn('[Speech Recognition] Restart failed:', error);
-                  setStatusText('Tap to restart voice chat if listening does not resume.');
-                }
-              }, 300);
-            }
+            isRecognitionStartingRef.current = false;
+            // TTS playback resumes recognition itself; do not race it here.
+            if (isSpeakingRef.current || isCallPausedRef.current) return;
+            scheduleRecognitionRestart(500);
           };
 
           recognitionRef.current = rec;
@@ -279,16 +303,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
         if (openingEnabled) {
           speakText('Good to hear your voice! How are you?');
         } else {
-          try {
-            if (!isListeningRef.current) recognitionRef.current.start();
-          } catch (error) {
-            hasMicPermissionRef.current = false;
-            setCallStatus('paused');
-            isCallPausedRef.current = true;
-            setStatusText('Could not start microphone');
-            console.warn('[Voice Call] Could not start recognition:', error);
-            toast.error('Could not start voice chat. Check microphone permissions and try again.');
-          }
+          startRecognitionSafely();
         }
       };
 
@@ -297,6 +312,8 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
       hasMicPermissionRef.current = false;
       isCallPausedRef.current = false;
       isListeningRef.current = false;
+      isRecognitionStartingRef.current = false;
+      clearRecognitionRestart();
       try {
         if (recognitionRef.current) recognitionRef.current.stop();
         if (synthRef.current) synthRef.current.cancel();
@@ -582,15 +599,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
       if (!isOpen || !hasMicPermissionRef.current || isCallPausedRef.current) return;
       setCallStatus('listening');
       setStatusText('Listening… speak now');
-      window.setTimeout(() => {
-        if (!isOpen || !hasMicPermissionRef.current || isCallPausedRef.current || isSpeakingRef.current) return;
-        try {
-          if (recognitionRef.current && !isListeningRef.current) recognitionRef.current.start();
-        } catch (error) {
-          console.warn('[Voice Call] Could not resume recognition after audio playback:', error);
-          setStatusText('Audio reply finished. Tap to restart listening if needed.');
-        }
-      }, 300);
+      scheduleRecognitionRestart(500);
     };
 
     const started = speakCleanHumanVoice(cleanedText, {
@@ -621,12 +630,12 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
       isCallPausedRef.current = false;
       setCallStatus('listening');
       setStatusText('Start speaking...');
-      try {
-        if (recognitionRef.current) recognitionRef.current.start();
-      } catch {}
+      startRecognitionSafely();
       toast.info('Voice call resumed');
     } else {
       isCallPausedRef.current = true;
+      clearRecognitionRestart();
+      isRecognitionStartingRef.current = false;
       setCallStatus('paused');
       setStatusText('Call paused');
       try {
