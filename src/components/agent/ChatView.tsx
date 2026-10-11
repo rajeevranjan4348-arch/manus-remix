@@ -374,9 +374,21 @@ export function ChatView({
     setShowMentionPicker(false);
   };
 
-  // Auto-scroll to bottom
+  // Smart auto-follow: follow streamed output while the reader stays near the bottom.
+  // If they scroll upward to read earlier messages, stop forcing the scroll position.
+  const shouldAutoScrollRef = React.useRef(true);
+
+  const handleConversationScroll = React.useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    shouldAutoScrollRef.current = distanceFromBottom < 120;
+  }, []);
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (shouldAutoScrollRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
   }, [messages, steps, result, isLoading, status]);
 
   // Initial animation
@@ -640,7 +652,7 @@ export function ChatView({
         </div>
       </div>
       {/* Chat Area */}
-      <div ref={containerRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-20 pt-6 pb-40 space-y-8 custom-scrollbar scroll-smooth">
+      <div ref={containerRef} onScroll={handleConversationScroll} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-20 pt-6 pb-40 space-y-8 custom-scrollbar scroll-smooth">
         
         {/* Render Conversation Messages in Chronological Order */}
         {(() => {
