@@ -116,18 +116,6 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   const [robotSeed, setRobotSeed] = useState(() => getSettings().robotSeed ?? 0.3);
   const [isHappyExpression, setIsHappyExpression] = useState(false);
 
-  const handleRobotTap = () => {
-    setIsHappyExpression(true);
-    toast.success("Robot is happy! 😊", {
-      icon: "😊",
-      duration: 2500,
-    });
-    window.dispatchEvent(new CustomEvent('manus_open_settings', { detail: { tab: 'robot' } }));
-    setTimeout(() => {
-      setIsHappyExpression(false);
-    }, 3500);
-  };
-
   React.useEffect(() => {
     const handleSettingsUpdated = (e: any) => {
       const s = e.detail || getSettings();
@@ -517,8 +505,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
             floorShadow={robotFloorShadow}
             seed={robotSeed}
             aria-label={`Manus AI robot assistant, ${isHappyExpression ? 'happy' : robotState}`}
-            className="shrink-0 cursor-pointer transform hover:scale-105 active:scale-95 transition-transform"
-            onClick={handleRobotTap}
+            className="shrink-0 transform transition-transform"
           />
         </div>
 
