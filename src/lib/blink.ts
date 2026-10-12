@@ -102,13 +102,11 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
           type: 'text-delta',
           delta: 'Hello! How can I help you today?'
         });
-        sendEvent({ type: 'finish', finishReason: 'stop' });
       } else {
         sendEvent({
           type: 'text-delta',
           delta: 'I couldn’t connect to the AI response service, so I haven’t completed your request. Please check your connection and try again. I won’t pretend that a search, tool, file, or action succeeded when it did not.'
         });
-        sendEvent({ type: 'finish', finishReason: 'error' });
       }
       sendEvent({ type: 'finish', finishReason: 'stop' });
       controller.enqueue(encoder.encode('data: [DONE]\n\n'));
