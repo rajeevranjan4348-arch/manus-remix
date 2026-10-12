@@ -27,7 +27,7 @@ function TaskView({
   onReset: () => void 
 }) {
   const { taskId } = useParams();
-  const { loadTask, resetTask, currentTask, messages, steps, result, chartData, taskStatus, exportToPDF, sendMessage, isLoading } = useAgentTaskResult;
+  const { loadTask, resetTask, stopTask, currentTask, messages, steps, result, chartData, taskStatus, exportToPDF, sendMessage, isLoading } = useAgentTaskResult;
 
   useEffect(() => {
     if (taskId) {
@@ -48,6 +48,7 @@ function TaskView({
       onReset={onReset}
       onExport={exportToPDF}
       onSubmit={sendMessage}
+      onStop={stopTask}
       isLoading={isLoading}
     />
   );
