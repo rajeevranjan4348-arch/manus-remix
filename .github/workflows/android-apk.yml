@@ -1,0 +1,81 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**'
+      - '!README.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Generate Android project
+        run: npx cap add android
+
+      - name: Add runtime permission declarations
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const file = 'android/app/src/main/AndroidManifest.xml';
+          let xml = fs.readFileSync(file, 'utf8');
+          const permissions = [
+            'android.permission.INTERNET',
+            'android.permission.CAMERA',
+            'android.permission.RECORD_AUDIO',
+            'android.permission.ACCESS_COARSE_LOCATION',
+            'android.permission.ACCESS_FINE_LOCATION',
+            'android.permission.POST_NOTIFICATIONS'
+          ];
+          for (const permission of permissions) {
+            const tag = `<uses-permission android:name="${permission}" />`;
+            if (!xml.includes(permission)) xml = xml.replace('<application', `    ${tag}\n    <application`);
+          }
+          if (!xml.includes('android.permission.CAMERA')) throw new Error('Failed to add camera permission');
+          fs.writeFileSync(file, xml);
+          NODE
+
+      - name: Build debug APK
+        run: |
+          chmod +x android/gradlew
+          cd android
+          ./gradlew --no-daemon assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: manus-remix-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
