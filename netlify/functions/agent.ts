@@ -257,14 +257,14 @@ export default async (req: Request) => {
         } catch (err: any) {
           console.error('[Netlify Agent] Response stream failed:', err);
           controller.enqueue(
-            encoder.encode(\`data: \${JSON.stringify({
+            encoder.encode(`data: ${JSON.stringify({
               type: 'error',
               code: 'AI_STREAM_FAILED',
               error: 'The AI response was interrupted. Please retry your message.',
               retryable: true,
-            })}\\n\\n\`)
+            })}\n\n`)
           );
-          controller.enqueue(encoder.encode('data: [DONE]\\n\\n'));
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           controller.close();
         }
       },
