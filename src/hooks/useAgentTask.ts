@@ -445,7 +445,7 @@ export function useAgentTask() {
     emitRobotEvent('USER_SUBMITTED');
     setResult(null); // Clear previous result card while running new prompt
 
-    const activeId = taskId || currentTaskIdRef.current;
+    const activeId = currentTaskIdRef.current || taskId;
     const userMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
     const userMsg = {
       id: userMsgId,
