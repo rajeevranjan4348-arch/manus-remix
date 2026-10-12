@@ -7,13 +7,18 @@
     "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 3000",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "android:sync": "npm run build && cap sync android",
+    "android:add": "cap add android",
+    "android:open": "cap open android",
+    "android:debug": "npm run build && cap sync android && cd android && ./gradlew assembleDebug"
   },
   "devDependencies": {
     "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.11",
     "typescript": "~5.9.3",
-    "vite": "^7.2.4"
+    "vite": "^7.2.4",
+    "@capacitor/cli": "^7.4.3"
   },
   "dependencies": {
     "@blinkdotnew/react": "^1.0.2",
@@ -88,6 +93,15 @@
     "tailwindcss-animate": "^1.0.7",
     "three": "^0.186.1",
     "vaul": "^1.1.2",
-    "zod": "^4.3.4"
+    "zod": "^4.3.4",
+    "@capacitor/android": "^7.4.3",
+    "@capacitor/app": "^7.0.2",
+    "@capacitor/browser": "^7.0.2",
+    "@capacitor/camera": "^7.0.2",
+    "@capacitor/core": "^7.4.3",
+    "@capacitor/device": "^7.0.2",
+    "@capacitor/filesystem": "^7.1.4",
+    "@capacitor/geolocation": "^7.1.5",
+    "@capacitor/haptics": "^7.0.2"
   }
 }
