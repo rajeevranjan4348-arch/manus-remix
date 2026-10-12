@@ -266,9 +266,8 @@ export function useAgentTask() {
           status: 'success' as const
         };
         setPersistentMessages(prev => {
-          if (prev.some(m => m.id === assistantMsgId || (m.role === 'assistant' && m.content === assistantText))) {
-            return prev;
-          }
+          // Different requests can legitimately produce identical text; dedupe by ID only.
+          if (prev.some(m => m.id === assistantMsgId)) return prev;
           return [...prev, assistantMsg];
         });
 
@@ -458,10 +457,7 @@ export function useAgentTask() {
 
     // Optimistically record user message immediately in state (avoiding duplicate adjacent appends)
     setPersistentMessages(prev => {
-      const last = prev[prev.length - 1];
-      if (last && last.role === 'user' && last.content.trim() === content.trim()) {
-        return prev;
-      }
+      // Every send is a distinct request, even if the text repeats.
       return [...prev, userMsg];
     });
 
