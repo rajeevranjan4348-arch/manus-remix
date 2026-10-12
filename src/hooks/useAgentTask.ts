@@ -25,7 +25,7 @@ function getConnectorTerms(connector: ConnectorRegistryEntry): string[] {
 }
 function isConnectorAuthenticated(c: ConnectorRegistryEntry): boolean {
   const status = [c.status, c.authStatus, c.connectionStatus].filter(Boolean).join(' ').toLowerCase();
-  return c.authenticated === true || c.isAuthenticated === true || c.connected === true || c.isConnected === true || /(^|\s)(active|connected|authenticated|authorized)(\s|$)/.test(status);
+  return c.authenticated === true || c.isAuthenticated === true || c.connected === true || c.isConnected === true || /(^|\s)(connected|authenticated|authorized)(\s|$)/.test(status);
 }
 function findPromptConnector(prompt: string, connectors: ConnectorRegistryEntry[]): ConnectorRegistryEntry | undefined {
   const p = prompt.toLowerCase();
@@ -381,6 +381,7 @@ export function useAgentTask() {
       setChartData(fallbackChart);
       setResult(finalResult);
       setTaskStatus('completed');
+      setPhase('completed');
       emitRobotEvent('TASK_SUCCEEDED');
       setSteps(prev => prev.map(s => ({ ...s, status: 'completed' as const })));
       playNotificationSound('success');
