@@ -95,89 +95,21 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
         console.warn('[AI Studio] Gemini stream endpoint unavailable, using local responder:', err);
       }
 
-      // 2. Intelligent local fallback if server cannot be reached
-      if (isWebsite) {
-        await sleep(150);
-        sendEvent({
-          type: 'tool-call',
-          toolCallId: 't1',
-          toolName: 'run_terminal_cmd',
-          args: { command: 'npm create vite@latest website -- --template react-ts' }
-        });
-        await sleep(250);
-        sendEvent({
-          type: 'tool-result',
-          toolCallId: 't1',
-          result: 'Vite project created successfully'
-        });
-
-        await sleep(200);
-        sendEvent({
-          type: 'tool-call',
-          toolCallId: 't2',
-          toolName: 'run_terminal_cmd',
-          args: { command: 'cd website && bun install' }
-        });
-        await sleep(250);
-        sendEvent({
-          type: 'tool-result',
-          toolCallId: 't2',
-          result: 'Installed packages'
-        });
-
-        await sleep(200);
-        sendEvent({
-          type: 'tool-call',
-          toolCallId: 't3',
-          toolName: 'write_file',
-          args: { path: 'src/App.tsx' }
-        });
-        await sleep(200);
-        sendEvent({
-          type: 'tool-result',
-          toolCallId: 't3',
-          result: 'Components generated'
-        });
-
-        await sleep(200);
-        sendEvent({
-          type: 'tool-call',
-          toolCallId: 't4',
-          toolName: 'run_terminal_cmd',
-          args: { command: 'npm run dev -- --port 3000 --host 0.0.0.0' }
-        });
-        await sleep(200);
-        sendEvent({
-          type: 'tool-result',
-          toolCallId: 't4',
-          result: 'Vite dev server running on port 3000'
-        });
-
+      // 2. Honest local fallback: never simulate successful tools or invent factual answers.
+      const cleanMsg = lastUserMsg.toLowerCase().trim();
+      if (/^(?:hi|hello|hey|hiya|howdy|good morning|good afternoon|good evening)[!?.\\s,]*$/i.test(cleanMsg)) {
         sendEvent({
           type: 'text-delta',
-          delta: 'Website setup and verified successfully. The live preview is ready.'
+          delta: 'Hello! How can I help you today?'
         });
+        sendEvent({ type: 'finish', finishReason: 'stop' });
       } else {
-        const cleanMsg = lastUserMsg.toLowerCase().trim();
-        if (/^(?:hi|hello|hey|hiya|howdy|good morning|good afternoon|good evening)[!?.\s,]*$/i.test(cleanMsg) || /\bUser:\s*(?:hi|hello|hey|hiya|howdy|good morning|good afternoon|good evening)[!?.\s,]*$/i.test(cleanMsg)) {
-          sendEvent({
-            type: 'text-delta',
-            delta: 'Hello! How can I help you today?'
-          });
-        } else if (/prime minister of india/i.test(cleanMsg)) {
-          sendEvent({
-            type: 'text-delta',
-            delta: 'The current Prime Minister of India is Narendra Modi.'
-          });
-        } else {
-          // Direct response answering the user query without fake boilerplate or infinite tool loops
-          sendEvent({
-            type: 'text-delta',
-            delta: `I have processed your request for: "${lastUserMsg}". Please let me know how you would like me to assist you further.`
-          });
-        }
+        sendEvent({
+          type: 'text-delta',
+          delta: 'I couldn’t connect to the AI response service, so I haven’t completed your request. Please check your connection and try again. I won’t pretend that a search, tool, file, or action succeeded when it did not.'
+        });
+        sendEvent({ type: 'finish', finishReason: 'error' });
       }
-
       sendEvent({ type: 'finish', finishReason: 'stop' });
       controller.enqueue(encoder.encode('data: [DONE]\n\n'));
       controller.close();
