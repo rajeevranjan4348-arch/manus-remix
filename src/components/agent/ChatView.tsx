@@ -892,7 +892,7 @@ export function ChatView({
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           className={cn(
-            "w-full max-w-3xl box-border bg-[#303030] dark:bg-[#303030] rounded-full shadow-xl border border-white/10 px-4 sm:px-6 py-3 sm:py-3.5 flex flex-row items-center gap-3 sm:gap-4 transition-all focus-within:ring-2 focus-within:ring-primary/20 relative",
+            "w-full min-w-0 max-w-3xl box-border bg-[#303030] dark:bg-[#303030] rounded-full shadow-xl border border-white/10 px-3 sm:px-6 py-3 sm:py-3.5 flex flex-row items-center gap-2 sm:gap-4 transition-all focus-within:ring-2 focus-within:ring-primary/20 relative",
             isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30"
           )}
         >
@@ -906,7 +906,7 @@ export function ChatView({
           )}
 
           {isDragging && (
-            <div className="absolute inset-0 bg-slate-100/95 dark:bg-slate-900/95 border-2 border-dashed border-foreground rounded-[2.2rem] flex items-center justify-center gap-3 z-30 backdrop-blur-xs transition-all animate-in fade-in zoom-in duration-200 pointer-events-none">
+            <div className="absolute inset-0 bg-slate-100/95 dark:bg-slate-900/95 border-2 border-dashed border-foreground rounded-full flex items-center justify-center gap-3 z-30 backdrop-blur-xs transition-all animate-in fade-in zoom-in duration-200 pointer-events-none">
               <Upload className="w-5 h-5 text-foreground animate-bounce" />
               <span className="font-semibold text-sm text-foreground">Drop files, images or datasets here</span>
             </div>
@@ -986,10 +986,10 @@ export function ChatView({
           </div>
 
           {/* Right-side controls inside the pill composer */}
-          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <div className="flex-1 min-w-0 overflow-hidden">
               {/* Selected Connector Tags */}
               {activeConnectorTags.length > 0 && (
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 min-w-0 overflow-x-auto no-scrollbar">
                   {activeConnectorTags.map((tagId) => {
                     const opt = WORKSPACE_CONNECTOR_OPTIONS.find(o => o.id === tagId) || CONNECTOR_CATALOG.find(c => c.id === tagId);
                     if (!opt) return null;
@@ -1025,10 +1025,10 @@ export function ChatView({
               )}
             </div>
 
-            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <div className="flex items-center gap-1 sm:gap-3 shrink-0">
               <VoiceInputButton
                 onTranscript={(text) => setInput(prev => prev ? `${prev} ${text}` : text)}
-                className="w-10 h-10 rounded-full hover:bg-white/10 transition-colors flex items-center justify-center text-white cursor-pointer"
+                className="w-9 h-9 sm:w-10 sm:h-10 rounded-full hover:bg-white/10 transition-colors flex items-center justify-center text-white cursor-pointer"
                 size={23}
               />
               <button 
@@ -1036,12 +1036,12 @@ export function ChatView({
                 onClick={handleSend}
                 disabled={(!input.trim() && !attachedFile && activeConnectorTags.length === 0) || isLoading}
                 className={cn(
-                  "w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center transition-all shadow-2xs",
+                  "w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center transition-all shadow-2xs",
                   isLoading || status === 'running'
                     ? "bg-white text-black dark:bg-white dark:text-black cursor-wait"
                     : (input.trim() || attachedFile || activeConnectorTags.length > 0)
                       ? "bg-white text-black hover:scale-105 active:scale-95 shadow-md cursor-pointer"
-                      : "bg-white text-black hover:bg-white/90 cursor-not-allowed"
+                      : "bg-white/15 text-white/45 cursor-not-allowed"
                 )}
                 title={isLoading || status === 'running' ? "AI is working" : "Send message"}
                 aria-label={isLoading || status === 'running' ? "AI is working" : "Send message"}
