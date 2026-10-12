@@ -60,9 +60,9 @@ export default async (req: Request) => {
     // Enable Google Search grounding for queries whose answers can change over time.
     const needsLiveSearch = (text: string) => {
       const q = text.toLowerCase();
-      return /\b(latest|today|current|currently|right now|breaking|live|real[\s-]?time|news|headlines|recent|this week|yesterday|weather|stock price|share price|exchange rate|world news|india news|tech news|latest updates|election results|box office|release date|latest version|price today|score|standings|forecast|who won|who is (the )?(prime minister|president|chief minister|ceo)|who are the (current|latest)\b)\b/i.test(q)
+      return /\b(latest|newest|up[ -]?to[ -]?date|today|current|currently|right now|breaking|live|real[\s-]?time|news|headlines|recent|this week|yesterday|weather|stock price|share price|exchange rate|world news|india news|tech news|latest updates|election results|box office|release date|latest version|price today|score|standings|forecast|who won|who is (the )?(prime minister|president|chief minister|ceo)|who are the (current|latest)\b)\b/i.test(q)
         || /\b(202[5-9]|203\d)\b/.test(q)
-        || /\b(what happened|what's happening|whats happening|tell me about the latest|latest on)\b/i.test(q);
+        || /\b(what happened|what's happening|whats happening|tell me about the latest|latest on|latest information|latest info|current information|current info|recent updates|what is going on|what's going on)\b/i.test(q);
     };
     const useGoogleSearch = needsLiveSearch(latestUserText);
     // External search enriches the model context only for fresh/live questions.
