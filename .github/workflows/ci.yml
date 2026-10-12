@@ -2,7 +2,7 @@ name: Manus Remix CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "security/**"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -17,13 +17,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Scan repository for leaked secrets
+        uses: gitleaks/gitleaks-action@v2
+
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
       - name: Install locked dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
+
+      - name: Audit dependency vulnerabilities
+        run: bun audit
 
       - name: TypeScript validation
         run: bun run lint
