@@ -17,6 +17,40 @@ import {
   StoredMessage,
 } from '@/lib/chatDatabase';
 
+export type AgentTaskPhase = 'idle' | 'tool-calling' | 'text-generation' | 'completed' | 'error';
+
+type ConnectorRegistryEntry = { id?: string; name?: string; slug?: string; key?: string; keywords?: string[]; status?: string; connected?: boolean; authenticated?: boolean; isAuthenticated?: boolean; isConnected?: boolean; authStatus?: string; connectionStatus?: string; };
+function getConnectorTerms(connector: ConnectorRegistryEntry): string[] {
+  return [...new Set([connector.name, connector.slug, connector.key, connector.id, ...(connector.keywords || [])].filter((v): v is string => typeof v === 'string' && v.trim().length > 0).map(v => v.trim().toLowerCase()))];
+}
+function isConnectorAuthenticated(c: ConnectorRegistryEntry): boolean {
+  const status = [c.status, c.authStatus, c.connectionStatus].filter(Boolean).join(' ').toLowerCase();
+  return c.authenticated === true || c.isAuthenticated === true || c.connected === true || c.isConnected === true || /(^|\s)(active|connected|authenticated|authorized)(\s|$)/.test(status);
+}
+function findPromptConnector(prompt: string, connectors: ConnectorRegistryEntry[]): ConnectorRegistryEntry | undefined {
+  const p = prompt.toLowerCase();
+  const matches = connectors.filter(isConnectorAuthenticated).map(connector => ({ connector, term: getConnectorTerms(connector).filter(t => t.length > 1).sort((a,b) => b.length-a.length).find(t => p.includes(t)) })).filter(x => x.term);
+  matches.sort((a,b) => (b.term?.length || 0) - (a.term?.length || 0));
+  return matches[0]?.connector;
+}
+async function executeMatchingConnector(prompt: string): Promise<{ matched: boolean; connectorName?: string; result?: unknown }> {
+  const registryResponse = await fetch('/api/connectors', { method: 'GET', credentials: 'include', headers: { Accept: 'application/json' } });
+  if (!registryResponse.ok) {
+    if (registryResponse.status === 404 || registryResponse.status === 405) return { matched: false };
+    throw new Error('Could not check connector registry (HTTP ' + registryResponse.status + ').');
+  }
+  const payload = await registryResponse.json();
+  const connectors: ConnectorRegistryEntry[] = Array.isArray(payload) ? payload : Array.isArray(payload?.connectors) ? payload.connectors : Array.isArray(payload?.data?.connectors) ? payload.data.connectors : [];
+  const connector = findPromptConnector(prompt, connectors);
+  if (!connector) return { matched: false };
+  const connectorId = connector.id || connector.slug || connector.key;
+  if (!connectorId) return { matched: false };
+  const response = await fetch('/api/connectors/execute', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ connectorId, prompt, input: { prompt }, action: 'auto' }) });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(typeof result?.error === 'string' ? result.error : 'Connector execution failed (HTTP ' + response.status + ').');
+  return { matched: true, connectorName: connector.name || connector.slug || connectorId, result };
+}
+
 export interface Step {
   id: string;
   label: string;
@@ -40,6 +74,7 @@ export function useAgentTask() {
   const [currentTask, setCurrentTask] = useState<{ prompt: string; options: any; fileData?: string; url?: string } | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
   const [taskStatus, setTaskStatus] = useState<'idle' | 'running' | 'completed' | 'error'>('idle');
+  const [phase, setPhase] = useState<AgentTaskPhase>('idle');
   const [result, setResult] = useState<any>(null);
   const [chartData, setChartData] = useState<ChartData | null>(null);
   const [sandbox, setSandbox] = useState<Sandbox | null>(null);
@@ -214,6 +249,7 @@ export function useAgentTask() {
       
       setResult(finalResult);
       setTaskStatus('completed');
+      setPhase('completed');
       emitRobotEvent('TASK_SUCCEEDED');
       
       const activeId = taskId || currentTaskIdRef.current;
@@ -390,6 +426,24 @@ export function useAgentTask() {
   const setMessages = (useAgentResult as any).setMessages;
   const processedInvocationsRef = useRef<Set<string>>(new Set());
 
+  const preparePromptWithConnectors = useCallback(async (prompt: string) => {
+    setPhase('tool-calling');
+    try {
+      const dispatch = await executeMatchingConnector(prompt);
+      if (dispatch.matched) {
+        return prompt + '\n\n[Connected app result from ' + dispatch.connectorName + ']\n' +
+          JSON.stringify(dispatch.result) + '\n\nUse this returned data as the source for your answer.';
+      }
+    } catch (error) {
+      console.warn('[Connectors] Dispatch failed; continuing with text generation:', error);
+      toast.error(error instanceof Error ? error.message : 'Connector dispatch failed. Continuing with AI response.');
+    } finally {
+      setPhase('text-generation');
+    }
+    return prompt;
+  }, []);
+
+
   // Track tool calls and update steps dynamically without duplicate traces
   useEffect(() => {
     if (messages.length > 0) {
@@ -465,6 +519,7 @@ export function useAgentTask() {
 
   const sendMessage = useCallback((content: string) => {
     setTaskStatus('running');
+    setPhase('tool-calling');
     emitRobotEvent('USER_SUBMITTED');
     setResult(null); // Clear previous result card while running new prompt
 
@@ -514,11 +569,11 @@ export function useAgentTask() {
     const lower = content.toLowerCase();
     if (lower.includes('graph') || lower.includes('chart') || lower.includes('plot') || lower.includes('diagram') || lower.includes('bar') || lower.includes('pie') || lower.includes('line')) {
       const chartPrompt = `${content}\n\n[INSTRUCTION: Format your chart data as a JSON code block using the format below so it renders as an interactive chart]\n\`\`\`json\n{\n  "graph": {\n    "type": "bar",\n    "labels": ["Category A", "Category B", "Category C", "Category D"],\n    "datasets": [{\n      "label": "Metric",\n      "data": [45, 72, 88, 95]\n    }]\n  }\n}\n\`\`\``;
-      agentSendMessage(chartPrompt);
+      void (async () => { agentSendMessage(await preparePromptWithConnectors(chartPrompt)); })();
     } else {
-      agentSendMessage(content);
+      void (async () => { agentSendMessage(await preparePromptWithConnectors(content)); })();
     }
-  }, [agentSendMessage, taskId, user]);
+  }, [agentSendMessage, preparePromptWithConnectors, taskId, user]);
 
   const startTask = useCallback(async (prompt: string, options: any) => {
     // Start fresh
@@ -601,6 +656,7 @@ export function useAgentTask() {
     processedInvocationsRef.current.clear();
     setCurrentTask({ prompt, options, fileData: options.fileData, url: options.url });
     setTaskStatus('running');
+    setPhase('tool-calling');
     setResult(null);
     setChartData(null);
     playNotificationSound('send');
@@ -679,8 +735,8 @@ export function useAgentTask() {
       toast.success(`${cmd.targetName}: ${cmd.feedbackSpeech}`);
     }
 
-    // Start agent execution
-    agentSendMessage(enhancedPrompt);
+    // Resolve authenticated connector tools before generating the text response.
+    agentSendMessage(await preparePromptWithConnectors(enhancedPrompt));
 
     // Initial DB update with steps
     if (newTaskId && initialSteps.length > 0) {
@@ -706,7 +762,7 @@ export function useAgentTask() {
     
     return newTaskId;
 
-  }, [isAuthenticated, user, agentSendMessage]);
+  }, [isAuthenticated, user, agentSendMessage, preparePromptWithConnectors]);
 
   const loadTask = useCallback(async (id: string) => {
     try {
@@ -763,6 +819,7 @@ export function useAgentTask() {
     currentTaskIdRef.current = null;
     setCurrentTask(null);
     setTaskStatus('idle');
+    setPhase('idle');
     setSteps([]);
     setResult(null);
     setChartData(null);
@@ -872,6 +929,7 @@ Report generated by Manus AI Workspace
     result,
     chartData,
     messages: displayMessages,
-    isLoading
+    isLoading,
+    phase
   };
 }
