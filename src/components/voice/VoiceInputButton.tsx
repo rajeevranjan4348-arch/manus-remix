@@ -28,6 +28,7 @@ export function VoiceInputButton({
 }: VoiceInputButtonProps) {
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const isStartingRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -54,13 +55,18 @@ export function VoiceInputButton({
       return;
     }
 
+    if (isStartingRef.current) return;
+    isStartingRef.current = true;
+
     // Request access from the user's click, then release the temporary stream
     // before SpeechRecognition opens its own microphone session.
     if (!window.isSecureContext) {
+      isStartingRef.current = false;
       toast.error('Microphone access requires HTTPS or localhost. Open Manus through its secure site.');
       return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
+      isStartingRef.current = false;
       toast.error('Microphone access is unavailable in this browser. Please use an up-to-date Chrome browser.');
       return;
     }
@@ -76,6 +82,7 @@ export function VoiceInputButton({
       } else {
         toast.error('Could not access the microphone. Check site permissions and ensure no other app is using it.');
       }
+      isStartingRef.current = false;
       return;
     } finally {
       permissionStream?.getTracks().forEach((track) => track.stop());
@@ -83,6 +90,7 @@ export function VoiceInputButton({
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
+      isStartingRef.current = false;
       toast.error('Voice recognition is not supported in this browser. Please use Chrome, Edge, or Safari.');
       return;
     }
@@ -177,10 +185,12 @@ export function VoiceInputButton({
         } else {
           window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
         }
+        isStartingRef.current = false;
         setIsListening(false);
       };
 
       recognition.onend = () => {
+        isStartingRef.current = false;
         setIsListening(false);
         emitRobotEvent('VOICE_LISTENING_STOPPED');
         window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
@@ -188,7 +198,9 @@ export function VoiceInputButton({
 
       recognitionRef.current = recognition;
       recognition.start();
+      isStartingRef.current = false;
     } catch (err) {
+      isStartingRef.current = false;
       console.error('Speech recognition error:', err);
       toast.error('Could not start microphone');
       setIsListening(false);

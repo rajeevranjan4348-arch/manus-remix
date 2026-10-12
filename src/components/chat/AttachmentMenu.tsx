@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { VoiceCallModal } from '../voice/VoiceCallModal';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
+import { validateUserSelectedFile } from '@/lib/deviceAccess';
 
 export interface AttachmentMenuProps {
   onFileSelect: (file: File) => void;
@@ -35,243 +36,103 @@ export function AttachmentMenu({
   const photosInputRef = useRef<HTMLInputElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
 
-  const handleCameraClick = async () => {
-    // Request browser camera permission explicitly before opening the native camera picker.
-    // The temporary stream is immediately released; the file input handles the actual capture.
+  // The native capture picker owns camera permission on mobile. Do not request
+  // getUserMedia and immediately stop it before opening a second camera flow.
+  const handleCameraClick = () => {
     if (!window.isSecureContext) {
-      toast.error('Camera access requires HTTPS or localhost. Open Manus through its secure site.');
+      toast.error('Camera capture requires HTTPS or localhost. Open Manus through its secure site.');
       return;
     }
-    if (!navigator.mediaDevices?.getUserMedia) {
-      // Some mobile browsers expose the native camera picker without getUserMedia.
-      cameraInputRef.current?.click();
+    cameraInputRef.current?.click();
+  };
+
+  const handleSelectedFile = (file: File | undefined, source: string) => {
+    if (!file) return; // User cancelled the native picker.
+    const validation = validateUserSelectedFile(file);
+    if (!validation.ok) {
+      toast.error(validation.message);
       return;
     }
 
-    let permissionStream: MediaStream | null = null;
-    try {
-      permissionStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
-      permissionStream.getTracks().forEach((track) => track.stop());
-      permissionStream = null;
-      cameraInputRef.current?.click();
-    } catch (error) {
-      permissionStream?.getTracks().forEach((track) => track.stop());
-      const name = error instanceof Error ? error.name : '';
-      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-        toast.error('Camera permission was blocked. Allow Camera for this site in browser settings, then try again.');
-      } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-        toast.error('No camera was found on this device.');
-      } else {
-        toast.error('Could not access the camera. Check site permissions and try again.');
-      }
-    }
+    onFileSelect(file);
+    setIsOpen(false);
+    // Library persistence is optional; do not block attachment if it fails.
+    saveSharedFileToLibrary(file, source).catch((error) => {
+      console.warn('[Manus] Could not save attachment to Library:', error);
+      toast.error('File attached, but it could not be saved to Library.');
+    });
+    toast.success(`Attached ${file.name} (${file.size < 1024 * 1024
+      ? `${Math.max(1, Math.round(file.size / 1024))} KB`
+      : `${(file.size / (1024 * 1024)).toFixed(1)} MB`})`);
   };
 
   const handleCameraChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      saveSharedFileToLibrary(file, 'Camera Capture').catch(console.error);
-      onFileSelect(file);
-      setIsOpen(false);
-      toast.success(`Photo captured & saved to Library: ${file.name}`);
-    }
-    // Allow selecting/capturing the same image again.
+    handleSelectedFile(e.target.files?.[0], 'Camera Capture');
     e.target.value = '';
   };
 
   const handlePhotosChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      saveSharedFileToLibrary(file, 'Photo Attachment').catch(console.error);
-      onFileSelect(file);
-      setIsOpen(false);
-      toast.success(`Image attached & saved to Library: ${file.name}`);
-    }
+    handleSelectedFile(e.target.files?.[0], 'Photo Attachment');
+    e.target.value = '';
   };
 
   const handleFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      saveSharedFileToLibrary(file, 'File Attachment').catch(console.error);
-      onFileSelect(file);
-      setIsOpen(false);
-      toast.success(`File attached & saved to Library: ${file.name}`);
-    }
+    handleSelectedFile(e.target.files?.[0], 'File Attachment');
+    e.target.value = '';
   };
 
   return (
     <>
-      {/* Hidden file inputs for Camera, Photos, and Files */}
-      <input
-        ref={cameraInputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        onChange={handleCameraChange}
-        className="hidden"
-      />
-      <input
-        ref={photosInputRef}
-        type="file"
-        accept="image/*"
-        onChange={handlePhotosChange}
-        className="hidden"
-      />
-      <input
-        ref={filesInputRef}
-        type="file"
-        accept=".csv,.xlsx,.xls,.pdf,.txt,.json,.doc,.docx"
-        onChange={handleFilesChange}
-        className="hidden"
-      />
+      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleCameraChange} className="hidden" aria-label="Capture photo" />
+      <input ref={photosInputRef} type="file" accept="image/*" onChange={handlePhotosChange} className="hidden" aria-label="Choose photo" />
+      <input ref={filesInputRef} type="file" accept=".csv,.xlsx,.xls,.pdf,.txt,.md,.json,.xml,.doc,.docx,.ppt,.pptx,.png,.jpg,.jpeg,.webp,.gif,.bmp,.svg,.mp3,.wav,.m4a,.mp4,.webm,.mov" onChange={handleFilesChange} className="hidden" aria-label="Choose file" />
 
       <Popover open={isOpen} onOpenChange={setIsOpen}>
-        <PopoverTrigger asChild>
-          {children}
-        </PopoverTrigger>
-        <PopoverContent 
-          side="top" 
-          align="start" 
+        <PopoverTrigger asChild>{children}</PopoverTrigger>
+        <PopoverContent
+          side="top"
+          align="start"
           sideOffset={12}
           className="w-72 p-2 rounded-[28px] border border-border dark:border-white/10 bg-white dark:bg-[#202124] text-foreground dark:text-white shadow-2xl overflow-hidden backdrop-blur-xl"
         >
           <div className="flex flex-col gap-1">
-            {/* Voice Call Option */}
-            <button
-              onClick={() => {
-                setIsOpen(false);
-                setIsVoiceCallOpen(true);
-              }}
-              className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer"
-            >
-              <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-white/10 text-slate-800 dark:text-white flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                <PhoneCall size={20} />
-              </div>
-              <div className="flex flex-col">
-                <span className="font-semibold text-base text-slate-900 dark:text-white tracking-tight">Voice call</span>
-                <span className="text-[11px] text-muted-foreground leading-tight">Live interactive voice call</span>
-              </div>
+            <button onClick={() => { setIsOpen(false); setIsVoiceCallOpen(true); }} className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer">
+              <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-white/10 text-slate-800 dark:text-white flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform"><PhoneCall size={20} /></div>
+              <div className="flex flex-col"><span className="font-semibold text-base text-slate-900 dark:text-white tracking-tight">Voice call</span><span className="text-[11px] text-muted-foreground leading-tight">Live interactive voice call</span></div>
             </button>
 
-            {/* Camera Option */}
-            <button
-              onClick={() => {
-                void handleCameraClick();
-              }}
-              className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer"
-            >
-              <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform text-slate-800 dark:text-white">
-                <Camera size={20} />
-              </div>
+            <button onClick={handleCameraClick} className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer">
+              <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform text-slate-800 dark:text-white"><Camera size={20} /></div>
               <span className="font-semibold text-base text-slate-900 dark:text-white tracking-tight">Camera</span>
             </button>
 
-            {/* Photos Option */}
-            <button
-              onClick={() => {
-                photosInputRef.current?.click();
-              }}
-              className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer"
-            >
-              <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform text-slate-800 dark:text-white">
-                <Image size={20} />
-              </div>
+            <button onClick={() => photosInputRef.current?.click()} className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer">
+              <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform text-slate-800 dark:text-white"><Image size={20} /></div>
               <span className="font-semibold text-base text-slate-900 dark:text-white tracking-tight">Photos</span>
             </button>
 
-            {/* Files Option */}
-            <button
-              onClick={() => {
-                filesInputRef.current?.click();
-              }}
-              className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer"
-            >
-              <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform text-slate-800 dark:text-white">
-                <Paperclip size={20} />
-              </div>
+            <button onClick={() => filesInputRef.current?.click()} className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer">
+              <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform text-slate-800 dark:text-white"><Paperclip size={20} /></div>
               <span className="font-semibold text-base text-slate-900 dark:text-white tracking-tight">Files</span>
             </button>
 
-            {/* Connectors Option (replaced Google Drive) */}
-            <button
-              onClick={() => {
-                setIsOpen(false);
-                if (onOpenConnectors) {
-                  onOpenConnectors();
-                } else if (onOpenGoogleDrivePicker) {
-                  onOpenGoogleDrivePicker();
-                } else {
-                  toast.info('Opening Connectors...');
-                }
-              }}
-              className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer"
-            >
-              <div className="w-10 h-10 rounded-full bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                <Plug size={20} />
-              </div>
-              <div className="flex flex-col">
-                <span className="font-semibold text-base text-slate-900 dark:text-white tracking-tight">Connectors</span>
-                <span className="text-[11px] text-muted-foreground leading-tight">Google Drive & Workspace tools</span>
-              </div>
+            <button onClick={() => { setIsOpen(false); if (onOpenConnectors) onOpenConnectors(); else if (onOpenGoogleDrivePicker) onOpenGoogleDrivePicker(); else toast.info('Opening Connectors...'); }} className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer">
+              <div className="w-10 h-10 rounded-full bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform"><Plug size={20} /></div>
+              <div className="flex flex-col"><span className="font-semibold text-base text-slate-900 dark:text-white tracking-tight">Connectors</span><span className="text-[11px] text-muted-foreground leading-tight">Google Drive & Workspace tools</span></div>
             </button>
 
-            {/* Think Harder Option */}
-            <button
-              onClick={() => {
-                onToggleThinkHarder();
-                if (!isThinkHarder) {
-                  toast.success('Think harder enabled: extended chain-of-thought reasoning active');
-                } else {
-                  toast.info('Think harder mode disabled');
-                }
-              }}
-              className={cn(
-                "w-full flex items-center justify-between px-3 py-2.5 rounded-2xl transition-colors text-left group cursor-pointer",
-                isThinkHarder 
-                  ? "bg-purple-500/10 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300" 
-                  : "hover:bg-slate-100 dark:hover:bg-white/10"
-              )}
-            >
+            <button onClick={() => { onToggleThinkHarder(); toast.info(isThinkHarder ? 'Think harder mode disabled' : 'Think harder enabled'); }} className={cn("w-full flex items-center justify-between px-3 py-2.5 rounded-2xl transition-colors text-left group cursor-pointer", isThinkHarder ? "bg-purple-500/10 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300" : "hover:bg-slate-100 dark:hover:bg-white/10")}>
               <div className="flex items-center gap-3.5">
-                <div className={cn(
-                  "w-10 h-10 rounded-full flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform",
-                  isThinkHarder
-                    ? "bg-purple-600 text-white shadow-[0_0_12px_rgba(168,85,247,0.4)]"
-                    : "bg-slate-100 dark:bg-white/10 text-slate-800 dark:text-white"
-                )}>
-                  <Brain size={20} />
-                </div>
-                <div className="flex flex-col">
-                  <span className={cn(
-                    "font-semibold text-base tracking-tight",
-                    isThinkHarder ? "text-purple-700 dark:text-purple-300" : "text-slate-900 dark:text-white"
-                  )}>
-                    Think harder
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    Deep chain-of-thought & step analysis
-                  </span>
-                </div>
+                <div className={cn("w-10 h-10 rounded-full flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform", isThinkHarder ? "bg-purple-600 text-white shadow-[0_0_12px_rgba(168,85,247,0.4)]" : "bg-slate-100 dark:bg-white/10 text-slate-800 dark:text-white")}><Brain size={20} /></div>
+                <div className="flex flex-col"><span className={cn("font-semibold text-base tracking-tight", isThinkHarder ? "text-purple-700 dark:text-purple-300" : "text-slate-900 dark:text-white")}>Think harder</span><span className="text-xs text-muted-foreground">Deep reasoning & step analysis</span></div>
               </div>
-              <div className={cn(
-                "w-5 h-5 rounded-full border flex items-center justify-center transition-colors",
-                isThinkHarder 
-                  ? "border-purple-600 bg-purple-600 text-white" 
-                  : "border-slate-300 dark:border-white/20"
-              )}>
-                {isThinkHarder && <Check size={12} strokeWidth={3} />}
-              </div>
+              <div className={cn("w-5 h-5 rounded-full border flex items-center justify-center transition-colors", isThinkHarder ? "border-purple-600 bg-purple-600 text-white" : "border-slate-300 dark:border-white/20")}>{isThinkHarder && <Check size={12} strokeWidth={3} />}</div>
             </button>
           </div>
         </PopoverContent>
       </Popover>
 
-      {/* Fullscreen Voice Call Modal (Matches Reference Screenshots) */}
-      <VoiceCallModal
-        isOpen={isVoiceCallOpen}
-        onClose={() => setIsVoiceCallOpen(false)}
-        onSendMessageToChat={onSendMessageToChat}
-      />
+      <VoiceCallModal isOpen={isVoiceCallOpen} onClose={() => setIsVoiceCallOpen(false)} onSendMessageToChat={onSendMessageToChat} />
     </>
   );
 }
