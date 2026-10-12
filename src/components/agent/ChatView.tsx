@@ -80,6 +80,19 @@ export function ChatView({
   isLoading 
 }: ChatViewProps) {
   const [input, setInput] = React.useState('');
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const isLongPrompt = input.length > 120 || input.includes('\n');
+
+  // Grow the composer as the user types or pastes, instead of trapping long prompts in two lines.
+  useEffect(() => {
+    const textarea = inputRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    const maxHeight = Math.min(window.innerHeight * 0.45, 420);
+    const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
+    textarea.style.height = `${Math.max(36, nextHeight)}px`;
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }, [input]);
   const [showChatMenu, setShowChatMenu] = useState(false);
   const [expandedSteps, setExpandedSteps] = React.useState<Record<string, boolean>>({});
   const [isThinkHarder, setIsThinkHarder] = useState(false);
@@ -895,7 +908,8 @@ export function ChatView({
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           className={cn(
-            "w-full min-w-0 max-w-3xl box-border bg-[#303030] dark:bg-[#303030] rounded-full shadow-xl border border-white/10 px-3 sm:px-6 py-3 sm:py-3.5 flex flex-row items-center gap-2 sm:gap-4 transition-all focus-within:ring-2 focus-within:ring-primary/20 relative",
+            "w-full min-w-0 max-w-3xl box-border bg-[#303030] dark:bg-[#303030] rounded-full shadow-xl border border-white/10 px-3 sm:px-6 py-3 sm:py-3.5 flex flex-row gap-2 sm:gap-4 transition-all focus-within:ring-2 focus-within:ring-primary/20 relative",
+            isLongPrompt ? "rounded-3xl items-end" : "items-center",
             isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30"
           )}
         >
@@ -942,6 +956,7 @@ export function ChatView({
           </AttachmentMenu>
           <div className="flex-1 min-w-0 flex items-center">
             <textarea
+              ref={inputRef}
               value={input}
               onChange={(e) => handleInputChange(e as any)}
               onKeyDown={(e) => {
@@ -983,7 +998,7 @@ export function ChatView({
               }}
               rows={1}
               placeholder={isThinkHarder ? "Ask with deep reasoning..." : "Reply to Manus"}
-              className="w-full min-w-0 bg-transparent border-none outline-none resize-none text-white placeholder:text-white/60 text-base sm:text-lg leading-relaxed p-0 focus:ring-0 focus:outline-none min-h-[36px] max-h-[96px] overflow-y-auto"
+              className="w-full min-w-0 bg-transparent border-none outline-none resize-none text-white placeholder:text-white/60 text-base sm:text-lg leading-relaxed p-0 focus:ring-0 focus:outline-none min-h-[36px] max-h-[45vh] overflow-y-hidden"
               disabled={isLoading}
             />
           </div>
