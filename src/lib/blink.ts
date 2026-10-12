@@ -84,8 +84,7 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
         });
 
         if (!res.ok) {
-          let payload: any = {};
-          try { payload = await res.json(); } catch {}
+          try { await res.body?.cancel(); } catch {}
           if (res.status === 429) {
             serviceFailureMessage = 'The AI service is receiving too many requests. Please wait a moment and try again.';
           } else if (res.status === 401 || res.status === 403 || res.status === 503) {
