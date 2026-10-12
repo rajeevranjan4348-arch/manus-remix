@@ -1,22 +1,44 @@
 import { GoogleGenAI } from '@google/genai';
 
 export default async (req: Request) => {
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' },
+  const jsonError = (status: number, code: string, message: string, retryable = false) =>
+    new Response(JSON.stringify({ error: message, code, retryable }), {
+      status,
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
     });
+
+  if (req.method !== 'POST') {
+    return jsonError(405, 'METHOD_NOT_ALLOWED', 'Use POST to send a message.');
   }
 
   try {
-    const body = await req.json();
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return jsonError(400, 'INVALID_JSON', 'The request could not be read. Please try again.');
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return jsonError(400, 'INVALID_REQUEST', 'The request format is invalid.');
+    }
+    if (!Array.isArray(body.messages) && typeof body.prompt !== 'string') {
+      return jsonError(400, 'MISSING_MESSAGE', 'Enter a message before sending.');
+    }
+    const promptText = typeof body.prompt === 'string' ? body.prompt : '';
+    const messageText = Array.isArray(body.messages)
+      ? body.messages.some((m: any) => m?.role === 'user' && typeof m?.content === 'string' && m.content.trim())
+      : Boolean(promptText.trim());
+    if (!messageText) {
+      return jsonError(400, 'EMPTY_MESSAGE', 'Your message is empty. Add some text and try again.');
+    }
+    if (JSON.stringify(body).length > 1_000_000) {
+      return jsonError(413, 'REQUEST_TOO_LARGE', 'This request is too large. Shorten the message or reduce attachments.');
+    }
     const apiKey = process.env.GEMINI_API_KEY;
 
     if (!apiKey) {
-      return new Response(JSON.stringify({ error: 'GEMINI_API_KEY not configured' }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      console.error('[Netlify Agent] GEMINI_API_KEY is not configured.');
+      return jsonError(503, 'AI_SERVICE_NOT_CONFIGURED', 'The AI service is not configured yet. Please contact the app administrator.', false);
     }
 
     const ai = new GoogleGenAI({
@@ -249,9 +271,17 @@ export default async (req: Request) => {
       },
     });
   } catch (error: any) {
-    return new Response(JSON.stringify({ error: error?.message || 'Internal server error' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    console.error('[Netlify Agent] Request failed:', error);
+    const message = String(error?.message || '');
+    if (/timeout|timed out|deadline/i.test(message)) {
+      return jsonError(504, 'AI_REQUEST_TIMEOUT', 'The AI service took too long to respond. Please try again.', true);
+    }
+    if (/rate.?limit|429|quota/i.test(message)) {
+      return jsonError(429, 'AI_RATE_LIMITED', 'The AI service is busy. Please wait a moment and try again.', true);
+    }
+    if (/API key|unauthorized|forbidden|401|403/i.test(message)) {
+      return jsonError(503, 'AI_SERVICE_AUTH_FAILED', 'The AI service is temporarily unavailable. Please contact the app administrator.', false);
+    }
+    return jsonError(500, 'AI_REQUEST_FAILED', 'Something went wrong while generating the response. Please try again.', true);
   }
 };
