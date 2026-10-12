@@ -64,6 +64,7 @@ interface ChatViewProps {
   onReset: () => void;
   onExport?: () => void;
   onSubmit: (prompt: string) => void;
+  onStop: () => void;
   isLoading: boolean;
 }
 
@@ -1051,22 +1052,22 @@ export function ChatView({
               />
               <button 
                 type="button"
-                onClick={handleSend}
-                disabled={(!input.trim() && !attachedFile && activeConnectorTags.length === 0) || isLoading}
+                onClick={isLoading || status === 'running' ? onStop : handleSend}
+                disabled={!isLoading && status !== 'running' && (!input.trim() && !attachedFile && activeConnectorTags.length === 0)}
                 className={cn(
                   "w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center transition-all shadow-2xs",
                   isLoading || status === 'running'
-                    ? "bg-white text-black dark:bg-white dark:text-black cursor-wait"
+                    ? "bg-white text-black dark:bg-white dark:text-black cursor-pointer hover:scale-105 active:scale-95"
                     : (input.trim() || attachedFile || activeConnectorTags.length > 0)
                       ? "bg-white text-black hover:scale-105 active:scale-95 shadow-md cursor-pointer"
                       : "bg-white/15 text-white/45 cursor-not-allowed"
                 )}
-                title={isLoading || status === 'running' ? "AI is working" : "Send message"}
-                aria-label={isLoading || status === 'running' ? "AI is working" : "Send message"}
+                title={isLoading || status === 'running' ? "Stop generating" : "Send message"}
+                aria-label={isLoading || status === 'running' ? "Stop generating" : "Send message"}
               >
                 {isLoading || status === 'running'
-                  ? <Square size={10} fill="currentColor" strokeWidth={2.5} />
-                  : <ArrowUp size={20} className="font-bold" />}
+                  ? <Square size={15} fill="currentColor" strokeWidth={3.5} />
+                  : <ArrowUp size={20} strokeWidth={3} />}
               </button>
             </div>
           </div>
