@@ -851,7 +851,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
 
             {/* Action chips displayed together in a single row line when in Work mode */}
             {chatWorkMode === 'work' && (
-              <div className="flex items-center justify-center gap-2.5 sm:gap-3 w-full overflow-x-auto no-scrollbar py-0.5 whitespace-nowrap">
+              <div className="flex min-w-0 w-full box-border items-center justify-start sm:justify-center gap-2.5 sm:gap-3 overflow-x-auto overscroll-x-contain scroll-px-3 no-scrollbar px-3 py-1 whitespace-nowrap">
                 {ACTION_CHIPS.map((chip) => (
                   <button
                     key={chip.label}
