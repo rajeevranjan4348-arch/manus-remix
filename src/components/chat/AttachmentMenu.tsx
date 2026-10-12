@@ -35,6 +35,38 @@ export function AttachmentMenu({
   const photosInputRef = useRef<HTMLInputElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
 
+  const handleCameraClick = async () => {
+    // Request browser camera permission explicitly before opening the native camera picker.
+    // The temporary stream is immediately released; the file input handles the actual capture.
+    if (!window.isSecureContext) {
+      toast.error('Camera access requires HTTPS or localhost. Open Manus through its secure site.');
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      // Some mobile browsers expose the native camera picker without getUserMedia.
+      cameraInputRef.current?.click();
+      return;
+    }
+
+    let permissionStream: MediaStream | null = null;
+    try {
+      permissionStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+      permissionStream.getTracks().forEach((track) => track.stop());
+      permissionStream = null;
+      cameraInputRef.current?.click();
+    } catch (error) {
+      permissionStream?.getTracks().forEach((track) => track.stop());
+      const name = error instanceof Error ? error.name : '';
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        toast.error('Camera permission was blocked. Allow Camera for this site in browser settings, then try again.');
+      } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+        toast.error('No camera was found on this device.');
+      } else {
+        toast.error('Could not access the camera. Check site permissions and try again.');
+      }
+    }
+  };
+
   const handleCameraChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -43,6 +75,8 @@ export function AttachmentMenu({
       setIsOpen(false);
       toast.success(`Photo captured & saved to Library: ${file.name}`);
     }
+    // Allow selecting/capturing the same image again.
+    e.target.value = '';
   };
 
   const handlePhotosChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -122,7 +156,7 @@ export function AttachmentMenu({
             {/* Camera Option */}
             <button
               onClick={() => {
-                cameraInputRef.current?.click();
+                void handleCameraClick();
               }}
               className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer"
             >
