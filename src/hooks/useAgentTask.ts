@@ -252,7 +252,7 @@ export function useAgentTask() {
       setPhase('completed');
       emitRobotEvent('TASK_SUCCEEDED');
       
-      const activeId = taskId || currentTaskIdRef.current;
+      const activeId = currentTaskIdRef.current || taskId;
       const assistantText = finalResult.content || text;
 
       // Save assistant message to permanent database immediately upon completion
@@ -323,103 +323,25 @@ export function useAgentTask() {
       }
     },
     onError: (err) => {
-      console.warn('[AI Studio] Agent stream notice (rate limit / fallback):', err);
-      
-      const promptText = currentTask?.prompt || 'Request';
-      const isGraphRequested = 
-        currentTask?.options?.format === 'graph' || 
-        /(graph|chart|plot|bar|pie|line|scatter)/i.test(promptText);
+      // Never replace a failed model request with canned or fabricated content.
+      // The previous fallback returned hard-coded facts (including outdated facts)
+      // and could make a failed/stale response look like a successful answer.
+      console.error('[Manus AI] Response generation failed:', err);
 
-      const lowerPrompt = promptText.toLowerCase().trim();
-      let fallbackContent = '';
-
-      const cmdMatch = matchVoiceCommand(promptText);
-      if (cmdMatch && cmdMatch.matched) {
-        if (cmdMatch.action === 'search' && cmdMatch.parameters?.query) {
-          fallbackContent = `I have launched **${cmdMatch.targetName}** and searched for **"${cmdMatch.parameters.query}"**! 🚀\n\n- **Target App**: ${cmdMatch.targetName}\n- **Search Query**: ${cmdMatch.parameters.query}\n- **Status**: Opened in a new window/tab.\n\n[➡️ Open ${cmdMatch.targetName} Search Directly](${cmdMatch.url})`;
-        } else if (cmdMatch.url) {
-          fallbackContent = `I have opened **${cmdMatch.targetName}** for you! 🚀\n\n- **Target App**: ${cmdMatch.targetName}\n- **Status**: Launched successfully.\n\n[➡️ Click here to open ${cmdMatch.targetName}](${cmdMatch.url})`;
-        } else {
-          fallbackContent = `Executed **${cmdMatch.targetName}**: ${cmdMatch.feedbackSpeech}`;
-        }
-      } else if (/^(hi|hello|hey|greetings|hola|namaste)/i.test(lowerPrompt)) {
-        fallbackContent = 'Hello! I am Manus, your AI workspace assistant. How can I help you today?';
-      } else if (/prime minister of india/i.test(lowerPrompt)) {
-        fallbackContent = 'The current Prime Minister of India is Narendra Modi.';
-      } else if (/president of united states|president of us/i.test(lowerPrompt)) {
-        fallbackContent = 'The President of the United States is Joe Biden.';
-      } else if (currentTask?.options?.fileData) {
-        fallbackContent = `### File Analysis Summary (${currentTask?.options?.fileName || 'Dataset'})\n\n- **Status**: Successfully processed and parsed file content.\n- **Data Structure**: Identified numeric/textual columns and records.\n- **Key Insights**: Extracted core trends, summary metrics, and distribution profiles.`;
-      } else {
-        fallbackContent = `I have processed your request for: **${promptText}**.\n\nHere is the synthesized overview:\n- Analyzed the key context and requirements\n- Structured actionable takeaways and recommendations\n- Prepared response format as requested (${currentTask?.options?.format || 'report'})`;
-      }
-
-      let fallbackChart = null;
-      if (isGraphRequested) {
-        fallbackChart = {
-          labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-          datasets: [
-            {
-              label: 'Performance Trends',
-              data: [48, 64, 79, 93, 105, 120],
-              backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899'],
-            },
-          ],
-        };
-      }
-
-      const finalResult = {
-        type: isGraphRequested ? 'graph' : (currentTask?.options?.format || 'chat'),
-        content: fallbackContent,
-        chartData: fallbackChart,
-        files: undefined,
-        detectedChartType: isGraphRequested ? (currentTask?.options?.chartType !== 'auto' ? currentTask?.options?.chartType : 'bar') : undefined,
-        rawResponse: { text: fallbackContent },
-        messages: [{ role: 'assistant', content: fallbackContent }],
-      };
-
-      setChartData(fallbackChart);
-      setResult(finalResult);
-      setTaskStatus('completed');
-      setPhase('completed');
-      emitRobotEvent('TASK_SUCCEEDED');
-      setSteps(prev => prev.map(s => ({ ...s, status: 'completed' as const })));
-      playNotificationSound('success');
-
-      const activeId = taskId || currentTaskIdRef.current;
-      if (activeId && fallbackContent) {
-        const assistantMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
-        const assistantMsg = {
-          id: assistantMsgId,
-          role: 'assistant' as const,
-          content: fallbackContent,
-          timestamp: new Date().toISOString(),
-          status: 'success' as const
-        };
-        setPersistentMessages(prev => {
-          if (prev.some(m => m.id === assistantMsgId || (m.role === 'assistant' && m.content === fallbackContent))) {
-            return prev;
-          }
-          return [...prev, assistantMsg];
-        });
-
-        saveMessage({
-          id: assistantMsgId,
-          conversationId: activeId,
-          userId: user?.id || 'usr_manus_default',
-          role: 'assistant',
-          content: fallbackContent,
-          status: 'success'
-        }).catch(() => {});
-
-        (blink.db as any).tasks
-          .update(activeId, {
-            status: 'completed',
-            result: JSON.stringify(finalResult),
-            steps: JSON.stringify(steps.map(s => ({ ...s, status: 'completed' as const }))),
-          })
-          .catch(() => {});
-      }
+      setTaskStatus('error');
+      setPhase('error');
+      setResult({
+        type: currentTask?.options?.format || 'chat',
+        content: "I couldn't generate a response for this message. Please try again.",
+        error: true,
+        rawResponse: null,
+      });
+      setSteps(prev => prev.map(step => ({
+        ...step,
+        status: step.status === 'completed' ? 'completed' as const : 'error' as const,
+      })));
+      emitRobotEvent('TASK_FAILED');
+      playNotificationSound('error');
     }
   });
 
