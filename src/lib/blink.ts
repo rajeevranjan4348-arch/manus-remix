@@ -63,12 +63,14 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
         } catch {}
       };
 
-      // 1. Try real Gemini streaming from our server endpoint
+      // 1. Try real Gemini streaming from our server endpoint.
+      let serviceFailureMessage = 'The AI response service is temporarily unavailable. Please check your connection and try again.';
       try {
         const streamEndpoint = '/api/gemini/stream';
         const res = await nativeFetch(streamEndpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(60000),
           body: JSON.stringify({
             messages: options.messages || [{ role: 'user', content: lastUserMsg }],
             prompt: lastUserMsg,
@@ -81,6 +83,23 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
           }),
         });
 
+        if (!res.ok) {
+          let payload: any = {};
+          try { payload = await res.json(); } catch {}
+          if (res.status === 429) {
+            serviceFailureMessage = 'The AI service is receiving too many requests. Please wait a moment and try again.';
+          } else if (res.status === 401 || res.status === 403 || res.status === 503) {
+            serviceFailureMessage = 'The AI service is not available right now. Please check the server configuration or try again later.';
+          } else if (res.status >= 500) {
+            serviceFailureMessage = 'The AI server encountered a problem. Your message was not completed; please try again.';
+          } else if (res.status === 400 || res.status === 413) {
+            serviceFailureMessage = 'The request could not be processed. Please check your message or shorten it, then try again.';
+          } else {
+            serviceFailureMessage = 'The AI request failed (HTTP ' + res.status + '). Please try again.';
+          }
+          throw new Error('AI endpoint returned HTTP ' + res.status);
+        }
+
         if (res.ok && res.body) {
           const reader = res.body.getReader();
           while (true) {
@@ -91,8 +110,13 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
           controller.close();
           return;
         }
-      } catch (err) {
-        console.warn('[AI Studio] Gemini stream endpoint unavailable, using local responder:', err);
+      } catch (err: any) {
+        if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+          serviceFailureMessage = 'The AI response timed out. Please try again.';
+        } else if (err instanceof TypeError) {
+          serviceFailureMessage = 'Could not reach the AI server. Check your internet connection and try again.';
+        }
+        console.warn('[AI Studio] Gemini stream request failed:', err);
       }
 
       // 2. Honest local fallback: never simulate successful tools or invent factual answers.
@@ -105,7 +129,7 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
       } else {
         sendEvent({
           type: 'text-delta',
-          delta: 'I couldn’t connect to the AI response service, so I haven’t completed your request. Please check your connection and try again. I won’t pretend that a search, tool, file, or action succeeded when it did not.'
+          delta: serviceFailureMessage + ' Your request was not completed, and no external action is being reported as successful.'
         });
       }
       sendEvent({ type: 'finish', finishReason: 'stop' });
