@@ -97,7 +97,7 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
 
       // 2. Honest local fallback: never simulate successful tools or invent factual answers.
       const cleanMsg = lastUserMsg.toLowerCase().trim();
-      if (/^(?:hi|hello|hey|hiya|howdy|good morning|good afternoon|good evening)[!?.\\s,]*$/i.test(cleanMsg)) {
+      if (/^(?:hi|hello|hey|hiya|howdy|good morning|good afternoon|good evening)[!?.\s,]*$/i.test(cleanMsg)) {
         sendEvent({
           type: 'text-delta',
           delta: 'Hello! How can I help you today?'
