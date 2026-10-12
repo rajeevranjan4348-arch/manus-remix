@@ -727,7 +727,7 @@ export function ChatView({
                     ) : null}
 
                     {/* Google Calendar Tool Card Detection */}
-                    {/(schedule|calendar event|meeting|add event to calendar)/i.test(cleanedContent || '') && (
+                    {isResponseSettled && /(schedule|calendar event|meeting|add event to calendar)/i.test(cleanedContent || '') && (
                       <WorkspaceToolCard
                         type="calendar_event"
                         data={{
@@ -740,7 +740,7 @@ export function ChatView({
                     )}
 
                     {/* Gmail Draft Tool Card Detection */}
-                    {/(draft email|email draft|save draft|gmail draft)/i.test(cleanedContent || '') && (
+                    {isResponseSettled && /(draft email|email draft|save draft|gmail draft)/i.test(cleanedContent || '') && (
                       <WorkspaceToolCard
                         type="gmail_draft"
                         data={{
@@ -751,11 +751,11 @@ export function ChatView({
                     )}
 
                     {/* Google Maps Widget Detection */}
-                    {/(map of|location of|show map|google map)/i.test(cleanedContent || '') && (
+                    {isResponseSettled && /(map of|location of|show map|google map)/i.test(cleanedContent || '') && (
                       <GoogleMapWidgetCard locationName="Google Headquarters, Mountain View" latitude={37.4220} longitude={-122.0841} />
                     )}
 
-                    {parsedSources.sources.length > 0 && (
+                    {isResponseSettled && parsedSources.sources.length > 0 && (
                       <SourceCitations sources={parsedSources.sources} />
                     )}
 
@@ -797,7 +797,7 @@ export function ChatView({
           );
           const hasFiles = Boolean(result?.files && Array.isArray(result.files) && result.files.length > 0);
 
-          if (!result || (!hasChart && !hasFiles)) return null;
+          if (!isResponseSettled || !result || (!hasChart && !hasFiles)) return null;
 
           return (
             <div className="flex gap-4 max-w-3xl mx-auto my-4 animate-in fade-in slide-in-from-bottom-3 duration-500">
