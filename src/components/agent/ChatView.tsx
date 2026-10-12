@@ -581,6 +581,9 @@ export function ChatView({
   };
 
   const isAssistantWorking = isLoading || status === 'running';
+  // Rich results are finalized only after the response lifecycle completes. This prevents
+  // out-of-band visualizations/files from appearing while later assistant text is still streaming.
+  const isResponseSettled = status === 'completed' && !isLoading;
   const activeRunningStep = steps.find(s => s.status === 'running');
   const typingStatus = activeRunningStep 
     ? activeRunningStep.label 
