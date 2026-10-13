@@ -875,42 +875,58 @@ html {
 }
 
 
-/* Adaptive performance layer: no layout, color, font, or component changes. */
+/* Adaptive performance layer: preserve layout, colors, fonts, and component structure. */
 html[data-perf-mode="saver"] {
-  --manus-motion-fast: 90ms;
-  --manus-motion-normal: 120ms;
-  --manus-motion-slow: 160ms;
+  --manus-motion-fast: 100ms;
+  --manus-motion-normal: 140ms;
+  --manus-motion-slow: 180ms;
   scroll-behavior: auto;
 }
 
-html[data-perf-mode="saver"] .loader-wrapper,
-html[data-perf-mode="saver"] .loader-circle,
-html[data-perf-mode="saver"] .loader-letter,
-html[data-perf-mode="saver"] .typing-dot,
-html[data-perf-mode="saver"] .contextual-thinking__dots i,
-html[data-perf-mode="saver"] .contextual-thinking__pulse {
-  animation-play-state: paused;
+/* Keep essential feedback (loading, listening, and progress) visible in saver mode.
+   Reduce expensive visual effects instead of freezing meaningful UI animations. */
+html[data-perf-mode="saver"] *,
+html[data-perf-mode="saver"] *::before,
+html[data-perf-mode="saver"] *::after {
+  scroll-behavior: auto;
 }
 
-html[data-perf-mode="saver"] .chat-message-enter,
+html[data-perf-mode="saver"] [class*="backdrop-blur"],
+html[data-perf-mode="saver"] [style*="backdrop-filter"] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html[data-perf-mode="saver"] [class*="shadow-"] {
+  box-shadow: none;
+}
+
 html[data-perf-mode="saver"] .manus-transition-enter {
-  animation-duration: 120ms;
+  animation-duration: 140ms;
 }
 
+/* Pause decorative motion only while the tab is hidden; restore it on return. */
 html[data-page-hidden="true"] *,
 html[data-page-hidden="true"] *::before,
 html[data-page-hidden="true"] *::after {
   animation-play-state: paused !important;
-}
-
-/* Keep animations compositor-friendly and avoid permanent GPU layer promotion. */
-.chat-message-enter,
-.manus-transition-enter {
-  transform: translateZ(0);
+  transition-duration: 0ms !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
   html[data-perf-mode] {
     scroll-behavior: auto !important;
   }
+}
+
+
+/* Reduce layout and paint work for long lists without changing their appearance. */
+[data-virtualized="true"] {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
+}
+
+/* Avoid accidental horizontal overflow on narrow mobile screens. */
+img, video, canvas, svg {
+  max-width: 100%;
 }
