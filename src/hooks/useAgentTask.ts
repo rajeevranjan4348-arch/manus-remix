@@ -217,7 +217,20 @@ export function useAgentTask() {
 
       if (parsedJson) {
         const chartData = parsedJson.graph || parsedJson.data || parsedJson;
-        if (chartData.labels && chartData.datasets) {
+        const hasValidChartShape =
+          Array.isArray(chartData?.labels) &&
+          chartData.labels.length > 0 &&
+          chartData.labels.every((label: unknown) => typeof label === 'string' || typeof label === 'number') &&
+          Array.isArray(chartData?.datasets) &&
+          chartData.datasets.length > 0 &&
+          chartData.datasets.every((dataset: any) =>
+            dataset &&
+            typeof dataset.label === 'string' &&
+            Array.isArray(dataset.data) &&
+            dataset.data.length === chartData.labels.length &&
+            dataset.data.every((value: unknown) => typeof value === 'number' && Number.isFinite(value))
+          );
+        if (hasValidChartShape) {
           parsedChartData = parsedJson;
           extractedChartData = chartData;
           detectedType = parsedJson.graph?.type || parsedJson.type || 'bar';
