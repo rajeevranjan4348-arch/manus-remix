@@ -18,6 +18,45 @@ import { configureHighQualityTTS } from './lib/audioPipeline';
 const PROJECT_ID = (import.meta as any).env?.VITE_BLINK_PROJECT_ID || 'manus-agent-clone-tkzhogvs';
 const PUBLISHABLE_KEY = (import.meta as any).env?.VITE_BLINK_PUBLISHABLE_KEY || '';
 
+type AppErrorBoundaryState = { hasError: boolean };
+
+// Keep a component failure from leaving the entire app as a blank screen.
+class AppErrorBoundary extends React.Component<React.PropsWithChildren, AppErrorBoundaryState> {
+  state: AppErrorBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(): AppErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('Manus UI rendering error:', error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex min-h-[100dvh] items-center justify-center bg-background px-6 text-foreground">
+          <div className="w-full max-w-md space-y-3 text-center">
+            <h1 className="text-xl font-semibold">Manus ran into a display error</h1>
+            <p className="text-sm text-muted-foreground">
+              Your session has not been intentionally cleared. Reload the app to try again.
+            </p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="inline-flex min-h-10 items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              Reload Manus
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 // Wrapper for ChatView to handle params
 function TaskView({ 
   useAgentTaskResult, 
@@ -33,7 +72,7 @@ function TaskView({
     if (taskId) {
       loadTask(taskId);
     }
-  }, [taskId]); // Remove loadTask dependency to avoid infinite loop if it's not stable, but it is useCallback
+  }, [taskId, loadTask]);
 
   if (!currentTask && !taskId) return null;
 
@@ -155,7 +194,7 @@ function AppContent() {
   }
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden">
+    <div className="flex h-[100dvh] bg-background overflow-hidden">
       <Sidebar 
         isOpen={isSidebarOpen} 
         onToggle={() => setIsSidebarOpen(!isSidebarOpen)} 
@@ -225,17 +264,19 @@ function AppContent() {
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <BlinkProvider 
-        projectId={PROJECT_ID} 
-        publishableKey={PUBLISHABLE_KEY}
-      >
-        <BlinkAuthProvider>
-          <BrowserRouter>
-            <AppContent />
-          </BrowserRouter>
-        </BlinkAuthProvider>
-      </BlinkProvider>
-    </ThemeProvider>
+    <AppErrorBoundary>
+      <ThemeProvider>
+        <BlinkProvider 
+          projectId={PROJECT_ID} 
+          publishableKey={PUBLISHABLE_KEY}
+        >
+          <BlinkAuthProvider>
+            <BrowserRouter>
+              <AppContent />
+            </BrowserRouter>
+          </BlinkAuthProvider>
+        </BlinkProvider>
+      </ThemeProvider>
+    </AppErrorBoundary>
   );
 }
