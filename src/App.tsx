@@ -72,6 +72,53 @@ function AppContent() {
     configureHighQualityTTS();
   }, []);
 
+  // Adaptive rendering: preserve the current UI while reducing unnecessary work on low battery.
+  React.useEffect(() => {
+    let batteryManager: any = null;
+    let disposed = false;
+
+    const updatePerformanceMode = () => {
+      if (disposed) return;
+      const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+      const batteryLow = Boolean(batteryManager && !batteryManager.charging && batteryManager.level <= 0.2);
+      const hidden = document.visibilityState === 'hidden';
+      const mode = reducedMotion || batteryLow ? 'saver' : 'balanced';
+      document.documentElement.dataset.perfMode = mode;
+      document.documentElement.dataset.pageHidden = hidden ? 'true' : 'false';
+    };
+
+    const onVisibilityChange = () => updatePerformanceMode();
+    const onMotionPreferenceChange = () => updatePerformanceMode();
+    const motionPreference = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    motionPreference?.addEventListener?.('change', onMotionPreferenceChange);
+
+    // The Battery Status API is optional and unsupported in many browsers; gracefully ignore it.
+    const batteryApi = (navigator as any).getBattery;
+    if (typeof batteryApi === 'function') {
+      batteryApi.call(navigator).then((battery: any) => {
+        if (disposed) return;
+        batteryManager = battery;
+        battery.addEventListener?.('levelchange', updatePerformanceMode);
+        battery.addEventListener?.('chargingchange', updatePerformanceMode);
+        updatePerformanceMode();
+      }).catch(() => updatePerformanceMode());
+    } else {
+      updatePerformanceMode();
+    }
+
+    return () => {
+      disposed = true;
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      motionPreference?.removeEventListener?.('change', onMotionPreferenceChange);
+      batteryManager?.removeEventListener?.('levelchange', updatePerformanceMode);
+      batteryManager?.removeEventListener?.('chargingchange', updatePerformanceMode);
+      delete document.documentElement.dataset.perfMode;
+      delete document.documentElement.dataset.pageHidden;
+    };
+  }, []);
+
+
   // Global keyboard shortcuts (Ctrl+H: History, Ctrl+, : Settings)
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
