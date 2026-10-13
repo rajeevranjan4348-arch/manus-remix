@@ -16,7 +16,7 @@ import { blink } from './lib/blink';
 import { configureHighQualityTTS } from './lib/audioPipeline';
 
 const PROJECT_ID = (import.meta as any).env?.VITE_BLINK_PROJECT_ID || 'manus-agent-clone-tkzhogvs';
-const PUBLISHABLE_KEY = (import.meta as any).env?.VITE_BLINK_PUBLISHABLE_KEY || 'blnk_pk_dummy';
+const PUBLISHABLE_KEY = (import.meta as any).env?.VITE_BLINK_PUBLISHABLE_KEY || '';
 
 // Wrapper for ChatView to handle params
 function TaskView({ 
@@ -61,7 +61,7 @@ function AppContent() {
   const [settingsInitialTab, setSettingsInitialTab] = React.useState<'general' | 'robot' | 'ai' | 'personalization' | 'voice' | 'data' | 'about'>('general');
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = useBlinkAuth();
+  const { user, isLoading: isAuthLoading } = useBlinkAuth();
   
   // Data analysis hook
   const agentTask = useAgentTask();
@@ -141,6 +141,18 @@ function AppContent() {
   const isWebsiteActive = websiteTask !== null;
   const isHomePage = location.pathname === '/';
   const hasSentMessage = !isHomePage || isWebsiteActive || Boolean(agentTask.currentTask) || agentTask.messages.length > 0 || agentTask.isLoading;
+
+  // Wait for Blink to restore the persisted session before rendering app routes.
+  if (isAuthLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background" role="status" aria-live="polite">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted border-t-foreground" />
+          <p className="text-sm text-muted-foreground">Restoring your session…</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
