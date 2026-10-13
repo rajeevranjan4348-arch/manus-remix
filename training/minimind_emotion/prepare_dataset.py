@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Validate and normalize chat-style JSONL for MiniMind fine-tuning.
+"""Validate, deduplicate, and split chat JSONL into MiniMind SFT format.
 
-Input: one JSON object per line with a non-empty "messages" array.
-Output: validated JSONL with only role/content fields. This intentionally does
-not download data, call external APIs, or include any model weights.
+Accepts records with either "messages" or "conversations". Outputs the
+"conversations" schema required by MiniMind's dataset/lm_dataset.py.
 """
 from __future__ import annotations
 
@@ -13,29 +12,39 @@ import random
 import sys
 from pathlib import Path
 
-ALLOWED_ROLES = {"system", "user", "assistant"}
-REQUIRED_ROLES = {"user", "assistant"}
+ALLOWED_ROLES = {"system", "user", "assistant", "tool"}
 
 
 def normalize(record: object, line_no: int) -> dict:
-    if not isinstance(record, dict) or not isinstance(record.get("messages"), list):
-        raise ValueError(f"line {line_no}: expected an object with a messages array")
-    messages = []
-    for i, item in enumerate(record["messages"]):
+    if not isinstance(record, dict):
+        raise ValueError(f"line {line_no}: expected a JSON object")
+    raw = record.get("conversations", record.get("messages"))
+    if not isinstance(raw, list):
+        raise ValueError(f"line {line_no}: expected a messages or conversations array")
+    conversations = []
+    for i, item in enumerate(raw):
         if not isinstance(item, dict):
             raise ValueError(f"line {line_no}, message {i}: expected an object")
-        role, content = item.get("role"), item.get("content")
+        role = item.get("role")
+        content = item.get("content", "")
         if role not in ALLOWED_ROLES:
             raise ValueError(f"line {line_no}, message {i}: unsupported role {role!r}")
-        if not isinstance(content, str) or not content.strip():
-            raise ValueError(f"line {line_no}, message {i}: content must be non-empty text")
-        messages.append({"role": role, "content": content.strip()})
-    roles = {m["role"] for m in messages}
-    if not REQUIRED_ROLES.issubset(roles):
+        if not isinstance(content, str):
+            raise ValueError(f"line {line_no}, message {i}: content must be text")
+        normalized = {"role": role, "content": content.strip()}
+        for key in ("reasoning_content", "tools", "tool_calls"):
+            if key in item and item[key] is not None:
+                value = item[key]
+                normalized[key] = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+        if role not in {"assistant", "tool"} and not normalized["content"]:
+            raise ValueError(f"line {line_no}, message {i}: {role} content cannot be empty")
+        conversations.append(normalized)
+    roles = {m["role"] for m in conversations}
+    if "user" not in roles or "assistant" not in roles:
         raise ValueError(f"line {line_no}: each example must include user and assistant messages")
-    if messages[-1]["role"] != "assistant":
-        raise ValueError(f"line {line_no}: final message must be assistant output")
-    return {"messages": messages}
+    if conversations[-1]["role"] != "assistant":
+        raise ValueError(f"line {line_no}: final message must be an assistant response")
+    return {"conversations": conversations}
 
 
 def main() -> int:
@@ -79,7 +88,7 @@ def main() -> int:
                 out.write(json.dumps(row, ensure_ascii=False) + "\n")
     print(f"Validated {len(examples)} unique examples; train={len(train)}, validation={len(validation)}")
     print(f"Output: {args.output_dir.resolve()}")
-    print("Reminder: inspect data for secrets/PII and split by source before training.")
+    print("Review privacy/licensing and ensure related conversations do not leak across splits.")
     return 0
 
 
