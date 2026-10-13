@@ -873,3 +873,44 @@ html {
   [role="button"]:active { transform: none; }
   .manus-transition-enter { animation: none; }
 }
+
+
+/* Adaptive performance layer: no layout, color, font, or component changes. */
+html[data-perf-mode="saver"] {
+  --manus-motion-fast: 90ms;
+  --manus-motion-normal: 120ms;
+  --manus-motion-slow: 160ms;
+  scroll-behavior: auto;
+}
+
+html[data-perf-mode="saver"] .loader-wrapper,
+html[data-perf-mode="saver"] .loader-circle,
+html[data-perf-mode="saver"] .loader-letter,
+html[data-perf-mode="saver"] .typing-dot,
+html[data-perf-mode="saver"] .contextual-thinking__dots i,
+html[data-perf-mode="saver"] .contextual-thinking__pulse {
+  animation-play-state: paused;
+}
+
+html[data-perf-mode="saver"] .chat-message-enter,
+html[data-perf-mode="saver"] .manus-transition-enter {
+  animation-duration: 120ms;
+}
+
+html[data-page-hidden="true"] *,
+html[data-page-hidden="true"] *::before,
+html[data-page-hidden="true"] *::after {
+  animation-play-state: paused !important;
+}
+
+/* Keep animations compositor-friendly and avoid permanent GPU layer promotion. */
+.chat-message-enter,
+.manus-transition-enter {
+  transform: translateZ(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-perf-mode] {
+    scroll-behavior: auto !important;
+  }
+}
