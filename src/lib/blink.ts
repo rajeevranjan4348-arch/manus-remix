@@ -23,19 +23,14 @@ function saveStoredTasks(tasks: any[]): void {
   }
 }
 
-const mockUser = {
-  id: 'usr_manus_default',
-  email: 'user@manus.space',
-  displayName: 'Manus User',
-  avatar: ''
-};
+// Authentication is provided by Blink managed auth; never synthesize users or tokens.
 
 // Create base client if possible
 let baseClient: any = null;
 try {
   baseClient = createClient({
     projectId: PROJECT_ID,
-    publishableKey: PUBLISHABLE_KEY || 'blnk_pk_dummy',
+    publishableKey: PUBLISHABLE_KEY,
     auth: { mode: 'managed' },
   });
 } catch (e) {
@@ -414,21 +409,6 @@ const localProjectsDb = {
   }
 };
 
-const localAuth = {
-  me: async () => mockUser,
-  login: (redirectUrl?: string) => {
-    console.info('Authenticated as Manus guest user');
-  },
-  signInWithEmail: async () => mockUser,
-  signUp: async () => mockUser,
-  signOut: async () => {},
-  onAuthStateChanged: (cb: (state: { user: any }) => void) => {
-    cb({ user: mockUser });
-    return () => {};
-  },
-  getValidToken: async () => 'mock_token',
-};
-
 const localSandbox = {
   create: async ({ template }: { template?: string } = {}) => ({
     id: 'sb_' + Math.random().toString(36).substring(2, 8),
@@ -467,37 +447,29 @@ export const blink: any = new Proxy(baseClient || {}, {
     }
     if (prop === 'auth') {
       const realAuth = target.auth;
-      return {
-        ...(realAuth || {}),
-        me: async () => {
-          try {
-            if (realAuth?.me) {
-              const u = await realAuth.me();
-              if (u) return u;
+      // Preserve Blink's official managed-auth persistence, state restoration,
+      // logout, and token refresh. Never turn provider failures into a fake login.
+      if (!realAuth) {
+        return new Proxy({}, {
+          get(_authTarget, authProp) {
+            if (authProp === 'onAuthStateChanged') {
+              return (cb: (state: { user: null; isLoading: boolean; isAuthenticated: boolean }) => void) => {
+                cb({ user: null, isLoading: false, isAuthenticated: false });
+                return () => {};
+              };
             }
-          } catch {}
-          return mockUser;
+            return () => {
+              throw new Error('Blink authentication is unavailable. Configure VITE_BLINK_PROJECT_ID and VITE_BLINK_PUBLISHABLE_KEY.');
+            };
+          },
+        });
+      }
+      return new Proxy(realAuth, {
+        get(authTarget, authProp, receiver) {
+          const value = Reflect.get(authTarget, authProp, receiver);
+          return typeof value === 'function' ? value.bind(authTarget) : value;
         },
-        login: (url?: string) => {
-          if (realAuth?.login && (import.meta as any).env?.VITE_BLINK_PROJECT_ID) {
-            try { return realAuth.login(url); } catch {}
-          }
-          localAuth.login(url);
-        },
-        onAuthStateChanged: (cb: any) => {
-          if (realAuth?.onAuthStateChanged) {
-            try {
-              return realAuth.onAuthStateChanged((state: any) => {
-                cb({ user: state?.user || mockUser });
-              });
-            } catch {}
-          }
-          return localAuth.onAuthStateChanged(cb);
-        },
-        signInWithEmail: localAuth.signInWithEmail,
-        signUp: localAuth.signUp,
-        signOut: localAuth.signOut,
-      };
+      });
     }
     if (prop === 'sandbox') {
       return target.sandbox || localSandbox;
