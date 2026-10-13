@@ -159,7 +159,7 @@ export default async (req: Request) => {
 
     // Route explicit image-creation requests to Gemini's image model on the server.
     // This preserves the existing chat UI and streams Markdown through the existing SSE protocol.
-    const imageGenerationIntent = /\\b(generate|create|make|draw|design|render|visuali[sz]e)\\b.{0,100}\\b(image|picture|illustration|artwork|wallpaper|logo|poster|thumbnail)\\b|\\b(image|picture|illustration|artwork|wallpaper|logo|poster|thumbnail)\\b.{0,100}\\b(generate|create|make|draw|design|render)\\b/i.test(latestUserText);
+    const imageGenerationIntent = /\b(generate|create|make|draw|design|render|visuali[sz]e)\b.{0,100}\b(image|picture|illustration|artwork|wallpaper|logo|poster|thumbnail)\b|\b(image|picture|illustration|artwork|wallpaper|logo|poster|thumbnail)\b.{0,100}\b(generate|create|make|draw|design|render)\b/i.test(latestUserText);
     if (imageGenerationIntent) {
       try {
         const imageResponse: any = await ai.models.generateContent({
@@ -180,8 +180,8 @@ export default async (req: Request) => {
         if (!rendered.some((item) => item.startsWith('![Generated image]'))) {
           rendered.push('The image provider did not return an image. Please try a more specific prompt or check that the configured Gemini account supports image generation.');
         }
-        const payload = `data: ${JSON.stringify({ type: 'text-delta', delta: rendered.join('\\n\\n') })}\\n\\n` +
-          `data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\\n\\n` + 'data: [DONE]\\n\\n';
+        const payload = `data: ${JSON.stringify({ type: 'text-delta', delta: rendered.join('\n\n') })}\n\n` +
+          `data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n` + 'data: [DONE]\n\n';
         return new Response(payload, {
           headers: {
             'Content-Type': 'text/event-stream; charset=utf-8',
@@ -194,8 +194,8 @@ export default async (req: Request) => {
       } catch (error) {
         console.error('[Netlify Agent] Image generation failed:', error);
         const message = 'Image generation is currently unavailable. Check Gemini image-model access and try again.';
-        const payload = `data: ${JSON.stringify({ type: 'text-delta', delta: message })}\\n\\n` +
-          `data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\\n\\n` + 'data: [DONE]\\n\\n';
+        const payload = `data: ${JSON.stringify({ type: 'text-delta', delta: message })}\n\n` +
+          `data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n` + 'data: [DONE]\n\n';
         return new Response(payload, {
           headers: {
             'Content-Type': 'text/event-stream; charset=utf-8',
