@@ -115,7 +115,9 @@ export function useAgentTask() {
     3. For data analysis tasks, generate chart-ready data in JSON format with labels and datasets.
     4. Use multi-step reasoning - break analysis into: data profiling → cleaning → aggregation → insight generation.
     5. When creating charts, provide specific data points with proper labels.
-    6. For reports, include: executive summary, key findings (bullet points), detailed analysis, and recommendations.
+    6. Never invent sample, placeholder, or illustrative data and present it as real. If the user has not provided data and a reliable source/tool has not returned data, clearly state that a chart needs data or label any example as illustrative.
+    7. Validate chart JSON before using it: labels must be an array, datasets must be an array, each dataset must have a label and numeric data values, and data length should match labels length. If the structure is invalid, explain the issue instead of fabricating replacement values.
+    8. For reports, include: executive summary, key findings (bullet points), detailed analysis, and recommendations.
     
     CONVERSATION CONTEXT & FOLLOW-UP QUESTIONS:
     - Treat each message as part of the current conversation unless the user explicitly starts a new topic or conversation.
@@ -231,20 +233,11 @@ export function useAgentTask() {
         currentTask?.options?.format === 'graph' || 
         messages.some(m => m.role === 'user' && /(graph|chart|plot|diagram|bar|pie|line|scatter|bubble|area)/i.test(m.content));
 
-      // Fallback chart generation if graph was requested but no valid chart JSON was parsed
+      // Data integrity guard: never fabricate chart points when the model did not return valid data.
+      // Keep the user's request visible in the text response, but render a chart only when
+      // real, validated labels and numeric datasets were supplied by the response.
       if (isGraphRequested && !extractedChartData) {
-        extractedChartData = {
-          labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-          datasets: [
-            {
-              label: 'Performance Trends',
-              data: [65, 78, 90, 81, 95, 110],
-              backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4']
-            }
-          ]
-        };
-        detectedType = currentTask?.options?.chartType !== 'auto' ? (currentTask?.options?.chartType || 'bar') : 'bar';
-        setChartData(extractedChartData);
+        setChartData(null);
       }
       
       const finalResult = { 
