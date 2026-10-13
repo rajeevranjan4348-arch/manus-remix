@@ -173,7 +173,7 @@ export default async (req: Request) => {
           if (typeof part?.text === 'string' && part.text.trim()) rendered.push(part.text.trim());
           const imageData = part?.inlineData?.data;
           const mimeType = typeof part?.inlineData?.mimeType === 'string' ? part.inlineData.mimeType : 'image/png';
-          if (typeof imageData === 'string' && imageData.length > 0 && /^image\\/(png|jpeg|webp)$/i.test(mimeType)) {
+          if (typeof imageData === 'string' && imageData.length > 0 && ['image/png', 'image/jpeg', 'image/webp'].includes(mimeType.toLowerCase())) {
             rendered.push('![Generated image](data:' + mimeType + ';base64,' + imageData + ')');
           }
         }
@@ -194,7 +194,7 @@ export default async (req: Request) => {
       } catch (error) {
         console.error('[Netlify Agent] Image generation failed:', error);
         const message = 'Image generation is currently unavailable. Check Gemini image-model access and try again.';
-        const payload = `data: ${JSON.stringify({ type: 'text-delta', delta: message })}\n\n` +
+        const payload = `data: ${JSON.stringify({ type: 'text-delta', delta: rendered.join('\n\n') })}\n\n` +
           `data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n` + 'data: [DONE]\n\n';
         return new Response(payload, {
           headers: {
