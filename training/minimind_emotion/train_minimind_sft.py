@@ -62,7 +62,8 @@ def main() -> int:
     p.add_argument("--num-hidden-layers", type=int, default=8)
     p.add_argument("--from-weight", default="pretrain", help="MiniMind checkpoint prefix, usually pretrain")
     p.add_argument("--save-weight", default="emotion_sft")
-    p.add_argument("--device", default=None, help="e.g. cuda:0; defaults to MiniMind's auto selection")
+    p.add_argument("--device", default=None, help="e.g. cuda:0; defaults to MiniMind auto selection")
+    p.add_argument("--dtype", choices=("float16", "bfloat16"), default="float16", help="mixed precision; float16 is a safer default for Colab T4 GPUs")
     p.add_argument("--dry-run", action="store_true", help="validate data and print the command without training")
     args = p.parse_args()
 
@@ -115,6 +116,7 @@ def main() -> int:
         "--hidden_size", str(args.hidden_size),
         "--num_hidden_layers", str(args.num_hidden_layers),
         "--from_weight", args.from_weight,
+        "--dtype", args.dtype,
     ]
     if args.device:
         cmd += ["--device", args.device]
