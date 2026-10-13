@@ -196,8 +196,26 @@ export function useAgentTask() {
     agent,
     sandbox: sandbox || undefined, // Pass sandbox to useAgent
     onFinish: async (response) => {
-      // Parse response for chart data if present
-      const text = response.text || '';
+      // Treat empty model output as a failed generation, never as a completed answer.
+      const text = typeof response?.text === 'string' ? response.text.trim() : '';
+      if (!text) {
+        console.error('[Manus AI] Provider finished without assistant text.');
+        setTaskStatus('error');
+        setPhase('error');
+        setResult({
+          type: currentTask?.options?.format || 'chat',
+          content: "I didn't receive an answer from the AI service. Please try again.",
+          error: true,
+          rawResponse: response ?? null,
+        });
+        setSteps(prev => prev.map(step => ({
+          ...step,
+          status: step.status === 'completed' ? 'completed' as const : 'error' as const,
+        })));
+        emitRobotEvent('TASK_FAILED');
+        playNotificationSound('error');
+        return;
+      }
       let parsedChartData = null; // Full parsed JSON
       let extractedChartData = null; // Inner data with labels/datasets
       let parsedFiles = null;
@@ -523,7 +541,24 @@ export function useAgentTask() {
       const chartPrompt = `${content}\n\n[INSTRUCTION: Format your chart data as a JSON code block using the format below so it renders as an interactive chart]\n\`\`\`json\n{\n  "graph": {\n    "type": "bar",\n    "labels": ["Category A", "Category B", "Category C", "Category D"],\n    "datasets": [{\n      "label": "Metric",\n      "data": [45, 72, 88, 95]\n    }]\n  }\n}\n\`\`\``;
       void (async () => { agentSendMessage(await preparePromptWithConnectors(chartPrompt)); })();
     } else {
-      void (async () => { agentSendMessage(await preparePromptWithConnectors(content)); })();
+      void (async () => {
+        try {
+          const preparedPrompt = await preparePromptWithConnectors(content);
+          await agentSendMessage(preparedPrompt);
+        } catch (error) {
+          console.error('[Manus AI] Failed to send chat message:', error);
+          setTaskStatus('error');
+          setPhase('error');
+          setResult({
+            type: 'chat',
+            content: "I couldn't reach the AI service. Check your connection and try again.",
+            error: true,
+          });
+          setSteps(prev => prev.map(step => ({ ...step, status: 'error' as const })));
+          emitRobotEvent('TASK_FAILED');
+          toast.error("Couldn't reach the AI service. Please try again.");
+        }
+      })();
     }
   }, [agentSendMessage, preparePromptWithConnectors, taskId, user]);
 
@@ -687,8 +722,24 @@ export function useAgentTask() {
       toast.success(`${cmd.targetName}: ${cmd.feedbackSpeech}`);
     }
 
-    // Resolve authenticated connector tools before generating the text response.
-    agentSendMessage(await preparePromptWithConnectors(enhancedPrompt));
+    // Resolve connectors and start generation. Handle rejected SDK/network requests so
+    // the UI never remains in a running/typing state when the request fails before onError.
+    try {
+      const preparedPrompt = await preparePromptWithConnectors(enhancedPrompt);
+      await agentSendMessage(preparedPrompt);
+    } catch (error) {
+      console.error('[Manus AI] Failed to start generation:', error);
+      setTaskStatus('error');
+      setPhase('error');
+      setResult({
+        type: options.format || 'chat',
+        content: "I couldn't reach the AI service. Check your connection and try again.",
+        error: true,
+      });
+      setSteps(prev => prev.map(step => ({ ...step, status: 'error' as const })));
+      emitRobotEvent('TASK_FAILED');
+      toast.error("Couldn't reach the AI service. Please try again.");
+    }
 
     // Initial DB update with steps
     if (newTaskId && initialSteps.length > 0) {
