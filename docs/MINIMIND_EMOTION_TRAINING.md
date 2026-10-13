@@ -1,55 +1,70 @@
-# MiniMind Emotion, Empathy, and Reasoning Training Plan
+# MiniMind Emotion, Empathy, and Reasoning Training
 
-This integration adds a reproducible **training pipeline plan** for Manus Remix using the upstream [MiniMind](https://github.com/jingyaogong/minimind) research implementation. It does not claim to copy ChatGPT's weights or instantly make a small model equivalent to a frontier model.
+This repository now includes runnable dataset preparation and a launcher for MiniMind's native supervised fine-tuning (SFT) trainer. It does not include model weights, a GPU runtime, or a claim that training has already completed.
 
-## Goals
+## What this trains
 
-- Improve helpfulness, instruction following, reasoning discipline, conversational continuity, and emotionally aware responses.
-- Teach the model to recognize expressed emotion from text and respond with empathy without pretending to literally feel emotions or diagnosing users.
-- Keep the existing Manus Remix UI and production inference provider unchanged until an evaluated fine-tuned model is explicitly configured.
-- Keep training workloads separate from Netlify serverless functions; train on a GPU machine/Colab, store artifacts securely, and deploy inference to a suitable model-serving host.
+Use high-quality examples to improve instruction following, common-sense responses, emotional-context recognition, empathy, factual QA, multi-turn consistency, and safe boundaries. This teaches conversational behavior; it does not give the model literal human feelings or consciousness. MiniMind is a small-model research project and will not automatically reach ChatGPT-level capability.
 
-## Architecture
+## 1. Prepare a dataset
 
-1. **Dataset preparation:** JSONL examples with `messages` in chat format; remove secrets and personally identifying data, deduplicate, validate role order, and split train/validation sets.
-2. **Supervised fine-tuning (SFT):** start from a compatible MiniMind checkpoint/configuration and train on high-quality assistant conversations, empathy examples, factual QA, tool-use examples, refusals, and multi-turn follow-ups.
-3. **Evaluation:** compare the base and tuned checkpoints on held-out instruction following, factuality, emotional-context recognition, harmful-content handling, hallucination rate, and latency. Do not evaluate only on training examples.
-4. **Optional preference optimization:** only after SFT and evaluation, use curated preference pairs with a compatible MiniMind training recipe. Never optimize for flattery, manipulation, or emotional dependency.
-5. **Serving:** export the tested checkpoint and serve it behind an authenticated inference API. Manus Remix calls it only when `MINIMIND_INFERENCE_URL` is configured; keep API keys server-side. Do not load model weights inside Netlify Functions.
-
-## Dataset format
-
-Each line is one JSON object:
+Create a JSONL file with one example per line. Input may use either `messages` or `conversations`:
 
 ```json
-{"messages":[{"role":"user","content":"I failed my exam and feel disappointed."},{"role":"assistant","content":"That sounds disappointing. One exam doesn't define your ability. Want to review what felt hardest and make a practical plan?"}]}
+{"messages":[{"role":"user","content":"I failed an exam and feel disappointed."},{"role":"assistant","content":"That sounds disappointing. One exam does not define your ability. Want to identify what felt hardest and plan a next step?"}]}
 ```
 
-Use diverse, consented or appropriately licensed data. Include examples where the best response is to ask a clarifying question, admit uncertainty, correct a mistake, or encourage reaching out to a trusted person. Avoid fabricated personal memories and claims that the AI has human feelings.
+Use data you have permission to train on. Remove passwords, tokens, private conversations, phone numbers, addresses, and other sensitive information. Prefer diverse, well-reviewed examples; include corrections, uncertainty, clarifying questions, non-English conversations, and examples that avoid emotional over-inference.
 
-## Training setup
+## 2. Set up a GPU machine / Google Colab
 
-1. Review the upstream MiniMind README and select a model size and training recipe that match available hardware.
-2. Clone the upstream project in a separate training workspace; do not vendor its entire repository into the web app.
-3. Create a virtual environment and install the exact dependencies documented upstream.
-4. Prepare `data/emotion_sft.jsonl`, validate it, and map it to the dataset format expected by the chosen MiniMind training script.
-5. Run the upstream pre-training/SFT entry point with a small smoke-test subset first, then a full run on an available GPU. The exact script/flags vary by upstream revision, so verify them against that checkout rather than relying on guessed commands.
-6. Save checkpoints outside the web repository; version the dataset manifest, hyperparameters, evaluation results, and model license.
-7. Run the evaluation gate before deploying. Keep the current provider as fallback and add a feature flag for gradual rollout.
+Run training outside Netlify and outside the Manus Remix web server. In a terminal or Colab cell:
 
-## Safety and quality gates
+```bash
+git clone --depth 1 https://github.com/jingyaogong/minimind
+cd minimind
+pip install -r requirements.txt
+```
 
-- No training on private conversations without valid permission and an appropriate data policy.
-- Strip credentials, access tokens, phone numbers, addresses, and other sensitive data.
-- Split by conversation/source before train-validation splitting to reduce leakage.
-- Include tests for emotional over-inference, false claims of sentience, medical/mental-health boundaries, bias, prompt injection, and refusal quality.
-- Human-like warmth means tone and perspective-taking, not claiming actual human consciousness or feelings.
-- Never silently replace the production model; use an explicit configuration switch and rollback path.
+Use the MiniMind README to obtain a compatible base checkpoint and its matching architecture. The default launcher configuration below expects `out/pretrain_512.pth` (hidden size 512). If your checkpoint has another architecture, pass the matching `--hidden-size` and `--num-hidden-layers` values. Never combine weights and model dimensions that do not match.
 
-## Environment variables
+## 3. Prepare the data from the Manus Remix repository
 
-- `MINIMIND_INFERENCE_URL`: server-side URL for the separately hosted inference service.
-- `MINIMIND_INFERENCE_TOKEN`: optional server-side bearer token, if required by that service.
-- `MINIMIND_MODEL_ID`: deployed checkpoint/version identifier.
+From the Manus Remix repository root (upload/copy your data file into the training workspace first):
 
-These variables are documentation for a future serving adapter. The presence of this plan does not mean training has run or an inference endpoint exists.
+```bash
+python training/minimind_emotion/prepare_dataset.py path/to/emotion_examples.jsonl --output-dir training/minimind_emotion/prepared
+```
+
+This writes `train.jsonl` and `validation.jsonl` in MiniMind's required `{"conversations":[...]}` schema. The training launcher accepts a single JSONL input and performs validation/deduplication; use the prepared `train.jsonl` for training and keep `validation.jsonl` held out for evaluation.
+
+## 4. Start supervised fine-tuning
+
+After both repositories are available in the same GPU workspace, run from the Manus Remix repository root:
+
+```bash
+python training/minimind_emotion/train_minimind_sft.py \
+  --data training/minimind_emotion/prepared/train.jsonl \
+  --minimind-dir ../minimind \
+  --hidden-size 512 \
+  --num-hidden-layers 8 \
+  --epochs 2 \
+  --batch-size 2 \
+  --max-seq-len 512
+```
+
+To verify data and print the training command without launching the GPU job, add `--dry-run`. If memory runs out, reduce `--batch-size` or `--max-seq-len`. The default expects a compatible `../minimind/out/pretrain_512.pth` checkpoint. The script saves fine-tuned weights to MiniMind's `out/emotion_sft_512.pth` and keeps training artifacts outside the web app.
+
+MiniMind's native trainer uses full-parameter SFT. GPU availability and memory requirements depend on model size and sequence length. The code launcher is committed, but no training run, checkpoint, benchmark, or inference service has been produced by this commit.
+
+## 5. Evaluate before connecting it to Manus Remix
+
+- Evaluate only on held-out `validation.jsonl` plus a separate safety and factuality test set.
+- Compare base and tuned checkpoints on helpfulness, factuality, emotional-context accuracy, bias, refusal quality, hallucinations, and multi-turn consistency.
+- Keep the existing production model/provider as fallback until the candidate passes evaluation.
+- Host the resulting model behind an authenticated inference service; keep tokens server-side. Do not load large model weights inside Netlify Functions.
+- Add a feature flag and rollback path before any production integration.
+
+## Upstream
+
+MiniMind source and training implementation: https://github.com/jingyaogong/minimind (Apache-2.0; review upstream license and the licenses of every dataset/model artifact separately).
