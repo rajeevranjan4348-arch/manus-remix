@@ -812,3 +812,64 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+
+/* Manus Remix: consistent, lightweight UI transitions */
+:root {
+  --manus-motion-fast: 160ms;
+  --manus-motion-normal: 240ms;
+  --manus-motion-slow: 360ms;
+  --manus-motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+button,
+[role="button"],
+a,
+input,
+textarea,
+select,
+[role="tab"],
+[data-state] {
+  transition:
+    color var(--manus-motion-fast) var(--manus-motion-ease),
+    background-color var(--manus-motion-fast) var(--manus-motion-ease),
+    border-color var(--manus-motion-fast) var(--manus-motion-ease),
+    box-shadow var(--manus-motion-normal) var(--manus-motion-ease),
+    opacity var(--manus-motion-normal) var(--manus-motion-ease),
+    transform var(--manus-motion-normal) var(--manus-motion-ease);
+}
+
+button:active,
+[role="button"]:active {
+  transform: scale(0.985);
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible {
+  outline-offset: 3px;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Reusable opt-in entrance for page sections, dialogs, and cards. */
+.manus-transition-enter {
+  animation: manus-transition-enter var(--manus-motion-slow) var(--manus-motion-ease) both;
+}
+
+@keyframes manus-transition-enter {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  button:active,
+  [role="button"]:active { transform: none; }
+  .manus-transition-enter { animation: none; }
+}
