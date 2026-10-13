@@ -157,6 +157,57 @@ export default async (req: Request) => {
       [...messages].reverse().find((m: any) => m?.role === 'user' && typeof m?.content === 'string')?.content
       || (typeof body.prompt === 'string' ? body.prompt : '');
 
+    // Route explicit image-creation requests to Gemini's image model on the server.
+    // This preserves the existing chat UI and streams Markdown through the existing SSE protocol.
+    const imageGenerationIntent = /\\b(generate|create|make|draw|design|render|visuali[sz]e)\\b.{0,100}\\b(image|picture|illustration|artwork|wallpaper|logo|poster|thumbnail)\\b|\\b(image|picture|illustration|artwork|wallpaper|logo|poster|thumbnail)\\b.{0,100}\\b(generate|create|make|draw|design|render)\\b/i.test(latestUserText);
+    if (imageGenerationIntent) {
+      try {
+        const imageResponse: any = await ai.models.generateContent({
+          model: 'gemini-2.5-flash-image',
+          contents: [{ role: 'user', parts: [{ text: latestUserText.slice(0, 8000) }] }],
+          config: { responseModalities: ['TEXT', 'IMAGE'] },
+        });
+        const parts = imageResponse?.candidates?.[0]?.content?.parts || [];
+        const rendered: string[] = [];
+        for (const part of parts) {
+          if (typeof part?.text === 'string' && part.text.trim()) rendered.push(part.text.trim());
+          const imageData = part?.inlineData?.data;
+          const mimeType = typeof part?.inlineData?.mimeType === 'string' ? part.inlineData.mimeType : 'image/png';
+          if (typeof imageData === 'string' && imageData.length > 0 && /^image\\/(png|jpeg|webp)$/i.test(mimeType)) {
+            rendered.push('![Generated image](data:' + mimeType + ';base64,' + imageData + ')');
+          }
+        }
+        if (!rendered.some((item) => item.startsWith('![Generated image]'))) {
+          rendered.push('The image provider did not return an image. Please try a more specific prompt or check that the configured Gemini account supports image generation.');
+        }
+        const payload = `data: ${JSON.stringify({ type: 'text-delta', delta: rendered.join('\\n\\n') })}\\n\\n` +
+          `data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\\n\\n` + 'data: [DONE]\\n\\n';
+        return new Response(payload, {
+          headers: {
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-cache, no-store',
+            'X-Content-Type-Options': 'nosniff',
+            'Referrer-Policy': 'no-referrer',
+            'X-Request-ID': requestId,
+          },
+        });
+      } catch (error) {
+        console.error('[Netlify Agent] Image generation failed:', error);
+        const message = 'Image generation is currently unavailable. Check Gemini image-model access and try again.';
+        const payload = `data: ${JSON.stringify({ type: 'text-delta', delta: message })}\\n\\n` +
+          `data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\\n\\n` + 'data: [DONE]\\n\\n';
+        return new Response(payload, {
+          headers: {
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-cache, no-store',
+            'X-Content-Type-Options': 'nosniff',
+            'Referrer-Policy': 'no-referrer',
+            'X-Request-ID': requestId,
+          },
+        });
+      }
+    }
+
     // Keep greetings and ordinary conversation on the fast, non-search path.
     // Enable Google Search grounding for queries whose answers can change over time.
     const needsLiveSearch = (text: string) => {
