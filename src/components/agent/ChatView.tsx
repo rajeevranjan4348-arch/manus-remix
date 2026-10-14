@@ -868,7 +868,7 @@ export function ChatView({
                   {/* Route Planner Detection */}
                   {/(route planner|plan (?:a )?route|directions from|navigate from|route from|how do i get to|how to get to)/i.test(cleanedContent || '') && (() => {
                     const latestUserPrompt = [...messages].reverse().find((message: any) => message?.role === 'user')?.content || prompt || '';
-                    const routeMatch = String(latestUserPrompt).match(/(?:route|directions|navigate)\\s+from\\s+(.+?)\\s+to\\s+(.+?)(?:[?.!]|$)/i);
+                    const routeMatch = String(latestUserPrompt).match(/(?:route|directions|navigate)\s+from\s+(.+?)\s+to\s+(.+?)(?:[?.!]|$)/i);
                     return <RoutePlannerCard initialOrigin={routeMatch?.[1]?.trim()} initialDestination={routeMatch?.[2]?.trim()} />;
                   })()}
 
