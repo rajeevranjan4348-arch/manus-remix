@@ -113,16 +113,22 @@ export function useAgentTask() {
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
         detail: { isGenerating: true, mode: 'work', text: 'Manus is typing...' }
       }));
-      // 45-second watchdog to guarantee no permanently stuck loading states
+      // A watchdog must fail visibly; it must never mark a missing response as success.
       watchdogTimer = setTimeout(() => {
-        console.warn('[useAgentTask] Watchdog: Task ran past timeout, recovering to terminal state');
+        console.error('[useAgentTask] Request exceeded 45-second client watchdog.');
         isSubmittingRef.current = false;
-        setTaskStatus('completed');
-        setPhase('completed');
-        setSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'completed' as const } : s));
+        setTaskStatus('error');
+        setPhase('error');
+        setResult({
+          type: 'chat',
+          content: 'The AI request timed out before a response arrived. Please retry. If this keeps happening, check the provider API key and Netlify function logs.',
+          error: true,
+        });
+        setSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'error' as const } : s));
         window.dispatchEvent(new CustomEvent('manus_agent_generating', {
           detail: { isGenerating: false, mode: 'work' }
         }));
+        emitRobotEvent('TASK_FAILED');
       }, 45000);
     } else {
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
@@ -230,6 +236,7 @@ export function useAgentTask() {
     sandbox: sandbox || undefined, // Pass sandbox to useAgent
     onFinish: async (response) => {
       // Treat empty model output as a failed generation, never as a completed answer.
+      isSubmittingRef.current = false;
       const text = typeof response?.text === 'string' ? response.text.trim() : '';
       if (!text) {
         console.error('[Manus AI] Provider finished without assistant text.');
@@ -406,7 +413,8 @@ export function useAgentTask() {
       }
     },
     onError: async (err) => {
-      console.warn('[AI Studio] Agent stream notice (rate limit / fallback):', err);
+      isSubmittingRef.current = false;
+      console.error('[Manus AI] Agent request failed:', err);
       
       const promptText = currentTask?.prompt || 'Request';
       const isGraphRequested = 
@@ -557,8 +565,8 @@ Regarding **${promptText}**:
       try { void stop(); } catch (error) { console.warn('[Agent] Stop request failed:', error); }
     }
     isSubmittingRef.current = false;
-    setTaskStatus('completed');
-    setPhase('completed');
+    setTaskStatus('idle');
+    setPhase('idle');
     setSteps(prev => prev.map(step => step.status === 'running' ? { ...step, status: 'pending' as const } : step));
     window.dispatchEvent(new CustomEvent('manus_agent_generating', {
       detail: { isGenerating: false, mode: 'work' }
@@ -719,6 +727,11 @@ Regarding **${promptText}**:
   }, [messages, taskId, isAuthenticated]);
 
   const sendMessage = useCallback((content: string) => {
+    if (isSubmittingRef.current) {
+      toast.info('A response is already being generated. Please wait or stop it first.');
+      return;
+    }
+    isSubmittingRef.current = true;
     setTaskStatus('running');
     setPhase('tool-calling');
     emitRobotEvent('USER_SUBMITTED');
@@ -734,14 +747,8 @@ Regarding **${promptText}**:
       status: 'success' as const
     };
 
-    // Optimistically record user message immediately in state (avoiding duplicate adjacent appends)
-    setPersistentMessages(prev => {
-      const last = prev[prev.length - 1];
-      if (last && last.role === 'user' && last.content.trim() === content.trim()) {
-        return prev;
-      }
-      return [...prev, userMsg];
-    });
+    // Each intentional submission gets its own ID. Identical consecutive messages are valid.
+    setPersistentMessages(prev => [...prev, userMsg]);
 
     // Save user message to database BEFORE starting AI generation (Requirement 3)
     if (activeId) {
