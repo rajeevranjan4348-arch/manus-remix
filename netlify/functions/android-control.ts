@@ -16,6 +16,8 @@ const allowedActions = new Set([
   'volume_down',
   'open_settings',
   'launch_app',
+  'search_in_app',
+  'call_contact',
 ]);
 
 function respond(data: unknown, status = 200) {
