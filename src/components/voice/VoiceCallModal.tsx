@@ -702,12 +702,12 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 h-[100dvh] min-h-0 w-full bg-[#0B0C0E] text-white flex flex-col justify-between overflow-hidden select-none font-sans animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 h-screen supports-[height:100dvh]:h-[100dvh] min-h-0 min-w-0 w-full bg-[#0B0C0E] text-white flex flex-col overflow-hidden select-none font-sans animate-in fade-in duration-200">
       
       {/* Top Header Bar */}
-      <div className="h-16 px-6 flex items-center justify-between shrink-0 z-20">
+      <div className="shrink-0 min-w-0 pt-[env(safe-area-inset-top)] px-3 sm:px-6 flex items-center justify-between z-20">
         {/* Left Icons: History & Live Transcript */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <button
             onClick={() => setActiveOverlay(activeOverlay === 'history' ? 'none' : 'history')}
             className={cn(
@@ -737,7 +737,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
         </div>
 
         {/* Center: Assistant Branding */}
-        <div className="flex flex-col items-center">
+        <div className="flex flex-col items-center min-w-0 px-1">
           <h2 className="text-base font-bold tracking-tight text-white flex items-center gap-1.5">
             Manus AI
           </h2>
@@ -760,10 +760,10 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
       </div>
 
       {/* Main Center Stage: Grok 3D Interactive Avatar & Uiverse 3D Sphere */}
-      <div className="flex-1 flex flex-col items-center justify-center relative z-10 px-6">
+      <div className="flex-1 min-h-0 min-w-0 flex flex-col items-center justify-center relative z-10 px-3 sm:px-6 py-2 overflow-y-auto overflow-x-hidden">
         
         {/* Interactive Avatar / Sphere Stage */}
-        <div className="relative my-auto flex items-center justify-center">
+        <div className="relative my-auto min-h-0 min-w-0 max-w-full flex items-center justify-center shrink">
           {avatarStyle === 'sphere' ? (
             <VoicePulseOrb
               callStatus={callStatus}
@@ -788,7 +788,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
         </div>
 
         {/* Status Text & Live Transcript */}
-        <div className="text-center space-y-3 mt-6 max-w-md w-full px-4">
+        <div className="text-center space-y-2 sm:space-y-3 mt-3 sm:mt-6 max-w-md min-w-0 w-full px-2 sm:px-4 shrink-0">
           <p className="text-xl sm:text-2xl font-semibold text-white tracking-tight line-clamp-2">
             {liveTranscript ? `"${liveTranscript}"` : statusText}
           </p>
@@ -847,8 +847,8 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
       </div>
 
       {/* Bottom Controls */}
-      <div className="pb-8 pt-4 px-6 flex flex-col items-center gap-5 shrink-0 z-20">
-        <div className="flex items-center gap-10">
+      <div className="shrink-0 pt-3 sm:pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] px-3 sm:px-6 flex flex-col items-center gap-3 sm:gap-5 z-20 max-w-full">
+        <div className="flex items-center justify-center gap-6 sm:gap-10 max-w-full">
           {/* Pause / Resume Button */}
           <div className="flex flex-col items-center gap-2">
             <button
@@ -1046,7 +1046,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
 
       {/* OVERLAY 3: Call Settings Popover (Matches Image 2) */}
       {activeOverlay === 'settings' && (
-        <div className="fixed top-[calc(4rem+env(safe-area-inset-top))] right-3 sm:right-6 w-[min(20rem,calc(100vw-1.5rem))] max-h-[calc(100dvh-5.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain bg-[#16171B] border border-white/10 rounded-3xl p-4 sm:p-5 z-[100] shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+        <div className="fixed top-[calc(env(safe-area-inset-top)+0.75rem)] right-3 sm:right-6 w-[min(20rem,calc(100vw-1.5rem))] max-h-[calc(100vh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-1.5rem)] supports-[height:100dvh]:max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-1.5rem)] overflow-y-auto overscroll-contain [scrollbar-gutter:stable] bg-[#16171B] border border-white/10 rounded-3xl p-4 sm:p-5 z-[100] shadow-2xl animate-in fade-in zoom-in-95 duration-200">
           <div className="flex items-center justify-between pb-4 border-b border-white/10">
             <div>
               <h3 className="font-bold text-sm text-white">Call Settings</h3>
