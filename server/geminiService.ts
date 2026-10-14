@@ -14,19 +14,47 @@ export interface StreamChatOptions {
   useGoogleSearch?: boolean;
 }
 
+// Context capacity is a model capability, not a tunable API parameter.
+// Gemini 2.5 Flash supports a 1M-token input context; keep the default
+// on that documented long-context model instead of silently aliasing it away.
+export const MIN_CONTEXT_WINDOW_TOKENS = 400_000;
+export const MAX_INPUT_CONTEXT_TOKENS = 800_000;
+export const DEFAULT_LONG_CONTEXT_MODEL = 'gemini-2.5-flash';
+
 function normalizeModel(modelName?: string): string {
-  if (!modelName) return 'gemini-3.8-flash';
-  const clean = modelName.replace(/^google\//, '').trim();
-  if (
-    clean === 'gemini-2.5-flash' ||
-    clean === 'gemini-3-flash' ||
-    clean === 'gemini-3.0-flash' ||
-    clean === 'gemini-2.0-flash' ||
-    clean === 'gemini-1.5-flash'
-  ) {
-    return 'gemini-3.8-flash';
+  if (!modelName) return DEFAULT_LONG_CONTEXT_MODEL;
+  const clean = modelName.replace(/^google\\//, '').trim();
+  if (clean === 'gemini-3-flash' || clean === 'gemini-3.0-flash' ||
+      clean === 'gemini-2.0-flash' || clean === 'gemini-1.5-flash') {
+    return DEFAULT_LONG_CONTEXT_MODEL;
   }
   return clean;
+}
+
+// Conservative estimate used to bound history before sending it to providers.
+// Keep the newest messages and never split a message's text in the middle.
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 3.5);
+}
+
+function fitMessagesToContext(messages: ChatMessage[], budget = MAX_INPUT_CONTEXT_TOKENS): ChatMessage[] {
+  const fitted: ChatMessage[] = [];
+  let used = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    const cost = estimateTokens(message.content) + 8;
+    if (used + cost > budget) {
+      // A single oversized latest message is clipped safely to the remaining budget.
+      if (fitted.length === 0 && budget > 0) {
+        const maxChars = Math.max(0, Math.floor((budget - 8) * 3.5));
+        fitted.unshift({ ...message, content: message.content.slice(-maxChars) });
+      }
+      break;
+    }
+    fitted.unshift(message);
+    used += cost;
+  }
+  return fitted;
 }
 
 export function needsLiveSearch(text: string): boolean {
@@ -191,7 +219,8 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
       '5. Never invent facts, dates, headlines, or URLs. Rely on grounded Google Search data.';
   }
 
-  const contents = options.messages
+  const contextMessages = fitMessagesToContext(options.messages);
+  const contents = contextMessages
     .filter(m => m.role === 'user' || m.role === 'assistant')
     .map(m => ({
       role: m.role === 'assistant' ? 'model' : 'user',
@@ -216,6 +245,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
           contents,
           config: {
             systemInstruction: systemPrompt,
+            maxOutputTokens: 8192,
             ...toolConfig,
           },
         });
@@ -322,7 +352,7 @@ export async function* streamOpenRouterResponse(
           model: model,
           messages: messages,
           stream: true,
-          max_tokens: 2048,
+          max_tokens: 8192,
         }),
       });
 
