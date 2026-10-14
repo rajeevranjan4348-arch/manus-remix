@@ -19,6 +19,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/android-control"
+  to = "/.netlify/functions/android-control"
+  status = 200
+
+[[redirects]]
   from = "/api/image-generation"
   to = "/.netlify/functions/image-generation"
   status = 200
