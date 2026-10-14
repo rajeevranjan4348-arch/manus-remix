@@ -612,6 +612,31 @@ Regarding **${promptText}**:
     let enriched = prompt;
     const activeUserId = user?.id || 'usr_manus_default';
 
+    // 0. Real image-generation tool (server-side provider call; never expose provider secrets in the browser).
+    const imageIntent = /@image_generation|@imagegen|\\b(generate|create|draw|make)\\b.{0,80}\\b(image|picture|illustration|wallpaper|logo|artwork)\\b/i.test(prompt);
+    if (imageIntent) {
+      const imagePrompt = prompt.replace(/@image_generation|@imagegen/gi, '').trim().slice(0, 4000);
+      const imageResponse = await fetch('/api/image-generation', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ prompt: imagePrompt }),
+      });
+      const imageData = await imageResponse.json().catch(() => ({}));
+      if (!imageResponse.ok) {
+        throw new Error(typeof imageData?.error === 'string' ? imageData.error : 'Image generation failed. Check the server image-provider configuration.');
+      }
+      if (typeof imageData?.imageDataUrl !== 'string' || !imageData.imageDataUrl.startsWith('data:image/')) {
+        throw new Error('The image provider returned no usable image.');
+      }
+      enriched += '\\n\\n[IMAGE GENERATION TOOL RESULT: Image generation completed successfully.]\\n' +
+        'Generated image (render this image in the answer; do not merely describe it):\\n' +
+        '![' + (imageData.alt || 'Generated image') + '](' + imageData.imageDataUrl + ')\\n' +
+        '[IMAGE_GENERATION_METADATA] ' + JSON.stringify({ mimeType: imageData.mimeType || 'image/png', provider: imageData.provider || 'Gemini' }) +
+        '\\n[INSTRUCTION: Show the generated image itself and briefly confirm completion. Do not claim success if the image is not included.]';
+      return enriched;
+    }
+
     // 0. Live Google Search & News Grounding (Real-time events, news, fact-checking)
     const isSearchIntent = /\b(current events?|latest news|recent news|breaking news|news today|headlines|fact[\s-]?check|factcheck|is it true|verify|debunk|latest|today|yesterday|this week|who won|election|stock price|weather|happening)\b/i.test(prompt) || prompt.includes('@web_search') || prompt.includes('@search') || prompt.includes('@google');
     if (isSearchIntent) {
