@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-The web application can issue authenticated, allowlisted commands through the Netlify function at `/api/android-control`. **This is not a standalone phone-control implementation until a trusted Android companion bridge is installed, paired, and reachable.** A browser-only website cannot silently control arbitrary Android apps or system settings.
+The web application can issue authenticated, allowlisted commands through the Netlify function at `/api/android-control`. Access is restricted to the exact Firebase UID in `ANDROID_CONTROL_ALLOWED_UID`. **This is not a standalone phone-control implementation until a trusted Android companion bridge is installed, paired, and reachable.** A browser-only website cannot silently control arbitrary Android apps or system settings.
 
 ## Current allowlist
 
@@ -21,6 +21,7 @@ The Settings panel asks for user confirmation before sending each action. The se
 Set these environment variables in Netlify:
 
 - `FIREBASE_SERVICE_ACCOUNT_JSON`: Firebase Admin service-account JSON, stored only as a server secret.
+- `ANDROID_CONTROL_ALLOWED_UID`: exact Firebase UID authorized to control the paired device.
 - `ANDROID_CONTROL_BRIDGE_URL`: HTTPS origin of the paired bridge/relay.
 - `ANDROID_CONTROL_BRIDGE_TOKEN`: high-entropy bearer token accepted by the bridge.
 
