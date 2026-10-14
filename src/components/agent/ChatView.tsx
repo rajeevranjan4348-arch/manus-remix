@@ -955,6 +955,33 @@ export function ChatView({
           return null;
         })}
 
+        {/* Live tool-call progress; automatically disappears on success, stop, or error. */}
+        {isAssistantWorking && activeRunningStep && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="flex items-center gap-3 max-w-3xl mx-auto my-2 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm animate-in fade-in slide-in-from-bottom-2"
+          >
+            <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
+              <span className="absolute inline-flex h-full w-full rounded-full bg-primary/20 animate-ping" />
+              <span className="relative h-2.5 w-2.5 rounded-full bg-primary" />
+            </span>
+            <span className="min-w-0">
+              <span className="font-medium text-foreground">
+                {(() => {
+                  const label = activeRunningStep.label || 'Processing request';
+                  if (/weather/i.test(label)) return 'Searching weather data...';
+                  if (/search|research|web/i.test(label)) return 'Searching the web...';
+                  if (/tool|connector|calendar|gmail|drive/i.test(label)) return `Running tool: ${label}...`;
+                  if (/fetch|load|read/i.test(label)) return `Fetching data: ${label}...`;
+                  return `${label}...`;
+                })()}
+              </span>
+              <span className="block text-xs text-muted-foreground mt-0.5">Manus is working on this step</span>
+            </span>
+          </div>
+        )}
+
         {/* Steps / Task Progress */}
         {steps.length > 0 && (
           <div className="flex gap-4 max-w-3xl mx-auto my-2">
@@ -1050,7 +1077,7 @@ export function ChatView({
               <div className="p-4 rounded-2xl bg-destructive/5 border border-destructive/20 text-sm">
                 <p className="font-semibold text-destructive mb-1">Execution Interrupted</p>
                 <p className="text-muted-foreground text-xs leading-relaxed">
-                  The request encountered a network timeout or provider interruption. You can retry the operation safely.
+                  The stream was interrupted or the AI provider is temporarily unavailable. Check your connection and API key/provider settings, then select Retry.
                 </p>
                 <div className="mt-3 flex items-center gap-2">
                   <button
