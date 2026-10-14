@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { streamGeminiResponse } from './server/geminiService';
 import { generateOAuthUrl, handleOAuthCallback, executeServerConnectorTool, isSafeUrl } from './server/connectorsService';
+import { GoogleGenAI } from '@google/genai';
 
 function geminiApiPlugin(): Plugin {
   return {
@@ -108,7 +109,42 @@ function geminiApiPlugin(): Plugin {
 
               const results: Array<{ title: string; url: string; snippet: string; source: string }> = [];
 
-              if (firecrawlKey) {
+              // 1. Primary Engine: Google Search Grounding via Gemini API
+              if (process.env.GEMINI_API_KEY) {
+                try {
+                  const ai = new GoogleGenAI({
+                    apiKey: process.env.GEMINI_API_KEY,
+                    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+                  });
+
+                  const searchRes = await ai.models.generateContent({
+                    model: 'gemini-3.8-flash',
+                    contents: `Search Google for real-time information, current events, recent news, or fact-checking about: "${query}". Provide a concise factual summary citing the verified sources.`,
+                    config: {
+                      tools: [{ googleSearch: {} }],
+                    },
+                  });
+
+                  const chunks = searchRes.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+                  const textSummary = searchRes.text?.trim() || '';
+
+                  for (const chunk of chunks) {
+                    const web = chunk?.web;
+                    if (web?.uri && /^https?:\/\//i.test(web.uri)) {
+                      results.push({
+                        title: String(web.title || web.uri).slice(0, 300),
+                        url: web.uri,
+                        snippet: textSummary.slice(0, 600),
+                        source: 'google-search',
+                      });
+                    }
+                  }
+                } catch (gErr) {
+                  console.warn('[Web Search] Google Search grounding notice:', gErr);
+                }
+              }
+
+              if (firecrawlKey && results.length < limit) {
                 try {
                   const fcRes = await fetch('https://api.firecrawl.dev/v2/search', {
                     method: 'POST',
@@ -170,7 +206,7 @@ function geminiApiPlugin(): Plugin {
                 query,
                 results: results.slice(0, limit),
                 providers: [...new Set(results.map(r => r.source))],
-                configured: Boolean(firecrawlKey || bridgeUrl),
+                configured: Boolean(process.env.GEMINI_API_KEY || firecrawlKey || bridgeUrl),
               }));
             } catch (err: any) {
               res.statusCode = 500;

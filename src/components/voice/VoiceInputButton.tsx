@@ -20,6 +20,43 @@ interface VoiceInputButtonProps {
   autoSubmitOnSpeech?: boolean;
 }
 
+/**
+ * Extracts and accumulates both final and interim transcripts from SpeechRecognition results.
+ */
+export function extractTranscriptFromResults(results: any): { finalTranscript: string; interimTranscript: string; fullTranscript: string } {
+  let finalTranscript = '';
+  let interimTranscript = '';
+
+  if (!results || typeof results.length !== 'number') {
+    return { finalTranscript: '', interimTranscript: '', fullTranscript: '' };
+  }
+
+  for (let i = 0; i < results.length; ++i) {
+    const result = results[i];
+    const text = (result?.[0]?.transcript || '').trim();
+    if (!text) continue;
+    if (result.isFinal) {
+      finalTranscript += (finalTranscript ? ' ' : '') + text;
+    } else {
+      interimTranscript += (interimTranscript ? ' ' : '') + text;
+    }
+  }
+
+  const fullTranscript = [finalTranscript, interimTranscript].filter(Boolean).join(' ').trim();
+  return { finalTranscript, interimTranscript, fullTranscript };
+}
+
+/**
+ * Combines previously typed text with newly dictated speech transcript.
+ */
+export function formatSpeechAutoFill(baseText: string, dictatedText: string): string {
+  const base = (baseText || '').trim();
+  const dictated = (dictatedText || '').trim();
+  if (!base) return dictated;
+  if (!dictated) return base;
+  return `${base} ${dictated}`;
+}
+
 export function VoiceInputButton({
   onTranscript,
   onListeningStateChange,
@@ -133,24 +170,12 @@ export function VoiceInputButton({
       };
 
       recognition.onresult = async (event: any) => {
-        let finalTranscript = '';
-        let interimTranscript = '';
+        const { finalTranscript, fullTranscript } = extractTranscriptFromResults(event.results);
 
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const result = event.results[i];
-          const text = result[0]?.transcript || '';
-          if (result.isFinal) {
-            finalTranscript += text;
-          } else {
-            interimTranscript += text;
-          }
-        }
+        if (!fullTranscript) return;
 
-        const currentText = (finalTranscript || interimTranscript).trim();
-        if (!currentText) return;
-
-        // Provide real-time live transcription to input area
-        onTranscript(currentText);
+        // Provide real-time live transcription to input area (auto-filling)
+        onTranscript(fullTranscript);
 
         if (finalTranscript.trim()) {
           const transcript = finalTranscript.trim();

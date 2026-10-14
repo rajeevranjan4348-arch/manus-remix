@@ -612,6 +612,37 @@ Regarding **${promptText}**:
     let enriched = prompt;
     const activeUserId = user?.id || 'usr_manus_default';
 
+    // 0. Live Google Search & News Grounding (Real-time events, news, fact-checking)
+    const isSearchIntent = /\b(current events?|latest news|recent news|breaking news|news today|headlines|fact[\s-]?check|factcheck|is it true|verify|debunk|latest|today|yesterday|this week|who won|election|stock price|weather|happening)\b/i.test(prompt) || prompt.includes('@web_search') || prompt.includes('@search') || prompt.includes('@google');
+    if (isSearchIntent) {
+      try {
+        const cleanQuery = prompt
+          .replace(/@(web_search|search|google)/gi, '')
+          .replace(/\[(?:Think Harder|Requested connectors)[^\]]*\]/gi, '')
+          .trim()
+          .slice(0, 300);
+        if (cleanQuery) {
+          const searchRes = await fetch('/api/web-search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: cleanQuery, limit: 5 }),
+          });
+          if (searchRes.ok) {
+            const searchData = await searchRes.json();
+            const searchItems = Array.isArray(searchData?.results) ? searchData.results : [];
+            if (searchItems.length > 0) {
+              const formattedResults = searchItems
+                .map((item: any) => `- [${item.title}](${item.url}): ${item.snippet?.slice(0, 250)}`)
+                .join('\n');
+              enriched += `\n\n[REAL-TIME GOOGLE SEARCH & NEWS RESULTS]:\n${formattedResults}\n[INSTRUCTION: Use these real-time Google Search results to answer the query, discuss current events, cite recent news, and verify facts. Provide structured answers and cite sources with markdown links.]`;
+            }
+          }
+        }
+      } catch (searchErr) {
+        console.warn('[Live Google Search Context] Notice:', searchErr);
+      }
+    }
+
     // 1. Inject Long-Term Memory
     try {
       const memoryContext = await longTermMemory.getRelevantContext(activeUserId, prompt);

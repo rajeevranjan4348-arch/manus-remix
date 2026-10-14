@@ -1,9 +1,11 @@
+import { GoogleGenAI } from '@google/genai';
+
 /**
  * Agentic web search adapter for Manus Remix.
- * Firecrawl is the hosted search provider. Agent Reach is a Python/CLI toolkit,
- * so connect it through a separately deployed HTTP bridge.
+ * Powered by Google Search Grounding via Gemini API, with optional
+ * Firecrawl and Agent Reach bridge fallbacks.
  */
-type SearchResult = { title: string; url: string; snippet: string; source: 'firecrawl' | 'agent-reach' };
+type SearchResult = { title: string; url: string; snippet: string; source: 'google-search' | 'firecrawl' | 'agent-reach' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' },
 });
@@ -22,6 +24,37 @@ export default async (req: Request) => {
   const limit = Math.min(10, Math.max(1, Number.isFinite(body?.limit) ? Math.floor(body.limit) : 5));
   const tasks: Promise<SearchResult[]>[] = [];
   const errors: string[] = [];
+
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey) tasks.push((async () => {
+    const ai = new GoogleGenAI({
+      apiKey: geminiKey,
+      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+    });
+    const searchRes = await ai.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: `Search Google for real-time information, current events, recent news, or fact-checking about: "${query}". Provide a concise factual summary citing the verified sources.`,
+      config: {
+        tools: [{ googleSearch: {} }],
+      },
+    });
+    const chunks = searchRes.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    const textSummary = searchRes.text?.trim() || '';
+    const results: SearchResult[] = [];
+    for (const chunk of chunks) {
+      const web = chunk?.web;
+      if (web?.uri && /^https?:\/\//i.test(web.uri)) {
+        results.push({
+          title: String(web.title || web.uri).slice(0, 300),
+          url: web.uri,
+          snippet: textSummary.slice(0, 600),
+          source: 'google-search',
+        });
+      }
+    }
+    return results;
+  })().catch((error) => { errors.push(error instanceof Error ? error.message : 'Google Search grounding failed'); return []; }));
+
   const firecrawlKey = process.env.FIRECRAWL_API_KEY;
   if (firecrawlKey) tasks.push((async () => {
     const response = await fetch('https://api.firecrawl.dev/v2/search', {
@@ -47,7 +80,7 @@ export default async (req: Request) => {
     const items = Array.isArray(payload?.results) ? payload.results : Array.isArray(payload?.data) ? payload.data : [];
     return items.map((item: any) => safeResult(item, 'agent-reach')).filter(Boolean) as SearchResult[];
   })().catch((error) => { errors.push(error instanceof Error ? error.message : 'Agent Reach bridge failed'); return []; }));
-  if (!tasks.length) return json({ error: 'Web search is not configured. Set FIRECRAWL_API_KEY and/or AGENT_REACH_BRIDGE_URL in Netlify environment variables.', results: [] }, 503);
+  if (!tasks.length) return json({ error: 'Web search is not configured. Set GEMINI_API_KEY, FIRECRAWL_API_KEY, or AGENT_REACH_BRIDGE_URL in environment variables.', results: [] }, 503);
   const batches = await Promise.all(tasks);
   const unique = new Map<string, SearchResult>();
   for (const item of batches.flat()) { const key = item.url.replace(/#.*$/, ''); if (!unique.has(key)) unique.set(key, item); }

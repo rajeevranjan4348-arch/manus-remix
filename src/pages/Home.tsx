@@ -30,7 +30,7 @@ import { cn } from '@/lib/utils';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
 import { AttachmentMenu } from '@/components/chat/AttachmentMenu';
-import { VoiceInputButton } from '@/components/voice/VoiceInputButton';
+import { VoiceInputButton, formatSpeechAutoFill } from '@/components/voice/VoiceInputButton';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
 import { validateFile, formatFileSize } from '@/lib/fileValidation';
 import { ConnectorsPopupMenu } from '@/components/chat/ConnectorsPopupMenu';
@@ -219,6 +219,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   const [showMentionPicker, setShowMentionPicker] = useState<boolean>(false);
   const [mentionQuery, setMentionQuery] = useState<string>('');
   const [mentionIndex, setMentionIndex] = useState<number>(0);
+  const [isListening, setIsListening] = useState<boolean>(false);
 
   const [chatWorkMode, setChatWorkMode] = useState<PersonalityMode>(() => {
     return (localStorage.getItem('manus_chat_work_mode') as PersonalityMode) || personality || 'chat';
@@ -642,7 +643,8 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
             onDrop={handleDrop}
             className={cn(
               "w-full bg-white dark:bg-[#1a1b1e] rounded-[1.75rem] shadow-lg border border-slate-200/80 dark:border-border/60 px-3.5 py-2.5 sm:px-4.5 sm:py-3 flex flex-col gap-1.5 sm:gap-2 transition-[box-shadow,border-color,background-color] duration-200 ease-out focus-within:ring-2 focus-within:ring-primary/20 relative z-[2] gpu-accelerated",
-              isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30"
+              isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30",
+              isListening && "ring-2 ring-rose-500/40 border-rose-400 dark:border-rose-500/60 shadow-lg shadow-rose-500/10"
             )}
           >
             {showMentionPicker && (
@@ -672,6 +674,27 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
             >
               <span className="w-0 h-0 inline-block pointer-events-none opacity-0" aria-hidden="true" />
             </ConnectorsPopupMenu>
+
+            {/* Visual Indicator for Speech Recognition Listening State */}
+            {isListening && (
+              <div 
+                data-testid="speech-listening-indicator"
+                className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-medium animate-in fade-in slide-in-from-top-1 duration-200 select-none mb-1"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+                  </span>
+                  <span className="font-semibold">Listening... Speak into microphone</span>
+                </div>
+                <div className="flex items-center gap-0.5">
+                  <span className="w-0.5 h-2.5 bg-rose-500 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                  <span className="w-0.5 h-4 bg-rose-500 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                  <span className="w-0.5 h-2 bg-rose-500 rounded-full animate-bounce"></span>
+                </div>
+              </div>
+            )}
 
             {/* Top Row: Textarea */}
             <div className="w-full flex flex-col min-h-[28px]">
@@ -721,7 +744,11 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                   isExpanded ? "max-h-[460px]" : "max-h-[280px]"
                 )}
                 rows={1}
-                placeholder={activeIntent?.placeholder || (chatWorkMode === 'chat' ? "Type a message or ask anything..." : (isThinkHarder ? "Assign a deep reasoning task or question..." : "Assign a building task or ask anything..."))} 
+                placeholder={
+                  isListening
+                    ? "Listening... speak now to auto-fill prompt..."
+                    : activeIntent?.placeholder || (chatWorkMode === 'chat' ? "Type a message or ask anything..." : (isThinkHarder ? "Assign a deep reasoning task or question..." : "Assign a building task or ask anything..."))
+                } 
               />
             </div>
 
@@ -843,13 +870,14 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                 )}
                 <VoiceInputButton 
                   onListeningStateChange={(listening) => {
+                    setIsListening(listening);
                     if (listening) {
                       speechBasePromptRef.current = prompt.trim();
                     }
                   }}
                   onTranscript={(dictatedText) => {
                     const base = speechBasePromptRef.current;
-                    setPrompt(base ? `${base} ${dictatedText}` : dictatedText);
+                    setPrompt(formatSpeechAutoFill(base, dictatedText));
                   }}
                   className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer"
                   size={18}

@@ -40,7 +40,7 @@ import { ContextualThinking } from './ContextualThinking';
 import { AttachmentMenu } from '../chat/AttachmentMenu';
 import { ThoughtProcess } from './ThoughtProcess';
 import { ConversationActionBar } from './ConversationActionBar';
-import { VoiceInputButton } from '../voice/VoiceInputButton';
+import { VoiceInputButton, formatSpeechAutoFill } from '../voice/VoiceInputButton';
 import { SourceCitations, parseSourcesFromMarkdown } from './SourceCitations';
 import { WeatherWidgetCard } from './WeatherWidgetCard';
 import { ToolApprovalCard } from './ToolApprovalCard';
@@ -133,6 +133,7 @@ export function ChatView({
   const [showMentionPicker, setShowMentionPicker] = useState<boolean>(false);
   const [mentionQuery, setMentionQuery] = useState<string>('');
   const [mentionIndex, setMentionIndex] = useState<number>(0);
+  const [isListening, setIsListening] = useState<boolean>(false);
   const dragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1018,7 +1019,8 @@ export function ChatView({
           onDrop={handleDrop}
           className={cn(
             "w-full max-w-3xl bg-white dark:bg-[#1a1b1e] rounded-[1.75rem] sm:rounded-[2rem] shadow-xl border border-slate-200/80 dark:border-border/60 px-3.5 py-2.5 sm:px-4.5 sm:py-3 flex flex-col gap-1.5 sm:gap-2 transition-[box-shadow,border-color,background-color] duration-200 ease-out focus-within:ring-2 focus-within:ring-primary/20 relative gpu-accelerated",
-            isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30"
+            isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30",
+            isListening && "ring-2 ring-rose-500/40 border-rose-400 dark:border-rose-500/60 shadow-lg shadow-rose-500/10"
           )}
         >
           {showMentionPicker && (
@@ -1046,6 +1048,27 @@ export function ChatView({
             onOpenStore={() => setIsConnectorsStoreOpen(true)}
             onOpenConfigModal={(id) => setSelectedConfigConnectorId(id)}
           />
+
+          {/* Visual Indicator for Speech Recognition Listening State */}
+          {isListening && (
+            <div 
+              data-testid="speech-listening-indicator"
+              className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-medium animate-in fade-in slide-in-from-top-1 duration-200 select-none"
+            >
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+                </span>
+                <span className="font-semibold">Listening... Speak into microphone</span>
+              </div>
+              <div className="flex items-center gap-0.5">
+                <span className="w-0.5 h-2.5 bg-rose-500 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                <span className="w-0.5 h-4 bg-rose-500 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                <span className="w-0.5 h-2 bg-rose-500 rounded-full animate-bounce"></span>
+              </div>
+            </div>
+          )}
 
           {/* Top Row: Textarea for typing message */}
           <div className="w-full flex flex-col min-h-[26px] sm:min-h-[28px]">
@@ -1091,7 +1114,13 @@ export function ChatView({
                 }
               }}
               rows={1}
-              placeholder={isThinkHarder ? "Ask with deep reasoning..." : "Type a message or ask anything..."}
+              placeholder={
+                isListening 
+                  ? "Listening... speak now to auto-fill prompt..." 
+                  : isThinkHarder 
+                    ? "Ask with deep reasoning..." 
+                    : "Type a message or ask anything..."
+              }
               className="w-full bg-transparent border-none outline-none resize-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-[14px] sm:text-[15px] leading-snug p-0 focus:ring-0 focus:outline-none min-h-[22px] sm:min-h-[24px] max-h-[90px] custom-scrollbar"
               disabled={isLoading}
             />
@@ -1163,13 +1192,14 @@ export function ChatView({
             <div className="flex items-center gap-2.5">
               <VoiceInputButton
                 onListeningStateChange={(listening) => {
+                  setIsListening(listening);
                   if (listening) {
                     speechBaseInputRef.current = input.trim();
                   }
                 }}
                 onTranscript={(dictatedText) => {
                   const base = speechBaseInputRef.current;
-                  setInput(base ? `${base} ${dictatedText}` : dictatedText);
+                  setInput(formatSpeechAutoFill(base, dictatedText));
                 }}
                 onAutoSubmit={(finalText) => {
                   if (finalText.trim()) {
