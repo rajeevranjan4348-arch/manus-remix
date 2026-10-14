@@ -7,6 +7,7 @@ interface GoogleMapWidgetCardProps {
   latitude?: number;
   longitude?: number;
   zoom?: number;
+  autoLocate?: boolean;
   markers?: Array<{
     id: string;
     title: string;
@@ -23,11 +24,28 @@ export function GoogleMapWidgetCard({
   latitude = 1.3521,
   longitude = 103.8198,
   zoom = 12,
+  autoLocate = false,
   markers = []
 }: GoogleMapWidgetCardProps) {
   const apiKey = getGoogleMapsApiKey();
   const [quotaExceeded, setQuotaExceeded] = useState(false);
   const [center, setCenter] = useState({ lat: latitude, lng: longitude });
+  const [resolvedZoom, setResolvedZoom] = useState(zoom);
+
+  useEffect(() => {
+    if (!autoLocate || !locationName.trim() || !window.google?.maps?.Geocoder) return;
+    let cancelled = false;
+    const geocoder = new window.google.maps.Geocoder();
+    geocoder.geocode({ address: locationName }, (results, status) => {
+      if (cancelled) return;
+      if (status === 'OK' && results?.[0]?.geometry?.location) {
+        const point = results[0].geometry.location;
+        setCenter({ lat: point.lat(), lng: point.lng() });
+        setResolvedZoom(12);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [autoLocate, locationName]);
 
   useEffect(() => {
     const handleQuotaExceeded = () => setQuotaExceeded(true);
@@ -80,8 +98,8 @@ export function GoogleMapWidgetCard({
         <APIProvider apiKey={apiKey}>
           <Map
             mapId="DEMO_MAP_ID"
-            defaultCenter={center}
-            defaultZoom={zoom}
+            center={center}
+            zoom={resolvedZoom}
             gestureHandling="greedy"
             disableDefaultUI={false}
             internalUsageAttributionIds={["gmp_mcp_codeassist_v1_aistudio"]}
