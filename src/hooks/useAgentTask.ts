@@ -246,7 +246,7 @@ export function useAgentTask() {
           status: step.status === 'completed' ? 'completed' as const : 'error' as const,
         })));
         emitRobotEvent('TASK_FAILED');
-        playNotificationSound('error');
+        playNotificationSound('pop');
         return;
       }
       let parsedChartData = null; // Full parsed JSON
