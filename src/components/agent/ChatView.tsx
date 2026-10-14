@@ -1086,7 +1086,7 @@ export function ChatView({
         <button
           type="button"
           onClick={() => scrollToBottom('smooth')}
-          className="absolute bottom-28 right-6 sm:right-12 z-30 flex items-center gap-2 px-3.5 py-2 rounded-full bg-primary text-primary-foreground shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 transition-all text-xs font-semibold cursor-pointer animate-in fade-in slide-in-from-bottom-2 duration-200"
+          className="absolute bottom-44 right-4 sm:right-12 z-30 flex items-center gap-2 px-3.5 py-2 rounded-full bg-primary text-primary-foreground shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 transition-all text-xs font-semibold cursor-pointer animate-in fade-in slide-in-from-bottom-2 duration-200"
           title="Scroll to latest message"
           aria-label="Scroll to latest message"
         >
