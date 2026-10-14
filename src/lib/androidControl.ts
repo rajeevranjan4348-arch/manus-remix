@@ -35,7 +35,7 @@ export function parseAndroidControlIntent(prompt: string): AndroidControlIntent 
   if (/^(?:go to )?home(?: screen)?$|^(?:press|tap) home$|^return to home screen$/.test(p)) {
     return { action: 'home', label: 'Go to home screen' };
   }
-  if (/^(?:toggle|turn) (?:the )?(?:flashlight|torch)(?: on or off)?$|^(?:turn on|enable|switch on) (?:the )?(?:flashlight|torch)$|^(?:turn off|disable|switch off) (?:the )?(?:flashlight|torch)$/.test(p)) {
+  if (/^(?:toggle|switch) (?:the )?(?:flashlight|torch)$|^(?:toggle|switch) flashlight$/.test(p)) {
     return { action: 'flashlight_toggle', label: 'Toggle flashlight' };
   }
   if (/^(?:turn|volume) volume? ?up$|^(?:increase|raise) (?:the )?volume$|^volume up$/.test(p)) {
