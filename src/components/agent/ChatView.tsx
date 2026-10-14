@@ -57,6 +57,50 @@ import { Step } from '@/hooks/useAgentTask';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
 
+
+type ManusMapRequest =
+  | { kind: 'route'; origin: string; destination: string }
+  | { kind: 'location'; location: string };
+
+function extractManusMapRequest(rawPrompt: string): ManusMapRequest | null {
+  const text = String(rawPrompt || '').replace(/\\s+/g, ' ').trim();
+  if (!text) return null;
+  const clean = (value: string) => value.replace(/\\b(?:please|on the map|on map)\\b/ig, '').replace(/[?.!,;]+$/, '').trim();
+
+  const routePatterns = [
+    /\\bdistance\\s+from\\s+(.+?)\\s+to\\s+(.+?)(?:[?.!,;]|$)/i,
+    /\\b(?:route|directions|navigate)\\s+from\\s+(.+?)\\s+to\\s+(.+?)(?:[?.!,;]|$)/i,
+    /\\bhow\\s+far\\s+is\\s+(.+?)\\s+from\\s+(.+?)(?:[?.!,;]|$)/i,
+    /\\bdistance\\s+between\\s+(.+?)\\s+and\\s+(.+?)(?:[?.!,;]|$)/i,
+  ];
+  for (let i = 0; i < routePatterns.length; i++) {
+    const match = text.match(routePatterns[i]);
+    if (match) {
+      const from = clean(i === 2 ? match[2] : match[1]);
+      const to = clean(i === 2 ? match[1] : match[2]);
+      if (from && to) return { kind: 'route', origin: from, destination: to };
+    }
+  }
+
+  const locationPatterns = [
+    /\\bwhere\\s+(?:is|are)\\s+(.+?)\\s+(?:located|situated)(?:\\s|$|[?.!,;])/i,
+    /\\bwhere\\s+(.+?)\\s+(?:is|are)\\s+(?:located|situated)(?:\\s|$|[?.!,;])/i,
+    /\\b(?:show|display|open)\\s+(?:me\\s+)?(?:the\\s+)?map(?:\\s+(?:of|for))?\\s+(.+?)(?:[?.!,;]|$)/i,
+    /\\bmap\\s+of\\s+(.+?)(?:[?.!,;]|$)/i,
+    /\\bwhere\\s+(?:is|are)\\s+(.+?)(?:[?.!,;]|$)/i,
+    /\\b(?:locate|find)\\s+(.+?)\\s+on\\s+(?:the\\s+)?map(?:[?.!,;]|$)/i,
+  ];
+  for (const pattern of locationPatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const location = clean(match[1].replace(/\\b(?:on the map|on map)\\b/ig, ''));
+      if (location) return { kind: 'location', location };
+    }
+  }
+  if (/\\bshow\\s+(?:me\\s+)?(?:the\\s+)?map\\b/i.test(text)) return { kind: 'location', location: 'India' };
+  return null;
+}
+
 interface ChatViewProps {
   prompt: string;
   messages: any[];
@@ -865,17 +909,17 @@ export function ChatView({
                     />
                   )}
 
-                  {/* Route Planner Detection */}
-                  {/(route planner|plan (?:a )?route|directions from|navigate from|route from|how do i get to|how to get to)/i.test(cleanedContent || '') && (() => {
-                    const latestUserPrompt = [...messages].reverse().find((message: any) => message?.role === 'user')?.content || prompt || '';
-                    const routeMatch = String(latestUserPrompt).match(/(?:route|directions|navigate)\s+from\s+(.+?)\s+to\s+(.+?)(?:[?.!]|$)/i);
-                    return <RoutePlannerCard initialOrigin={routeMatch?.[1]?.trim()} initialDestination={routeMatch?.[2]?.trim()} />;
+                  {/* Map intent comes from the user's question, while the assistant response remains the direct answer. */}
+                  {isLatestAssistant && (() => {
+                    const latestUserMessage = [...messages].reverse().find((message: any) => message?.role === 'user')?.content;
+                    const latestUserPrompt = typeof latestUserMessage === 'string' ? latestUserMessage : (latestUserMessage?.text || prompt || '');
+                    const mapRequest = extractManusMapRequest(String(latestUserPrompt));
+                    if (!mapRequest) return null;
+                    if (mapRequest.kind === 'route') {
+                      return <RoutePlannerCard key={`route-${mapRequest.origin}-${mapRequest.destination}`} initialOrigin={mapRequest.origin} initialDestination={mapRequest.destination} autoCalculate />;
+                    }
+                    return <GoogleMapWidgetCard key={`location-${mapRequest.location}`} locationName={mapRequest.location} autoLocate zoom={12} />;
                   })()}
-
-                  {/* Google Maps Widget Detection */}
-                  {/(map of|location of|show map|google map)/i.test(cleanedContent || '') && !/(route planner|plan (?:a )?route|directions from|navigate from|route from|how do i get to|how to get to)/i.test(cleanedContent || '') && (
-                    <GoogleMapWidgetCard locationName="Google Headquarters, Mountain View" latitude={37.4220} longitude={-122.0841} />
-                  )}
 
                   {parsedSources.sources.length > 0 && (
                     <SourceCitations sources={parsedSources.sources} />
