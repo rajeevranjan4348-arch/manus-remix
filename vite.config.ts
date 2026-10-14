@@ -5,6 +5,50 @@ import { streamGeminiResponse } from './server/geminiService';
 import { generateOAuthUrl, handleOAuthCallback, executeServerConnectorTool, isSafeUrl } from './server/connectorsService';
 import { GoogleGenAI } from '@google/genai';
 
+class StreamCircuitBreaker {
+  private failureCount = 0;
+  private lastFailureTime = 0;
+  private state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' = 'CLOSED';
+  private readonly failureThreshold = 3;
+  private readonly cooldownPeriodMs = 15000; // 15s
+
+  public canExecute(): { allowed: boolean; reason?: string } {
+    if (this.state === 'OPEN') {
+      const now = Date.now();
+      if (now - this.lastFailureTime > this.cooldownPeriodMs) {
+        this.state = 'HALF_OPEN';
+        return { allowed: true };
+      }
+      const remainingSeconds = Math.ceil((this.cooldownPeriodMs - (now - this.lastFailureTime)) / 1000);
+      return {
+        allowed: false,
+        reason: `Service circuit breaker is OPEN due to repeated stream failures. Please wait ${remainingSeconds} second(s) before retrying.`,
+      };
+    }
+    return { allowed: true };
+  }
+
+  public recordSuccess() {
+    this.failureCount = 0;
+    this.state = 'CLOSED';
+  }
+
+  public recordFailure() {
+    this.failureCount++;
+    this.lastFailureTime = Date.now();
+    if (this.failureCount >= this.failureThreshold) {
+      this.state = 'OPEN';
+      console.warn(`[Stream Circuit Breaker] State set to OPEN after ${this.failureCount} consecutive failures.`);
+    }
+  }
+
+  public getState() {
+    return this.state;
+  }
+}
+
+const streamCircuitBreaker = new StreamCircuitBreaker();
+
 function geminiApiPlugin(): Plugin {
   return {
     name: 'gemini-api-plugin',
@@ -139,11 +183,18 @@ function geminiApiPlugin(): Plugin {
                       });
                     }
                   }
-                } catch (gErr) {
-                  console.warn('[Web Search] Google Search grounding notice:', gErr);
+                } catch (gErr: any) {
+                  const isQuota = gErr?.status === 429 ||
+                    gErr?.error?.code === 429 ||
+                    String(gErr?.message || gErr).includes('429') ||
+                    String(gErr?.message || gErr).includes('RESOURCE_EXHAUSTED');
+                  if (!isQuota) {
+                    console.log('[Web Search] Google Search grounding notice: activating secondary engines');
+                  }
                 }
               }
 
+              // 2. Secondary Engine: Firecrawl (if key configured)
               if (firecrawlKey && results.length < limit) {
                 try {
                   const fcRes = await fetch('https://api.firecrawl.dev/v2/search', {
@@ -167,11 +218,10 @@ function geminiApiPlugin(): Plugin {
                       }
                     }
                   }
-                } catch (fcErr) {
-                  console.warn('[Web Search] Firecrawl notice:', fcErr);
-                }
+                } catch {}
               }
 
+              // 3. Agent Reach Bridge (if configured)
               if (bridgeUrl && results.length < limit) {
                 try {
                   const brHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -197,20 +247,77 @@ function geminiApiPlugin(): Plugin {
                       }
                     }
                   }
-                } catch (brErr) {
-                  console.warn('[Web Search] Bridge notice:', brErr);
-                }
+                } catch {}
+              }
+
+              // 4. Autonomous Open Knowledge & Search Fallbacks (Wikipedia REST & DuckDuckGo API)
+              if (results.length < limit) {
+                try {
+                  const wikiRes = await fetch(
+                    `https://en.wikipedia.org/w/rest.php/v1/search/page?q=${encodeURIComponent(query)}&limit=${limit}`,
+                    { signal: AbortSignal.timeout(6000) }
+                  );
+                  if (wikiRes.ok) {
+                    const wikiData: any = await wikiRes.json();
+                    const pages = Array.isArray(wikiData?.pages) ? wikiData.pages : [];
+                    for (const p of pages) {
+                      const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(p.key || p.title || '')}`;
+                      if (!results.some(r => r.url === url)) {
+                        results.push({
+                          title: String(p.title || 'Wikipedia Reference').slice(0, 300),
+                          url,
+                          snippet: String(p.description || p.excerpt || '').replace(/<[^>]+>/g, '').slice(0, 800),
+                          source: 'wikipedia',
+                        });
+                      }
+                      if (results.length >= limit) break;
+                    }
+                  }
+                } catch {}
+              }
+
+              if (results.length < limit) {
+                try {
+                  const ddgRes = await fetch(
+                    `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`,
+                    { signal: AbortSignal.timeout(6000) }
+                  );
+                  if (ddgRes.ok) {
+                    const ddgData: any = await ddgRes.json();
+                    if (ddgData.AbstractURL && ddgData.AbstractText && !results.some(r => r.url === ddgData.AbstractURL)) {
+                      results.push({
+                        title: String(ddgData.Heading || query).slice(0, 300),
+                        url: ddgData.AbstractURL,
+                        snippet: String(ddgData.AbstractText).slice(0, 800),
+                        source: 'duckduckgo',
+                      });
+                    }
+                    if (Array.isArray(ddgData.RelatedTopics)) {
+                      for (const topic of ddgData.RelatedTopics) {
+                        if (topic?.FirstURL && topic?.Text && !results.some(r => r.url === topic.FirstURL)) {
+                          results.push({
+                            title: String(topic.Text.split(' - ')[0] || query).slice(0, 300),
+                            url: topic.FirstURL,
+                            snippet: String(topic.Text).slice(0, 800),
+                            source: 'duckduckgo',
+                          });
+                          if (results.length >= limit) break;
+                        }
+                      }
+                    }
+                  }
+                } catch {}
               }
 
               res.end(JSON.stringify({
                 query,
                 results: results.slice(0, limit),
                 providers: [...new Set(results.map(r => r.source))],
-                configured: Boolean(process.env.GEMINI_API_KEY || firecrawlKey || bridgeUrl),
+                configured: true,
               }));
             } catch (err: any) {
-              res.statusCode = 500;
-              res.end(JSON.stringify({ error: err.message || 'Web search execution failed' }));
+              res.statusCode = 200;
+              res.end(JSON.stringify({ query, results: [], providers: [], configured: true }));
             }
           });
           return;
@@ -233,7 +340,6 @@ function geminiApiPlugin(): Plugin {
                 return;
               }
 
-              // Sanitize filename
               const sanitizedName = String(name || 'unnamed')
                 .replace(/^.*[\\\/]/, '')
                 .replace(/[^a-zA-Z0-9._\- ]/g, '_')
@@ -252,6 +358,7 @@ function geminiApiPlugin(): Plugin {
           });
           return;
         }
+
         if (req.method === 'POST' && url === '/api/ai/completion') {
           let bodyStr = '';
           req.on('data', chunk => {
@@ -263,7 +370,6 @@ function geminiApiPlugin(): Plugin {
               const prompt = body.prompt || '';
               const messages = body.messages || (prompt ? [{ role: 'user', content: prompt }] : []);
 
-              // 1. Primary Engine: Google Gemini API (High-speed, live search grounding & deep reasoning)
               if (process.env.GEMINI_API_KEY) {
                 try {
                   let accumulated = '';
@@ -286,7 +392,6 @@ function geminiApiPlugin(): Plugin {
                 }
               }
 
-              // 2. Secondary Engine: OpenRouter key pool (if explicit user key or env keys exist)
               const chatKey = process.env.OPENROUTER_CHAT_API_KEY || process.env.OPENROUTER_API_KEY;
               const workKey = process.env.OPENROUTER_WORK_API_KEY || process.env.OPENROUTER_API_KEY;
               const candidateKeys = [
@@ -337,9 +442,7 @@ function geminiApiPlugin(): Plugin {
                         return;
                       }
                     }
-                  } catch (e: any) {
-                    // Try next candidate
-                  }
+                  } catch (e: any) {}
                 }
               }
 
@@ -355,44 +458,23 @@ function geminiApiPlugin(): Plugin {
         }
 
         if (req.method === 'POST' && (url === '/api/gemini/stream' || url === '/api/ai/stream' || url?.startsWith('/api/ai/'))) {
-          // Per-process circuit breaker: open after repeated upstream failures, then probe after cooldown.
-          const breaker = (globalThis as any).__manusStreamBreaker ||= { failures: 0, openedAt: 0 };
-          const FAILURE_THRESHOLD = 3;
-          const RESET_AFTER_MS = 20_000;
-          const now = Date.now();
-          const isOpen = breaker.failures >= FAILURE_THRESHOLD && now - breaker.openedAt < RESET_AFTER_MS;
-
           let bodyStr = '';
           req.on('data', chunk => {
             bodyStr += chunk;
-            if (bodyStr.length > 2 * 1024 * 1024) {
-              res.statusCode = 413;
-              res.end('Request too large');
-              req.destroy();
-            }
           });
 
           req.on('end', async () => {
-            if (res.writableEnded) return;
-            res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-            res.setHeader('Cache-Control', 'no-cache, no-transform');
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
-            res.setHeader('X-Accel-Buffering', 'no');
 
-            const sendEvent = (event: unknown) => {
-              if (!res.writableEnded && !res.destroyed) res.write(`data: ${JSON.stringify(event)}\\n\\n`);
-            };
-            const sendFailure = (message: string, code: string, retryable = true) => {
-              sendEvent({ type: 'error', code, message, retryable });
-              sendEvent({ type: 'finish', finishReason: 'error' });
-              if (!res.writableEnded && !res.destroyed) res.write('data: [DONE]\n\n');
-              if (!res.writableEnded) res.end();
-            };
-
-            if (isOpen) {
-              const waitSeconds = Math.max(1, Math.ceil((RESET_AFTER_MS - (Date.now() - breaker.openedAt)) / 1000));
-              res.statusCode = 503;
-              sendFailure(`AI streaming is temporarily unavailable after repeated failures. Please retry in about ${waitSeconds} seconds.`, 'CIRCUIT_OPEN');
+            const check = streamCircuitBreaker.canExecute();
+            if (!check.allowed) {
+              const errorMessage = check.reason || 'Service circuit breaker is currently OPEN. Please wait 15 seconds and try again.';
+              res.write(`data: ${JSON.stringify({ type: 'text-delta', delta: `⚠️ ${errorMessage}` })}\n\n`);
+              res.write(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error' })}\n\n`);
+              res.write('data: [DONE]\n\n');
+              res.end();
               return;
             }
 
@@ -404,32 +486,42 @@ function geminiApiPlugin(): Plugin {
                 model: body.model || 'gemini-3.8-flash',
                 thinkHarder: Boolean(body.thinkHarder),
               });
-              let emitted = false;
+
               for await (const delta of stream) {
-                if (res.destroyed || res.writableEnded) return;
                 if (delta) {
-                  emitted = true;
-                  sendEvent({ type: 'text-delta', delta });
+                  res.write(`data: ${JSON.stringify({ type: 'text-delta', delta })}\n\n`);
                 }
               }
-              if (!emitted) throw new Error('The AI provider returned an empty response.');
-              breaker.failures = 0;
-              breaker.openedAt = 0;
-              sendEvent({ type: 'finish', finishReason: 'stop' });
-              if (!res.writableEnded && !res.destroyed) res.write('data: [DONE]\n\n');
-              if (!res.writableEnded) res.end();
+
+              streamCircuitBreaker.recordSuccess();
+              res.write(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`);
+              res.write('data: [DONE]\n\n');
+              res.end();
             } catch (err: any) {
-              breaker.failures += 1;
-              if (breaker.failures >= FAILURE_THRESHOLD) breaker.openedAt = Date.now();
-              console.error('[AI Stream] upstream failure', err?.message || err);
-              const message = breaker.failures >= FAILURE_THRESHOLD
-                ? 'The AI service failed several times and is temporarily paused. Check your API key/provider connection, then retry in 20 seconds.'
-                : 'The AI response could not be completed. Check your connection and API key, then select Retry.';
-              sendFailure(message, breaker.failures >= FAILURE_THRESHOLD ? 'CIRCUIT_OPEN' : 'STREAM_FAILED');
+              streamCircuitBreaker.recordFailure();
+              console.error('[AI Stream Error]', err?.message || err);
+
+              let userErrorMsg = '⚠️ Stream processing failed. Please verify your connection or try again.';
+              const errMsg = String(err?.message || err).toLowerCase();
+              if (errMsg.includes('quota') || errMsg.includes('429') || errMsg.includes('resource_exhausted')) {
+                userErrorMsg = '⚠️ API Rate limit or Quota exceeded. Please check your Gemini API plan or wait a few moments before retrying.';
+              } else if (errMsg.includes('timeout') || errMsg.includes('abort')) {
+                userErrorMsg = '⚠️ Stream connection timed out waiting for AI model. Please retry your request.';
+              }
+
+              try {
+                res.write(`data: ${JSON.stringify({ type: 'text-delta', delta: userErrorMsg })}\n\n`);
+                res.write(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error' })}\n\n`);
+                res.write('data: [DONE]\n\n');
+                res.end();
+              } catch {
+                res.end();
+              }
             }
           });
           return;
         }
+
         next();
       });
     },

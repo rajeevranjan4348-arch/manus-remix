@@ -34,6 +34,8 @@ import {
   clearActiveChatHistoryBackup,
   reconcileChatMessages,
 } from '@/lib/chatAutoSave';
+import { extractWeatherQuery, fetchWeatherByCity } from '@/lib/weatherService';
+
 
 export type AgentTaskPhase = 'idle' | 'tool-calling' | 'text-generation' | 'completed' | 'error';
 
@@ -699,6 +701,35 @@ Regarding **${promptText}**:
       return enriched;
     }
 
+    // -1. Autonomous Live Weather Tool Calling
+    try {
+      const weatherCheck = extractWeatherQuery(prompt, displayMessages);
+      if (weatherCheck.isWeather) {
+        if (weatherCheck.city) {
+          const weatherData = await fetchWeatherByCity(weatherCheck.city);
+          if (weatherData) {
+            enriched += `\n\n[LIVE WEATHER TOOL DATA FOR ${weatherData.locationName.toUpperCase()}${weatherData.country ? ', ' + weatherData.country : ''}]:
+- Location: ${weatherData.locationName}${weatherData.country ? ' (' + weatherData.country + ')' : ''}
+- Current Temperature: ${weatherData.temperature}°C (${weatherData.temperatureFahrenheit}°F)
+- Apparent Temperature (Feels like): ${weatherData.apparentTemperature}°C
+- Condition: ${weatherData.condition}
+- Humidity: ${weatherData.humidity}%
+- Wind Speed: ${weatherData.windSpeed} km/h
+- Precipitation: ${weatherData.precipitation} mm
+- 5-Day Forecast:
+${weatherData.forecast.map(f => `  * ${f.day}: Max ${f.maxTemp}°C, Min ${f.minTemp}°C - ${f.condition}`).join('\n')}
+- Source Attribution: Open-Meteo Real-time Weather API (https://open-meteo.com)
+
+[INSTRUCTION: Present this live weather data clearly to the user with temperature in both °C and °F, humidity, wind speed, and the 5-day forecast. Explicitly attribute Open-Meteo as the source.]`;
+          }
+        } else {
+          enriched += `\n\n[WEATHER TOOL INSTRUCTION: The user asked about weather, but did not specify a city or location. Ask the user politely which city or location they would like to check the weather for.]`;
+        }
+      }
+    } catch (weatherErr) {
+      console.warn('[Weather Tool] Error fetching weather data:', weatherErr);
+    }
+
     // 0. Live Google Search & News Grounding (Real-time events, news, fact-checking)
     const isSearchIntent = /\b(current events?|latest news|recent news|breaking news|news today|headlines|fact[\s-]?check|factcheck|is it true|verify|debunk|latest|today|yesterday|this week|who won|election|stock price|weather|happening)\b/i.test(prompt) || prompt.includes('@web_search') || prompt.includes('@search') || prompt.includes('@google');
     if (isSearchIntent) {
@@ -725,8 +756,8 @@ Regarding **${promptText}**:
             }
           }
         }
-      } catch (searchErr) {
-        console.warn('[Live Google Search Context] Notice:', searchErr);
+      } catch {
+        // Silently continue if real-time search context is unavailable
       }
     }
 

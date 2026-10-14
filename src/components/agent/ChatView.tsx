@@ -254,13 +254,19 @@ export function ChatView({
 
   // Check user queries for live weather data
   useEffect(() => {
-    messages.forEach(async (m) => {
-      if (m.role === 'user' && !weatherMap[m.id || m.content]) {
-        const query = extractWeatherQuery(m.content || '');
+    messages.forEach(async (m, idx) => {
+      const msgKey = m.id || m.content;
+      if (!weatherMap[msgKey]) {
+        const query = extractWeatherQuery(m.content || '', messages.slice(0, idx));
         if (query.isWeather && query.city) {
           const data = await fetchWeatherByCity(query.city);
           if (data) {
-            setWeatherMap(prev => ({ ...prev, [m.id || m.content]: data }));
+            setWeatherMap(prev => ({
+              ...prev,
+              [msgKey]: data,
+              [query.city!.toLowerCase()]: data,
+              [data.locationName.toLowerCase()]: data,
+            }));
           }
         }
       }
@@ -764,11 +770,25 @@ export function ChatView({
     return Boolean(cleanedContent || thought);
   });
   const activeRunningStep = steps.find(s => s.status === 'running');
-  const typingStatus = activeRunningStep 
-    ? activeRunningStep.label 
-    : isThinkHarder 
-      ? "Manus is reasoning deeply..." 
-      : "Manus is thinking...";
+  const latestUserMsg = [...displayMessages].reverse().find((m: any) => m?.role === 'user')?.content || prompt;
+  const weatherQuery = extractWeatherQuery(latestUserMsg, displayMessages);
+
+  let typingStatus = activeRunningStep?.label;
+  if (!typingStatus && isAssistantWorking) {
+    if (weatherQuery.isWeather && weatherQuery.city) {
+      typingStatus = `Searching weather data for ${weatherQuery.city}...`;
+    } else if (weatherQuery.isWeather) {
+      typingStatus = 'Searching weather data...';
+    } else if (/(search|google|news|latest|breaking|fact|verify)/i.test(latestUserMsg)) {
+      typingStatus = 'Searching live web sources...';
+    } else if (/@[\w_]+/.test(latestUserMsg)) {
+      typingStatus = 'Connecting to workspace tools...';
+    } else if (isThinkHarder) {
+      typingStatus = 'Manus is reasoning deeply...';
+    } else {
+      typingStatus = 'Manus is thinking...';
+    }
+  }
 
   return (
     <div className="flex flex-col h-full bg-manus-cream dark:bg-background relative">
@@ -920,6 +940,23 @@ export function ChatView({
                       return <RoutePlannerCard key={`route-${mapRequest.origin}-${mapRequest.destination}`} initialOrigin={mapRequest.origin} initialDestination={mapRequest.destination} autoCalculate />;
                     }
                     return <GoogleMapWidgetCard key={`location-${mapRequest.location}`} locationName={mapRequest.location} autoLocate zoom={12} />;
+                  })()}
+
+                  {/* Weather Widget Card Detection */}
+                  {(() => {
+                    const prevUserMsg = i > 0 ? displayMessages[i - 1] : null;
+                    const wData = weatherMap[msg.id] || 
+                      weatherMap[msg.content] || 
+                      (prevUserMsg ? (weatherMap[prevUserMsg.id] || weatherMap[prevUserMsg.content]) : null) ||
+                      (Object.keys(weatherMap).length > 0 ? Object.values(weatherMap)[0] : null);
+                    
+                    const isWeatherContent = /(weather|temperature|forecast|humidity|celsius|fahrenheit|open-meteo|climate)/i.test(cleanedContent || '') ||
+                      (prevUserMsg && /(weather|temperature|forecast|delhi|mumbai|london|tokyo|city)/i.test(prevUserMsg.content || ''));
+
+                    if (wData && isWeatherContent) {
+                      return <WeatherWidgetCard data={wData} className="my-3 animate-weather-card" />;
+                    }
+                    return null;
                   })()}
 
                   {parsedSources.sources.length > 0 && (

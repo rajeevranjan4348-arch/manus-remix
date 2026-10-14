@@ -38,7 +38,7 @@ export function WeatherWidgetCard({ data, className }: WeatherWidgetCardProps) {
   return (
     <div
       className={cn(
-        "rounded-2xl border border-border/80 bg-gradient-to-br from-white via-white to-sky-50/40 dark:from-card dark:via-card dark:to-sky-950/20 p-5 shadow-sm hover:shadow-md transition-all max-w-xl mx-auto my-3 text-foreground",
+        "rounded-2xl border border-border/80 bg-gradient-to-br from-white via-white to-sky-50/40 dark:from-card dark:via-card dark:to-sky-950/20 p-5 shadow-sm hover:shadow-md transition-all max-w-xl mx-auto my-3 text-foreground animate-weather-card",
         className
       )}
     >

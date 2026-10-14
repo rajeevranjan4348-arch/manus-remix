@@ -146,31 +146,51 @@ export async function fetchWeatherByCoords(
 /**
  * Checks if a user prompt is asking about weather, and extracts city name if present
  */
-export function extractWeatherQuery(text: string): { isWeather: boolean; city?: string } {
+export function extractWeatherQuery(
+  text: string,
+  recentMessages?: Array<{ role: string; content: string }>
+): { isWeather: boolean; city?: string } {
   if (!text) return { isWeather: false };
-  const lower = text.toLowerCase();
+  const lower = text.toLowerCase().trim();
 
   const isWeatherMatch =
-    /\b(weather|temperature|forecast|climate|rain today|snowing|is it cold|is it hot|sunny in)\b/i.test(lower);
+    /\b(weather|temperature|forecast|climate|rain today|snowing|is it cold|is it hot|sunny in|how hot|how cold)\b/i.test(lower);
 
-  if (!isWeatherMatch) return { isWeather: false };
+  if (isWeatherMatch) {
+    // Try extracting city: "weather in Tokyo", "what's the weather for London", "Paris weather"
+    const inPattern = /(?:weather|temperature|forecast|climate)\s+(?:in|for|at|of)\s+([a-zA-Z\s,]+?)(?:\?|\.|$|\s+(?:today|tomorrow|this week))/i;
+    const match = lower.match(inPattern);
 
-  // Try extracting city: "weather in Tokyo", "what's the weather for London", "Paris weather"
-  const inPattern = /(?:weather|temperature|forecast|climate)\s+(?:in|for|at|of)\s+([a-zA-Z\s,]+?)(?:\?|\.|$|\s+(?:today|tomorrow|this week))/i;
-  const match = lower.match(inPattern);
+    if (match && match[1]) {
+      return { isWeather: true, city: match[1].trim() };
+    }
 
-  if (match && match[1]) {
-    return { isWeather: true, city: match[1].trim() };
+    const prefixPattern = /([a-zA-Z\s]+?)\s+(?:weather|temperature|forecast)(?:\?|\.|$)/i;
+    const prefixMatch = lower.match(prefixPattern);
+    if (prefixMatch && prefixMatch[1] && prefixMatch[1].length < 30) {
+      const candidate = prefixMatch[1].replace(/^(what is|whats|how is|hows|the)\s+/i, '').trim();
+      if (candidate && !['today', 'now', 'there', 'here', 'outside'].includes(candidate.toLowerCase())) {
+        return { isWeather: true, city: candidate };
+      }
+    }
+
+    return { isWeather: true };
   }
 
-  const prefixPattern = /([a-zA-Z\s]+?)\s+(?:weather|temperature|forecast)(?:\?|\.|$)/i;
-  const prefixMatch = lower.match(prefixPattern);
-  if (prefixMatch && prefixMatch[1] && prefixMatch[1].length < 30) {
-    const candidate = prefixMatch[1].replace(/^(what is|whats|how is|hows|the)\s+/i, '').trim();
-    if (candidate) {
-      return { isWeather: true, city: candidate };
+  // Check if this is a follow-up location answer (e.g., user answered "Delhi" after being asked for a city)
+  if (recentMessages && recentMessages.length > 0) {
+    const recentContext = recentMessages.slice(-3).map(m => m.content.toLowerCase()).join(' ');
+    const contextWasWeather = /\b(weather|temperature|forecast|city|location)\b/i.test(recentContext);
+
+    if (contextWasWeather) {
+      // Clean candidate string: e.g. "Delhi", "Delhi, India", "New Delhi"
+      const cleanCandidate = lower.replace(/^(in|for|at|city|location|check|for|it is)\s+/i, '').replace(/[?.!]/g, '').trim();
+      if (cleanCandidate && cleanCandidate.length > 1 && cleanCandidate.length < 40 && !/^(yes|no|thanks|ok|hello|hi)$/i.test(cleanCandidate)) {
+        return { isWeather: true, city: cleanCandidate };
+      }
     }
   }
 
-  return { isWeather: true };
+  return { isWeather: false };
 }
+

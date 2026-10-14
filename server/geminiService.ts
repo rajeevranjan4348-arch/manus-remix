@@ -186,13 +186,11 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
   });
 
   const preferredModel = normalizeModel(options.model);
-  // Order candidate models prioritizing active high-speed models
   const candidateModels = Array.from(new Set([
     preferredModel,
     'gemini-3.8-flash',
     'gemini-3.1-flash-lite',
     'gemini-flash-latest',
-    'gemini-flash-lite-latest',
   ]));
 
   let systemPrompt = options.systemInstruction ||
