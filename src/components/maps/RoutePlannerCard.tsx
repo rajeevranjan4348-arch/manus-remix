@@ -8,6 +8,7 @@ type TravelMode = 'DRIVING' | 'WALKING' | 'BICYCLING';
 interface RoutePlannerCardProps {
   initialOrigin?: string;
   initialDestination?: string;
+  autoCalculate?: boolean;
   className?: string;
 }
 
@@ -108,6 +109,7 @@ function RouteMap({
 function RoutePlannerContent({
   initialOrigin = '',
   initialDestination = '',
+  autoCalculate = false,
 }: RoutePlannerCardProps) {
   const [origin, setOrigin] = useState(initialOrigin);
   const [destination, setDestination] = useState(initialDestination);
@@ -121,6 +123,14 @@ function RoutePlannerContent({
   const onRoute = useCallback((value: any) => setRoute(value), []);
   const onError = useCallback((value: string) => setError(value), []);
   const onLoading = useCallback((value: boolean) => setLoading(value), []);
+
+  useEffect(() => {
+    if (autoCalculate && initialOrigin.trim() && initialDestination.trim()) {
+      setOrigin(initialOrigin);
+      setDestination(initialDestination);
+      setRequestVersion((version) => version + 1);
+    }
+  }, [autoCalculate, initialOrigin, initialDestination]);
 
   const swapLocations = () => {
     setOrigin(destination);
