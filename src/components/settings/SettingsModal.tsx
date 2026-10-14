@@ -7,7 +7,8 @@ import {
   Brain, 
   User, 
   Volume2, 
-  Shield, 
+  Shield,
+  Smartphone, 
   Info, 
   Download, 
   Upload, 
@@ -29,6 +30,7 @@ import {
 } from 'lucide-react';
 import { useFirebase } from '@/context/FirebaseContext';
 import { GitHubRepositoryBrowser } from './GitHubRepositoryBrowser';
+import { AndroidControlPanel } from './AndroidControlPanel';
 import { 
   UserSettings, 
   AppTheme, 
@@ -93,7 +95,7 @@ interface SettingsModalProps {
   initialTab?: SettingsTab;
 }
 
-type SettingsTab = 'general' | 'robot' | 'ai' | 'personalization' | 'voice' | 'data' | 'connectors' | 'about';
+type SettingsTab = 'general' | 'robot' | 'ai' | 'personalization' | 'voice' | 'data' | 'connectors' | 'android' | 'about';
 
 export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProps) {
   const { theme, setTheme } = useTheme();
@@ -226,6 +228,7 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
   const tabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
     { id: 'general', label: 'General', icon: Sun },
     { id: 'connectors', label: 'GitHub & Repos', icon: Github },
+    { id: 'android', label: 'Android Control', icon: Smartphone },
     { id: 'robot', label: 'Robot', icon: Bot },
     { id: 'ai', label: 'AI & Models', icon: Brain },
     { id: 'personalization', label: 'Personalization', icon: User },
@@ -481,6 +484,9 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                 <GitHubRepositoryBrowser />
               </div>
             )}
+
+            {/* ANDROID PHONE CONTROL TAB */}
+            {activeTab === 'android' && <AndroidControlPanel />}
 
             {/* ROBOT CUSTOMIZATION TAB */}
             {activeTab === 'robot' && (
