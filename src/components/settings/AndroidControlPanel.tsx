@@ -112,7 +112,7 @@ export function AndroidControlPanel() {
         {status !== 'connected' && (
           <div className="rounded-lg bg-muted/50 p-3 text-[11px] leading-relaxed text-muted-foreground">
             {status === 'not-configured'
-              ? 'The secure bridge is not configured on the server yet. Add ANDROID_CONTROL_BRIDGE_URL and ANDROID_CONTROL_BRIDGE_TOKEN in Netlify, then deploy the companion bridge on your Android device.'
+              ? 'The secure bridge is not configured on the server yet. Set FIREBASE_SERVICE_ACCOUNT_JSON, ANDROID_CONTROL_ALLOWED_UID, ANDROID_CONTROL_BRIDGE_URL, and ANDROID_CONTROL_BRIDGE_TOKEN in Netlify, then deploy and pair a compatible companion bridge on your Android device.'
               : status === 'checking'
                 ? 'Checking the configured bridge…'
                 : 'The bridge is not responding. Keep the companion service running, online, and paired.'}
