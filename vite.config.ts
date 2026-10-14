@@ -355,45 +355,77 @@ function geminiApiPlugin(): Plugin {
         }
 
         if (req.method === 'POST' && (url === '/api/gemini/stream' || url === '/api/ai/stream' || url?.startsWith('/api/ai/'))) {
+          // Per-process circuit breaker: open after repeated upstream failures, then probe after cooldown.
+          const breaker = (globalThis as any).__manusStreamBreaker ||= { failures: 0, openedAt: 0 };
+          const FAILURE_THRESHOLD = 3;
+          const RESET_AFTER_MS = 20_000;
+          const now = Date.now();
+          const isOpen = breaker.failures >= FAILURE_THRESHOLD && now - breaker.openedAt < RESET_AFTER_MS;
+
           let bodyStr = '';
           req.on('data', chunk => {
             bodyStr += chunk;
+            if (bodyStr.length > 2 * 1024 * 1024) {
+              res.statusCode = 413;
+              res.end('Request too large');
+              req.destroy();
+            }
           });
 
           req.on('end', async () => {
+            if (res.writableEnded) return;
+            res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-cache, no-transform');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Accel-Buffering', 'no');
+
+            const sendEvent = (event: unknown) => {
+              if (!res.writableEnded && !res.destroyed) res.write(`data: ${JSON.stringify(event)}\\n\\n`);
+            };
+            const sendFailure = (message: string, code: string, retryable = true) => {
+              sendEvent({ type: 'error', code, message, retryable });
+              sendEvent({ type: 'finish', finishReason: 'error' });
+              sendEvent('[DONE]');
+              if (!res.writableEnded) res.end();
+            };
+
+            if (isOpen) {
+              const waitSeconds = Math.max(1, Math.ceil((RESET_AFTER_MS - (Date.now() - breaker.openedAt)) / 1000));
+              res.statusCode = 503;
+              sendFailure(`AI streaming is temporarily unavailable after repeated failures. Please retry in about ${waitSeconds} seconds.`, 'CIRCUIT_OPEN');
+              return;
+            }
+
             try {
               const body = bodyStr ? JSON.parse(bodyStr) : {};
-              res.setHeader('Content-Type', 'text/event-stream');
-              res.setHeader('Cache-Control', 'no-cache');
-              res.setHeader('Connection', 'keep-alive');
-
               const stream = streamGeminiResponse({
                 messages: body.messages || (body.prompt ? [{ role: 'user', content: body.prompt }] : []),
                 systemInstruction: body.systemInstruction,
                 model: body.model || 'gemini-3.8-flash',
                 thinkHarder: Boolean(body.thinkHarder),
               });
-
+              let emitted = false;
               for await (const delta of stream) {
-                res.write(`data: ${JSON.stringify({ type: 'text-delta', delta })}\n\n`);
-              }
-
-              res.write(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`);
-              res.write('data: [DONE]\n\n');
-              res.end();
-            } catch (err: any) {
-              console.log('[AI Stream] Request concluded with resilient fallback');
-              try {
-                if (!res.headersSent) {
-                  res.setHeader('Content-Type', 'text/event-stream');
+                if (res.destroyed || res.writableEnded) return;
+                if (delta) {
+                  emitted = true;
+                  sendEvent({ type: 'text-delta', delta });
                 }
-                res.write(`data: ${JSON.stringify({ type: 'text-delta', delta: 'I have processed your request. How else can I assist you?' })}\n\n`);
-                res.write(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`);
-                res.write('data: [DONE]\n\n');
-                res.end();
-              } catch {
-                res.end();
               }
+              if (!emitted) throw new Error('The AI provider returned an empty response.');
+              breaker.failures = 0;
+              breaker.openedAt = 0;
+              sendEvent({ type: 'finish', finishReason: 'stop' });
+              sendEvent('[DONE]');
+              if (!res.writableEnded) res.end();
+            } catch (err: any) {
+              breaker.failures += 1;
+              if (breaker.failures >= FAILURE_THRESHOLD) breaker.openedAt = Date.now();
+              console.error('[AI Stream] upstream failure', err?.message || err);
+              const message = breaker.failures >= FAILURE_THRESHOLD
+                ? 'The AI service failed several times and is temporarily paused. Check your API key/provider connection, then retry in 20 seconds.'
+                : 'The AI response could not be completed. Check your connection and API key, then select Retry.';
+              sendFailure(message, breaker.failures >= FAILURE_THRESHOLD ? 'CIRCUIT_OPEN' : 'STREAM_FAILED');
             }
           });
           return;
