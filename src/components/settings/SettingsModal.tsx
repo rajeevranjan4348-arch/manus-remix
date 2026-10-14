@@ -26,11 +26,13 @@ import {
   Github,
   Cloud,
   Flame,
+  Workflow,
   Database as DatabaseIcon
 } from 'lucide-react';
 import { useFirebase } from '@/context/FirebaseContext';
 import { GitHubRepositoryBrowser } from './GitHubRepositoryBrowser';
 import { AndroidControlPanel } from './AndroidControlPanel';
+import { AutomationAgentPanel } from './AutomationAgentPanel';
 import { 
   UserSettings, 
   AppTheme, 
@@ -95,7 +97,7 @@ interface SettingsModalProps {
   initialTab?: SettingsTab;
 }
 
-type SettingsTab = 'general' | 'robot' | 'ai' | 'personalization' | 'voice' | 'data' | 'connectors' | 'android' | 'about';
+type SettingsTab = 'general' | 'robot' | 'ai' | 'personalization' | 'voice' | 'data' | 'connectors' | 'android' | 'automation' | 'about';
 
 export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProps) {
   const { theme, setTheme } = useTheme();
@@ -229,6 +231,7 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
     { id: 'general', label: 'General', icon: Sun },
     { id: 'connectors', label: 'GitHub & Repos', icon: Github },
     { id: 'android', label: 'Android Control', icon: Smartphone },
+    { id: 'automation', label: 'Automation Agent', icon: Workflow }, 
     { id: 'robot', label: 'Robot', icon: Bot },
     { id: 'ai', label: 'AI & Models', icon: Brain },
     { id: 'personalization', label: 'Personalization', icon: User },
@@ -487,6 +490,8 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
 
             {/* ANDROID PHONE CONTROL TAB */}
             {activeTab === 'android' && <AndroidControlPanel />}
+
+            {activeTab === 'automation' && <AutomationAgentPanel />}
 
             {/* ROBOT CUSTOMIZATION TAB */}
             {activeTab === 'robot' && (
