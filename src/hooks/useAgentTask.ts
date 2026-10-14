@@ -612,6 +612,29 @@ Regarding **${promptText}**:
     let enriched = prompt;
     const activeUserId = user?.id || 'usr_manus_default';
 
+    // Automation coordinator: plan multi-step tasks using current server-side integration readiness.
+    // This endpoint creates a plan only; real actions must still be confirmed by an actual connector/tool result.
+    const automationIntent = /\\b(automate|automation|workflow|browseract|macrodroid|android phone|control my phone|run a sequence|multi-step task|schedule a task)\\b/i.test(prompt);
+    if (automationIntent && !/@image_generation|@imagegen/i.test(prompt)) {
+      try {
+        const planResponse = await fetch('/api/automation-agent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ action: 'plan', prompt: prompt.slice(0, 4000) }),
+        });
+        const planData = await planResponse.json().catch(() => ({}));
+        if (planResponse.ok && Array.isArray(planData.steps)) {
+          enriched += '\\n\\n[MANUS AUTOMATION PLAN — PLANNING ONLY; NOT EXECUTED]:\\n' +
+            planData.steps.map((step: unknown, index: number) => (index + 1) + '. ' + String(step)).join('\\n') +
+            '\\n[AVAILABLE CHANNELS]:\\n' +
+            (Array.isArray(planData.capabilities) ? planData.capabilities.map((cap: any) => '- ' + String(cap.label) + ': ' + (cap.ready ? 'configured' : 'not configured') + ' — ' + String(cap.detail)).join('\\n') : '') +
+            '\\n[EXECUTION SAFETY]: Use only tools that return actual successful results. The plan is not proof of execution. Ask for explicit confirmation before sending, publishing, purchasing, deleting, or changing account/device state. Never claim an unavailable connector ran.';
+        }
+      } catch (automationError) {
+        console.warn('[Automation Agent] Planning unavailable; continuing with normal tool routing.', automationError);
+      }
+    }
+
     // 0. Real image-generation tool (server-side provider call; never expose provider secrets in the browser).
     const imageIntent = /@image_generation|@imagegen|\\b(generate|create|draw|make)\\b.{0,80}\\b(image|picture|illustration|wallpaper|logo|artwork)\\b/i.test(prompt);
     if (imageIntent) {
