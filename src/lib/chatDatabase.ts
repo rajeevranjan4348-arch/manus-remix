@@ -355,6 +355,12 @@ export async function deleteConversation(id: string): Promise<boolean> {
   const fallbackMsgs = getFallbackMessages().filter(m => m.conversationId !== id);
   saveFallbackMessages(fallbackMsgs);
 
+  // Clean up periodic chat auto-save backup in localStorage
+  try {
+    const { clearChatHistoryBackup } = await import('@/lib/chatAutoSave');
+    clearChatHistoryBackup(id);
+  } catch {}
+
   notifyDbUpdated(id);
   deleteConversationFromFirestore(id).catch(() => {});
   return true;

@@ -301,14 +301,14 @@ export function VoiceInputButton({
         aria-label={isListening ? 'Stop listening' : 'Start voice command or speech input'}
         title={isListening ? 'Listening... click to stop' : 'Voice command or question (e.g. "Open YouTube", "Weather in Paris")'}
         className={cn(
-          "relative flex items-center justify-center rounded-full transition-all cursor-pointer",
+          "relative flex items-center justify-center rounded-full transition-all cursor-pointer shrink-0 active:scale-95",
           isListening
             ? "bg-rose-500 text-white animate-pulse shadow-md shadow-rose-500/30 ring-2 ring-rose-400"
             : "hover:bg-[var(--fill-tsp-gray-main)] dark:hover:bg-accent text-[var(--icon-primary)] dark:text-foreground",
           className
         )}
       >
-        {isListening ? <MicOff size={size} /> : <Mic size={size} />}
+        {isListening ? <MicOff size={size} className="shrink-0" /> : <Mic size={size} className="shrink-0" />}
       </button>
 
       <MicrophonePermissionModal 

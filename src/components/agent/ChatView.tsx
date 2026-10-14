@@ -406,6 +406,18 @@ export function ChatView({
     return list;
   }, [messages]);
 
+  // Determine if the agent is actively streaming a response
+  const isStreamingResponse = React.useMemo(() => {
+    if (isLoading || status === 'running') return true;
+    const hasRunningStep = steps.some(s => s.status === 'running');
+    if (hasRunningStep) return true;
+    const lastMsg = displayMessages[displayMessages.length - 1];
+    if (lastMsg?.role === 'assistant' && (lastMsg.status === 'streaming' || (lastMsg as any).isStreaming)) {
+      return true;
+    }
+    return false;
+  }, [isLoading, status, steps, displayMessages]);
+
   const scrollToBottom = React.useCallback((behavior: ScrollBehavior = 'smooth') => {
     const container = containerRef.current;
     if (container) {
@@ -421,10 +433,10 @@ export function ChatView({
 
   const handleTypewriterComplete = React.useCallback((msgKey: string) => {
     setCompletedTypewriters(prev => prev[msgKey] ? prev : { ...prev, [msgKey]: true });
-    if (shouldAutoScrollRef.current && containerRef.current) {
+    if (isStreamingResponse && shouldAutoScrollRef.current && containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
-  }, []);
+  }, [isStreamingResponse]);
 
   const handleConversationScroll = React.useCallback(() => {
     const container = containerRef.current;
@@ -435,35 +447,78 @@ export function ChatView({
     setShowScrollToBottom(!isAtBottom);
   }, []);
 
+  // When a streaming response begins, reset auto-scroll lock to true and align to bottom
+  const prevStreamingRef = useRef(false);
   useEffect(() => {
-    if (shouldAutoScrollRef.current && containerRef.current) {
-      // Use direct position update during active token streaming to prevent frame animation cancellation stutters
+    if (isStreamingResponse && !prevStreamingRef.current) {
+      shouldAutoScrollRef.current = true;
+      setShowScrollToBottom(false);
+      if (containerRef.current) {
+        containerRef.current.scrollTop = containerRef.current.scrollHeight;
+      }
+    }
+    prevStreamingRef.current = isStreamingResponse;
+  }, [isStreamingResponse]);
+
+  // Keep scroll position at the bottom during active streaming token/step updates
+  useEffect(() => {
+    if (isStreamingResponse && shouldAutoScrollRef.current && containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
-  }, [messages, steps, result, isLoading, status]);
+  }, [messages, steps, result, isStreamingResponse]);
 
-  // Use ResizeObserver on container children to keep bottom in view as new message/content/images/charts render
+  // Auto-scroll observer for the ChatView component:
+  // Keeps the scroll position at the bottom ONLY when the agent is streaming a response.
+  // Observes content mutations and dimensional resizes while streaming, disconnecting when idle.
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    // Disconnect and do nothing when not streaming - allowing user to freely browse past messages
+    if (!container || !isStreamingResponse) return;
 
     let rafId: number | null = null;
-    const observer = new ResizeObserver(() => {
-      if (shouldAutoScrollRef.current && container) {
-        if (rafId) cancelAnimationFrame(rafId);
-        rafId = requestAnimationFrame(() => {
-          container.scrollTop = container.scrollHeight;
-        });
-      }
+    const scrollDownIfAllowed = () => {
+      if (!shouldAutoScrollRef.current || !container) return;
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        container.scrollTop = container.scrollHeight;
+      });
+    };
+
+    // 1. ResizeObserver: Observes height expansion of container and child elements as tokens stream in
+    const resizeObserver = new ResizeObserver(() => {
+      scrollDownIfAllowed();
     });
 
-    Array.from(container.children).forEach(child => observer.observe(child));
+    resizeObserver.observe(container);
+    Array.from(container.children).forEach(child => resizeObserver.observe(child));
+
+    // 2. MutationObserver: Observes characterData and childList updates for real-time text streaming
+    const mutationObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        mutation.addedNodes.forEach(node => {
+          if (node instanceof HTMLElement) {
+            resizeObserver.observe(node);
+          }
+        });
+      }
+      scrollDownIfAllowed();
+    });
+
+    mutationObserver.observe(container, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+
+    // Ensure immediate bottom alignment on observer mount
+    scrollDownIfAllowed();
 
     return () => {
       if (rafId) cancelAnimationFrame(rafId);
-      observer.disconnect();
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
     };
-  }, []);
+  }, [isStreamingResponse]);
 
   // Initial animation
   useEffect(() => {
@@ -672,7 +727,7 @@ export function ChatView({
   return (
     <div className="flex flex-col h-full bg-manus-cream dark:bg-background relative">
       {/* Chat Area */}
-      <div ref={containerRef} onScroll={handleConversationScroll} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-20 pt-6 pb-40 space-y-8 custom-scrollbar scroll-smooth">
+      <div ref={containerRef} onScroll={handleConversationScroll} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-20 pt-6 pb-40 space-y-8 custom-scrollbar">
         
         {/* Render Conversation Messages in Chronological Order */}
         {displayMessages.map((msg, i) => {
@@ -722,7 +777,7 @@ export function ChatView({
                         animateTypewriter={shouldAnimate}
                         onTypewriterComplete={() => handleTypewriterComplete(msgKey)}
                         onTypewriterTick={() => {
-                          if (shouldAutoScrollRef.current && containerRef.current) {
+                          if (isStreamingResponse && shouldAutoScrollRef.current && containerRef.current) {
                             containerRef.current.scrollTop = containerRef.current.scrollHeight;
                           }
                         }}
@@ -1127,9 +1182,9 @@ export function ChatView({
           </div>
 
           {/* Bottom Row: Controls */}
-          <div className="flex items-center justify-between pt-0.5 border-t border-transparent">
+          <div className="flex items-center justify-between gap-2 sm:gap-3 pt-1 border-t border-transparent min-w-0 w-full">
             {/* Left Controls: Circular + Button & Attached Connector Tags */}
-            <div className="flex items-center gap-2.5 flex-wrap">
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0 flex-1">
               <AttachmentMenu
                 onFileSelect={handleFileSelect}
                 isThinkHarder={isThinkHarder}
@@ -1142,17 +1197,17 @@ export function ChatView({
               >
                 <button 
                   type="button"
-                  className="w-8 h-8 rounded-full border border-slate-200/90 dark:border-white/15 bg-white dark:bg-[#141518] hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 shadow-2xs cursor-pointer active:scale-95"
+                  className="w-9 h-9 rounded-full border border-slate-200/90 dark:border-white/15 bg-white dark:bg-[#141518] hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 shadow-2xs cursor-pointer active:scale-95 shrink-0"
                   title="Add attachments or options"
                   aria-label="Add attachments or options"
                 >
-                  <Plus size={16} className="text-slate-800 dark:text-slate-200" />
+                  <Plus size={18} strokeWidth={2.4} className="text-slate-800 dark:text-slate-200 shrink-0" />
                 </button>
               </AttachmentMenu>
 
               {/* Selected Connector Tags */}
               {activeConnectorTags.length > 0 && (
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap">
                   {activeConnectorTags.map((tagId) => {
                     const opt = WORKSPACE_CONNECTOR_OPTIONS.find(o => o.id === tagId) || CONNECTOR_CATALOG.find(c => c.id === tagId);
                     if (!opt) return null;
@@ -1165,21 +1220,21 @@ export function ChatView({
                       <div 
                         key={tagId} 
                         onClick={() => setSelectedConfigConnectorId(tagId)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-800/40 text-[#2563eb] dark:text-[#93c5fd] font-semibold text-xs rounded-full cursor-pointer hover:opacity-80 transition-opacity select-none shrink-0"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-800/40 text-[#2563eb] dark:text-[#93c5fd] font-semibold text-xs rounded-full cursor-pointer hover:opacity-80 transition-opacity select-none shrink-0 whitespace-nowrap"
                         title="Click to view connector parameters or details"
                       >
-                        <IconComp className="w-3.5 h-3.5 shrink-0" />
-                        <span>{displayName}</span>
+                        <IconComp strokeWidth={2.4} className="w-3.5 h-3.5 shrink-0" />
+                        <span className="shrink-0">{displayName}</span>
                         <button 
                           type="button" 
                           onClick={(e) => {
                             e.stopPropagation();
                             removeConnectorTag(tagId);
                           }}
-                          className="p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full text-current/70 hover:text-current"
+                          className="p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full text-current/70 hover:text-current ml-0.5 shrink-0"
                           title="Remove connector"
                         >
-                          <X size={12} />
+                          <X size={13} strokeWidth={2.4} />
                         </button>
                       </div>
                     );
@@ -1189,7 +1244,7 @@ export function ChatView({
             </div>
 
             {/* Right Controls: Mic & Circular Send Button */}
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto">
               <VoiceInputButton
                 onListeningStateChange={(listening) => {
                   setIsListening(listening);
@@ -1207,7 +1262,7 @@ export function ChatView({
                     setInput('');
                   }
                 }}
-                className="w-8 h-8 sm:w-8.5 sm:h-8.5 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer"
+                className="w-9 h-9 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer shrink-0"
                 size={18}
               />
               <button 
@@ -1224,19 +1279,19 @@ export function ChatView({
                 }}
                 disabled={(!isLoading && status !== 'running') && (!input.trim() && !attachedFile && activeConnectorTags.length === 0)}
                 className={cn(
-                  "w-8 h-8 sm:w-8.5 sm:h-8.5 rounded-full flex items-center justify-center transition-all shadow-2xs",
+                  "w-9 h-9 rounded-full flex items-center justify-center transition-all duration-150 shadow-2xs shrink-0 cursor-pointer",
                   isLoading || status === 'running'
-                    ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md cursor-pointer"
+                    ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md"
                     : (input.trim() || attachedFile || activeConnectorTags.length > 0)
-                      ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md cursor-pointer"
-                      : "bg-[#e2e8f0]/80 dark:bg-muted text-slate-400 dark:text-muted-foreground cursor-not-allowed"
+                      ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md opacity-100"
+                      : "bg-[#e2e8f0]/80 dark:bg-muted text-slate-400 dark:text-muted-foreground cursor-not-allowed opacity-50"
                 )}
                 title={isLoading || status === 'running' ? "Stop response" : "Send message"}
                 aria-label={isLoading || status === 'running' ? "Stop response" : "Send message"}
               >
                 {isLoading || status === 'running'
-                  ? <Square size={11} fill="currentColor" strokeWidth={2.5} />
-                  : <ArrowUp size={18} className="font-bold" />}
+                  ? <Square size={13} fill="currentColor" strokeWidth={2.5} className="shrink-0" />
+                  : <ArrowUp size={18} strokeWidth={2.6} className="font-bold shrink-0" />}
               </button>
             </div>
           </div>

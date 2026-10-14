@@ -43,6 +43,8 @@ import { TaskQuickPreviewCard } from '../history/TaskQuickPreviewCard';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent } from '@/components/ui/dropdown-menu';
 import { useBlinkAuth } from '@blinkdotnew/react';
 import { useFirebase } from '@/context/FirebaseContext';
+import { Step } from '@/hooks/useAgentTask';
+import { RadialProgress } from '@/components/ui/radial-progress';
 import { blink } from '@/lib/blink';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -70,6 +72,8 @@ interface SidebarProps {
   activeTaskId?: string;
   onOpenHistory?: () => void;
   onOpenSettings?: () => void;
+  activeSteps?: Step[];
+  activeTaskStatus?: 'idle' | 'running' | 'completed' | 'error' | string;
 }
 
 interface TaskHistory {
@@ -78,6 +82,7 @@ interface TaskHistory {
   title?: string;
   created_at: string;
   status?: string;
+  steps?: string | Step[];
   outputFormat?: string;
   projectId?: string;
 }
@@ -170,7 +175,64 @@ function groupTasksByTime(tasks: TaskHistory[]): { group: string; items: TaskHis
     .map(([group, items]) => ({ group, items }));
 }
 
-export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHistory, onOpenSettings }: SidebarProps) {
+export function calculateStepsProgress(
+  steps: Step[] | undefined,
+  status: string | undefined
+): {
+  percentage: number;
+  completedCount: number;
+  totalCount: number;
+  isRunning: boolean;
+  isCompleted: boolean;
+  isError: boolean;
+} {
+  const isRunning = status === 'running';
+  const isCompleted = status === 'completed';
+  const isError = status === 'error';
+
+  if (!steps || steps.length === 0) {
+    if (isCompleted) {
+      return { percentage: 100, completedCount: 0, totalCount: 0, isRunning: false, isCompleted: true, isError: false };
+    }
+    if (isRunning) {
+      return { percentage: 15, completedCount: 0, totalCount: 0, isRunning: true, isCompleted: false, isError: false };
+    }
+    return { percentage: 0, completedCount: 0, totalCount: 0, isRunning: false, isCompleted: false, isError: isError };
+  }
+
+  const totalCount = steps.length;
+  const completedCount = steps.filter(s => s.status === 'completed').length;
+  const runningCount = steps.filter(s => s.status === 'running').length;
+
+  if (isCompleted || completedCount === totalCount) {
+    return { percentage: 100, completedCount: totalCount, totalCount, isRunning: false, isCompleted: true, isError: false };
+  }
+
+  // Fractional progress: each completed step is 100/total; currently running step adds 50%
+  const fractionalCompleted = completedCount + (runningCount > 0 ? 0.5 : 0);
+  const rawPercentage = Math.round((fractionalCompleted / totalCount) * 100);
+  const percentage = isRunning ? Math.min(99, Math.max(5, rawPercentage)) : Math.min(100, rawPercentage);
+
+  return {
+    percentage,
+    completedCount,
+    totalCount,
+    isRunning,
+    isCompleted,
+    isError
+  };
+}
+
+export function Sidebar({ 
+  isOpen, 
+  onToggle, 
+  onNewTask, 
+  activeTaskId, 
+  onOpenHistory, 
+  onOpenSettings,
+  activeSteps,
+  activeTaskStatus 
+}: SidebarProps) {
   const [activeTab, setActiveTab] = React.useState('new');
   const [tasks, setTasks] = useState<TaskHistory[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -237,6 +299,28 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
     } catch (error) {
       console.error('Failed to load tasks', error);
     }
+  };
+
+  const getTaskSteps = (task: TaskHistory): Step[] | undefined => {
+    if (task.id === activeTaskId && activeSteps && activeSteps.length > 0) {
+      return activeSteps;
+    }
+    if (task.steps) {
+      try {
+        const parsed = typeof task.steps === 'string' ? JSON.parse(task.steps) : task.steps;
+        if (Array.isArray(parsed)) return parsed;
+      } catch {
+        // ignore malformed step payload
+      }
+    }
+    return undefined;
+  };
+
+  const getTaskStatus = (task: TaskHistory): string | undefined => {
+    if (task.id === activeTaskId && activeTaskStatus) {
+      return activeTaskStatus;
+    }
+    return task.status;
   };
 
   const handleStartRename = (taskId: string, e: React.MouseEvent, currentTitle: string) => {
@@ -459,18 +543,45 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
           {tasks.slice(0, 6).map((task) => {
             const isActive = activeTaskId === task.id;
             const taskProj = projects.find(p => p.id === task.projectId);
+            const taskSteps = getTaskSteps(task);
+            const taskStatus = getTaskStatus(task);
+            const progress = calculateStepsProgress(taskSteps, taskStatus);
+
             return (
               <TaskQuickPreviewCard key={task.id} task={task} projectName={taskProj?.name} side="right" align="center">
                 <button
                   onClick={() => navigate(`/task/${task.id}`)}
                   className={cn(
-                    "p-2.5 rounded-xl transition-all relative group cursor-pointer",
+                    "p-2 rounded-xl transition-all relative group cursor-pointer flex items-center justify-center",
                     isActive
                       ? "bg-primary text-primary-foreground shadow-sm"
                       : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
                   )}
+                  title={isActive ? `${task.prompt} (${progress.percentage}% completed)` : task.prompt}
+                  aria-label={isActive ? `Active task: ${task.prompt} (${progress.percentage}% completed)` : task.prompt}
                 >
-                  <MessageSquare size={19} strokeWidth={2.4} />
+                  {isActive ? (
+                    <RadialProgress
+                      value={progress.percentage}
+                      status={taskStatus}
+                      size={22}
+                      strokeWidth={2.5}
+                      indicatorClassName="text-primary-foreground"
+                      trackClassName="text-primary-foreground/25"
+                    >
+                      {progress.isCompleted ? (
+                        <Check size={11} strokeWidth={3} className="text-primary-foreground" />
+                      ) : progress.isRunning ? (
+                        <span className="text-[8px] font-bold text-primary-foreground tabular-nums">
+                          {Math.round(progress.percentage)}
+                        </span>
+                      ) : (
+                        <MessageSquare size={12} strokeWidth={2.4} className="text-primary-foreground" />
+                      )}
+                    </RadialProgress>
+                  ) : (
+                    <MessageSquare size={19} strokeWidth={2.4} />
+                  )}
                   {isActive && (
                     <span className="absolute -left-1 top-1/2 -translate-y-1/2 w-1 h-3.5 bg-primary rounded-r-full" />
                   )}
@@ -774,6 +885,9 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                   const isActive = activeTaskId === task.id;
                   const relTime = getRelativeTime(task.created_at);
                   const taskProj = projects.find(p => p.id === task.projectId);
+                  const taskSteps = getTaskSteps(task);
+                  const taskStatus = getTaskStatus(task);
+                  const progress = calculateStepsProgress(taskSteps, taskStatus);
 
                   return (
                     <div key={task.id} className="relative group">
@@ -790,10 +904,31 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                           )}
                           title={task.prompt}
                         >
-                          <MessageSquare size={17} strokeWidth={2.3} className={cn(
-                            "shrink-0 transition-colors",
-                            isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
-                          )} />
+                          {isActive ? (
+                            <div className="relative shrink-0 flex items-center justify-center">
+                              <RadialProgress
+                                value={progress.percentage}
+                                status={taskStatus}
+                                size={22}
+                                strokeWidth={2.5}
+                              >
+                                {progress.isCompleted ? (
+                                  <Check size={11} strokeWidth={3} className="text-emerald-500 dark:text-emerald-400" />
+                                ) : progress.isRunning ? (
+                                  <span className="text-[8px] font-bold text-primary tabular-nums">
+                                    {Math.round(progress.percentage)}
+                                  </span>
+                                ) : (
+                                  <MessageSquare size={11} strokeWidth={2.5} className="text-primary" />
+                                )}
+                              </RadialProgress>
+                            </div>
+                          ) : (
+                            <MessageSquare size={17} strokeWidth={2.3} className={cn(
+                              "shrink-0 transition-colors",
+                              isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
+                            )} />
+                          )}
                           
                           <div className="flex-1 min-w-0 pr-6">
                             <p className="truncate text-xs leading-snug">{title}</p>
@@ -804,6 +939,30 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                               {taskProj && (
                                 <span className="text-[9px] px-1.5 py-0.2 rounded bg-primary/10 text-primary font-semibold truncate max-w-[90px]">
                                   {taskProj.name}
+                                </span>
+                              )}
+                              {isActive && (
+                                <span className={cn(
+                                  "inline-flex items-center gap-1 text-[9px] font-semibold px-1.5 py-0.2 rounded-full tabular-nums",
+                                  progress.isCompleted 
+                                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" 
+                                    : progress.isRunning
+                                    ? "bg-primary/10 text-primary"
+                                    : "bg-muted text-muted-foreground"
+                                )}>
+                                  <span>{progress.percentage}%</span>
+                                  {progress.totalCount > 0 && (
+                                    <>
+                                      <span className="opacity-50">•</span>
+                                      <span>{progress.completedCount}/{progress.totalCount}</span>
+                                    </>
+                                  )}
+                                  {progress.isRunning && (
+                                    <span className="relative flex h-1.5 w-1.5 ml-0.5">
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary"></span>
+                                    </span>
+                                  )}
                                 </span>
                               )}
                             </div>

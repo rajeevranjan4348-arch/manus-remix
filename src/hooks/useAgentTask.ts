@@ -26,6 +26,13 @@ import {
   cleanChatTitle,
   StoredMessage,
 } from '@/lib/chatDatabase';
+import {
+  saveChatHistoryToLocalStorage,
+  getChatHistoryFromLocalStorage,
+  clearChatHistoryBackup,
+  clearActiveChatHistoryBackup,
+  reconcileChatMessages,
+} from '@/lib/chatAutoSave';
 
 export type AgentTaskPhase = 'idle' | 'tool-calling' | 'text-generation' | 'completed' | 'error';
 
@@ -80,17 +87,33 @@ export interface ChartData {
 
 export function useAgentTask() {
   const { isAuthenticated, user } = useBlinkAuth();
-  const [taskId, setTaskId] = useState<string | null>(null);
-  const [currentTask, setCurrentTask] = useState<{ prompt: string; options: any; fileData?: string; url?: string } | null>(null);
-  const [steps, setSteps] = useState<Step[]>([]);
-  const [taskStatus, setTaskStatus] = useState<'idle' | 'running' | 'completed' | 'error'>('idle');
-  const [phase, setPhase] = useState<AgentTaskPhase>('idle');
-  const [result, setResult] = useState<any>(null);
-  const [chartData, setChartData] = useState<ChartData | null>(null);
+
+  // Instant synchronous recovery from localStorage backup if current route has a taskId
+  const initialBackup = useMemo(() => {
+    if (typeof window === 'undefined') return null;
+    const match = window.location.pathname.match(/\/task\/([a-zA-Z0-9_-]+)/);
+    const id = match ? match[1] : null;
+    if (id) {
+      return getChatHistoryFromLocalStorage(id);
+    }
+    return null;
+  }, []);
+
+  const [taskId, setTaskId] = useState<string | null>(initialBackup?.taskId || null);
+  const [currentTask, setCurrentTask] = useState<{ prompt: string; options: any; fileData?: string; url?: string } | null>(initialBackup?.currentTask || null);
+  const [steps, setSteps] = useState<Step[]>(initialBackup?.steps || []);
+  const [taskStatus, setTaskStatus] = useState<'idle' | 'running' | 'completed' | 'error'>(
+    (initialBackup?.taskStatus === 'running' ? 'completed' : initialBackup?.taskStatus) || 'idle'
+  );
+  const [phase, setPhase] = useState<AgentTaskPhase>(
+    (initialBackup?.phase === 'tool-calling' ? 'completed' : (initialBackup?.phase as any)) || 'idle'
+  );
+  const [result, setResult] = useState<any>(initialBackup?.result || null);
+  const [chartData, setChartData] = useState<ChartData | null>(initialBackup?.chartData || null);
   const [sandbox, setSandbox] = useState<Sandbox | null>(null);
-  const [persistentMessages, setPersistentMessages] = useState<any[]>([]);
+  const [persistentMessages, setPersistentMessages] = useState<any[]>(initialBackup?.messages || []);
   const messagesRef = useRef<any[]>([]);
-  const currentTaskIdRef = useRef<string | null>(null);
+  const currentTaskIdRef = useRef<string | null>(initialBackup?.taskId || null);
   currentTaskIdRef.current = taskId;
 
   // Initialize sandbox
@@ -1051,12 +1074,23 @@ Regarding **${promptText}**:
     }
 
     processedInvocationsRef.current.clear();
-    setCurrentTask({ prompt, options, fileData: options.fileData, url: options.url });
+    const taskData = { prompt, options, fileData: options.fileData, url: options.url };
+    setCurrentTask(taskData);
     setTaskStatus('running');
     setPhase('tool-calling');
     setResult(null);
     setChartData(null);
     playNotificationSound('send');
+
+    // Persist to local storage immediately so it can be resumed even if refreshed right away
+    saveChatHistoryToLocalStorage({
+      taskId: newTaskId,
+      currentTask: taskData,
+      messages: [userMsg],
+      steps: [],
+      taskStatus: 'running',
+      phase: 'tool-calling',
+    });
 
     // Retrieve user personalization preferences from Settings
     const userSettings = getSettings();
@@ -1212,45 +1246,94 @@ Regarding **${promptText}**:
       setTaskId(id);
       currentTaskIdRef.current = id;
 
-      // 1. Load permanent messages from IndexedDB / chatDatabase
+      // 1. Instant synchronous recovery from localStorage backup for zero-latency resumption after browser refresh
+      const localBackup = getChatHistoryFromLocalStorage(id);
+      if (localBackup) {
+        if (localBackup.currentTask) {
+          setCurrentTask(localBackup.currentTask);
+        }
+        if (localBackup.messages && localBackup.messages.length > 0) {
+          setPersistentMessages(localBackup.messages);
+        }
+        if (localBackup.steps && localBackup.steps.length > 0) {
+          setSteps(localBackup.steps);
+        }
+        if (localBackup.taskStatus) {
+          // If task was in-flight when user refreshed, safely finalize to completed so conversation can continue
+          setTaskStatus(localBackup.taskStatus === 'running' ? 'completed' : localBackup.taskStatus);
+        }
+        if (localBackup.phase) {
+          setPhase(localBackup.phase === 'tool-calling' ? 'completed' : (localBackup.phase as any));
+        }
+        if (localBackup.result) {
+          setResult(localBackup.result);
+        }
+        if (localBackup.chartData) {
+          setChartData(localBackup.chartData);
+        }
+      }
+
+      // 2. Load permanent messages from IndexedDB / chatDatabase and reconcile with local backup
       const storedMsgs = await getMessages(id);
       if (storedMsgs && storedMsgs.length > 0) {
-        setPersistentMessages(
-          storedMsgs.map(m => ({
+        setPersistentMessages(prev => {
+          const dbMsgs = storedMsgs.map(m => ({
             id: m.id,
             role: m.role,
             content: m.content,
             timestamp: m.timestamp,
             status: m.status
-          }))
-        );
+          }));
+          return reconcileChatMessages(prev, dbMsgs);
+        });
       }
 
-      // 2. Load task data
+      // 3. Load task data from Blink DB
       const task = await (blink.db as any).tasks.get(id);
       if (task) {
-        setCurrentTask({ 
+        setCurrentTask(prev => prev || { 
           prompt: task.prompt || task.title, 
           options: { format: task.outputFormat, chartType: task.chartType } 
         });
-        setTaskStatus(task.status as any);
+        if (task.status && task.status !== 'running') {
+          setTaskStatus(task.status as any);
+        }
         
         if (task.steps) {
           try {
-            setSteps(JSON.parse(task.steps));
-          } catch { setSteps([]); }
+            const parsed = JSON.parse(task.steps);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setSteps(parsed);
+            }
+          } catch { }
         }
         
         if (task.result) {
           try {
             const parsedResult = JSON.parse(task.result);
-            setResult(parsedResult);
-            setChartData(parsedResult.chartData);
-            if ((!storedMsgs || storedMsgs.length === 0) && parsedResult.messages && parsedResult.messages.length > 0) {
-              setPersistentMessages(parsedResult.messages);
+            setResult(prev => prev || parsedResult);
+            if (parsedResult.chartData) {
+              setChartData(prev => prev || parsedResult.chartData);
             }
-          } catch { setResult(null); }
+            if ((!storedMsgs || storedMsgs.length === 0) && parsedResult.messages && parsedResult.messages.length > 0) {
+              setPersistentMessages(prev => reconcileChatMessages(prev, parsedResult.messages));
+            }
+          } catch { }
         }
+      }
+
+      // Consolidate current state back to local storage
+      const consolidatedBackup = getChatHistoryFromLocalStorage(id);
+      if (consolidatedBackup) {
+        saveChatHistoryToLocalStorage({
+          taskId: id,
+          currentTask: consolidatedBackup.currentTask,
+          messages: consolidatedBackup.messages,
+          steps: consolidatedBackup.steps,
+          taskStatus: consolidatedBackup.taskStatus,
+          result: consolidatedBackup.result,
+          chartData: consolidatedBackup.chartData,
+        });
       }
     } catch (e) {
       console.error('Failed to load task:', e);
@@ -1258,6 +1341,7 @@ Regarding **${promptText}**:
   }, [isAuthenticated]);
 
   const resetTask = () => {
+    clearActiveChatHistoryBackup();
     setTaskId(null);
     currentTaskIdRef.current = null;
     setCurrentTask(null);
@@ -1305,6 +1389,7 @@ Report generated by Manus AI Workspace
 
   const deleteTask = useCallback(async (id: string) => {
     try {
+      clearChatHistoryBackup(id);
       await (blink.db as any).tasks.delete(id);
       return true;
     } catch (e) {
@@ -1358,6 +1443,65 @@ Report generated by Manus AI Workspace
     }
     return deduped;
   }, [persistentMessages, messages, isLoading]);
+
+  // Live reference of active conversation state for periodic auto-save
+  const chatBackupStateRef = useRef({
+    taskId,
+    currentTask,
+    messages: displayMessages,
+    steps,
+    taskStatus,
+    phase,
+    result,
+    chartData,
+  });
+
+  useEffect(() => {
+    chatBackupStateRef.current = {
+      taskId,
+      currentTask,
+      messages: displayMessages,
+      steps,
+      taskStatus,
+      phase,
+      result,
+      chartData,
+    };
+  }, [taskId, currentTask, displayMessages, steps, taskStatus, phase, result, chartData]);
+
+  // Periodic Auto-Save: Automatically saves the current chat history to localStorage periodically
+  // so tasks can be resumed after a browser refresh
+  useEffect(() => {
+    const saveSnapshot = () => {
+      const state = chatBackupStateRef.current;
+      const activeId = state.taskId || currentTaskIdRef.current;
+      if (activeId && (state.messages.length > 0 || state.currentTask)) {
+        saveChatHistoryToLocalStorage({
+          taskId: activeId,
+          currentTask: state.currentTask,
+          messages: state.messages,
+          steps: state.steps,
+          taskStatus: state.taskStatus as any,
+          phase: state.phase,
+          result: state.result,
+          chartData: state.chartData,
+        });
+      }
+    };
+
+    // Save snapshot periodically every 2500ms
+    const intervalTimer = setInterval(saveSnapshot, 2500);
+
+    // Save immediately before page refresh or tab close
+    window.addEventListener('beforeunload', saveSnapshot);
+    window.addEventListener('pagehide', saveSnapshot);
+
+    return () => {
+      clearInterval(intervalTimer);
+      window.removeEventListener('beforeunload', saveSnapshot);
+      window.removeEventListener('pagehide', saveSnapshot);
+    };
+  }, []);
 
   return {
     taskId,
