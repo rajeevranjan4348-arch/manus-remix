@@ -39,6 +39,7 @@ import { ConnectorsStorePanel } from '../connectors/ConnectorsStorePanel';
 import { cn } from '@/lib/utils';
 import { Logo, ManusLogo } from './Logo';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { TaskQuickPreviewCard } from '../history/TaskQuickPreviewCard';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent } from '@/components/ui/dropdown-menu';
 import { useBlinkAuth } from '@blinkdotnew/react';
 import { useFirebase } from '@/context/FirebaseContext';
@@ -456,35 +457,25 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
         {/* Quick Recent Task Sessions in Collapsed View */}
         <div className="w-full flex-1 flex flex-col items-center pt-3 mt-2 border-t border-border/60 space-y-2 overflow-y-auto custom-scrollbar">
           {tasks.slice(0, 6).map((task) => {
-            const title = formatTaskTitle(task);
             const isActive = activeTaskId === task.id;
+            const taskProj = projects.find(p => p.id === task.projectId);
             return (
-              <TooltipProvider key={task.id}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={() => navigate(`/task/${task.id}`)}
-                      className={cn(
-                        "p-2.5 rounded-xl transition-all relative group cursor-pointer",
-                        isActive
-                          ? "bg-primary text-primary-foreground shadow-sm"
-                          : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
-                      )}
-                    >
-                      <MessageSquare size={19} strokeWidth={2.4} />
-                      {isActive && (
-                        <span className="absolute -left-1 top-1/2 -translate-y-1/2 w-1 h-3.5 bg-primary rounded-r-full" />
-                      )}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right" className="max-w-xs p-2.5">
-                    <p className="font-semibold text-xs text-foreground leading-tight">{title}</p>
-                    <div className="flex items-center gap-1.5 mt-1 text-[10px] text-muted-foreground">
-                      <span>{getRelativeTime(task.created_at)}</span>
-                    </div>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              <TaskQuickPreviewCard key={task.id} task={task} projectName={taskProj?.name} side="right" align="center">
+                <button
+                  onClick={() => navigate(`/task/${task.id}`)}
+                  className={cn(
+                    "p-2.5 rounded-xl transition-all relative group cursor-pointer",
+                    isActive
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
+                  )}
+                >
+                  <MessageSquare size={19} strokeWidth={2.4} />
+                  {isActive && (
+                    <span className="absolute -left-1 top-1/2 -translate-y-1/2 w-1 h-3.5 bg-primary rounded-r-full" />
+                  )}
+                </button>
+              </TaskQuickPreviewCard>
             );
           })}
         </div>
@@ -786,37 +777,39 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
 
                   return (
                     <div key={task.id} className="relative group">
-                      <button
-                        onClick={() => {
-                          handleMobileSelect(() => navigate(`/task/${task.id}`));
-                        }}
-                        className={cn(
-                          "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-all text-left cursor-pointer",
-                          isActive
-                            ? "bg-white dark:bg-card border border-border text-foreground font-semibold shadow-xs" 
-                            : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
-                        )}
-                        title={task.prompt}
-                      >
-                        <MessageSquare size={17} strokeWidth={2.3} className={cn(
-                          "shrink-0 transition-colors",
-                          isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
-                        )} />
-                        
-                        <div className="flex-1 min-w-0 pr-6">
-                          <p className="truncate text-xs leading-snug">{title}</p>
-                          <div className="flex items-center gap-1.5 mt-0.5">
-                            <span className="text-[10px] text-muted-foreground/70 leading-tight">
-                              {relTime}
-                            </span>
-                            {taskProj && (
-                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-primary/10 text-primary font-semibold truncate max-w-[90px]">
-                                {taskProj.name}
+                      <TaskQuickPreviewCard task={task} projectName={taskProj?.name} side="right" align="start">
+                        <button
+                          onClick={() => {
+                            handleMobileSelect(() => navigate(`/task/${task.id}`));
+                          }}
+                          className={cn(
+                            "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-all text-left cursor-pointer",
+                            isActive
+                              ? "bg-white dark:bg-card border border-border text-foreground font-semibold shadow-xs" 
+                              : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
+                          )}
+                          title={task.prompt}
+                        >
+                          <MessageSquare size={17} strokeWidth={2.3} className={cn(
+                            "shrink-0 transition-colors",
+                            isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
+                          )} />
+                          
+                          <div className="flex-1 min-w-0 pr-6">
+                            <p className="truncate text-xs leading-snug">{title}</p>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-[10px] text-muted-foreground/70 leading-tight">
+                                {relTime}
                               </span>
-                            )}
+                              {taskProj && (
+                                <span className="text-[9px] px-1.5 py-0.2 rounded bg-primary/10 text-primary font-semibold truncate max-w-[90px]">
+                                  {taskProj.name}
+                                </span>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      </button>
+                        </button>
+                      </TaskQuickPreviewCard>
                       
                       {/* Action Dropdown Menu */}
                       <DropdownMenu>

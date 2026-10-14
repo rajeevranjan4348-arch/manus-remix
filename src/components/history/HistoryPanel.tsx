@@ -24,7 +24,10 @@ import {
   Check,
   Plus,
   LayoutList,
-  LayoutGrid
+  LayoutGrid,
+  Calendar,
+  Filter,
+  CheckSquare
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { blink } from '@/lib/blink';
@@ -32,6 +35,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { syncTasksToLibrary, getLibraryItems } from '@/lib/libraryStore';
 import { listConversations, deleteConversation, exportAllChatHistory, recoverChatHistory } from '@/lib/chatDatabase';
+import { TaskQuickPreviewCard } from './TaskQuickPreviewCard';
 import {
   Sheet,
   SheetContent,
@@ -197,12 +201,49 @@ function getTypeLabel(item: LibraryFileItem): { label: string; bg: string; text:
   }
 }
 
+/**
+ * Automatically groups past tasks by date periods:
+ * - 'Today': Tasks created today (since 00:00)
+ * - 'This Week': Tasks created within the last 7 days (prior to today)
+ * - 'Older': Tasks created more than 7 days ago
+ */
+export function groupTasksByDate(tasks: TaskHistoryItem[]): { label: string; tasks: TaskHistoryItem[] }[] {
+  const groups: { [key: string]: TaskHistoryItem[] } = {
+    'Today': [],
+    'This Week': [],
+    'Older': []
+  };
+
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const sevenDaysAgoStart = todayStart - 7 * 86400000;
+
+  tasks.forEach((task) => {
+    const time = new Date(task.created_at || Date.now()).getTime();
+    if (isNaN(time) || time >= todayStart) {
+      groups['Today'].push(task);
+    } else if (time >= sevenDaysAgoStart) {
+      groups['This Week'].push(task);
+    } else {
+      groups['Older'].push(task);
+    }
+  });
+
+  return Object.entries(groups)
+    .filter(([_, list]) => list.length > 0)
+    .map(([label, list]) => ({ label, tasks: list }));
+}
+
 export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProps) {
   const [tasks, setTasks] = useState<TaskHistoryItem[]>([]);
   const [voiceHistory, setVoiceHistory] = useState<VoiceHistoryRecord[]>([]);
   const [libraryItems, setLibraryItems] = useState<LibraryFileItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'yesterday' | 'week' | 'month' | 'custom'>('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [showDateFilter, setShowDateFilter] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'photos' | 'videos' | 'docs' | 'sessions'>('all');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [previewMedia, setPreviewMedia] = useState<LibraryFileItem | null>(null);
@@ -212,13 +253,24 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
     name: string;
   } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Multi-select state for bulk task deletion
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
-  // Load library & task data whenever panel opens or new file is shared with AI
+  // Load library & task data whenever panel opens; reset selection when closed
   useEffect(() => {
     if (isOpen) {
       loadLibraryData();
+    } else {
+      setSelectedTaskIds(new Set());
+      setIsSelectionMode(false);
+      setShowBulkDeleteDialog(false);
     }
 
     const handleLibraryUpdate = () => {
@@ -450,6 +502,88 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
     }
   };
 
+  // Multi-select handlers for bulk deleting tasks
+  const toggleSelectTask = (taskId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedTaskIds(prev => {
+      const next = new Set(prev);
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+      return next;
+    });
+    if (!isSelectionMode) {
+      setIsSelectionMode(true);
+    }
+  };
+
+  const handleSelectAllTasks = () => {
+    if (selectedTaskIds.size === filteredTasks.length && filteredTasks.length > 0) {
+      // Deselect all
+      setSelectedTaskIds(new Set());
+    } else {
+      // Select all currently filtered tasks
+      setSelectedTaskIds(new Set(filteredTasks.map(t => t.id)));
+      setIsSelectionMode(true);
+    }
+  };
+
+  const handleSelectGroupTasks = (groupTasks: TaskHistoryItem[], e: React.MouseEvent) => {
+    e.stopPropagation();
+    const groupIds = groupTasks.map(t => t.id);
+    const allSelected = groupIds.length > 0 && groupIds.every(id => selectedTaskIds.has(id));
+    setSelectedTaskIds(prev => {
+      const next = new Set(prev);
+      if (allSelected) {
+        groupIds.forEach(id => next.delete(id));
+      } else {
+        groupIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
+    if (!isSelectionMode) {
+      setIsSelectionMode(true);
+    }
+  };
+
+  const handleCancelSelection = () => {
+    setSelectedTaskIds(new Set());
+    setIsSelectionMode(false);
+  };
+
+  const handleConfirmBulkDelete = async () => {
+    if (selectedTaskIds.size === 0) return;
+
+    setIsBulkDeleting(true);
+    const idsToDelete = Array.from(selectedTaskIds);
+    try {
+      await Promise.allSettled(
+        idsToDelete.map(async (id) => {
+          try {
+            await (blink.db as any).tasks.delete(id);
+          } catch {}
+          try {
+            await deleteConversation(id);
+          } catch {}
+        })
+      );
+
+      const idSet = new Set(idsToDelete);
+      setTasks(prev => prev.filter(t => !idSet.has(t.id)));
+      setSelectedTaskIds(new Set());
+      setIsSelectionMode(false);
+      setShowBulkDeleteDialog(false);
+      toast.success(`Deleted ${idsToDelete.length} task(s) from history`);
+    } catch (err) {
+      console.error('Failed to bulk delete tasks:', err);
+      toast.error('Failed to delete some tasks');
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
   const handleExportHistory = async () => {
     try {
       const dataStr = await exportAllChatHistory();
@@ -490,64 +624,132 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
   // Filtered files & items
   const filteredItems = useMemo(() => {
     return libraryItems.filter(item => {
-      const q = searchQuery.toLowerCase().trim();
-      const matchesSearch = !q || item.name.toLowerCase().includes(q) || (item.description || '').toLowerCase().includes(q);
-      if (!matchesSearch) return false;
+      const created = new Date(item.createdAt || Date.now());
+      const createdTime = created.getTime();
 
-      if (activeTab === 'all') return true;
-      if (activeTab === 'photos') return item.type === 'photo';
-      if (activeTab === 'videos') return item.type === 'video' || item.type === 'audio';
-      if (activeTab === 'docs') return item.type === 'doc' || item.type === 'graph';
-      return true;
+      // 1. Category tab filter
+      if (activeTab === 'photos' && item.type !== 'photo') return false;
+      if (activeTab === 'videos' && item.type !== 'video' && item.type !== 'audio') return false;
+      if (activeTab === 'docs' && item.type !== 'doc' && item.type !== 'graph') return false;
+
+      // 2. Date Range Filter
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const yesterdayStart = todayStart - 86400000;
+      const weekStart = todayStart - 7 * 86400000;
+      const monthStart = todayStart - 30 * 86400000;
+
+      if (dateFilter === 'today') {
+        if (createdTime < todayStart) return false;
+      } else if (dateFilter === 'yesterday') {
+        if (createdTime < yesterdayStart || createdTime >= todayStart) return false;
+      } else if (dateFilter === 'week') {
+        if (createdTime < weekStart) return false;
+      } else if (dateFilter === 'month') {
+        if (createdTime < monthStart) return false;
+      } else if (dateFilter === 'custom') {
+        if (startDate) {
+          const sTime = new Date(startDate).getTime();
+          if (!isNaN(sTime) && createdTime < sTime) return false;
+        }
+        if (endDate) {
+          const eTime = new Date(endDate).getTime() + 86400000 - 1;
+          if (!isNaN(eTime) && createdTime > eTime) return false;
+        }
+      }
+
+      // 3. Keyword Filter
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase().trim();
+
+      const name = item.name.toLowerCase();
+      const desc = (item.description || '').toLowerCase();
+      const source = (item.source || '').toLowerCase();
+      const dateFormatted = created.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      }).toLowerCase();
+      const isoDate = created.toISOString().toLowerCase();
+      const relTime = getRelativeTime(item.createdAt).toLowerCase();
+
+      return (
+        name.includes(q) ||
+        desc.includes(q) ||
+        source.includes(q) ||
+        dateFormatted.includes(q) ||
+        isoDate.includes(q) ||
+        relTime.includes(q)
+      );
     });
-  }, [libraryItems, searchQuery, activeTab]);
+  }, [libraryItems, searchQuery, activeTab, dateFilter, startDate, endDate]);
 
   const filteredTasks = useMemo(() => {
-    if (!searchQuery.trim()) return tasks;
-    const q = searchQuery.toLowerCase().trim();
     return tasks.filter(task => {
+      const created = new Date(task.created_at || Date.now());
+      const createdTime = created.getTime();
+
+      // 1. Date Range Filter
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const yesterdayStart = todayStart - 86400000;
+      const weekStart = todayStart - 7 * 86400000;
+      const monthStart = todayStart - 30 * 86400000;
+
+      if (dateFilter === 'today') {
+        if (createdTime < todayStart) return false;
+      } else if (dateFilter === 'yesterday') {
+        if (createdTime < yesterdayStart || createdTime >= todayStart) return false;
+      } else if (dateFilter === 'week') {
+        if (createdTime < weekStart) return false;
+      } else if (dateFilter === 'month') {
+        if (createdTime < monthStart) return false;
+      } else if (dateFilter === 'custom') {
+        if (startDate) {
+          const sTime = new Date(startDate).getTime();
+          if (!isNaN(sTime) && createdTime < sTime) return false;
+        }
+        if (endDate) {
+          const eTime = new Date(endDate).getTime() + 86400000 - 1;
+          if (!isNaN(eTime) && createdTime > eTime) return false;
+        }
+      }
+
+      // 2. Keyword Filter
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase().trim();
+
       const title = formatTitle(task).toLowerCase();
       const prompt = (task.prompt || '').toLowerCase();
       const status = (task.status || '').toLowerCase();
       const mode = ((task as any).mode || '').toLowerCase();
-      return title.includes(q) || prompt.includes(q) || status.includes(q) || mode.includes(q);
-    });
-  }, [tasks, searchQuery]);
 
-  // Group task sessions by date periods (Today, Yesterday, 7 Days, 30 Days, Older)
+      const dateFormatted = created.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        weekday: 'short'
+      }).toLowerCase();
+      const fullDate = created.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).toLowerCase();
+      const isoDate = created.toISOString().toLowerCase();
+      const relTime = getRelativeTime(task.created_at).toLowerCase();
+
+      return (
+        title.includes(q) ||
+        prompt.includes(q) ||
+        status.includes(q) ||
+        mode.includes(q) ||
+        dateFormatted.includes(q) ||
+        fullDate.includes(q) ||
+        isoDate.includes(q) ||
+        relTime.includes(q)
+      );
+    });
+  }, [tasks, searchQuery, dateFilter, startDate, endDate]);
+
+  // Automatically group task sessions by date periods ('Today', 'This Week', 'Older')
   const groupedTasks = useMemo(() => {
-    const groups: { [key: string]: TaskHistoryItem[] } = {
-      'Today': [],
-      'Yesterday': [],
-      'Previous 7 Days': [],
-      'Previous 30 Days': [],
-      'Older': []
-    };
-
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const yesterdayStart = todayStart - 86400000;
-    const sevenDaysAgoStart = todayStart - 7 * 86400000;
-    const thirtyDaysAgoStart = todayStart - 30 * 86400000;
-
-    filteredTasks.forEach((task) => {
-      const time = new Date(task.created_at || Date.now()).getTime();
-      if (time >= todayStart) {
-        groups['Today'].push(task);
-      } else if (time >= yesterdayStart) {
-        groups['Yesterday'].push(task);
-      } else if (time >= sevenDaysAgoStart) {
-        groups['Previous 7 Days'].push(task);
-      } else if (time >= thirtyDaysAgoStart) {
-        groups['Previous 30 Days'].push(task);
-      } else {
-        groups['Older'].push(task);
-      }
-    });
-
-    return Object.entries(groups)
-      .filter(([_, list]) => list.length > 0)
-      .map(([label, list]) => ({ label, tasks: list }));
+    return groupTasksByDate(filteredTasks);
   }, [filteredTasks]);
 
   return (
@@ -614,23 +816,119 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
             </div>
           </div>
 
-          {/* Search Bar */}
-          <div className="relative mt-3">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search Library files, photos, videos..."
-              className="w-full pl-9 pr-8 py-2 bg-white dark:bg-card border border-border rounded-xl text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary shadow-2xs"
-            />
-            {searchQuery && (
+          {/* Search Bar & Date Filter Controls */}
+          <div className="space-y-2 mt-3">
+            <div className="relative flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search tasks by keyword or date (e.g. 'Oct 14', 'work', 'code')..."
+                  className="w-full pl-9 pr-8 py-2 bg-white dark:bg-card border border-border rounded-xl text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary shadow-2xs"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full hover:bg-muted text-muted-foreground"
+                    title="Clear search query"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+
+              {/* Date Filter Toggle Button */}
               <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full hover:bg-muted text-muted-foreground"
+                onClick={() => setShowDateFilter(!showDateFilter)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-medium transition-all shrink-0 cursor-pointer shadow-2xs",
+                  (dateFilter !== 'all' || showDateFilter)
+                    ? "bg-primary/10 border-primary/40 text-primary font-semibold"
+                    : "bg-white dark:bg-card border-border text-muted-foreground hover:text-foreground"
+                )}
+                title="Filter tasks by date range"
               >
-                <X size={12} />
+                <Calendar size={14} />
+                <span className="hidden sm:inline">Date</span>
+                {dateFilter !== 'all' && (
+                  <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
+                )}
               </button>
+            </div>
+
+            {/* Quick Date Filter Pills & Custom Date Range */}
+            {(showDateFilter || dateFilter !== 'all') && (
+              <div className="p-2.5 rounded-xl bg-white dark:bg-card/90 border border-border/80 space-y-2 animate-in fade-in slide-in-from-top-1 duration-150">
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground font-semibold px-0.5">
+                  <span className="flex items-center gap-1">
+                    <Filter size={11} className="text-primary" /> Filter by Date Period
+                  </span>
+                  {(dateFilter !== 'all' || searchQuery || startDate || endDate) && (
+                    <button
+                      onClick={() => {
+                        setDateFilter('all');
+                        setStartDate('');
+                        setEndDate('');
+                        setSearchQuery('');
+                      }}
+                      className="text-[10px] text-primary hover:underline font-normal cursor-pointer"
+                    >
+                      Reset All Filters
+                    </button>
+                  )}
+                </div>
+
+                {/* Date Quick Filter Pills */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[
+                    { id: 'all', label: 'All Dates' },
+                    { id: 'today', label: 'Today' },
+                    { id: 'yesterday', label: 'Yesterday' },
+                    { id: 'week', label: 'Past 7 Days' },
+                    { id: 'month', label: 'Past 30 Days' },
+                    { id: 'custom', label: 'Custom Range' }
+                  ].map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => setDateFilter(p.id as any)}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer",
+                        dateFilter === p.id
+                          ? "bg-primary text-primary-foreground font-semibold shadow-2xs"
+                          : "bg-muted/60 text-muted-foreground hover:text-foreground hover:bg-muted"
+                      )}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Custom Date Range Picker */}
+                {dateFilter === 'custom' && (
+                  <div className="flex items-center gap-2 pt-1 border-t border-border/40">
+                    <div className="flex-1 space-y-1">
+                      <label className="text-[10px] text-muted-foreground font-mono block">Start Date</label>
+                      <input
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="w-full px-2 py-1 bg-background border border-border rounded-lg text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <label className="text-[10px] text-muted-foreground font-mono block">End Date</label>
+                      <input
+                        type="date"
+                        value={endDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        className="w-full px-2 py-1 bg-background border border-border rounded-lg text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -919,31 +1217,91 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
             ) : (
               /* Chat & Task Sessions Tab */
               <TabsContent value="sessions" className="flex-1 overflow-y-auto p-4 space-y-2.5 custom-scrollbar m-0">
-                {/* Conversation Persistence & Recovery Bar */}
-                <div className="flex items-center justify-between p-2.5 rounded-xl bg-muted/40 border border-border/50 mb-2">
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium">
-                    <Clock size={13} className="text-primary" />
-                    <span>Permanent History ({filteredTasks.length})</span>
+                {/* Conversation Persistence & Multi-Select Toolbar */}
+                {isSelectionMode ? (
+                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-primary/10 border border-primary/20 mb-2 animate-in fade-in">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleSelectAllTasks}
+                        className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline cursor-pointer"
+                      >
+                        <div className={cn(
+                          "w-4 h-4 rounded border flex items-center justify-center transition-colors",
+                          selectedTaskIds.size === filteredTasks.length && filteredTasks.length > 0
+                            ? "bg-primary border-primary text-primary-foreground"
+                            : selectedTaskIds.size > 0
+                              ? "bg-primary/20 border-primary text-primary"
+                              : "border-muted-foreground/40 bg-background"
+                        )}>
+                          {selectedTaskIds.size === filteredTasks.length && filteredTasks.length > 0 && <Check size={11} strokeWidth={3} />}
+                          {selectedTaskIds.size > 0 && selectedTaskIds.size < filteredTasks.length && <div className="w-2 h-0.5 bg-primary rounded-full" />}
+                        </div>
+                        <span>
+                          {selectedTaskIds.size === filteredTasks.length && filteredTasks.length > 0
+                            ? 'Deselect All'
+                            : 'Select All'}
+                        </span>
+                      </button>
+                      <span className="text-xs text-muted-foreground font-mono font-medium">
+                        ({selectedTaskIds.size} of {filteredTasks.length} selected)
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setShowBulkDeleteDialog(true)}
+                        disabled={selectedTaskIds.size === 0}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-500 hover:bg-red-600 text-white text-[11px] font-semibold transition-all cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed"
+                        title="Delete selected tasks"
+                      >
+                        <Trash2 size={12} />
+                        <span>Delete ({selectedTaskIds.size})</span>
+                      </button>
+                      <button
+                        onClick={handleCancelSelection}
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-background hover:bg-muted text-foreground border border-border/60 text-[11px] font-semibold transition-all cursor-pointer shadow-2xs"
+                        title="Exit selection mode"
+                      >
+                        <span>Done</span>
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={handleExportHistory}
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-background hover:bg-muted text-foreground border border-border/60 text-[11px] font-semibold transition-all cursor-pointer shadow-2xs"
-                      title="Export conversation history to JSON backup"
-                    >
-                      <Download size={12} />
-                      <span>Backup</span>
-                    </button>
-                    <button
-                      onClick={handleRecoverHistory}
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary hover:text-primary-foreground text-primary text-[11px] font-semibold transition-all cursor-pointer"
-                      title="Restore conversations from a backup file"
-                    >
-                      <Upload size={12} />
-                      <span>Recover</span>
-                    </button>
+                ) : (
+                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-muted/40 border border-border/50 mb-2">
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium">
+                      <Clock size={13} className="text-primary" />
+                      <span>Permanent History ({filteredTasks.length})</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {filteredTasks.length > 0 && (
+                        <button
+                          onClick={() => setIsSelectionMode(true)}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-background hover:bg-muted text-foreground border border-border/60 text-[11px] font-semibold transition-all cursor-pointer shadow-2xs"
+                          title="Select multiple tasks to delete"
+                        >
+                          <CheckSquare size={12} className="text-primary" />
+                          <span>Select</span>
+                        </button>
+                      )}
+                      <button
+                        onClick={handleExportHistory}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-background hover:bg-muted text-foreground border border-border/60 text-[11px] font-semibold transition-all cursor-pointer shadow-2xs"
+                        title="Export conversation history to JSON backup"
+                      >
+                        <Download size={12} />
+                        <span>Backup</span>
+                      </button>
+                      <button
+                        onClick={handleRecoverHistory}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary hover:text-primary-foreground text-primary text-[11px] font-semibold transition-all cursor-pointer"
+                        title="Restore conversations from a backup file"
+                      >
+                        <Upload size={12} />
+                        <span>Recover</span>
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {groupedTasks.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-56 text-center px-4 space-y-3">
@@ -972,43 +1330,92 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
                           {group.tasks.length}
                         </span>
                         <div className="h-px bg-border/40 flex-1 ml-1" />
+                        {isSelectionMode && (
+                          <button
+                            onClick={(e) => handleSelectGroupTasks(group.tasks, e)}
+                            className="text-[10px] font-medium text-muted-foreground hover:text-primary px-1.5 py-0.5 rounded hover:bg-muted transition-colors cursor-pointer"
+                          >
+                            {group.tasks.every(t => selectedTaskIds.has(t.id)) ? 'Deselect group' : 'Select group'}
+                          </button>
+                        )}
                       </div>
 
                       {/* Grouped session cards */}
                       <div className="space-y-2">
-                        {group.tasks.map((task) => (
-                          <div
-                            key={task.id}
-                            onClick={() => handleOpenTask(task.id)}
-                            className="group relative p-3.5 rounded-2xl border border-border bg-white dark:bg-card hover:border-primary/50 hover:shadow-md transition-all cursor-pointer"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="flex-1 min-w-0 space-y-1.5">
-                                <div className="flex items-center gap-2">
-                                  <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
-                                    <MessageSquare size={11} /> {((task as any).mode === 'work' || task.outputFormat === 'website' || Boolean(task.websiteName)) ? 'Work' : 'Chat'}
-                                  </span>
-                                  <span className="text-[10px] text-muted-foreground font-mono">
-                                    {getRelativeTime(task.created_at)}
-                                  </span>
+                        {group.tasks.map((task) => {
+                          const isSelected = selectedTaskIds.has(task.id);
+                          const cardContent = (
+                            <div
+                              onClick={(e) => {
+                                if (isSelectionMode) {
+                                  toggleSelectTask(task.id, e);
+                                } else {
+                                  handleOpenTask(task.id);
+                                }
+                              }}
+                              className={cn(
+                                "group relative p-3.5 rounded-2xl border transition-all cursor-pointer",
+                                isSelected
+                                  ? "border-primary bg-primary/5 dark:bg-primary/10 ring-1 ring-primary/30 shadow-sm"
+                                  : "border-border bg-white dark:bg-card hover:border-primary/50 hover:shadow-md"
+                              )}
+                            >
+                              <div className="flex items-start gap-3">
+                                {/* Selection Checkbox */}
+                                <div
+                                  onClick={(e) => toggleSelectTask(task.id, e)}
+                                  className={cn(
+                                    "mt-0.5 shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-all cursor-pointer",
+                                    isSelected
+                                      ? "bg-primary border-primary text-primary-foreground opacity-100"
+                                      : isSelectionMode
+                                        ? "border-muted-foreground/40 bg-background hover:border-primary opacity-100"
+                                        : "border-muted-foreground/40 bg-background hover:border-primary opacity-0 group-hover:opacity-100"
+                                  )}
+                                  title={isSelected ? "Deselect task" : "Select task"}
+                                >
+                                  {isSelected && <Check size={11} strokeWidth={3} />}
                                 </div>
-                                <h4 className="font-semibold text-xs text-foreground line-clamp-1">
-                                  {formatTitle(task)}
-                                </h4>
-                                <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
-                                  {task.prompt}
-                                </p>
+
+                                <div className="flex-1 min-w-0 space-y-1.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
+                                      <MessageSquare size={11} /> {((task as any).mode === 'work' || task.outputFormat === 'website' || Boolean(task.websiteName)) ? 'Work' : 'Chat'}
+                                    </span>
+                                    <span className="text-[10px] text-muted-foreground font-mono">
+                                      {getRelativeTime(task.created_at)}
+                                    </span>
+                                  </div>
+                                  <h4 className="font-semibold text-xs text-foreground line-clamp-1">
+                                    {formatTitle(task)}
+                                  </h4>
+                                  <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
+                                    {task.prompt}
+                                  </p>
+                                </div>
+
+                                {/* Delete single session button - only when not in selection mode */}
+                                {!isSelectionMode && (
+                                  <button
+                                    onClick={(e) => handleDeleteTask(task.id, e, formatTitle(task))}
+                                    className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
+                                    title="Delete session"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                )}
                               </div>
-                              <button
-                                onClick={(e) => handleDeleteTask(task.id, e, formatTitle(task))}
-                                className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
-                                title="Delete session"
-                              >
-                                <Trash2 size={13} />
-                              </button>
                             </div>
-                          </div>
-                        ))}
+                          );
+
+                          return isSelectionMode ? (
+                            <div key={task.id}>{cardContent}</div>
+                          ) : (
+                            <TaskQuickPreviewCard key={task.id} task={task} side="left" align="start">
+                              {cardContent}
+                            </TaskQuickPreviewCard>
+                          );
+                        })}
                       </div>
                     </div>
                   ))
@@ -1110,6 +1517,55 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
                 className="rounded-xl text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer shadow-xs font-semibold"
               >
                 {isDeleting ? 'Deleting...' : (itemToDelete?.type === 'session' ? 'Delete Session' : 'Delete File')}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Bulk Delete Confirmation Alert Dialog */}
+        <AlertDialog 
+          open={showBulkDeleteDialog} 
+          onOpenChange={(open) => {
+            if (!open && !isBulkDeleting) {
+              setShowBulkDeleteDialog(false);
+            }
+          }}
+        >
+          <AlertDialogContent className="max-w-md rounded-2xl p-6 bg-card border border-border">
+            <AlertDialogHeader>
+              <div className="w-11 h-11 rounded-2xl flex items-center justify-center mb-2 mx-auto sm:mx-0 bg-destructive/10 text-destructive">
+                <Trash2 size={22} />
+              </div>
+              <AlertDialogTitle className="text-base sm:text-lg font-bold text-foreground">
+                Delete {selectedTaskIds.size} Selected {selectedTaskIds.size === 1 ? 'Task' : 'Tasks'}?
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-xs text-muted-foreground leading-relaxed">
+                Are you sure you want to delete <span className="font-semibold text-foreground">{selectedTaskIds.size} selected {selectedTaskIds.size === 1 ? 'task' : 'tasks'}</span> in a single action?
+                This action cannot be undone. All conversation messages, research steps, and generated analysis will be permanently deleted.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            <AlertDialogFooter className="mt-4 gap-2 sm:gap-2">
+              <AlertDialogCancel 
+                disabled={isBulkDeleting}
+                onClick={() => setShowBulkDeleteDialog(false)}
+                className="rounded-xl text-xs cursor-pointer border border-border hover:bg-muted"
+              >
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                disabled={isBulkDeleting}
+                onClick={handleConfirmBulkDelete}
+                className="rounded-xl text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer shadow-xs font-semibold flex items-center gap-1.5"
+              >
+                {isBulkDeleting ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" />
+                    <span>Deleting {selectedTaskIds.size}...</span>
+                  </>
+                ) : (
+                  <span>Delete {selectedTaskIds.size} {selectedTaskIds.size === 1 ? 'Task' : 'Tasks'}</span>
+                )}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
