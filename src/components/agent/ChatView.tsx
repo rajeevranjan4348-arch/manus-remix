@@ -24,7 +24,8 @@ import {
   Settings,
   Zap,
   AlertCircle,
-  RotateCw
+  RotateCw,
+  Loader2
 } from 'lucide-react';
 import { ConnectorsPopupMenu } from '../chat/ConnectorsPopupMenu';
 import { ConnectorsStorePanel, CONNECTOR_CATALOG } from '../connectors/ConnectorsStorePanel';
@@ -40,7 +41,7 @@ import { ContextualThinking } from './ContextualThinking';
 import { AttachmentMenu } from '../chat/AttachmentMenu';
 import { ThoughtProcess } from './ThoughtProcess';
 import { ConversationActionBar } from './ConversationActionBar';
-import { VoiceInputButton, formatSpeechAutoFill } from '../voice/VoiceInputButton';
+import { VoiceInputButton } from '../voice/VoiceInputButton';
 import { SourceCitations, parseSourcesFromMarkdown } from './SourceCitations';
 import { WeatherWidgetCard } from './WeatherWidgetCard';
 import { ToolApprovalCard } from './ToolApprovalCard';
@@ -49,58 +50,12 @@ import { executeOpenUrl, executeDeviceCommand, VoiceCommandResult } from '@/lib/
 import { GoogleDrivePickerModal } from '../workspace/GoogleDrivePickerModal';
 import { WorkspaceToolCard } from '../workspace/WorkspaceToolCard';
 import { GoogleMapWidgetCard } from '../maps/GoogleMapWidgetCard';
-import { RoutePlannerCard } from '../maps/RoutePlannerCard';
 import { GoogleDriveFileItem } from '@/lib/workspaceTools';
 import { WorkspaceMentionPicker, WORKSPACE_CONNECTOR_OPTIONS, WorkspaceConnectorOption } from '../chat/WorkspaceMentionPicker';
 import { fetchWorkspaceContextSummary } from '@/lib/workspaceContextService';
 import { Step } from '@/hooks/useAgentTask';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
-
-
-type ManusMapRequest =
-  | { kind: 'route'; origin: string; destination: string }
-  | { kind: 'location'; location: string };
-
-function extractManusMapRequest(rawPrompt: string): ManusMapRequest | null {
-  const text = String(rawPrompt || '').replace(/\s+/g, ' ').trim();
-  if (!text) return null;
-  const clean = (value: string) => value.replace(/\b(?:please|on the map|on map)\b/ig, '').replace(/[?.!,;]+$/, '').trim();
-
-  const routePatterns = [
-    /\bdistance\s+from\s+(.+?)\s+to\s+(.+?)(?:[?.!,;]|$)/i,
-    /\b(?:route|directions|navigate)\s+from\s+(.+?)\s+to\s+(.+?)(?:[?.!,;]|$)/i,
-    /\bhow\s+far\s+is\s+(.+?)\s+from\s+(.+?)(?:[?.!,;]|$)/i,
-    /\bdistance\s+between\s+(.+?)\s+and\s+(.+?)(?:[?.!,;]|$)/i,
-  ];
-  for (let i = 0; i < routePatterns.length; i++) {
-    const match = text.match(routePatterns[i]);
-    if (match) {
-      const from = clean(match[1]);
-      const to = clean(match[2]);
-      if (from && to) return { kind: 'route', origin: from, destination: to };
-    }
-  }
-
-  const locationPatterns = [
-    /\bwhere\s+(?:is|are)\s+(.+?)\s+(?:located|situated)(?:\s|$|[?.!,;])/i,
-    /\bwhere\s+(.+?)\s+located(?:\s|$|[?.!,;])/i,
-    /\bwhere\s+(.+?)\s+(?:is|are)\s+(?:located|situated)(?:\s|$|[?.!,;])/i,
-    /\b(?:show|display|open)\s+(?:me\s+)?(?:the\s+)?map(?:\s+(?:of|for))?\s+(.+?)(?:[?.!,;]|$)/i,
-    /\bmap\s+of\s+(.+?)(?:[?.!,;]|$)/i,
-    /\bwhere\s+(?:is|are)\s+(.+?)(?:[?.!,;]|$)/i,
-    /\b(?:locate|find)\s+(.+?)\s+on\s+(?:the\s+)?map(?:[?.!,;]|$)/i,
-  ];
-  for (const pattern of locationPatterns) {
-    const match = text.match(pattern);
-    if (match) {
-      const location = clean(match[1].replace(/\b(?:on the map|on map)\b/ig, ''));
-      if (location) return { kind: 'location', location };
-    }
-  }
-  if (/\bshow\s+(?:me\s+)?(?:the\s+)?map\b/i.test(text)) return { kind: 'location', location: 'India' };
-  return null;
-}
 
 interface ChatViewProps {
   prompt: string;
@@ -138,6 +93,53 @@ export function ChatView({
   const [pendingApproval, setPendingApproval] = useState<VoiceCommandResult | null>(null);
   const [weatherMap, setWeatherMap] = useState<Record<string, WeatherData>>({});
   const [completedTypewriters, setCompletedTypewriters] = useState<Record<string, boolean>>({});
+  const [activeToolCall, setActiveToolCall] = useState<string | null>(null);
+
+  // Clean up tool call progress indicators on error, completion, reset, or idle state
+  useEffect(() => {
+    if (status === 'error' || status === 'completed' || status === 'idle' || !isLoading) {
+      setActiveToolCall(null);
+    }
+  }, [status, isLoading]);
+
+  // Synchronize active tool call indicator from running task steps or custom events
+  useEffect(() => {
+    if (status === 'error') {
+      setActiveToolCall(null);
+      return;
+    }
+
+    if (status === 'running' || isLoading) {
+      const runningStep = steps.find(s => s.status === 'running');
+      if (runningStep) {
+        const lbl = runningStep.label.toLowerCase();
+        if (lbl.includes('weather')) {
+          setActiveToolCall(runningStep.label || 'Searching weather data...');
+        } else if (lbl.includes('search') || lbl.includes('research')) {
+          setActiveToolCall(runningStep.label || 'Searching the web...');
+        } else if (lbl.includes('code') || lbl.includes('sandbox')) {
+          setActiveToolCall(runningStep.label || 'Executing code sandbox...');
+        }
+      }
+    }
+
+    const handleToolStart = (e: any) => {
+      if (status === 'error') return;
+      const msg = e?.detail?.message || (e?.detail?.tool ? `Processing tool: ${e.detail.tool}...` : 'Processing tool call...');
+      setActiveToolCall(msg);
+    };
+    const handleToolEnd = () => {
+      setActiveToolCall(null);
+    };
+
+    window.addEventListener('manus_tool_start', handleToolStart);
+    window.addEventListener('manus_tool_end', handleToolEnd);
+    return () => {
+      window.removeEventListener('manus_tool_start', handleToolStart);
+      window.removeEventListener('manus_tool_end', handleToolEnd);
+      setActiveToolCall(null);
+    };
+  }, [steps, status, isLoading]);
 
   // Granular robot reaction sync with task status and active execution step
   useEffect(() => {
@@ -179,7 +181,6 @@ export function ChatView({
   const [showMentionPicker, setShowMentionPicker] = useState<boolean>(false);
   const [mentionQuery, setMentionQuery] = useState<string>('');
   const [mentionIndex, setMentionIndex] = useState<number>(0);
-  const [isListening, setIsListening] = useState<boolean>(false);
   const dragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -191,7 +192,7 @@ export function ChatView({
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
       const scrollHeight = textareaRef.current.scrollHeight;
-      const targetHeight = Math.max(Math.min(scrollHeight, 90), 22);
+      const targetHeight = Math.max(Math.min(scrollHeight, 120), 26);
       textareaRef.current.style.height = `${targetHeight}px`;
     }
   }, [input]);
@@ -252,26 +253,37 @@ export function ChatView({
     toast.success(`Sent "${driveFile.name}" as context to AI Agent`);
   };
 
-  // Check user queries for live weather data
+  // Check user queries for live weather data and update active tool progress indicator
   useEffect(() => {
-    messages.forEach(async (m, idx) => {
-      const msgKey = m.id || m.content;
-      if (!weatherMap[msgKey]) {
-        const query = extractWeatherQuery(m.content || '', messages.slice(0, idx));
+    let isCancelled = false;
+    messages.forEach(async (m) => {
+      if (m.role === 'user' && !weatherMap[m.id || m.content]) {
+        const query = extractWeatherQuery(m.content || '', messages.slice(0, messages.indexOf(m)));
         if (query.isWeather && query.city) {
-          const data = await fetchWeatherByCity(query.city);
-          if (data) {
-            setWeatherMap(prev => ({
-              ...prev,
-              [msgKey]: data,
-              [query.city!.toLowerCase()]: data,
-              [data.locationName.toLowerCase()]: data,
-            }));
+          try {
+            if (status !== 'error') {
+              setActiveToolCall(`Searching weather data for ${query.city}...`);
+            }
+            const data = await fetchWeatherByCity(query.city);
+            if (!isCancelled && data) {
+              setWeatherMap(prev => ({ ...prev, [m.id || m.content]: data }));
+            }
+          } catch (err) {
+            console.error('[ChatView] Weather fetch error:', err);
+          } finally {
+            if (!isCancelled) {
+              setActiveToolCall(null);
+            }
           }
         }
       }
     });
-  }, [messages]);
+
+    return () => {
+      isCancelled = true;
+      setActiveToolCall(null);
+    };
+  }, [messages, weatherMap, status]);
 
   const handleApproveTool = async () => {
     if (!pendingApproval) return;
@@ -448,7 +460,16 @@ export function ChatView({
       if (
         prev &&
         prev.role === msg.role &&
+        prev.role === 'user' &&
         cleanUserMessage(prev.content || '').trim().toLowerCase() === cleanUserMessage(msg.content || '').trim().toLowerCase()
+      ) {
+        continue;
+      }
+      if (
+        prev &&
+        prev.role === 'assistant' &&
+        msg.role === 'assistant' &&
+        (prev.content || '').trim() === (msg.content || '').trim()
       ) {
         continue;
       }
@@ -457,18 +478,6 @@ export function ChatView({
     }
     return list;
   }, [messages]);
-
-  // Determine if the agent is actively streaming a response
-  const isStreamingResponse = React.useMemo(() => {
-    if (isLoading || status === 'running') return true;
-    const hasRunningStep = steps.some(s => s.status === 'running');
-    if (hasRunningStep) return true;
-    const lastMsg = displayMessages[displayMessages.length - 1];
-    if (lastMsg?.role === 'assistant' && (lastMsg.status === 'streaming' || (lastMsg as any).isStreaming)) {
-      return true;
-    }
-    return false;
-  }, [isLoading, status, steps, displayMessages]);
 
   const scrollToBottom = React.useCallback((behavior: ScrollBehavior = 'smooth') => {
     const container = containerRef.current;
@@ -485,10 +494,10 @@ export function ChatView({
 
   const handleTypewriterComplete = React.useCallback((msgKey: string) => {
     setCompletedTypewriters(prev => prev[msgKey] ? prev : { ...prev, [msgKey]: true });
-    if (isStreamingResponse && shouldAutoScrollRef.current && containerRef.current) {
+    if (shouldAutoScrollRef.current && containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
-  }, [isStreamingResponse]);
+  }, []);
 
   const handleConversationScroll = React.useCallback(() => {
     const container = containerRef.current;
@@ -499,78 +508,35 @@ export function ChatView({
     setShowScrollToBottom(!isAtBottom);
   }, []);
 
-  // When a streaming response begins, reset auto-scroll lock to true and align to bottom
-  const prevStreamingRef = useRef(false);
   useEffect(() => {
-    if (isStreamingResponse && !prevStreamingRef.current) {
-      shouldAutoScrollRef.current = true;
-      setShowScrollToBottom(false);
-      if (containerRef.current) {
-        containerRef.current.scrollTop = containerRef.current.scrollHeight;
-      }
-    }
-    prevStreamingRef.current = isStreamingResponse;
-  }, [isStreamingResponse]);
-
-  // Keep scroll position at the bottom during active streaming token/step updates
-  useEffect(() => {
-    if (isStreamingResponse && shouldAutoScrollRef.current && containerRef.current) {
+    if (shouldAutoScrollRef.current && containerRef.current) {
+      // Use direct position update during active token streaming to prevent frame animation cancellation stutters
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
-  }, [messages, steps, result, isStreamingResponse]);
+  }, [messages, steps, result, isLoading, status]);
 
-  // Auto-scroll observer for the ChatView component:
-  // Keeps the scroll position at the bottom ONLY when the agent is streaming a response.
-  // Observes content mutations and dimensional resizes while streaming, disconnecting when idle.
+  // Use ResizeObserver on container children to keep bottom in view as new message/content/images/charts render
   useEffect(() => {
     const container = containerRef.current;
-    // Disconnect and do nothing when not streaming - allowing user to freely browse past messages
-    if (!container || !isStreamingResponse) return;
+    if (!container) return;
 
     let rafId: number | null = null;
-    const scrollDownIfAllowed = () => {
-      if (!shouldAutoScrollRef.current || !container) return;
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        container.scrollTop = container.scrollHeight;
-      });
-    };
-
-    // 1. ResizeObserver: Observes height expansion of container and child elements as tokens stream in
-    const resizeObserver = new ResizeObserver(() => {
-      scrollDownIfAllowed();
-    });
-
-    resizeObserver.observe(container);
-    Array.from(container.children).forEach(child => resizeObserver.observe(child));
-
-    // 2. MutationObserver: Observes characterData and childList updates for real-time text streaming
-    const mutationObserver = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        mutation.addedNodes.forEach(node => {
-          if (node instanceof HTMLElement) {
-            resizeObserver.observe(node);
-          }
+    const observer = new ResizeObserver(() => {
+      if (shouldAutoScrollRef.current && container) {
+        if (rafId) cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(() => {
+          container.scrollTop = container.scrollHeight;
         });
       }
-      scrollDownIfAllowed();
     });
 
-    mutationObserver.observe(container, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-    });
-
-    // Ensure immediate bottom alignment on observer mount
-    scrollDownIfAllowed();
+    Array.from(container.children).forEach(child => observer.observe(child));
 
     return () => {
       if (rafId) cancelAnimationFrame(rafId);
-      resizeObserver.disconnect();
-      mutationObserver.disconnect();
+      observer.disconnect();
     };
-  }, [isStreamingResponse]);
+  }, []);
 
   // Initial animation
   useEffect(() => {
@@ -610,7 +576,8 @@ export function ChatView({
         match.includes('"graph"') || 
         match.includes('"labels"') || 
         match.includes('"datasets"') ||
-        match.includes('"files"')
+        match.includes('"files"') ||
+        match.includes('"weather"')
       ) {
         return '';
       }
@@ -761,39 +728,21 @@ export function ChatView({
     );
   };
 
-  const isAssistantWorking = isLoading || status === 'running';
-  const hasVisibleAssistantMessage = displayMessages.some((m: any) => {
-    if (m?.role !== 'assistant') return false;
-    const raw = m.content || '';
-    const { thought, content: extracted } = extractThoughtProcess(raw);
-    const cleanedContent = cleanMessageContent(extracted || raw);
-    return Boolean(cleanedContent || thought);
-  });
+  const isAssistantWorking = (isLoading || status === 'running') && status !== 'error' && status !== 'completed';
+  const hasAssistantOutput = displayMessages.some((m: any) => 
+    m.role === 'assistant' && (Boolean(cleanMessageContent(m.content)) || Boolean(m.content?.trim()))
+  );
   const activeRunningStep = steps.find(s => s.status === 'running');
-  const latestUserMsg = [...displayMessages].reverse().find((m: any) => m?.role === 'user')?.content || prompt;
-  const weatherQuery = extractWeatherQuery(latestUserMsg, displayMessages);
-
-  let typingStatus = activeRunningStep?.label;
-  if (!typingStatus && isAssistantWorking) {
-    if (weatherQuery.isWeather && weatherQuery.city) {
-      typingStatus = `Searching weather data for ${weatherQuery.city}...`;
-    } else if (weatherQuery.isWeather) {
-      typingStatus = 'Searching weather data...';
-    } else if (/(search|google|news|latest|breaking|fact|verify)/i.test(latestUserMsg)) {
-      typingStatus = 'Searching live web sources...';
-    } else if (/@[\w_]+/.test(latestUserMsg)) {
-      typingStatus = 'Connecting to workspace tools...';
-    } else if (isThinkHarder) {
-      typingStatus = 'Manus is reasoning deeply...';
-    } else {
-      typingStatus = 'Manus is thinking...';
-    }
-  }
+  const typingStatus = activeRunningStep 
+    ? activeRunningStep.label 
+    : isThinkHarder 
+      ? "Manus is reasoning deeply..." 
+      : "Manus is thinking...";
 
   return (
     <div className="flex flex-col h-full bg-manus-cream dark:bg-background relative">
       {/* Chat Area */}
-      <div ref={containerRef} onScroll={handleConversationScroll} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-20 pt-6 pb-40 space-y-8 custom-scrollbar">
+      <div ref={containerRef} onScroll={handleConversationScroll} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-20 pt-6 pb-40 space-y-8 custom-scrollbar scroll-smooth">
         
         {/* Render Conversation Messages in Chronological Order */}
         {displayMessages.map((msg, i) => {
@@ -843,7 +792,7 @@ export function ChatView({
                         animateTypewriter={shouldAnimate}
                         onTypewriterComplete={() => handleTypewriterComplete(msgKey)}
                         onTypewriterTick={() => {
-                          if (isStreamingResponse && shouldAutoScrollRef.current && containerRef.current) {
+                          if (shouldAutoScrollRef.current && containerRef.current) {
                             containerRef.current.scrollTop = containerRef.current.scrollHeight;
                           }
                         }}
@@ -930,47 +879,41 @@ export function ChatView({
                     />
                   )}
 
-                  {/* Map intent comes from the user's question, while the assistant response remains the direct answer. */}
-                  {isLatestAssistant && (() => {
-                    const latestUserMessage = [...messages].reverse().find((message: any) => message?.role === 'user')?.content;
-                    const latestUserPrompt = typeof latestUserMessage === 'string' ? latestUserMessage : (latestUserMessage?.text || prompt || '');
-                    const mapRequest = extractManusMapRequest(String(latestUserPrompt));
-                    if (!mapRequest) return null;
-                    if (mapRequest.kind === 'route') {
-                      return <RoutePlannerCard key={`route-${mapRequest.origin}-${mapRequest.destination}`} initialOrigin={mapRequest.origin} initialDestination={mapRequest.destination} autoCalculate />;
-                    }
-                    return <GoogleMapWidgetCard key={`location-${mapRequest.location}`} locationName={mapRequest.location} autoLocate zoom={12} />;
-                  })()}
+                  {/* Google Maps Widget Detection */}
+                  {/(map of|location of|show map|google map)/i.test(cleanedContent || '') && (
+                    <GoogleMapWidgetCard locationName="Google Headquarters, Mountain View" latitude={37.4220} longitude={-122.0841} />
+                  )}
 
-                  {/* Weather Widget Card Detection */}
+                  {/* Real-Time Weather Widget Card */}
                   {(() => {
-                    const prevUserMsg = i > 0 ? displayMessages[i - 1] : null;
-                    const wData = weatherMap[msg.id] || 
-                      weatherMap[msg.content] || 
-                      (prevUserMsg ? (weatherMap[prevUserMsg.id] || weatherMap[prevUserMsg.content]) : null) ||
-                      (Object.keys(weatherMap).length > 0 ? Object.values(weatherMap)[0] : null);
-                    
-                    const isWeatherContent = /(weather|temperature|forecast|humidity|celsius|fahrenheit|open-meteo|climate)/i.test(cleanedContent || '') ||
-                      (prevUserMsg && /(weather|temperature|forecast|delhi|mumbai|london|tokyo|city)/i.test(prevUserMsg.content || ''));
-
-                    if (wData && isWeatherContent) {
-                      return <WeatherWidgetCard data={wData} className="my-3 animate-weather-card" />;
+                    // Check if raw content contains JSON weather data
+                    const weatherJsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?"weather"[\s\S]*?)\s*```/);
+                    if (weatherJsonMatch) {
+                      try {
+                        const parsed = JSON.parse(weatherJsonMatch[1]);
+                        if (parsed?.weather?.locationName && typeof parsed?.weather?.temperature === 'number') {
+                          return <WeatherWidgetCard data={parsed.weather} />;
+                        }
+                      } catch {}
+                    }
+                    // Check weatherMap for this message
+                    const directWeather = weatherMap[msg.id || ''] || weatherMap[raw];
+                    if (directWeather) {
+                      return <WeatherWidgetCard data={directWeather} />;
+                    }
+                    // Check previous user message
+                    const prevUser = displayMessages.slice(0, i).reverse().find((m: any) => m.role === 'user');
+                    if (prevUser) {
+                      const userWeather = weatherMap[prevUser.id || ''] || weatherMap[prevUser.content || ''];
+                      if (userWeather) {
+                        return <WeatherWidgetCard data={userWeather} />;
+                      }
                     }
                     return null;
                   })()}
 
                   {parsedSources.sources.length > 0 && (
                     <SourceCitations sources={parsedSources.sources} />
-                  )}
-
-                  {isAssistantWorking && isLatestAssistant && (
-                    <div className="pt-1">
-                      <ContextualThinking
-                        prompt={messages.filter((message: any) => message?.role === 'user').slice(-1)[0]?.content || prompt}
-                        activeStep={activeRunningStep?.label}
-                        deepMode={isThinkHarder}
-                      />
-                    </div>
                   )}
 
                   {cleanedContent ? (
@@ -991,33 +934,6 @@ export function ChatView({
           }
           return null;
         })}
-
-        {/* Live tool-call progress; automatically disappears on success, stop, or error. */}
-        {isAssistantWorking && activeRunningStep && (
-          <div
-            role="status"
-            aria-live="polite"
-            className="flex items-center gap-3 max-w-3xl mx-auto my-2 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm animate-in fade-in slide-in-from-bottom-2"
-          >
-            <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
-              <span className="absolute inline-flex h-full w-full rounded-full bg-primary/20 animate-ping" />
-              <span className="relative h-2.5 w-2.5 rounded-full bg-primary" />
-            </span>
-            <span className="min-w-0">
-              <span className="font-medium text-foreground">
-                {(() => {
-                  const label = activeRunningStep.label || 'Processing request';
-                  if (/weather/i.test(label)) return 'Searching weather data...';
-                  if (/search|research|web/i.test(label)) return 'Searching the web...';
-                  if (/tool|connector|calendar|gmail|drive/i.test(label)) return `Running tool: ${label}...`;
-                  if (/fetch|load|read/i.test(label)) return `Fetching data: ${label}...`;
-                  return `${label}...`;
-                })()}
-              </span>
-              <span className="block text-xs text-muted-foreground mt-0.5">Manus is working on this step</span>
-            </span>
-          </div>
-        )}
 
         {/* Steps / Task Progress */}
         {steps.length > 0 && (
@@ -1084,8 +1000,26 @@ export function ChatView({
           );
         })()}
 
-        {/* Prompt-aware thinking animation: stages adapt to the user's request */}
-        {isAssistantWorking && !hasVisibleAssistantMessage && (
+        {/* Visual Progress Indicator: explicitly shows when AI is processing tool calls (e.g. Searching weather data...) */}
+        {activeToolCall && status !== 'error' && (
+          <div 
+            className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-2 duration-300"
+            data-testid="tool-progress-indicator"
+          >
+            <div className="flex-1 space-y-2.5 min-w-0">
+              <div className="flex items-center gap-2.5">
+                <ManusLogo showBadge={true} />
+              </div>
+              <div className="inline-flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-blue-50/90 dark:bg-blue-950/40 border border-blue-200/80 dark:border-blue-800/60 text-blue-700 dark:text-blue-300 text-xs font-medium shadow-xs">
+                <Loader2 size={14} className="animate-spin text-blue-600 dark:text-blue-400 shrink-0" />
+                <span>{activeToolCall}</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Prompt-aware thinking animation: shown ONLY while waiting for initial tokens */}
+        {isAssistantWorking && !hasAssistantOutput && !activeToolCall && (
           <div className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="flex-1 space-y-2.5 min-w-0">
               <div className="flex items-center gap-2.5">
@@ -1114,7 +1048,7 @@ export function ChatView({
               <div className="p-4 rounded-2xl bg-destructive/5 border border-destructive/20 text-sm">
                 <p className="font-semibold text-destructive mb-1">Execution Interrupted</p>
                 <p className="text-muted-foreground text-xs leading-relaxed">
-                  The stream was interrupted or the AI provider is temporarily unavailable. Check your connection and API key/provider settings, then select Retry.
+                  The request encountered a network timeout or provider interruption. You can retry the operation safely.
                 </p>
                 <div className="mt-3 flex items-center gap-2">
                   <button
@@ -1131,7 +1065,10 @@ export function ChatView({
                   </button>
                   <button
                     type="button"
-                    onClick={onReset}
+                    onClick={() => {
+                      setActiveToolCall(null);
+                      onReset();
+                    }}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted text-xs font-medium transition-all cursor-pointer text-muted-foreground hover:text-foreground"
                   >
                     <span>Reset</span>
@@ -1150,7 +1087,7 @@ export function ChatView({
         <button
           type="button"
           onClick={() => scrollToBottom('smooth')}
-          className="absolute bottom-44 right-4 sm:right-12 z-30 flex items-center gap-2 px-3.5 py-2 rounded-full bg-primary text-primary-foreground shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 transition-all text-xs font-semibold cursor-pointer animate-in fade-in slide-in-from-bottom-2 duration-200"
+          className="absolute bottom-28 right-6 sm:right-12 z-30 flex items-center gap-2 px-3.5 py-2 rounded-full bg-primary text-primary-foreground shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 transition-all text-xs font-semibold cursor-pointer animate-in fade-in slide-in-from-bottom-2 duration-200"
           title="Scroll to latest message"
           aria-label="Scroll to latest message"
         >
@@ -1191,8 +1128,7 @@ export function ChatView({
           onDrop={handleDrop}
           className={cn(
             "w-full max-w-3xl bg-white dark:bg-[#1a1b1e] rounded-[1.75rem] sm:rounded-[2rem] shadow-xl border border-slate-200/80 dark:border-border/60 px-3.5 py-2.5 sm:px-4.5 sm:py-3 flex flex-col gap-1.5 sm:gap-2 transition-[box-shadow,border-color,background-color] duration-200 ease-out focus-within:ring-2 focus-within:ring-primary/20 relative gpu-accelerated",
-            isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30",
-            isListening && "ring-2 ring-rose-500/40 border-rose-400 dark:border-rose-500/60 shadow-lg shadow-rose-500/10"
+            isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30"
           )}
         >
           {showMentionPicker && (
@@ -1220,27 +1156,6 @@ export function ChatView({
             onOpenStore={() => setIsConnectorsStoreOpen(true)}
             onOpenConfigModal={(id) => setSelectedConfigConnectorId(id)}
           />
-
-          {/* Visual Indicator for Speech Recognition Listening State */}
-          {isListening && (
-            <div 
-              data-testid="speech-listening-indicator"
-              className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-medium animate-in fade-in slide-in-from-top-1 duration-200 select-none"
-            >
-              <div className="flex items-center gap-2">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
-                </span>
-                <span className="font-semibold">Listening... Speak into microphone</span>
-              </div>
-              <div className="flex items-center gap-0.5">
-                <span className="w-0.5 h-2.5 bg-rose-500 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
-                <span className="w-0.5 h-4 bg-rose-500 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
-                <span className="w-0.5 h-2 bg-rose-500 rounded-full animate-bounce"></span>
-              </div>
-            </div>
-          )}
 
           {/* Top Row: Textarea for typing message */}
           <div className="w-full flex flex-col min-h-[26px] sm:min-h-[28px]">
@@ -1286,22 +1201,16 @@ export function ChatView({
                 }
               }}
               rows={1}
-              placeholder={
-                isListening 
-                  ? "Listening... speak now to auto-fill prompt..." 
-                  : isThinkHarder 
-                    ? "Ask with deep reasoning..." 
-                    : "Type a message or ask anything..."
-              }
-              className="w-full bg-transparent border-none outline-none resize-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-[14px] sm:text-[15px] leading-snug p-0 focus:ring-0 focus:outline-none min-h-[22px] sm:min-h-[24px] max-h-[90px] custom-scrollbar"
+              placeholder={isThinkHarder ? "Ask with deep reasoning..." : "Type a message or ask anything..."}
+              className="w-full bg-transparent border-none outline-none resize-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-[15px] sm:text-base leading-snug sm:leading-relaxed p-0 focus:ring-0 focus:outline-none min-h-[26px] sm:min-h-[28px] max-h-[130px] custom-scrollbar"
               disabled={isLoading}
             />
           </div>
 
           {/* Bottom Row: Controls */}
-          <div className="flex items-center justify-between gap-2 sm:gap-3 pt-1 border-t border-transparent min-w-0 w-full">
+          <div className="flex items-center justify-between pt-0.5 border-t border-transparent gap-2 min-w-0 w-full">
             {/* Left Controls: Circular + Button & Attached Connector Tags */}
-            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 overflow-x-auto no-scrollbar py-0.5">
               <AttachmentMenu
                 onFileSelect={handleFileSelect}
                 isThinkHarder={isThinkHarder}
@@ -1314,17 +1223,17 @@ export function ChatView({
               >
                 <button 
                   type="button"
-                  className="w-9 h-9 rounded-full border border-slate-200/90 dark:border-white/15 bg-white dark:bg-[#141518] hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                  className="w-8 h-8 rounded-full border border-slate-200/90 dark:border-white/15 bg-white dark:bg-[#141518] hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 shadow-2xs cursor-pointer active:scale-95 shrink-0"
                   title="Add attachments or options"
                   aria-label="Add attachments or options"
                 >
-                  <Plus size={18} strokeWidth={2.4} className="text-slate-800 dark:text-slate-200 shrink-0" />
+                  <Plus size={16} className="text-slate-800 dark:text-slate-200 shrink-0" />
                 </button>
               </AttachmentMenu>
 
               {/* Selected Connector Tags */}
               {activeConnectorTags.length > 0 && (
-                <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap">
+                <div className="flex items-center gap-1.5 shrink-0">
                   {activeConnectorTags.map((tagId) => {
                     const opt = WORKSPACE_CONNECTOR_OPTIONS.find(o => o.id === tagId) || CONNECTOR_CATALOG.find(c => c.id === tagId);
                     if (!opt) return null;
@@ -1337,21 +1246,21 @@ export function ChatView({
                       <div 
                         key={tagId} 
                         onClick={() => setSelectedConfigConnectorId(tagId)}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-800/40 text-[#2563eb] dark:text-[#93c5fd] font-semibold text-xs rounded-full cursor-pointer hover:opacity-80 transition-opacity select-none shrink-0 whitespace-nowrap"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-800/40 text-[#2563eb] dark:text-[#93c5fd] font-semibold text-xs rounded-full cursor-pointer hover:opacity-80 transition-opacity select-none shrink-0"
                         title="Click to view connector parameters or details"
                       >
-                        <IconComp strokeWidth={2.4} className="w-3.5 h-3.5 shrink-0" />
-                        <span className="shrink-0">{displayName}</span>
+                        <IconComp className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate max-w-[120px]">{displayName}</span>
                         <button 
                           type="button" 
                           onClick={(e) => {
                             e.stopPropagation();
                             removeConnectorTag(tagId);
                           }}
-                          className="p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full text-current/70 hover:text-current ml-0.5 shrink-0"
+                          className="p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full text-current/70 hover:text-current shrink-0"
                           title="Remove connector"
                         >
-                          <X size={13} strokeWidth={2.4} />
+                          <X size={12} />
                         </button>
                       </div>
                     );
@@ -1364,14 +1273,13 @@ export function ChatView({
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto">
               <VoiceInputButton
                 onListeningStateChange={(listening) => {
-                  setIsListening(listening);
                   if (listening) {
                     speechBaseInputRef.current = input.trim();
                   }
                 }}
                 onTranscript={(dictatedText) => {
                   const base = speechBaseInputRef.current;
-                  setInput(formatSpeechAutoFill(base, dictatedText));
+                  setInput(base ? `${base} ${dictatedText}` : dictatedText);
                 }}
                 onAutoSubmit={(finalText) => {
                   if (finalText.trim()) {
@@ -1379,8 +1287,8 @@ export function ChatView({
                     setInput('');
                   }
                 }}
-                className="w-9 h-9 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer shrink-0"
-                size={18}
+                className="w-8 h-8 sm:w-8.5 sm:h-8.5 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer shrink-0"
+                size={16}
               />
               <button 
                 type="button"
@@ -1396,19 +1304,19 @@ export function ChatView({
                 }}
                 disabled={(!isLoading && status !== 'running') && (!input.trim() && !attachedFile && activeConnectorTags.length === 0)}
                 className={cn(
-                  "w-9 h-9 rounded-full flex items-center justify-center transition-all duration-150 shadow-2xs shrink-0 cursor-pointer",
+                  "w-8 h-8 sm:w-8.5 sm:h-8.5 rounded-full flex items-center justify-center transition-all shadow-2xs shrink-0",
                   isLoading || status === 'running'
-                    ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md"
+                    ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md cursor-pointer"
                     : (input.trim() || attachedFile || activeConnectorTags.length > 0)
-                      ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md opacity-100"
-                      : "bg-[#e2e8f0]/80 dark:bg-muted text-slate-400 dark:text-muted-foreground cursor-not-allowed opacity-50"
+                      ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md cursor-pointer"
+                      : "bg-[#e2e8f0]/80 dark:bg-muted text-slate-400 dark:text-muted-foreground cursor-not-allowed"
                 )}
                 title={isLoading || status === 'running' ? "Stop response" : "Send message"}
                 aria-label={isLoading || status === 'running' ? "Stop response" : "Send message"}
               >
                 {isLoading || status === 'running'
-                  ? <Square size={13} fill="currentColor" strokeWidth={2.5} className="shrink-0" />
-                  : <ArrowUp size={18} strokeWidth={2.6} className="font-bold shrink-0" />}
+                  ? <Square size={11} fill="currentColor" strokeWidth={2.5} />
+                  : <ArrowUp size={16} strokeWidth={2.6} className="font-bold shrink-0" />}
               </button>
             </div>
           </div>

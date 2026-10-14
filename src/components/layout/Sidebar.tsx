@@ -39,12 +39,9 @@ import { ConnectorsStorePanel } from '../connectors/ConnectorsStorePanel';
 import { cn } from '@/lib/utils';
 import { Logo, ManusLogo } from './Logo';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { TaskQuickPreviewCard } from '../history/TaskQuickPreviewCard';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent } from '@/components/ui/dropdown-menu';
 import { useBlinkAuth } from '@blinkdotnew/react';
 import { useFirebase } from '@/context/FirebaseContext';
-import { Step } from '@/hooks/useAgentTask';
-import { RadialProgress } from '@/components/ui/radial-progress';
 import { blink } from '@/lib/blink';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -72,8 +69,6 @@ interface SidebarProps {
   activeTaskId?: string;
   onOpenHistory?: () => void;
   onOpenSettings?: () => void;
-  activeSteps?: Step[];
-  activeTaskStatus?: 'idle' | 'running' | 'completed' | 'error' | string;
 }
 
 interface TaskHistory {
@@ -82,7 +77,6 @@ interface TaskHistory {
   title?: string;
   created_at: string;
   status?: string;
-  steps?: string | Step[];
   outputFormat?: string;
   projectId?: string;
 }
@@ -175,64 +169,7 @@ function groupTasksByTime(tasks: TaskHistory[]): { group: string; items: TaskHis
     .map(([group, items]) => ({ group, items }));
 }
 
-export function calculateStepsProgress(
-  steps: Step[] | undefined,
-  status: string | undefined
-): {
-  percentage: number;
-  completedCount: number;
-  totalCount: number;
-  isRunning: boolean;
-  isCompleted: boolean;
-  isError: boolean;
-} {
-  const isRunning = status === 'running';
-  const isCompleted = status === 'completed';
-  const isError = status === 'error';
-
-  if (!steps || steps.length === 0) {
-    if (isCompleted) {
-      return { percentage: 100, completedCount: 0, totalCount: 0, isRunning: false, isCompleted: true, isError: false };
-    }
-    if (isRunning) {
-      return { percentage: 15, completedCount: 0, totalCount: 0, isRunning: true, isCompleted: false, isError: false };
-    }
-    return { percentage: 0, completedCount: 0, totalCount: 0, isRunning: false, isCompleted: false, isError: isError };
-  }
-
-  const totalCount = steps.length;
-  const completedCount = steps.filter(s => s.status === 'completed').length;
-  const runningCount = steps.filter(s => s.status === 'running').length;
-
-  if (isCompleted || completedCount === totalCount) {
-    return { percentage: 100, completedCount: totalCount, totalCount, isRunning: false, isCompleted: true, isError: false };
-  }
-
-  // Fractional progress: each completed step is 100/total; currently running step adds 50%
-  const fractionalCompleted = completedCount + (runningCount > 0 ? 0.5 : 0);
-  const rawPercentage = Math.round((fractionalCompleted / totalCount) * 100);
-  const percentage = isRunning ? Math.min(99, Math.max(5, rawPercentage)) : Math.min(100, rawPercentage);
-
-  return {
-    percentage,
-    completedCount,
-    totalCount,
-    isRunning,
-    isCompleted,
-    isError
-  };
-}
-
-export function Sidebar({ 
-  isOpen, 
-  onToggle, 
-  onNewTask, 
-  activeTaskId, 
-  onOpenHistory, 
-  onOpenSettings,
-  activeSteps,
-  activeTaskStatus 
-}: SidebarProps) {
+export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHistory, onOpenSettings }: SidebarProps) {
   const [activeTab, setActiveTab] = React.useState('new');
   const [tasks, setTasks] = useState<TaskHistory[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -299,28 +236,6 @@ export function Sidebar({
     } catch (error) {
       console.error('Failed to load tasks', error);
     }
-  };
-
-  const getTaskSteps = (task: TaskHistory): Step[] | undefined => {
-    if (task.id === activeTaskId && activeSteps && activeSteps.length > 0) {
-      return activeSteps;
-    }
-    if (task.steps) {
-      try {
-        const parsed = typeof task.steps === 'string' ? JSON.parse(task.steps) : task.steps;
-        if (Array.isArray(parsed)) return parsed;
-      } catch {
-        // ignore malformed step payload
-      }
-    }
-    return undefined;
-  };
-
-  const getTaskStatus = (task: TaskHistory): string | undefined => {
-    if (task.id === activeTaskId && activeTaskStatus) {
-      return activeTaskStatus;
-    }
-    return task.status;
   };
 
   const handleStartRename = (taskId: string, e: React.MouseEvent, currentTitle: string) => {
@@ -458,183 +373,187 @@ export function Sidebar({
     }
   };
 
-  // Collapsed Sidebar (Icon Mode)
-  if (!isOpen) {
-    return (
-      <aside className="w-16 h-screen border-r border-border/40 bg-manus-soft dark:bg-sidebar flex flex-col items-center py-6 hidden lg:flex shrink-0 transition-colors">
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button 
-                onClick={onToggle}
-                className="p-2 rounded-xl hover:bg-manus-cream dark:hover:bg-accent transition-all duration-200 group relative mb-6 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 smooth-press"
-                title="Open sidebar"
-              >
-                <div className="group-hover:opacity-0 transition-opacity">
-                  <Logo size={26} />
-                </div>
-                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                  <PanelLeft size={26} strokeWidth={2.4} />
-                </div>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">Open sidebar</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+  return (
+    <>
+      {/* Mobile Backdrop with smooth fade in/out */}
+      <div 
+        onClick={onToggle}
+        className={cn(
+          "fixed inset-0 bg-black/50 z-40 lg:hidden backdrop-blur-xs transition-opacity duration-300 ease-in-out",
+          isOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+        )}
+        aria-hidden={!isOpen}
+      />
 
-        {/* Primary Navigation Icons */}
-        <nav className="space-y-3 w-full flex flex-col items-center">
-          {navItems.map((item) => (
-            <TooltipProvider key={item.id}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={() => item.action ? item.action() : setActiveTab(item.id)}
-                    className={cn(
-                      "p-2.5 rounded-xl transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95",
-                      activeTab === item.id && !item.action
-                        ? "bg-white dark:bg-card border border-border text-foreground shadow-sm" 
-                        : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
-                    )}
-                  >
-                    <item.icon size={23} strokeWidth={2.5} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="right">{item.label}</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          ))}
-        </nav>
-
-        {/* Quick Project Shortcuts in Collapsed View */}
-        <div className="w-full pt-4 mt-4 border-t border-border/60 flex flex-col items-center space-y-2">
-          {projects.slice(0, 4).map((proj) => {
-            const IconComp = PROJECT_ICON_MAP[proj.icon] || Folder;
-            const colorTheme = PROJECT_COLOR_MAP[proj.color] || PROJECT_COLOR_MAP.indigo;
-            return (
-              <TooltipProvider key={proj.id}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={() => {
-                        onToggle();
-                        setSelectedProjectView(proj);
-                      }}
-                      className={cn(
-                        "w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-2xs hover:scale-105",
-                        colorTheme.bg
-                      )}
-                    >
-                      <IconComp size={18} strokeWidth={2.4} />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    <p className="font-bold text-xs">{proj.name}</p>
-                    <p className="text-[10px] text-muted-foreground">{proj.description || 'Project'}</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            );
-          })}
-        </div>
-
-        {/* Quick Recent Task Sessions in Collapsed View */}
-        <div className="w-full flex-1 flex flex-col items-center pt-3 mt-2 border-t border-border/60 space-y-2 overflow-y-auto custom-scrollbar">
-          {tasks.slice(0, 6).map((task) => {
-            const isActive = activeTaskId === task.id;
-            const taskProj = projects.find(p => p.id === task.projectId);
-            const taskSteps = getTaskSteps(task);
-            const taskStatus = getTaskStatus(task);
-            const progress = calculateStepsProgress(taskSteps, taskStatus);
-
-            return (
-              <TaskQuickPreviewCard key={task.id} task={task} projectName={taskProj?.name} side="right" align="center">
-                <button
-                  onClick={() => navigate(`/task/${task.id}`)}
-                  className={cn(
-                    "p-2 rounded-xl transition-all relative group cursor-pointer flex items-center justify-center",
-                    isActive
-                      ? "bg-primary text-primary-foreground shadow-sm"
-                      : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
-                  )}
-                  title={isActive ? `${task.prompt} (${progress.percentage}% completed)` : task.prompt}
-                  aria-label={isActive ? `Active task: ${task.prompt} (${progress.percentage}% completed)` : task.prompt}
-                >
-                  {isActive ? (
-                    <RadialProgress
-                      value={progress.percentage}
-                      status={taskStatus}
-                      size={22}
-                      strokeWidth={2.5}
-                      indicatorClassName="text-primary-foreground"
-                      trackClassName="text-primary-foreground/25"
-                    >
-                      {progress.isCompleted ? (
-                        <Check size={11} strokeWidth={3} className="text-primary-foreground" />
-                      ) : progress.isRunning ? (
-                        <span className="text-[8px] font-bold text-primary-foreground tabular-nums">
-                          {Math.round(progress.percentage)}
-                        </span>
-                      ) : (
-                        <MessageSquare size={12} strokeWidth={2.4} className="text-primary-foreground" />
-                      )}
-                    </RadialProgress>
-                  ) : (
-                    <MessageSquare size={19} strokeWidth={2.4} />
-                  )}
-                  {isActive && (
-                    <span className="absolute -left-1 top-1/2 -translate-y-1/2 w-1 h-3.5 bg-primary rounded-r-full" />
-                  )}
-                </button>
-              </TaskQuickPreviewCard>
-            );
-          })}
-        </div>
-
-        {/* Firebase Cloud Sync Icon in Collapsed View */}
-        <div className="mt-auto mb-2 flex flex-col items-center">
+      {/* Desktop Collapsed Sidebar (Icon Rail) with smooth width and opacity transition */}
+      <aside
+        className={cn(
+          "h-screen border-r border-border/40 bg-manus-soft dark:bg-sidebar flex-col items-center py-6 hidden lg:flex shrink-0 transition-all duration-300 ease-in-out overflow-hidden z-20",
+          isOpen 
+            ? "w-0 opacity-0 pointer-events-none border-r-0 p-0" 
+            : "w-16 opacity-100 pointer-events-auto"
+        )}
+        aria-hidden={isOpen}
+      >
+        <div className="w-16 flex flex-col items-center h-full shrink-0">
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <button
-                  onClick={fbUser ? () => fbSignOut() : () => signInWithGoogle()}
-                  className="w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer bg-white/80 dark:bg-card border border-border/80 hover:border-foreground/30 shadow-xs"
+                <button 
+                  onClick={onToggle}
+                  className="p-2 rounded-xl hover:bg-manus-cream dark:hover:bg-accent transition-all duration-200 group relative mb-6 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 smooth-press"
+                  title="Open sidebar"
                 >
-                  {fbUser ? (
-                    fbUser.photoURL ? (
-                      <img src={fbUser.photoURL} alt="" className="w-7 h-7 rounded-full object-cover" />
-                    ) : (
-                      <div className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-xs">
-                        {(fbUser.displayName || fbUser.email || 'U')[0].toUpperCase()}
-                      </div>
-                    )
-                  ) : (
-                    <Cloud size={18} className="text-muted-foreground hover:text-foreground" />
-                  )}
+                  <div className="group-hover:opacity-0 transition-opacity">
+                    <Logo size={26} />
+                  </div>
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <PanelLeft size={26} strokeWidth={2.4} />
+                  </div>
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="right">
-                {fbUser ? `${fbUser.displayName || fbUser.email} (Click to sign out)` : 'Sign in with Google (Firebase)'}
-              </TooltipContent>
+              <TooltipContent side="right">Open sidebar</TooltipContent>
             </Tooltip>
           </TooltipProvider>
+
+          {/* Primary Navigation Icons */}
+          <nav className="space-y-3 w-full flex flex-col items-center">
+            {navItems.map((item) => (
+              <TooltipProvider key={item.id}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => item.action ? item.action() : setActiveTab(item.id)}
+                      className={cn(
+                        "p-2.5 rounded-xl transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95",
+                        activeTab === item.id && !item.action
+                          ? "bg-white dark:bg-card border border-border text-foreground shadow-sm" 
+                          : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
+                      )}
+                    >
+                      <item.icon size={23} strokeWidth={2.5} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">{item.label}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            ))}
+          </nav>
+
+          {/* Quick Project Shortcuts in Collapsed View */}
+          <div className="w-full pt-4 mt-4 border-t border-border/60 flex flex-col items-center space-y-2">
+            {projects.slice(0, 4).map((proj) => {
+              const IconComp = PROJECT_ICON_MAP[proj.icon] || Folder;
+              const colorTheme = PROJECT_COLOR_MAP[proj.color] || PROJECT_COLOR_MAP.indigo;
+              return (
+                <TooltipProvider key={proj.id}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => {
+                          onToggle();
+                          setSelectedProjectView(proj);
+                        }}
+                        className={cn(
+                          "w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-2xs hover:scale-105",
+                          colorTheme.bg
+                        )}
+                      >
+                        <IconComp size={18} strokeWidth={2.4} />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">
+                      <p className="font-bold text-xs">{proj.name}</p>
+                      <p className="text-[10px] text-muted-foreground">{proj.description || 'Project'}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              );
+            })}
+          </div>
+
+          {/* Quick Recent Task Sessions in Collapsed View */}
+          <div className="w-full flex-1 flex flex-col items-center pt-3 mt-2 border-t border-border/60 space-y-2 overflow-y-auto custom-scrollbar">
+            {tasks.slice(0, 6).map((task) => {
+              const title = formatTaskTitle(task);
+              const isActive = activeTaskId === task.id;
+              return (
+                <TooltipProvider key={task.id}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => navigate(`/task/${task.id}`)}
+                        className={cn(
+                          "p-2.5 rounded-xl transition-all relative group cursor-pointer",
+                          isActive
+                            ? "bg-primary text-primary-foreground shadow-sm"
+                            : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
+                        )}
+                      >
+                        <MessageSquare size={19} strokeWidth={2.4} />
+                        {isActive && (
+                          <span className="absolute -left-1 top-1/2 -translate-y-1/2 w-1 h-3.5 bg-primary rounded-r-full" />
+                        )}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="max-w-xs p-2.5">
+                      <p className="font-semibold text-xs text-foreground leading-tight">{title}</p>
+                      <div className="flex items-center gap-1.5 mt-1 text-[10px] text-muted-foreground">
+                        <span>{getRelativeTime(task.created_at)}</span>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              );
+            })}
+          </div>
+
+          {/* Firebase Cloud Sync Icon in Collapsed View */}
+          <div className="mt-auto mb-2 flex flex-col items-center">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={fbUser ? () => fbSignOut() : () => signInWithGoogle()}
+                    className="w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer bg-white/80 dark:bg-card border border-border/80 hover:border-foreground/30 shadow-xs"
+                  >
+                    {fbUser ? (
+                      fbUser.photoURL ? (
+                        <img src={fbUser.photoURL} alt="" className="w-7 h-7 rounded-full object-cover" />
+                      ) : (
+                        <div className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-xs">
+                          {(fbUser.displayName || fbUser.email || 'U')[0].toUpperCase()}
+                        </div>
+                      )
+                    ) : (
+                      <Cloud size={18} className="text-muted-foreground hover:text-foreground" />
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  {fbUser ? `${fbUser.displayName || fbUser.email} (Click to sign out)` : 'Sign in with Google (Firebase)'}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
         </div>
       </aside>
-    );
-  }
 
-  // Expanded Sidebar
-  return (
-    <>
-      {/* Mobile Backdrop */}
-      <div 
-        onClick={onToggle}
-        className="fixed inset-0 bg-black/50 z-40 lg:hidden backdrop-blur-xs transition-opacity duration-250 ease-out animate-in fade-in"
-      />
-
-      <aside className="w-[82vw] max-w-[280px] sm:w-64 h-screen border-r border-border/40 bg-manus-soft dark:bg-sidebar flex flex-col fixed inset-y-0 left-0 lg:static z-50 shrink-0 transition-[transform,width,colors] duration-250 ease-[cubic-bezier(0.16,1,0.3,1)] shadow-2xl lg:shadow-none animate-in slide-in-from-left gpu-accelerated">
-        {/* Header with Logo and Close Toggle */}
-        <div className="p-4 sm:p-5 flex items-center justify-between">
+      {/* Expanded Sidebar with smooth slide-in/out transition */}
+      <aside 
+        className={cn(
+          "h-screen border-r border-border/40 bg-manus-soft dark:bg-sidebar flex flex-col fixed inset-y-0 left-0 lg:static z-50 shrink-0",
+          "transform transition-all duration-300 ease-in-out",
+          "w-[82vw] max-w-[280px] sm:w-64",
+          isOpen 
+            ? "translate-x-0 shadow-2xl lg:shadow-none lg:w-64 lg:opacity-100 lg:pointer-events-auto" 
+            : "-translate-x-full pointer-events-none lg:-translate-x-full lg:w-0 lg:opacity-0 lg:border-r-0 lg:overflow-hidden"
+        )}
+        aria-hidden={!isOpen}
+      >
+        <div className="w-[82vw] max-w-[280px] sm:w-64 h-full flex flex-col shrink-0 overflow-hidden">
+          {/* Header with Logo and Close Toggle */}
+          <div className="p-4 sm:p-5 flex items-center justify-between">
           <ManusLogo showBadge={true} />
           <button 
             onClick={onToggle}
@@ -885,90 +804,40 @@ export function Sidebar({
                   const isActive = activeTaskId === task.id;
                   const relTime = getRelativeTime(task.created_at);
                   const taskProj = projects.find(p => p.id === task.projectId);
-                  const taskSteps = getTaskSteps(task);
-                  const taskStatus = getTaskStatus(task);
-                  const progress = calculateStepsProgress(taskSteps, taskStatus);
 
                   return (
                     <div key={task.id} className="relative group">
-                      <TaskQuickPreviewCard task={task} projectName={taskProj?.name} side="right" align="start">
-                        <button
-                          onClick={() => {
-                            handleMobileSelect(() => navigate(`/task/${task.id}`));
-                          }}
-                          className={cn(
-                            "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-all text-left cursor-pointer",
-                            isActive
-                              ? "bg-white dark:bg-card border border-border text-foreground font-semibold shadow-xs" 
-                              : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
-                          )}
-                          title={task.prompt}
-                        >
-                          {isActive ? (
-                            <div className="relative shrink-0 flex items-center justify-center">
-                              <RadialProgress
-                                value={progress.percentage}
-                                status={taskStatus}
-                                size={22}
-                                strokeWidth={2.5}
-                              >
-                                {progress.isCompleted ? (
-                                  <Check size={11} strokeWidth={3} className="text-emerald-500 dark:text-emerald-400" />
-                                ) : progress.isRunning ? (
-                                  <span className="text-[8px] font-bold text-primary tabular-nums">
-                                    {Math.round(progress.percentage)}
-                                  </span>
-                                ) : (
-                                  <MessageSquare size={11} strokeWidth={2.5} className="text-primary" />
-                                )}
-                              </RadialProgress>
-                            </div>
-                          ) : (
-                            <MessageSquare size={17} strokeWidth={2.3} className={cn(
-                              "shrink-0 transition-colors",
-                              isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
-                            )} />
-                          )}
-                          
-                          <div className="flex-1 min-w-0 pr-6">
-                            <p className="truncate text-xs leading-snug">{title}</p>
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className="text-[10px] text-muted-foreground/70 leading-tight">
-                                {relTime}
+                      <button
+                        onClick={() => {
+                          handleMobileSelect(() => navigate(`/task/${task.id}`));
+                        }}
+                        className={cn(
+                          "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-all text-left cursor-pointer",
+                          isActive
+                            ? "bg-white dark:bg-card border border-border text-foreground font-semibold shadow-xs" 
+                            : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
+                        )}
+                        title={task.prompt}
+                      >
+                        <MessageSquare size={17} strokeWidth={2.3} className={cn(
+                          "shrink-0 transition-colors",
+                          isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
+                        )} />
+                        
+                        <div className="flex-1 min-w-0 pr-6">
+                          <p className="truncate text-xs leading-snug">{title}</p>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="text-[10px] text-muted-foreground/70 leading-tight">
+                              {relTime}
+                            </span>
+                            {taskProj && (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-primary/10 text-primary font-semibold truncate max-w-[90px]">
+                                {taskProj.name}
                               </span>
-                              {taskProj && (
-                                <span className="text-[9px] px-1.5 py-0.2 rounded bg-primary/10 text-primary font-semibold truncate max-w-[90px]">
-                                  {taskProj.name}
-                                </span>
-                              )}
-                              {isActive && (
-                                <span className={cn(
-                                  "inline-flex items-center gap-1 text-[9px] font-semibold px-1.5 py-0.2 rounded-full tabular-nums",
-                                  progress.isCompleted 
-                                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" 
-                                    : progress.isRunning
-                                    ? "bg-primary/10 text-primary"
-                                    : "bg-muted text-muted-foreground"
-                                )}>
-                                  <span>{progress.percentage}%</span>
-                                  {progress.totalCount > 0 && (
-                                    <>
-                                      <span className="opacity-50">•</span>
-                                      <span>{progress.completedCount}/{progress.totalCount}</span>
-                                    </>
-                                  )}
-                                  {progress.isRunning && (
-                                    <span className="relative flex h-1.5 w-1.5 ml-0.5">
-                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-                                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary"></span>
-                                    </span>
-                                  )}
-                                </span>
-                              )}
-                            </div>
+                            )}
                           </div>
-                        </button>
-                      </TaskQuickPreviewCard>
+                        </div>
+                      </button>
                       
                       {/* Action Dropdown Menu */}
                       <DropdownMenu>
@@ -1113,6 +982,7 @@ export function Sidebar({
               <span>Sign in with Google</span>
             </button>
           )}
+        </div>
         </div>
       </aside>
 

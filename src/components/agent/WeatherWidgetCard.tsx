@@ -121,6 +121,12 @@ export function WeatherWidgetCard({ data, className }: WeatherWidgetCardProps) {
           </div>
         </div>
       )}
+
+      {/* Source Attribution */}
+      <div className="pt-2.5 mt-2 border-t border-border/40 flex items-center justify-between text-[10px] text-muted-foreground">
+        <span>Units: {useFahrenheit ? 'Fahrenheit (°F)' : 'Celsius (°C)'}, km/h, %</span>
+        <span>Source: {data.source || 'Open-Meteo Real-Time Weather API'}</span>
+      </div>
     </div>
   );
 }

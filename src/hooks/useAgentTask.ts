@@ -1,7 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useAgent, Agent, webSearch, sandboxTools, fetchUrl, useBlinkAuth } from '@blinkdotnew/react';
 import { blink } from '@/lib/blink';
-import { parseAndroidControlIntent, executeAndroidControlIntent } from '@/lib/androidControl';
 import type { Sandbox } from '@blinkdotnew/sdk';
 import { getSettings, playNotificationSound } from '@/lib/settingsStore';
 import { speakCleanHumanVoice } from '@/lib/speechSynthesis';
@@ -19,6 +18,7 @@ import { notificationDispatcher } from '@/lib/notificationDispatcher';
 import { securityCenter } from '@/lib/securityCenter';
 import { modelRouter } from '@/lib/modelRouter';
 import { skillsRegistry } from '@/lib/skillsSystem';
+import { reliableResponseEngine } from '@/lib/reliableResponseEngine';
 import {
   saveMessage,
   getMessages,
@@ -27,15 +27,7 @@ import {
   cleanChatTitle,
   StoredMessage,
 } from '@/lib/chatDatabase';
-import {
-  saveChatHistoryToLocalStorage,
-  getChatHistoryFromLocalStorage,
-  clearChatHistoryBackup,
-  clearActiveChatHistoryBackup,
-  reconcileChatMessages,
-} from '@/lib/chatAutoSave';
-import { extractWeatherQuery, fetchWeatherByCity } from '@/lib/weatherService';
-
+import { extractWeatherQuery, fetchWeatherByCity, formatWeatherMarkdown, WeatherData } from '@/lib/weatherService';
 
 export type AgentTaskPhase = 'idle' | 'tool-calling' | 'text-generation' | 'completed' | 'error';
 
@@ -90,34 +82,20 @@ export interface ChartData {
 
 export function useAgentTask() {
   const { isAuthenticated, user } = useBlinkAuth();
-
-  // Instant synchronous recovery from localStorage backup if current route has a taskId
-  const initialBackup = useMemo(() => {
-    if (typeof window === 'undefined') return null;
-    const match = window.location.pathname.match(/\/task\/([a-zA-Z0-9_-]+)/);
-    const id = match ? match[1] : null;
-    if (id) {
-      return getChatHistoryFromLocalStorage(id);
-    }
-    return null;
-  }, []);
-
-  const [taskId, setTaskId] = useState<string | null>(initialBackup?.taskId || null);
-  const [currentTask, setCurrentTask] = useState<{ prompt: string; options: any; fileData?: string; url?: string } | null>(initialBackup?.currentTask || null);
-  const [steps, setSteps] = useState<Step[]>(initialBackup?.steps || []);
-  const [taskStatus, setTaskStatus] = useState<'idle' | 'running' | 'completed' | 'error'>(
-    (initialBackup?.taskStatus === 'running' ? 'completed' : initialBackup?.taskStatus) || 'idle'
-  );
-  const [phase, setPhase] = useState<AgentTaskPhase>(
-    (initialBackup?.phase === 'tool-calling' ? 'completed' : (initialBackup?.phase as any)) || 'idle'
-  );
-  const [result, setResult] = useState<any>(initialBackup?.result || null);
-  const [chartData, setChartData] = useState<ChartData | null>(initialBackup?.chartData || null);
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [currentTask, setCurrentTask] = useState<{ prompt: string; options: any; fileData?: string; url?: string } | null>(null);
+  const [steps, setSteps] = useState<Step[]>([]);
+  const [taskStatus, setTaskStatus] = useState<'idle' | 'running' | 'completed' | 'error'>('idle');
+  const [phase, setPhase] = useState<AgentTaskPhase>('idle');
+  const [result, setResult] = useState<any>(null);
+  const [chartData, setChartData] = useState<ChartData | null>(null);
   const [sandbox, setSandbox] = useState<Sandbox | null>(null);
-  const [persistentMessages, setPersistentMessages] = useState<any[]>(initialBackup?.messages || []);
+  const [persistentMessages, setPersistentMessages] = useState<any[]>([]);
   const messagesRef = useRef<any[]>([]);
-  const currentTaskIdRef = useRef<string | null>(initialBackup?.taskId || null);
+  const currentTaskIdRef = useRef<string | null>(null);
   currentTaskIdRef.current = taskId;
+  const currentRequestIdRef = useRef<string | null>(null);
+  const currentAssistantMsgIdRef = useRef<string | null>(null);
 
   // Initialize sandbox
   useEffect(() => {
@@ -139,16 +117,22 @@ export function useAgentTask() {
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
         detail: { isGenerating: true, mode: 'work', text: 'Manus is typing...' }
       }));
-      // 45-second watchdog to guarantee no permanently stuck loading states
+      // A watchdog must fail visibly; it must never mark a missing response as success.
       watchdogTimer = setTimeout(() => {
-        console.warn('[useAgentTask] Watchdog: Task ran past timeout, recovering to terminal state');
+        console.error('[useAgentTask] Request exceeded 45-second client watchdog.');
         isSubmittingRef.current = false;
-        setTaskStatus('completed');
-        setPhase('completed');
-        setSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'completed' as const } : s));
+        setTaskStatus('error');
+        setPhase('error');
+        setResult({
+          type: 'chat',
+          content: 'The AI request timed out before a response arrived. Please retry. If this keeps happening, check the provider API key and Netlify function logs.',
+          error: true,
+        });
+        setSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'error' as const } : s));
         window.dispatchEvent(new CustomEvent('manus_agent_generating', {
           detail: { isGenerating: false, mode: 'work' }
         }));
+        emitRobotEvent('TASK_FAILED');
       }, 45000);
     } else {
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
@@ -159,6 +143,16 @@ export function useAgentTask() {
       if (watchdogTimer) clearTimeout(watchdogTimer);
     };
   }, [taskStatus]);
+
+  // Cleanup in-flight state and indicators on unmount
+  useEffect(() => {
+    return () => {
+      isSubmittingRef.current = false;
+      window.dispatchEvent(new CustomEvent('manus_agent_generating', {
+        detail: { isGenerating: false, mode: 'work' }
+      }));
+    };
+  }, []);
 
   // Define the agent
   const agent = useMemo(() => {
@@ -256,11 +250,18 @@ export function useAgentTask() {
     sandbox: sandbox || undefined, // Pass sandbox to useAgent
     onFinish: async (response) => {
       // Treat empty model output as a failed generation, never as a completed answer.
+      isSubmittingRef.current = false;
+      if (currentRequestIdRef.current) {
+        reliableResponseEngine.finalizeRequest(currentRequestIdRef.current);
+      }
       const text = typeof response?.text === 'string' ? response.text.trim() : '';
       if (!text) {
         console.error('[Manus AI] Provider finished without assistant text.');
         setTaskStatus('error');
         setPhase('error');
+        window.dispatchEvent(new CustomEvent('manus_agent_generating', {
+          detail: { isGenerating: false, mode: 'work' }
+        }));
         setResult({
           type: currentTask?.options?.format || 'chat',
           content: "I didn't receive an answer from the AI service. Please try again.",
@@ -272,7 +273,7 @@ export function useAgentTask() {
           status: step.status === 'completed' ? 'completed' as const : 'error' as const,
         })));
         emitRobotEvent('TASK_FAILED');
-        playNotificationSound('pop');
+        playNotificationSound('error');
         return;
       }
       let parsedChartData = null; // Full parsed JSON
@@ -322,10 +323,10 @@ export function useAgentTask() {
         }
       }
 
-      // Check if last user message or task requested a graph/chart/visualization
+      // Check if last user message or task explicitly requested a graph/chart/visualization
       const isGraphRequested = 
         currentTask?.options?.format === 'graph' || 
-        messages.some(m => m.role === 'user' && /(graph|chart|plot|diagram|bar|pie|line|scatter|bubble|area)/i.test(m.content));
+        messages.some(m => m.role === 'user' && /(?:create|generate|draw|show|make|build|render)\s+(?:a|an)?\s*(?:graph|chart|plot|diagram|bar chart|pie chart|line chart|scatter plot|area chart)/i.test(m.content));
 
       // Data integrity guard: never fabricate chart points when the model did not return valid data.
       // Keep the user's request visible in the text response, but render a chart only when
@@ -347,14 +348,17 @@ export function useAgentTask() {
       setResult(finalResult);
       setTaskStatus('completed');
       setPhase('completed');
+      window.dispatchEvent(new CustomEvent('manus_agent_generating', {
+        detail: { isGenerating: false, mode: 'work' }
+      }));
       emitRobotEvent('TASK_SUCCEEDED');
       
       const activeId = taskId || currentTaskIdRef.current;
       const assistantText = finalResult.content || text;
 
-      // Save assistant message to permanent database immediately upon completion
+      // Save assistant message to permanent database immediately upon completion using stable ID
       if (activeId && assistantText) {
-        const assistantMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+        const assistantMsgId = currentAssistantMsgIdRef.current || ('msg_ast_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8));
         const assistantMsg = {
           id: assistantMsgId,
           role: 'assistant' as const,
@@ -363,8 +367,11 @@ export function useAgentTask() {
           status: 'success' as const
         };
         setPersistentMessages(prev => {
-          if (prev.some(m => m.id === assistantMsgId || (m.role === 'assistant' && m.content === assistantText))) {
-            return prev;
+          const idx = prev.findIndex(m => m.id === assistantMsgId || (m.role === 'assistant' && (m.status === 'streaming' || m.content === assistantText)));
+          if (idx !== -1) {
+            const updated = [...prev];
+            updated[idx] = assistantMsg;
+            return updated;
           }
           return [...prev, assistantMsg];
         });
@@ -432,7 +439,8 @@ export function useAgentTask() {
       }
     },
     onError: async (err) => {
-      console.warn('[AI Studio] Agent stream notice (rate limit / fallback):', err);
+      isSubmittingRef.current = false;
+      console.error('[Manus AI] Agent request failed:', err);
       
       const promptText = currentTask?.prompt || 'Request';
       const isGraphRequested = 
@@ -452,11 +460,12 @@ export function useAgentTask() {
           fallbackContent = `Executed **${cmdMatch.targetName}**: ${cmdMatch.feedbackSpeech}`;
         }
       } else {
-        // Query server proxy powered by OpenRouter API key
+        // Query server proxy powered by OpenRouter API key with 8s bounded timeout
         try {
           const res = await fetch('/api/ai/completion', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            signal: AbortSignal.timeout(8000),
             body: JSON.stringify({
               prompt: promptText,
               messages: messages.map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })),
@@ -532,6 +541,9 @@ Regarding **${promptText}**:
       setResult(finalResult);
       setTaskStatus('completed');
       setPhase('completed');
+      window.dispatchEvent(new CustomEvent('manus_agent_generating', {
+        detail: { isGenerating: false, mode: 'work' }
+      }));
       emitRobotEvent('TASK_SUCCEEDED');
       setSteps(prev => prev.map(s => ({ ...s, status: 'completed' as const })));
       playNotificationSound('success');
@@ -583,8 +595,8 @@ Regarding **${promptText}**:
       try { void stop(); } catch (error) { console.warn('[Agent] Stop request failed:', error); }
     }
     isSubmittingRef.current = false;
-    setTaskStatus('completed');
-    setPhase('completed');
+    setTaskStatus('idle');
+    setPhase('idle');
     setSteps(prev => prev.map(step => step.status === 'running' ? { ...step, status: 'pending' as const } : step));
     window.dispatchEvent(new CustomEvent('manus_agent_generating', {
       detail: { isGenerating: false, mode: 'work' }
@@ -592,174 +604,12 @@ Regarding **${promptText}**:
     toast.info('Generation stopped');
   }, [useAgentResult]);
 
-  const lastSubmitRef = useRef<{ prompt: string; timestamp: number }>({ prompt: '', timestamp: 0 });
-
-  // Stream Completion Safeguard: Automatically finalize task state when SDK stream closes
-  useEffect(() => {
-    if (!isLoading && taskStatus === 'running') {
-      const liveAssistant = [...messages].reverse().find((m: any) => m?.role === 'assistant' && typeof m?.content === 'string' && m.content.trim());
-      if (liveAssistant?.content) {
-        const assistantText = liveAssistant.content.trim();
-        const activeId = taskId || currentTaskIdRef.current;
-        if (activeId && assistantText) {
-          const assistantMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
-          setPersistentMessages(prev => {
-            if (prev.some(m => m.role === 'assistant' && m.content === assistantText)) return prev;
-            return [...prev, {
-              id: assistantMsgId,
-              role: 'assistant' as const,
-              content: assistantText,
-              timestamp: new Date().toISOString(),
-              status: 'success' as const
-            }];
-          });
-          saveMessage({
-            id: assistantMsgId,
-            conversationId: activeId,
-            userId: user?.id || 'usr_manus_default',
-            role: 'assistant',
-            content: assistantText,
-            status: 'success'
-          }).catch(() => {});
-        }
-      }
-      setTaskStatus('completed');
-      setPhase('completed');
-      window.dispatchEvent(new CustomEvent('manus_agent_generating', {
-        detail: { isGenerating: false, mode: 'work' }
-      }));
-    }
-  }, [isLoading, taskStatus, messages, taskId, user]);
-
   const processedInvocationsRef = useRef<Set<string>>(new Set());
 
   const preparePromptWithConnectors = useCallback(async (prompt: string) => {
     setPhase('tool-calling');
     let enriched = prompt;
     const activeUserId = user?.id || 'usr_manus_default';
-
-    // Execute explicit allowlisted Android intents through the paired, authenticated device bridge.
-    // This is a real action path; a plan or model response alone is never treated as execution.
-    const androidIntent = parseAndroidControlIntent(prompt);
-    if (androidIntent) {
-      setPhase('tool-calling');
-      const deviceResult = await executeAndroidControlIntent(androidIntent);
-      const deviceContext = '\n\n[ANDROID CONTROL RESULT — ' + (deviceResult.success ? 'SUCCESS' : 'NOT COMPLETED') + ']\n' +
-        'Requested action: ' + androidIntent.label + '\n' +
-        'Result: ' + deviceResult.message + '\n' +
-        (deviceResult.data ? 'Bridge response: ' + JSON.stringify(deviceResult.data).slice(0, 2500) + '\n' : '') +
-        '[INSTRUCTION: Report this exact result. Never claim an action succeeded when the result is NOT COMPLETED.]';
-      setPhase('text-generation');
-      return enriched + deviceContext;
-    }
-
-    // Automation coordinator: plan multi-step tasks using current server-side integration readiness.
-    // This endpoint creates a plan only; real actions must still be confirmed by an actual connector/tool result.
-    const automationIntent = /\b(automate|automation|workflow|browseract|macrodroid|android phone|control my phone|run a sequence|multi-step task|schedule a task)\b/i.test(prompt);
-    if (automationIntent && !/@image_generation|@imagegen/i.test(prompt)) {
-      try {
-        const planResponse = await fetch('/api/automation-agent', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ action: 'plan', prompt: prompt.slice(0, 4000) }),
-        });
-        const planData = await planResponse.json().catch(() => ({}));
-        if (planResponse.ok && Array.isArray(planData.steps)) {
-          enriched += '\n\n[MANUS AUTOMATION PLAN — PLANNING ONLY; NOT EXECUTED]:\n' +
-            planData.steps.map((step: unknown, index: number) => (index + 1) + '. ' + String(step)).join('\n') +
-            '\n[AVAILABLE CHANNELS]:\n' +
-            (Array.isArray(planData.capabilities) ? planData.capabilities.map((cap: any) => '- ' + String(cap.label) + ': ' + (cap.ready ? 'configured' : 'not configured') + ' — ' + String(cap.detail)).join('\n') : '') +
-            '\n[EXECUTION SAFETY]: Use only tools that return actual successful results. The plan is not proof of execution. Ask for explicit confirmation before sending, publishing, purchasing, deleting, or changing account/device state. Never claim an unavailable connector ran.';
-        }
-      } catch (automationError) {
-        console.warn('[Automation Agent] Planning unavailable; continuing with normal tool routing.', automationError);
-      }
-    }
-
-    // 0. Real image-generation tool (server-side provider call; never expose provider secrets in the browser).
-    const imageIntent = /@image_generation|@imagegen|\b(generate|create|draw|make)\b.{0,80}\b(image|picture|illustration|wallpaper|logo|artwork)\b/i.test(prompt);
-    if (imageIntent) {
-      const imagePrompt = prompt.replace(/@image_generation|@imagegen/gi, '').trim().slice(0, 4000);
-      const imageResponse = await fetch('/api/image-generation', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ prompt: imagePrompt }),
-      });
-      const imageData = await imageResponse.json().catch(() => ({}));
-      if (!imageResponse.ok) {
-        throw new Error(typeof imageData?.error === 'string' ? imageData.error : 'Image generation failed. Check the server image-provider configuration.');
-      }
-      if (typeof imageData?.imageDataUrl !== 'string' || !imageData.imageDataUrl.startsWith('data:image/')) {
-        throw new Error('The image provider returned no usable image.');
-      }
-      enriched += '\n\n[IMAGE GENERATION TOOL RESULT: Image generation completed successfully.]\n' +
-        'Generated image (render this image in the answer; do not merely describe it):\n' +
-        '![' + (imageData.alt || 'Generated image') + '](' + imageData.imageDataUrl + ')\n' +
-        '[IMAGE_GENERATION_METADATA] ' + JSON.stringify({ mimeType: imageData.mimeType || 'image/png', provider: imageData.provider || 'Gemini' }) +
-        '\n[INSTRUCTION: Show the generated image itself and briefly confirm completion. Do not claim success if the image is not included.]';
-      return enriched;
-    }
-
-    // -1. Autonomous Live Weather Tool Calling
-    try {
-      const weatherCheck = extractWeatherQuery(prompt, displayMessages);
-      if (weatherCheck.isWeather) {
-        if (weatherCheck.city) {
-          const weatherData = await fetchWeatherByCity(weatherCheck.city);
-          if (weatherData) {
-            enriched += `\n\n[LIVE WEATHER TOOL DATA FOR ${weatherData.locationName.toUpperCase()}${weatherData.country ? ', ' + weatherData.country : ''}]:
-- Location: ${weatherData.locationName}${weatherData.country ? ' (' + weatherData.country + ')' : ''}
-- Current Temperature: ${weatherData.temperature}°C (${weatherData.temperatureFahrenheit}°F)
-- Apparent Temperature (Feels like): ${weatherData.apparentTemperature}°C
-- Condition: ${weatherData.condition}
-- Humidity: ${weatherData.humidity}%
-- Wind Speed: ${weatherData.windSpeed} km/h
-- Precipitation: ${weatherData.precipitation} mm
-- 5-Day Forecast:
-${weatherData.forecast.map(f => `  * ${f.day}: Max ${f.maxTemp}°C, Min ${f.minTemp}°C - ${f.condition}`).join('\n')}
-- Source Attribution: Open-Meteo Real-time Weather API (https://open-meteo.com)
-
-[INSTRUCTION: Present this live weather data clearly to the user with temperature in both °C and °F, humidity, wind speed, and the 5-day forecast. Explicitly attribute Open-Meteo as the source.]`;
-          }
-        } else {
-          enriched += `\n\n[WEATHER TOOL INSTRUCTION: The user asked about weather, but did not specify a city or location. Ask the user politely which city or location they would like to check the weather for.]`;
-        }
-      }
-    } catch (weatherErr) {
-      console.warn('[Weather Tool] Error fetching weather data:', weatherErr);
-    }
-
-    // 0. Live Google Search & News Grounding (Real-time events, news, fact-checking)
-    const isSearchIntent = /\b(current events?|latest news|recent news|breaking news|news today|headlines|fact[\s-]?check|factcheck|is it true|verify|debunk|latest|today|yesterday|this week|who won|election|stock price|weather|happening)\b/i.test(prompt) || prompt.includes('@web_search') || prompt.includes('@search') || prompt.includes('@google');
-    if (isSearchIntent) {
-      try {
-        const cleanQuery = prompt
-          .replace(/@(web_search|search|google)/gi, '')
-          .replace(/\[(?:Think Harder|Requested connectors)[^\]]*\]/gi, '')
-          .trim()
-          .slice(0, 300);
-        if (cleanQuery) {
-          const searchRes = await fetch('/api/web-search', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: cleanQuery, limit: 5 }),
-          });
-          if (searchRes.ok) {
-            const searchData = await searchRes.json();
-            const searchItems = Array.isArray(searchData?.results) ? searchData.results : [];
-            if (searchItems.length > 0) {
-              const formattedResults = searchItems
-                .map((item: any) => `- [${item.title}](${item.url}): ${item.snippet?.slice(0, 250)}`)
-                .join('\n');
-              enriched += `\n\n[REAL-TIME GOOGLE SEARCH & NEWS RESULTS]:\n${formattedResults}\n[INSTRUCTION: Use these real-time Google Search results to answer the query, discuss current events, cite recent news, and verify facts. Provide structured answers and cite sources with markdown links.]`;
-            }
-          }
-        }
-      } catch {
-        // Silently continue if real-time search context is unavailable
-      }
-    }
 
     // 1. Inject Long-Term Memory
     try {
@@ -907,21 +757,28 @@ ${weatherData.forecast.map(f => `  * ${f.day}: Max ${f.maxTemp}°C, Min ${f.minT
   }, [messages, taskId, isAuthenticated]);
 
   const sendMessage = useCallback((content: string) => {
-    if (!content || !content.trim()) return;
-    const now = Date.now();
-    if (lastSubmitRef.current.prompt === content.trim() && now - lastSubmitRef.current.timestamp < 1200) {
-      console.warn('[Manus Agent] Suppressed duplicate rapid submission:', content);
+    if (isSubmittingRef.current) {
+      toast.info('A response is already being generated. Please wait or stop it first.');
       return;
     }
-    lastSubmitRef.current = { prompt: content.trim(), timestamp: now };
+
+    const activeId = taskId || currentTaskIdRef.current || ('task_' + Date.now());
+    const reqFenceId = reliableResponseEngine.createRequestFence(activeId);
+    if (reliableResponseEngine.isRequestActive(reqFenceId) && isSubmittingRef.current) {
+      toast.info('Submission already in progress.');
+      return;
+    }
+
+    isSubmittingRef.current = true;
+    currentRequestIdRef.current = reqFenceId;
+    currentAssistantMsgIdRef.current = 'msg_ast_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
 
     setTaskStatus('running');
     setPhase('tool-calling');
     emitRobotEvent('USER_SUBMITTED');
     setResult(null); // Clear previous result card while running new prompt
 
-    const activeId = taskId || currentTaskIdRef.current;
-    const userMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+    const userMsgId = 'msg_usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
     const userMsg = {
       id: userMsgId,
       role: 'user' as const,
@@ -930,14 +787,8 @@ ${weatherData.forecast.map(f => `  * ${f.day}: Max ${f.maxTemp}°C, Min ${f.minT
       status: 'success' as const
     };
 
-    // Optimistically record user message immediately in state (avoiding duplicate adjacent appends)
-    setPersistentMessages(prev => {
-      const last = prev[prev.length - 1];
-      if (last && last.role === 'user' && last.content.trim() === content.trim()) {
-        return prev;
-      }
-      return [...prev, userMsg];
-    });
+    // Each intentional submission gets its own ID. Identical consecutive messages are valid.
+    setPersistentMessages(prev => [...prev, userMsg]);
 
     // Save user message to database BEFORE starting AI generation (Requirement 3)
     if (activeId) {
@@ -960,6 +811,112 @@ ${weatherData.forecast.map(f => `  * ${f.day}: Max ${f.maxTemp}°C, Min ${f.minT
         executeDeviceCommand(cmd);
       }
       toast.success(`${cmd.targetName}: ${cmd.feedbackSpeech}`);
+    }
+
+    // Weather Tool Calling Layer
+    const weatherCheck = extractWeatherQuery(content, persistentMessages);
+    if (weatherCheck.isWeather) {
+      if (weatherCheck.needsLocation || !weatherCheck.city) {
+        const assistantMsgId = 'msg_ast_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+        const replyText = 'Which city or location would you like to check the weather for? (e.g., Delhi, New York, London, Tokyo)';
+        const assistantMsg = {
+          id: assistantMsgId,
+          role: 'assistant' as const,
+          content: replyText,
+          timestamp: new Date().toISOString(),
+          status: 'success' as const
+        };
+        setPersistentMessages(prev => [...prev, assistantMsg]);
+        saveMessage({
+          id: assistantMsgId,
+          conversationId: activeId,
+          userId: user?.id || 'usr_manus_default',
+          role: 'assistant',
+          content: replyText,
+          status: 'success'
+        }).catch(() => {});
+        isSubmittingRef.current = false;
+        if (currentRequestIdRef.current) reliableResponseEngine.finalizeRequest(currentRequestIdRef.current);
+        setTaskStatus('completed');
+        setPhase('completed');
+        window.dispatchEvent(new CustomEvent('manus_agent_generating', {
+          detail: { isGenerating: false, mode: 'work' }
+        }));
+        emitRobotEvent('TASK_SUCCEEDED');
+        return;
+      }
+
+      // We have location/city: Fetch real-time weather data
+      const targetCity = weatherCheck.city;
+      setSteps([
+        { id: '1', label: `Checking live weather for ${targetCity}`, status: 'running', trace: [`Querying real-time weather provider for ${targetCity}...`] }
+      ]);
+
+      void (async () => {
+        try {
+          const wData = await fetchWeatherByCity(targetCity);
+          if (wData) {
+            setSteps(prev => prev.map(s => ({ ...s, status: 'completed' as const })));
+            const formatted = formatWeatherMarkdown(wData);
+            const assistantMsgId = 'msg_ast_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+            const assistantMsg = {
+              id: assistantMsgId,
+              role: 'assistant' as const,
+              content: formatted,
+              timestamp: new Date().toISOString(),
+              status: 'success' as const
+            };
+            setPersistentMessages(prev => [...prev, assistantMsg]);
+            saveMessage({
+              id: assistantMsgId,
+              conversationId: activeId,
+              userId: user?.id || 'usr_manus_default',
+              role: 'assistant',
+              content: formatted,
+              status: 'success'
+            }).catch(() => {});
+
+            const finalResult = {
+              type: 'weather',
+              content: formatted,
+              weatherData: wData,
+              rawResponse: { text: formatted },
+              messages: [...persistentMessages, userMsg, assistantMsg],
+            };
+            setResult(finalResult);
+            isSubmittingRef.current = false;
+            if (currentRequestIdRef.current) reliableResponseEngine.finalizeRequest(currentRequestIdRef.current);
+            setTaskStatus('completed');
+            setPhase('completed');
+            window.dispatchEvent(new CustomEvent('manus_agent_generating', {
+              detail: { isGenerating: false, mode: 'work' }
+            }));
+            emitRobotEvent('TASK_SUCCEEDED');
+            playNotificationSound('success');
+            return;
+          }
+        } catch (wErr) {
+          console.warn('[useAgentTask] Weather fetch notice:', wErr);
+        }
+
+        // If direct fetch was null or threw, attempt through model
+        try {
+          const preparedPrompt = await preparePromptWithConnectors(
+            `User requested current weather and forecast for ${targetCity}. Provide live current conditions and today's forecast.`
+          );
+          await agentSendMessage(preparedPrompt);
+        } catch (error) {
+          isSubmittingRef.current = false;
+          if (currentRequestIdRef.current) reliableResponseEngine.finalizeRequest(currentRequestIdRef.current);
+          setTaskStatus('error');
+          setPhase('error');
+          window.dispatchEvent(new CustomEvent('manus_agent_generating', {
+            detail: { isGenerating: false, mode: 'work' }
+          }));
+          emitRobotEvent('TASK_FAILED');
+        }
+      })();
+      return;
     }
 
     // App Connector Tool Intent Phase
@@ -994,8 +951,11 @@ ${weatherData.forecast.map(f => `  * ${f.day}: Max ${f.maxTemp}°C, Min ${f.minT
     }
 
     // Check if content specifically requests a graph or chart
-    const lower = content.toLowerCase();
-    if (lower.includes('graph') || lower.includes('chart') || lower.includes('plot') || lower.includes('diagram') || lower.includes('bar') || lower.includes('pie') || lower.includes('line')) {
+    const isExplicitChartRequest = 
+      /(?:create|generate|draw|show|make|build|render)\s+(?:a|an)?\s*(?:graph|chart|plot|diagram|bar chart|pie chart|line chart)/i.test(content) ||
+      /^(?:graph|chart|plot):\s*/i.test(content.trim());
+
+    if (isExplicitChartRequest) {
       const chartPrompt = `${content}\n\n[INSTRUCTION: Format your chart data as a JSON code block using the format below so it renders as an interactive chart]\n\`\`\`json\n{\n  "graph": {\n    "type": "bar",\n    "labels": ["Category A", "Category B", "Category C", "Category D"],\n    "datasets": [{\n      "label": "Metric",\n      "data": [45, 72, 88, 95]\n    }]\n  }\n}\n\`\`\``;
       void (async () => { agentSendMessage(await preparePromptWithConnectors(chartPrompt)); })();
     } else {
@@ -1005,6 +965,8 @@ ${weatherData.forecast.map(f => `  * ${f.day}: Max ${f.maxTemp}°C, Min ${f.minT
           await agentSendMessage(preparedPrompt);
         } catch (error) {
           console.error('[Manus AI] Failed to send chat message:', error);
+          isSubmittingRef.current = false;
+          if (currentRequestIdRef.current) reliableResponseEngine.finalizeRequest(currentRequestIdRef.current);
           setTaskStatus('error');
           setPhase('error');
           setResult({
@@ -1013,22 +975,17 @@ ${weatherData.forecast.map(f => `  * ${f.day}: Max ${f.maxTemp}°C, Min ${f.minT
             error: true,
           });
           setSteps(prev => prev.map(step => ({ ...step, status: 'error' as const })));
+          window.dispatchEvent(new CustomEvent('manus_agent_generating', {
+            detail: { isGenerating: false, mode: 'work' }
+          }));
           emitRobotEvent('TASK_FAILED');
           toast.error("Couldn't reach the AI service. Please try again.");
         }
       })();
     }
-  }, [agentSendMessage, preparePromptWithConnectors, taskId, user]);
+  }, [agentSendMessage, preparePromptWithConnectors, taskId, user, persistentMessages]);
 
   const startTask = useCallback(async (prompt: string, options: any) => {
-    if (!prompt || !prompt.trim()) return null;
-    const now = Date.now();
-    if (lastSubmitRef.current.prompt === prompt.trim() && now - lastSubmitRef.current.timestamp < 1200) {
-      console.warn('[Manus Agent] Suppressed duplicate rapid startTask:', prompt);
-      return currentTaskIdRef.current;
-    }
-    lastSubmitRef.current = { prompt: prompt.trim(), timestamp: now };
-
     // Start fresh
     if (clearMessages) {
       clearMessages();
@@ -1053,6 +1010,8 @@ ${weatherData.forecast.map(f => `  * ${f.day}: Max ${f.maxTemp}°C, Min ${f.minT
     newTaskId = generatedId;
     setTaskId(newTaskId);
     currentTaskIdRef.current = newTaskId;
+    currentRequestIdRef.current = reliableResponseEngine.createRequestFence(newTaskId);
+    currentAssistantMsgIdRef.current = 'msg_ast_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
 
     try {
       let activeUser = user;
@@ -1121,23 +1080,12 @@ ${weatherData.forecast.map(f => `  * ${f.day}: Max ${f.maxTemp}°C, Min ${f.minT
     }
 
     processedInvocationsRef.current.clear();
-    const taskData = { prompt, options, fileData: options.fileData, url: options.url };
-    setCurrentTask(taskData);
+    setCurrentTask({ prompt, options, fileData: options.fileData, url: options.url });
     setTaskStatus('running');
     setPhase('tool-calling');
     setResult(null);
     setChartData(null);
     playNotificationSound('send');
-
-    // Persist to local storage immediately so it can be resumed even if refreshed right away
-    saveChatHistoryToLocalStorage({
-      taskId: newTaskId,
-      currentTask: taskData,
-      messages: [userMsg],
-      steps: [],
-      taskStatus: 'running',
-      phase: 'tool-calling',
-    });
 
     // Retrieve user personalization preferences from Settings
     const userSettings = getSettings();
@@ -1293,94 +1241,45 @@ ${weatherData.forecast.map(f => `  * ${f.day}: Max ${f.maxTemp}°C, Min ${f.minT
       setTaskId(id);
       currentTaskIdRef.current = id;
 
-      // 1. Instant synchronous recovery from localStorage backup for zero-latency resumption after browser refresh
-      const localBackup = getChatHistoryFromLocalStorage(id);
-      if (localBackup) {
-        if (localBackup.currentTask) {
-          setCurrentTask(localBackup.currentTask);
-        }
-        if (localBackup.messages && localBackup.messages.length > 0) {
-          setPersistentMessages(localBackup.messages);
-        }
-        if (localBackup.steps && localBackup.steps.length > 0) {
-          setSteps(localBackup.steps);
-        }
-        if (localBackup.taskStatus) {
-          // If task was in-flight when user refreshed, safely finalize to completed so conversation can continue
-          setTaskStatus(localBackup.taskStatus === 'running' ? 'completed' : localBackup.taskStatus);
-        }
-        if (localBackup.phase) {
-          setPhase(localBackup.phase === 'tool-calling' ? 'completed' : (localBackup.phase as any));
-        }
-        if (localBackup.result) {
-          setResult(localBackup.result);
-        }
-        if (localBackup.chartData) {
-          setChartData(localBackup.chartData);
-        }
-      }
-
-      // 2. Load permanent messages from IndexedDB / chatDatabase and reconcile with local backup
+      // 1. Load permanent messages from IndexedDB / chatDatabase
       const storedMsgs = await getMessages(id);
       if (storedMsgs && storedMsgs.length > 0) {
-        setPersistentMessages(prev => {
-          const dbMsgs = storedMsgs.map(m => ({
+        setPersistentMessages(
+          storedMsgs.map(m => ({
             id: m.id,
             role: m.role,
             content: m.content,
             timestamp: m.timestamp,
             status: m.status
-          }));
-          return reconcileChatMessages(prev, dbMsgs);
-        });
+          }))
+        );
       }
 
-      // 3. Load task data from Blink DB
+      // 2. Load task data
       const task = await (blink.db as any).tasks.get(id);
       if (task) {
-        setCurrentTask(prev => prev || { 
+        setCurrentTask({ 
           prompt: task.prompt || task.title, 
           options: { format: task.outputFormat, chartType: task.chartType } 
         });
-        if (task.status && task.status !== 'running') {
-          setTaskStatus(task.status as any);
-        }
+        setTaskStatus(task.status as any);
         
         if (task.steps) {
           try {
-            const parsed = JSON.parse(task.steps);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              setSteps(parsed);
-            }
-          } catch { }
+            setSteps(JSON.parse(task.steps));
+          } catch { setSteps([]); }
         }
         
         if (task.result) {
           try {
             const parsedResult = JSON.parse(task.result);
-            setResult(prev => prev || parsedResult);
-            if (parsedResult.chartData) {
-              setChartData(prev => prev || parsedResult.chartData);
-            }
+            setResult(parsedResult);
+            setChartData(parsedResult.chartData);
             if ((!storedMsgs || storedMsgs.length === 0) && parsedResult.messages && parsedResult.messages.length > 0) {
-              setPersistentMessages(prev => reconcileChatMessages(prev, parsedResult.messages));
+              setPersistentMessages(parsedResult.messages);
             }
-          } catch { }
+          } catch { setResult(null); }
         }
-      }
-
-      // Consolidate current state back to local storage
-      const consolidatedBackup = getChatHistoryFromLocalStorage(id);
-      if (consolidatedBackup) {
-        saveChatHistoryToLocalStorage({
-          taskId: id,
-          currentTask: consolidatedBackup.currentTask,
-          messages: consolidatedBackup.messages,
-          steps: consolidatedBackup.steps,
-          taskStatus: consolidatedBackup.taskStatus,
-          result: consolidatedBackup.result,
-          chartData: consolidatedBackup.chartData,
-        });
       }
     } catch (e) {
       console.error('Failed to load task:', e);
@@ -1388,7 +1287,6 @@ ${weatherData.forecast.map(f => `  * ${f.day}: Max ${f.maxTemp}°C, Min ${f.minT
   }, [isAuthenticated]);
 
   const resetTask = () => {
-    clearActiveChatHistoryBackup();
     setTaskId(null);
     currentTaskIdRef.current = null;
     setCurrentTask(null);
@@ -1436,7 +1334,6 @@ Report generated by Manus AI Workspace
 
   const deleteTask = useCallback(async (id: string) => {
     try {
-      clearChatHistoryBackup(id);
       await (blink.db as any).tasks.delete(id);
       return true;
     } catch (e) {
@@ -1459,16 +1356,18 @@ Report generated by Manus AI Workspace
         message?.role === 'assistant' && typeof message.content === 'string'
       );
       if (liveAssistant?.content) {
-        const last = rawList[rawList.length - 1];
-        if (last?.role === 'assistant') {
-          rawList[rawList.length - 1] = {
-            ...last,
+        const targetId = currentAssistantMsgIdRef.current || 'live-assistant-current';
+        const lastIdx = rawList.length - 1;
+        if (rawList[lastIdx]?.role === 'assistant') {
+          rawList[lastIdx] = {
+            ...rawList[lastIdx],
             content: liveAssistant.content,
-            id: last.id || liveAssistant.id || 'live-assistant-current',
+            id: targetId,
+            status: 'streaming',
           };
         } else {
           rawList.push({
-            id: liveAssistant.id || 'live-assistant-current',
+            id: targetId,
             role: 'assistant',
             content: liveAssistant.content,
             timestamp: new Date().toISOString(),
@@ -1478,77 +1377,28 @@ Report generated by Manus AI Workspace
       }
     }
 
-    // Deduplicate by stable message ID only. Identical text can be a legitimate
-    // separate turn, so content-based deduplication silently deletes user messages.
+    // Deduplicate by stable ID and filter out consecutive identical assistant messages
     const deduped: any[] = [];
     const seenIds = new Set<string>();
     for (const msg of rawList) {
       if (!msg) continue;
       if (msg.id && seenIds.has(msg.id)) continue;
       if (msg.id) seenIds.add(msg.id);
+
+      const prev = deduped[deduped.length - 1];
+      if (
+        prev &&
+        prev.role === 'assistant' &&
+        msg.role === 'assistant' &&
+        prev.content.trim() === msg.content.trim()
+      ) {
+        continue;
+      }
+
       deduped.push(msg);
     }
     return deduped;
   }, [persistentMessages, messages, isLoading]);
-
-  // Live reference of active conversation state for periodic auto-save
-  const chatBackupStateRef = useRef({
-    taskId,
-    currentTask,
-    messages: displayMessages,
-    steps,
-    taskStatus,
-    phase,
-    result,
-    chartData,
-  });
-
-  useEffect(() => {
-    chatBackupStateRef.current = {
-      taskId,
-      currentTask,
-      messages: displayMessages,
-      steps,
-      taskStatus,
-      phase,
-      result,
-      chartData,
-    };
-  }, [taskId, currentTask, displayMessages, steps, taskStatus, phase, result, chartData]);
-
-  // Periodic Auto-Save: Automatically saves the current chat history to localStorage periodically
-  // so tasks can be resumed after a browser refresh
-  useEffect(() => {
-    const saveSnapshot = () => {
-      const state = chatBackupStateRef.current;
-      const activeId = state.taskId || currentTaskIdRef.current;
-      if (activeId && (state.messages.length > 0 || state.currentTask)) {
-        saveChatHistoryToLocalStorage({
-          taskId: activeId,
-          currentTask: state.currentTask,
-          messages: state.messages,
-          steps: state.steps,
-          taskStatus: state.taskStatus as any,
-          phase: state.phase,
-          result: state.result,
-          chartData: state.chartData,
-        });
-      }
-    };
-
-    // Save snapshot periodically every 2500ms
-    const intervalTimer = setInterval(saveSnapshot, 2500);
-
-    // Save immediately before page refresh or tab close
-    window.addEventListener('beforeunload', saveSnapshot);
-    window.addEventListener('pagehide', saveSnapshot);
-
-    return () => {
-      clearInterval(intervalTimer);
-      window.removeEventListener('beforeunload', saveSnapshot);
-      window.removeEventListener('pagehide', saveSnapshot);
-    };
-  }, []);
 
   return {
     taskId,

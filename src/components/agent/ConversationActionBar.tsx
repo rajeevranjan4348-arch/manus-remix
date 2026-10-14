@@ -163,7 +163,7 @@ export const ConversationActionBar = memo(function ConversationActionBar({
   return (
     <div 
       className={cn(
-        "flex items-center gap-2.5 sm:gap-3 py-1.5 text-muted-foreground/80 select-none relative animate-in fade-in duration-200",
+        "flex items-center gap-1 sm:gap-2 py-1 text-muted-foreground/80 select-none relative animate-in fade-in duration-200 overflow-x-auto no-scrollbar",
         className
       )}
     >
@@ -173,12 +173,12 @@ export const ConversationActionBar = memo(function ConversationActionBar({
         onClick={handleCopy}
         title={copied ? "Copied" : "Copy to clipboard"}
         aria-label="Copy to clipboard"
-        className="p-1.5 rounded-lg hover:text-foreground hover:bg-muted/70 active:scale-95 transition-all text-muted-foreground/80 hover:text-foreground cursor-pointer"
+        className="p-1.5 rounded-lg hover:text-foreground hover:bg-muted/70 active:scale-95 transition-all text-muted-foreground/80 hover:text-foreground cursor-pointer shrink-0"
       >
         {copied ? (
-          <Check size={18} className="text-emerald-500 animate-in zoom-in-75 duration-150" strokeWidth={2} />
+          <Check size={16} className="text-emerald-500 animate-in zoom-in-75 duration-150 shrink-0" strokeWidth={2} />
         ) : (
-          <Copy size={18} strokeWidth={1.75} />
+          <Copy size={16} strokeWidth={1.8} className="shrink-0" />
         )}
       </button>
 
@@ -189,16 +189,16 @@ export const ConversationActionBar = memo(function ConversationActionBar({
         title="Good response"
         aria-label="Good response"
         className={cn(
-          "p-1.5 rounded-lg hover:text-foreground hover:bg-muted/70 active:scale-95 transition-all cursor-pointer",
+          "p-1.5 rounded-lg hover:text-foreground hover:bg-muted/70 active:scale-95 transition-all cursor-pointer shrink-0",
           feedback === 'up' 
             ? "text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20" 
             : "text-muted-foreground/80 hover:text-foreground"
         )}
       >
         <ThumbsUp 
-          size={18} 
-          strokeWidth={1.75} 
-          className={cn(feedback === 'up' && "fill-emerald-500/20")}
+          size={16} 
+          strokeWidth={1.8} 
+          className={cn("shrink-0", feedback === 'up' && "fill-emerald-500/20")}
         />
       </button>
 
@@ -209,16 +209,16 @@ export const ConversationActionBar = memo(function ConversationActionBar({
         title="Bad response"
         aria-label="Bad response"
         className={cn(
-          "p-1.5 rounded-lg hover:text-foreground hover:bg-muted/70 active:scale-95 transition-all cursor-pointer",
+          "p-1.5 rounded-lg hover:text-foreground hover:bg-muted/70 active:scale-95 transition-all cursor-pointer shrink-0",
           feedback === 'down' 
             ? "text-rose-500 bg-rose-500/10 hover:bg-rose-500/20" 
             : "text-muted-foreground/80 hover:text-foreground"
         )}
       >
         <ThumbsDown 
-          size={18} 
-          strokeWidth={1.75} 
-          className={cn(feedback === 'down' && "fill-rose-500/20")}
+          size={16} 
+          strokeWidth={1.8} 
+          className={cn("shrink-0", feedback === 'down' && "fill-rose-500/20")}
         />
       </button>
 
@@ -229,16 +229,16 @@ export const ConversationActionBar = memo(function ConversationActionBar({
         title={isSpeaking ? "Stop reading" : "Read aloud"}
         aria-label={isSpeaking ? "Stop reading" : "Read aloud"}
         className={cn(
-          "p-1.5 rounded-lg hover:text-foreground hover:bg-muted/70 active:scale-95 transition-all cursor-pointer",
+          "p-1.5 rounded-lg hover:text-foreground hover:bg-muted/70 active:scale-95 transition-all cursor-pointer shrink-0",
           isSpeaking 
             ? "text-primary bg-primary/10 animate-pulse" 
             : "text-muted-foreground/80 hover:text-foreground"
         )}
       >
         {isSpeaking ? (
-          <VolumeX size={18} strokeWidth={1.75} />
+          <VolumeX size={16} strokeWidth={1.8} className="shrink-0" />
         ) : (
-          <Volume2 size={18} strokeWidth={1.75} />
+          <Volume2 size={16} strokeWidth={1.8} className="shrink-0" />
         )}
       </button>
 
@@ -248,24 +248,24 @@ export const ConversationActionBar = memo(function ConversationActionBar({
         onClick={handleShare}
         title="Share response"
         aria-label="Share response"
-        className="p-1.5 rounded-lg hover:text-foreground hover:bg-muted/70 active:scale-95 transition-all text-muted-foreground/80 hover:text-foreground cursor-pointer"
+        className="p-1.5 rounded-lg hover:text-foreground hover:bg-muted/70 active:scale-95 transition-all text-muted-foreground/80 hover:text-foreground cursor-pointer shrink-0"
       >
-        <Share2 size={18} strokeWidth={1.75} />
+        <Share2 size={16} strokeWidth={1.8} className="shrink-0" />
       </button>
 
       {/* 6. More options button */}
-      <div className="relative" ref={menuRef}>
+      <div className="relative shrink-0" ref={menuRef}>
         <button
           type="button"
           onClick={() => setShowMenu(prev => !prev)}
           title="More options"
           aria-label="More options"
           className={cn(
-            "p-1.5 rounded-lg hover:text-foreground hover:bg-muted/70 active:scale-95 transition-all text-muted-foreground/80 hover:text-foreground cursor-pointer",
+            "p-1.5 rounded-lg hover:text-foreground hover:bg-muted/70 active:scale-95 transition-all text-muted-foreground/80 hover:text-foreground cursor-pointer shrink-0",
             showMenu && "text-foreground bg-muted/80"
           )}
         >
-          <MoreVertical size={18} strokeWidth={1.75} />
+          <MoreVertical size={16} strokeWidth={1.8} className="shrink-0" />
         </button>
 
         {/* Dropdown Menu */}

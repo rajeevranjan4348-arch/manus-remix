@@ -30,7 +30,7 @@ import { cn } from '@/lib/utils';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
 import { AttachmentMenu } from '@/components/chat/AttachmentMenu';
-import { VoiceInputButton, formatSpeechAutoFill } from '@/components/voice/VoiceInputButton';
+import { VoiceInputButton } from '@/components/voice/VoiceInputButton';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
 import { validateFile, formatFileSize } from '@/lib/fileValidation';
 import { ConnectorsPopupMenu } from '@/components/chat/ConnectorsPopupMenu';
@@ -219,7 +219,6 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   const [showMentionPicker, setShowMentionPicker] = useState<boolean>(false);
   const [mentionQuery, setMentionQuery] = useState<string>('');
   const [mentionIndex, setMentionIndex] = useState<number>(0);
-  const [isListening, setIsListening] = useState<boolean>(false);
 
   const [chatWorkMode, setChatWorkMode] = useState<PersonalityMode>(() => {
     return (localStorage.getItem('manus_chat_work_mode') as PersonalityMode) || personality || 'chat';
@@ -643,8 +642,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
             onDrop={handleDrop}
             className={cn(
               "w-full bg-white dark:bg-[#1a1b1e] rounded-[1.75rem] shadow-lg border border-slate-200/80 dark:border-border/60 px-3.5 py-2.5 sm:px-4.5 sm:py-3 flex flex-col gap-1.5 sm:gap-2 transition-[box-shadow,border-color,background-color] duration-200 ease-out focus-within:ring-2 focus-within:ring-primary/20 relative z-[2] gpu-accelerated",
-              isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30",
-              isListening && "ring-2 ring-rose-500/40 border-rose-400 dark:border-rose-500/60 shadow-lg shadow-rose-500/10"
+              isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30"
             )}
           >
             {showMentionPicker && (
@@ -674,27 +672,6 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
             >
               <span className="w-0 h-0 inline-block pointer-events-none opacity-0" aria-hidden="true" />
             </ConnectorsPopupMenu>
-
-            {/* Visual Indicator for Speech Recognition Listening State */}
-            {isListening && (
-              <div 
-                data-testid="speech-listening-indicator"
-                className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-medium animate-in fade-in slide-in-from-top-1 duration-200 select-none mb-1"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
-                  </span>
-                  <span className="font-semibold">Listening... Speak into microphone</span>
-                </div>
-                <div className="flex items-center gap-0.5">
-                  <span className="w-0.5 h-2.5 bg-rose-500 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
-                  <span className="w-0.5 h-4 bg-rose-500 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
-                  <span className="w-0.5 h-2 bg-rose-500 rounded-full animate-bounce"></span>
-                </div>
-              </div>
-            )}
 
             {/* Top Row: Textarea */}
             <div className="w-full flex flex-col min-h-[28px]">
@@ -744,16 +721,12 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                   isExpanded ? "max-h-[460px]" : "max-h-[280px]"
                 )}
                 rows={1}
-                placeholder={
-                  isListening
-                    ? "Listening... speak now to auto-fill prompt..."
-                    : activeIntent?.placeholder || (chatWorkMode === 'chat' ? "Type a message or ask anything..." : (isThinkHarder ? "Assign a deep reasoning task or question..." : "Assign a building task or ask anything..."))
-                } 
+                placeholder={activeIntent?.placeholder || (chatWorkMode === 'chat' ? "Type a message or ask anything..." : (isThinkHarder ? "Assign a deep reasoning task or question..." : "Assign a building task or ask anything..."))} 
               />
             </div>
 
             {/* Bottom Row: Actions */}
-            <div className="flex items-center justify-between gap-2 sm:gap-3 pt-1 border-t border-transparent min-w-0 w-full">
+            <div className="flex items-center justify-between pt-1 border-t border-transparent gap-2 min-w-0 w-full">
               {/* Left Side: Circular + Button & Connector Tags / Badges */}
               <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 overflow-x-auto no-scrollbar py-0.5">
                 <AttachmentMenu
@@ -771,17 +744,17 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                   <button 
                     type="button"
                     disabled={isExtracting}
-                    className="w-9 h-9 rounded-full border border-slate-200/90 dark:border-white/15 bg-white dark:bg-[#141518] hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                    className="w-8 h-8 rounded-full border border-slate-200/90 dark:border-white/15 bg-white dark:bg-[#141518] hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 shadow-2xs cursor-pointer active:scale-95 shrink-0"
                     title="Add attachments or connectors"
                     aria-label="Add attachments or options"
                   >
-                    <Plus size={18} strokeWidth={2.4} className="text-slate-800 dark:text-slate-200 shrink-0"/>
+                    <Plus size={16} strokeWidth={2.5} className="text-slate-800 dark:text-slate-200 shrink-0"/>
                   </button>
                 </AttachmentMenu>
 
                 {/* Selected Connector Tags */}
                 {activeConnectorTags.length > 0 && (
-                  <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap">
+                  <div className="flex items-center gap-1.5 shrink-0">
                     {activeConnectorTags.map((tagId) => {
                       const opt = WORKSPACE_CONNECTOR_OPTIONS.find(o => o.id === tagId) || CONNECTOR_CATALOG.find(c => c.id === tagId);
                       if (!opt) return null;
@@ -794,21 +767,21 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                         <div 
                           key={tagId} 
                           onClick={() => setSelectedConfigConnectorId(tagId)}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-800/40 text-[#2563eb] dark:text-[#93c5fd] font-semibold text-xs rounded-full cursor-pointer hover:opacity-80 transition-opacity select-none shrink-0 whitespace-nowrap"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-800/40 text-[#2563eb] dark:text-[#93c5fd] font-semibold text-xs rounded-full cursor-pointer hover:opacity-80 transition-opacity select-none shrink-0"
                           title="Click to view connector parameters or details"
                         >
                           <IconComp strokeWidth={2.4} className="w-3.5 h-3.5 shrink-0" />
-                          <span className="shrink-0">{displayName}</span>
+                          <span className="truncate max-w-[120px]">{displayName}</span>
                           <button 
                             type="button" 
                             onClick={(e) => {
                               e.stopPropagation();
                               removeConnectorTag(tagId);
                             }}
-                            className="p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full text-current/70 hover:text-current ml-0.5 shrink-0"
+                            className="p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full text-current/70 hover:text-current shrink-0"
                             title="Remove connector"
                           >
-                            <X size={13} strokeWidth={2.4} />
+                            <X size={12} strokeWidth={2.4} />
                           </button>
                         </div>
                       );
@@ -818,9 +791,9 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
 
                 {/* Badges for active intent or deep reasoning */}
                 {activeIntent && (
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white text-black dark:bg-white dark:text-black border border-slate-200 dark:border-border rounded-full text-xs font-medium shrink-0 max-w-full select-none whitespace-nowrap animate-in fade-in zoom-in duration-200 shadow-2xs">
-                    <activeIntent.icon size={14} strokeWidth={2.4} className="shrink-0 text-primary" />
-                    <span className="shrink-0 truncate">{activeIntent.label}</span>
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white text-black dark:bg-white dark:text-black border border-slate-200 rounded-full text-xs font-medium shrink-0 animate-in fade-in zoom-in duration-200">
+                    <activeIntent.icon size={14} strokeWidth={2.4} className="shrink-0" />
+                    <span className="shrink-0">{activeIntent.label}</span>
                     <button 
                       onClick={() => {
                         if (activeIntent.label === "Data analysis") {
@@ -833,26 +806,23 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                         setActiveIntent(null);
                         setPrompt('');
                       }} 
-                      className="p-0.5 hover:bg-black/10 dark:hover:bg-white/15 rounded-full transition-colors ml-0.5 shrink-0"
-                      title="Clear intent"
-                      aria-label="Clear intent"
+                      className="p-0.5 hover:bg-black/10 rounded-full transition-colors shrink-0"
                     >
-                      <X size={13} strokeWidth={2.4} />
+                      <X size={12} strokeWidth={2.4} />
                     </button>
                   </div>
                 )}
 
                 {isThinkHarder && (
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-500/15 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-300/60 dark:border-purple-600/40 rounded-full text-xs font-semibold shrink-0 max-w-full select-none whitespace-nowrap animate-in fade-in zoom-in duration-200">
-                    <Brain size={14} strokeWidth={2.4} className="text-purple-600 dark:text-purple-400 animate-pulse shrink-0" />
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-500/20 text-purple-300 border border-purple-400/30 rounded-full text-xs font-semibold shrink-0 animate-in fade-in zoom-in duration-200">
+                    <Brain size={14} strokeWidth={2.4} className="text-purple-400 animate-pulse shrink-0" />
                     <span className="shrink-0">Deep reasoning</span>
                     <button 
                       onClick={() => setIsThinkHarder(false)} 
                       className="p-0.5 hover:bg-purple-500/20 rounded-full transition-colors ml-0.5 shrink-0"
                       title="Remove deep reasoning"
-                      aria-label="Remove deep reasoning"
                     >
-                      <X size={13} strokeWidth={2.4} />
+                      <X size={12} strokeWidth={2.4} />
                     </button>
                   </div>
                 )}
@@ -864,32 +834,31 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                   <button
                     type="button"
                     onClick={() => setIsExpanded(prev => !prev)}
-                    className="w-9 h-9 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer animate-in fade-in zoom-in-95 duration-150 shrink-0"
+                    className="w-8 h-8 sm:w-8.5 sm:h-8.5 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer animate-in fade-in zoom-in-95 duration-150 shrink-0"
                     title={isExpanded ? "Collapse typing area" : "Expand typing area"}
                     aria-label={isExpanded ? "Collapse typing area" : "Expand typing area"}
                   >
-                    {isExpanded ? <Minimize2 size={18} strokeWidth={2.4} className="shrink-0" /> : <Maximize2 size={18} strokeWidth={2.4} className="shrink-0" />}
+                    {isExpanded ? <Minimize2 size={16} strokeWidth={2.4} /> : <Maximize2 size={16} strokeWidth={2.4} />}
                   </button>
                 )}
                 <VoiceInputButton 
                   onListeningStateChange={(listening) => {
-                    setIsListening(listening);
                     if (listening) {
                       speechBasePromptRef.current = prompt.trim();
                     }
                   }}
                   onTranscript={(dictatedText) => {
                     const base = speechBasePromptRef.current;
-                    setPrompt(formatSpeechAutoFill(base, dictatedText));
+                    setPrompt(base ? `${base} ${dictatedText}` : dictatedText);
                   }}
-                  className="w-9 h-9 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer shrink-0"
-                  size={18}
+                  className="w-8 h-8 sm:w-8.5 sm:h-8.5 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer shrink-0"
+                  size={16}
                 />
                 <button 
                   type="button"
                   onClick={handleStart}
                   className={cn(
-                    "w-9 h-9 rounded-full flex items-center justify-center transition-all duration-150 cursor-pointer shadow-md shrink-0",
+                    "w-8 h-8 sm:w-8.5 sm:h-8.5 rounded-full flex items-center justify-center transition-all duration-150 cursor-pointer shadow-md shrink-0",
                     (prompt.trim() || activeConnectorTags.length > 0)
                       ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-lg opacity-100"
                       : "bg-foreground/10 text-foreground/40 dark:bg-white/10 dark:text-white/40 hover:bg-foreground/15 dark:hover:bg-white/20"
@@ -897,20 +866,16 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                   title="Send message"
                   aria-label="Send message"
                 >
-                  <ArrowUp size={18} strokeWidth={2.6} className="font-bold shrink-0" />
+                  <ArrowUp size={16} strokeWidth={2.6} className="font-bold shrink-0" />
                 </button>
               </div>
             </div>
           </div>
 
-          <div className="flex flex-col items-center justify-center gap-3.5 sm:gap-4 w-full">
+          <div className="flex flex-col items-center justify-center gap-4 w-full">
             {/* Chat / Work mode switch centered in the middle */}
-            <div className="flex justify-center w-full px-2">
-              <div 
-                className="relative inline-flex items-center p-1 rounded-full border border-slate-200/90 dark:border-border/80 bg-white/90 dark:bg-card/90 shadow-xs backdrop-blur-md overflow-hidden select-none max-w-full"
-                role="radiogroup"
-                aria-label="Agent personality mode"
-              >
+            <div className="flex justify-center w-full">
+              <div className="relative inline-flex items-center gap-1 rounded-full border border-slate-200/90 dark:border-border/80 bg-white/90 dark:bg-card/90 p-1 shadow-xs backdrop-blur-md max-w-full overflow-hidden select-none">
                 {CHAT_WORK_MODES.map((mode) => {
                   const Icon = mode.icon;
                   const active = chatWorkMode === mode.id;
@@ -918,22 +883,21 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                     <button
                       key={mode.id}
                       type="button"
-                      role="radio"
                       onClick={() => handleChatWorkMode(mode.id)}
                       title={mode.desc}
-                      aria-checked={active}
+                      aria-pressed={active}
                       className={cn(
-                        "relative z-10 inline-flex items-center justify-center gap-2 px-4 py-2 sm:px-5 sm:py-2 rounded-full text-xs sm:text-sm font-semibold transition-all duration-200 cursor-pointer whitespace-nowrap shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
+                        "relative z-10 inline-flex items-center justify-center gap-2 px-4 py-1.5 sm:px-5 sm:py-2 rounded-full text-xs sm:text-sm font-semibold transition-all duration-200 cursor-pointer shrink-0 whitespace-nowrap",
                         active
-                          ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm"
+                          ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs"
                           : "text-muted-foreground hover:text-foreground hover:bg-slate-100 dark:hover:bg-accent/60"
                       )}
                     >
-                      <Icon size={16} strokeWidth={2.2} className="shrink-0" />
+                      <Icon size={16} strokeWidth={2.4} className="shrink-0" />
                       <span className="shrink-0 leading-none">{mode.label}</span>
                       {active && (
                         <span 
-                          className="w-1.5 h-1.5 rounded-full bg-emerald-400 dark:bg-emerald-500 shrink-0 ml-0.5" 
+                          className="w-1.5 h-1.5 rounded-full bg-emerald-400 dark:bg-emerald-600 shrink-0 inline-block animate-pulse ml-0.5" 
                           aria-hidden="true" 
                         />
                       )}
@@ -945,7 +909,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
 
             {/* Action chips displayed together in a single row line when in Work mode */}
             {chatWorkMode === 'work' && (
-              <div className="flex min-w-0 w-full box-border items-center justify-start sm:justify-center gap-2 sm:gap-2.5 overflow-x-auto overscroll-x-contain scroll-px-2 no-scrollbar px-2 sm:px-4 py-1.5 whitespace-nowrap">
+              <div className="flex min-w-0 w-full box-border items-center justify-start sm:justify-center gap-2 sm:gap-3 overflow-x-auto overscroll-x-contain scroll-px-3 no-scrollbar px-2 py-1 whitespace-nowrap">
                 {ACTION_CHIPS.map((chip) => (
                   <button
                     key={chip.label}
@@ -984,9 +948,9 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                         setPrompt('');
                       }
                     }}
-                    className="shrink-0 inline-flex items-center justify-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-full text-xs sm:text-sm font-medium border border-border bg-white dark:bg-card text-muted-foreground hover:text-foreground hover:border-primary/30 hover:bg-slate-50 dark:hover:bg-accent/80 transition-all duration-150 cursor-pointer whitespace-nowrap shadow-xs active:scale-95 select-none"
+                    className="inline-flex items-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-full border border-slate-200/90 dark:border-border/80 bg-white dark:bg-card text-xs sm:text-sm font-medium text-muted-foreground hover:text-foreground hover:border-primary/30 dark:hover:border-primary/40 hover:shadow-xs transition-all duration-150 cursor-pointer shrink-0 select-none active:scale-95"
                   >
-                    <chip.icon size={16} strokeWidth={2.2} className="shrink-0 w-4 h-4 text-primary/80" />
+                    <chip.icon size={16} strokeWidth={2.4} className="shrink-0 text-primary/80" />
                     <span className="shrink-0 leading-none">{chip.label}</span>
                   </button>
                 ))}

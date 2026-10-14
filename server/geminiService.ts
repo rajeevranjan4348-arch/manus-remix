@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { extractWeatherQuery, fetchServerWeather, formatWeatherResponse } from './weatherService';
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -11,92 +12,27 @@ export interface StreamChatOptions {
   model?: string;
   thinkHarder?: boolean;
   mode?: 'chat' | 'work';
-  useGoogleSearch?: boolean;
 }
 
-// Context capacity is a model capability, not a tunable API parameter.
-// Gemini 2.5 Flash supports a 1M-token input context; keep the default
-// on that documented long-context model instead of silently aliasing it away.
-export const MIN_CONTEXT_WINDOW_TOKENS = 400_000;
-export const MAX_INPUT_CONTEXT_TOKENS = 800_000;
-export const DEFAULT_LONG_CONTEXT_MODEL = 'gemini-2.5-flash';
-
 function normalizeModel(modelName?: string): string {
-  if (!modelName) return DEFAULT_LONG_CONTEXT_MODEL;
+  if (!modelName) return 'gemini-3.8-flash';
   const clean = modelName.replace(/^google\//, '').trim();
-  if (clean === 'gemini-3-flash' || clean === 'gemini-3.0-flash' ||
-      clean === 'gemini-2.0-flash' || clean === 'gemini-1.5-flash') {
-    return DEFAULT_LONG_CONTEXT_MODEL;
+  if (
+    clean === 'gemini-2.5-flash' ||
+    clean === 'gemini-3-flash' ||
+    clean === 'gemini-3.0-flash' ||
+    clean === 'gemini-2.0-flash' ||
+    clean === 'gemini-1.5-flash'
+  ) {
+    return 'gemini-3.8-flash';
   }
   return clean;
 }
 
-// Conservative estimate used to bound history before sending it to providers.
-// Keep the newest messages and never split a message's text in the middle.
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 3.5);
-}
-
-function fitMessagesToContext(messages: ChatMessage[], budget = MAX_INPUT_CONTEXT_TOKENS): ChatMessage[] {
-  const fitted: ChatMessage[] = [];
-  let used = 0;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    const cost = estimateTokens(message.content) + 8;
-    if (used + cost > budget) {
-      // A single oversized latest message is clipped safely to the remaining budget.
-      if (fitted.length === 0 && budget > 0) {
-        const maxChars = Math.max(0, Math.floor((budget - 8) * 3.5));
-        fitted.unshift({ ...message, content: message.content.slice(-maxChars) });
-      }
-      break;
-    }
-    fitted.unshift(message);
-    used += cost;
-  }
-  return fitted;
-}
-
-export function needsLiveSearch(text: string): boolean {
-  if (!text || typeof text !== 'string') return false;
-  const q = text.toLowerCase().trim();
-
-  // Explicit search triggers & mentions
-  if (/@(web_search|search|google)\b/i.test(q) || /\b(google search|search web|live search|web search)\b/i.test(q)) {
-    return true;
-  }
-
-  // Current events, recent news, and breaking developments
-  if (/\b(current events?|latest news|recent news|breaking news|news today|headlines|world news|tech news|finance news|market news|election news|sports news|top stories)\b/i.test(q)) {
-    return true;
-  }
-
-  // Fact-checking, claim verification & debunking
-  if (/\b(fact[\s-]?check|factcheck|is it true|is that true|verify|verification|debunk|myth|rumor|confirmed|did .* really|is there truth to)\b/i.test(q)) {
-    return true;
-  }
-
-  // Temporal indicators & freshness
-  if (/\b(today|right now|currently|this morning|this afternoon|tonight|yesterday|this week|this month|this year|recent|recently|latest|newest|breaking|live|real[\s-]?time)\b/i.test(q)) {
-    return true;
-  }
-
-  // Recent and future years
-  if (/\b(202[4-9]|203\d)\b/.test(q)) {
-    return true;
-  }
-
-  // Live metrics, scores, leaders, and market updates
-  if (/\b(stock price|share price|crypto price|exchange rate|inflation rate|interest rate|weather forecast|score|standings|box office|winner of|who won|who is (the )?(prime minister|president|chief minister|ceo)|who are the (current|latest)|new release|release date|version update|patch notes)\b/i.test(q)) {
-    return true;
-  }
-
-  // Inquiries into what happened or is happening
-  if (/\b(what happened (to|with|in|at)|what's happening (with|in|at)|whats happening|what is going on|tell me about the latest|latest on)\b/i.test(q)) {
-    return true;
-  }
-
-  return false;
+function needsLiveSearch(text: string): boolean {
+  return /\b(latest|today|current|currently|right now|breaking|live|real[\s-]?time|news|headlines|recent|this week|yesterday|weather|stock price|share price|exchange rate|world news|india news|tech news|latest updates|election results|box office|release date|latest version|price today|score|standings|forecast|who won|who is (the )?(prime minister|president|chief minister|ceo)|who are the (current|latest)\b)\b/i.test(text)
+    || /\b(202[5-9]|203\d)\b/.test(text)
+    || /\b(what happened|what's happening|whats happening|tell me about the latest|latest on)\b/i.test(text);
 }
 
 function generateResilientResponse(prompt: string, messages: ChatMessage[]): string {
@@ -186,11 +122,13 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
   });
 
   const preferredModel = normalizeModel(options.model);
+  // Order candidate models prioritizing active high-speed models
   const candidateModels = Array.from(new Set([
     preferredModel,
     'gemini-3.8-flash',
     'gemini-3.1-flash-lite',
     'gemini-flash-latest',
+    'gemini-flash-lite-latest',
   ]));
 
   let systemPrompt = options.systemInstruction ||
@@ -202,23 +140,35 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
 
   const latestUserText = [...options.messages].reverse()
     .find(m => m.role === 'user')?.content || '';
-  const useGoogleSearch = options.useGoogleSearch !== undefined
-    ? options.useGoogleSearch
-    : needsLiveSearch(latestUserText);
+
+  // Weather Tool Calling Layer
+  const weatherCheck = extractWeatherQuery(latestUserText, options.messages);
+  if (weatherCheck.isWeather) {
+    if (weatherCheck.needsLocation || !weatherCheck.city) {
+      yield 'Which city or location would you like to check the weather for? (e.g., Delhi, New York, London, Tokyo)';
+      return;
+    }
+    try {
+      const weatherData = await fetchServerWeather(weatherCheck.city, 8000);
+      if (weatherData) {
+        yield formatWeatherResponse(weatherData);
+        return;
+      }
+    } catch (wErr) {
+      console.warn('[Gemini Service] Weather tool fetch notice:', wErr);
+    }
+  }
+
+  const useGoogleSearch = needsLiveSearch(latestUserText);
 
   if (useGoogleSearch) {
     systemPrompt +=
-      '\n\n[REAL-TIME GOOGLE SEARCH & NEWS GROUNDING ACTIVE]\n' +
-      'You are equipped with real-time Google Search data. Use this live information to:\n' +
-      '1. Discuss current events, breaking developments, and recent news accurately with up-to-date context.\n' +
-      '2. Fact-check claims, debunk rumors or misinformation, and verify facts against reliable web sources.\n' +
-      '3. Cite recent news and sources with publication names, dates, and direct links when available.\n' +
-      '4. Distinguish verified facts from emerging reports or conflicting claims.\n' +
-      '5. Never invent facts, dates, headlines, or URLs. Rely on grounded Google Search data.';
+      '\n\nLIVE WEB SEARCH IS ENABLED. Use Google Search grounding for current-events, news, and other changing-fact questions. ' +
+      'Prioritize recent, reliable sources. Clearly distinguish confirmed information from uncertainty. Include useful source links and publication dates when available. ' +
+      'Never invent sources, URLs, dates, headlines, or live facts. If search results are insufficient, say so.';
   }
 
-  const contextMessages = fitMessagesToContext(options.messages);
-  const contents = contextMessages
+  const contents = options.messages
     .filter(m => m.role === 'user' || m.role === 'assistant')
     .map(m => ({
       role: m.role === 'assistant' ? 'model' : 'user',
@@ -243,7 +193,6 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
           contents,
           config: {
             systemInstruction: systemPrompt,
-            maxOutputTokens: 8192,
             ...toolConfig,
           },
         });
@@ -346,11 +295,12 @@ export async function* streamOpenRouterResponse(
           'HTTP-Referer': 'https://manus.im',
           'X-Title': 'Manus AI Agent',
         },
+        signal: AbortSignal.timeout(10000),
         body: JSON.stringify({
           model: model,
           messages: messages,
           stream: true,
-          max_tokens: 8192,
+          max_tokens: 2048,
         }),
       });
 

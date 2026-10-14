@@ -3,51 +3,8 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { streamGeminiResponse } from './server/geminiService';
 import { generateOAuthUrl, handleOAuthCallback, executeServerConnectorTool, isSafeUrl } from './server/connectorsService';
-import { GoogleGenAI } from '@google/genai';
-
-class StreamCircuitBreaker {
-  private failureCount = 0;
-  private lastFailureTime = 0;
-  private state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' = 'CLOSED';
-  private readonly failureThreshold = 3;
-  private readonly cooldownPeriodMs = 15000; // 15s
-
-  public canExecute(): { allowed: boolean; reason?: string } {
-    if (this.state === 'OPEN') {
-      const now = Date.now();
-      if (now - this.lastFailureTime > this.cooldownPeriodMs) {
-        this.state = 'HALF_OPEN';
-        return { allowed: true };
-      }
-      const remainingSeconds = Math.ceil((this.cooldownPeriodMs - (now - this.lastFailureTime)) / 1000);
-      return {
-        allowed: false,
-        reason: `Service circuit breaker is OPEN due to repeated stream failures. Please wait ${remainingSeconds} second(s) before retrying.`,
-      };
-    }
-    return { allowed: true };
-  }
-
-  public recordSuccess() {
-    this.failureCount = 0;
-    this.state = 'CLOSED';
-  }
-
-  public recordFailure() {
-    this.failureCount++;
-    this.lastFailureTime = Date.now();
-    if (this.failureCount >= this.failureThreshold) {
-      this.state = 'OPEN';
-      console.warn(`[Stream Circuit Breaker] State set to OPEN after ${this.failureCount} consecutive failures.`);
-    }
-  }
-
-  public getState() {
-    return this.state;
-  }
-}
-
-const streamCircuitBreaker = new StreamCircuitBreaker();
+import { fetchServerWeather } from './server/weatherService';
+import { globalStreamingCircuitBreaker } from './server/circuitBreaker';
 
 function geminiApiPlugin(): Plugin {
   return {
@@ -131,6 +88,59 @@ function geminiApiPlugin(): Plugin {
           }
         }
 
+        // Server-Side Real-Time Weather Endpoint
+        if (url === '/api/weather') {
+          res.setHeader('Content-Type', 'application/json');
+          if (req.method === 'GET') {
+            const queryParams = new URLSearchParams(req.url?.split('?')[1] || '');
+            const city = queryParams.get('city') || queryParams.get('location') || queryParams.get('q') || '';
+            if (!city.trim()) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: 'City parameter is required (e.g. ?city=Delhi)', code: 'CITY_REQUIRED' }));
+              return;
+            }
+            try {
+              const data = await fetchServerWeather(city, 8000);
+              if (!data) {
+                res.statusCode = 404;
+                res.end(JSON.stringify({ error: `Could not retrieve weather data for "${city}"`, code: 'NOT_FOUND' }));
+                return;
+              }
+              res.end(JSON.stringify({ success: true, data }));
+            } catch (err: any) {
+              res.statusCode = 500;
+              res.end(JSON.stringify({ error: err.message || 'Weather fetch failed' }));
+            }
+            return;
+          }
+          if (req.method === 'POST') {
+            let bodyStr = '';
+            req.on('data', chunk => { bodyStr += chunk; });
+            req.on('end', async () => {
+              try {
+                const body = bodyStr ? JSON.parse(bodyStr) : {};
+                const city = body?.city || body?.location || body?.q || '';
+                if (!city.trim()) {
+                  res.statusCode = 400;
+                  res.end(JSON.stringify({ error: 'City is required in body', code: 'CITY_REQUIRED' }));
+                  return;
+                }
+                const data = await fetchServerWeather(city, 8000);
+                if (!data) {
+                  res.statusCode = 404;
+                  res.end(JSON.stringify({ error: `Could not retrieve weather data for "${city}"`, code: 'NOT_FOUND' }));
+                  return;
+                }
+                res.end(JSON.stringify({ success: true, data }));
+              } catch (err: any) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ error: err.message || 'Weather fetch failed' }));
+              }
+            });
+            return;
+          }
+        }
+
         // Server-Side Web Search Endpoint (mirrors netlify/functions/web-search.ts)
         if ((url === '/api/web-search' || url === '/api/search') && req.method === 'POST') {
           res.setHeader('Content-Type', 'application/json');
@@ -153,49 +163,7 @@ function geminiApiPlugin(): Plugin {
 
               const results: Array<{ title: string; url: string; snippet: string; source: string }> = [];
 
-              // 1. Primary Engine: Google Search Grounding via Gemini API
-              if (process.env.GEMINI_API_KEY) {
-                try {
-                  const ai = new GoogleGenAI({
-                    apiKey: process.env.GEMINI_API_KEY,
-                    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
-                  });
-
-                  const searchRes = await ai.models.generateContent({
-                    model: 'gemini-3.8-flash',
-                    contents: `Search Google for real-time information, current events, recent news, or fact-checking about: "${query}". Provide a concise factual summary citing the verified sources.`,
-                    config: {
-                      tools: [{ googleSearch: {} }],
-                    },
-                  });
-
-                  const chunks = searchRes.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-                  const textSummary = searchRes.text?.trim() || '';
-
-                  for (const chunk of chunks) {
-                    const web = chunk?.web;
-                    if (web?.uri && /^https?:\/\//i.test(web.uri)) {
-                      results.push({
-                        title: String(web.title || web.uri).slice(0, 300),
-                        url: web.uri,
-                        snippet: textSummary.slice(0, 600),
-                        source: 'google-search',
-                      });
-                    }
-                  }
-                } catch (gErr: any) {
-                  const isQuota = gErr?.status === 429 ||
-                    gErr?.error?.code === 429 ||
-                    String(gErr?.message || gErr).includes('429') ||
-                    String(gErr?.message || gErr).includes('RESOURCE_EXHAUSTED');
-                  if (!isQuota) {
-                    console.log('[Web Search] Google Search grounding notice: activating secondary engines');
-                  }
-                }
-              }
-
-              // 2. Secondary Engine: Firecrawl (if key configured)
-              if (firecrawlKey && results.length < limit) {
+              if (firecrawlKey) {
                 try {
                   const fcRes = await fetch('https://api.firecrawl.dev/v2/search', {
                     method: 'POST',
@@ -218,10 +186,11 @@ function geminiApiPlugin(): Plugin {
                       }
                     }
                   }
-                } catch {}
+                } catch (fcErr) {
+                  console.warn('[Web Search] Firecrawl notice:', fcErr);
+                }
               }
 
-              // 3. Agent Reach Bridge (if configured)
               if (bridgeUrl && results.length < limit) {
                 try {
                   const brHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -247,77 +216,20 @@ function geminiApiPlugin(): Plugin {
                       }
                     }
                   }
-                } catch {}
-              }
-
-              // 4. Autonomous Open Knowledge & Search Fallbacks (Wikipedia REST & DuckDuckGo API)
-              if (results.length < limit) {
-                try {
-                  const wikiRes = await fetch(
-                    `https://en.wikipedia.org/w/rest.php/v1/search/page?q=${encodeURIComponent(query)}&limit=${limit}`,
-                    { signal: AbortSignal.timeout(6000) }
-                  );
-                  if (wikiRes.ok) {
-                    const wikiData: any = await wikiRes.json();
-                    const pages = Array.isArray(wikiData?.pages) ? wikiData.pages : [];
-                    for (const p of pages) {
-                      const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(p.key || p.title || '')}`;
-                      if (!results.some(r => r.url === url)) {
-                        results.push({
-                          title: String(p.title || 'Wikipedia Reference').slice(0, 300),
-                          url,
-                          snippet: String(p.description || p.excerpt || '').replace(/<[^>]+>/g, '').slice(0, 800),
-                          source: 'wikipedia',
-                        });
-                      }
-                      if (results.length >= limit) break;
-                    }
-                  }
-                } catch {}
-              }
-
-              if (results.length < limit) {
-                try {
-                  const ddgRes = await fetch(
-                    `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`,
-                    { signal: AbortSignal.timeout(6000) }
-                  );
-                  if (ddgRes.ok) {
-                    const ddgData: any = await ddgRes.json();
-                    if (ddgData.AbstractURL && ddgData.AbstractText && !results.some(r => r.url === ddgData.AbstractURL)) {
-                      results.push({
-                        title: String(ddgData.Heading || query).slice(0, 300),
-                        url: ddgData.AbstractURL,
-                        snippet: String(ddgData.AbstractText).slice(0, 800),
-                        source: 'duckduckgo',
-                      });
-                    }
-                    if (Array.isArray(ddgData.RelatedTopics)) {
-                      for (const topic of ddgData.RelatedTopics) {
-                        if (topic?.FirstURL && topic?.Text && !results.some(r => r.url === topic.FirstURL)) {
-                          results.push({
-                            title: String(topic.Text.split(' - ')[0] || query).slice(0, 300),
-                            url: topic.FirstURL,
-                            snippet: String(topic.Text).slice(0, 800),
-                            source: 'duckduckgo',
-                          });
-                          if (results.length >= limit) break;
-                        }
-                      }
-                    }
-                  }
-                } catch {}
+                } catch (brErr) {
+                  console.warn('[Web Search] Bridge notice:', brErr);
+                }
               }
 
               res.end(JSON.stringify({
                 query,
                 results: results.slice(0, limit),
                 providers: [...new Set(results.map(r => r.source))],
-                configured: true,
+                configured: Boolean(firecrawlKey || bridgeUrl),
               }));
             } catch (err: any) {
-              res.statusCode = 200;
-              res.end(JSON.stringify({ query, results: [], providers: [], configured: true }));
+              res.statusCode = 500;
+              res.end(JSON.stringify({ error: err.message || 'Web search execution failed' }));
             }
           });
           return;
@@ -340,6 +252,7 @@ function geminiApiPlugin(): Plugin {
                 return;
               }
 
+              // Sanitize filename
               const sanitizedName = String(name || 'unnamed')
                 .replace(/^.*[\\\/]/, '')
                 .replace(/[^a-zA-Z0-9._\- ]/g, '_')
@@ -358,7 +271,6 @@ function geminiApiPlugin(): Plugin {
           });
           return;
         }
-
         if (req.method === 'POST' && url === '/api/ai/completion') {
           let bodyStr = '';
           req.on('data', chunk => {
@@ -370,6 +282,7 @@ function geminiApiPlugin(): Plugin {
               const prompt = body.prompt || '';
               const messages = body.messages || (prompt ? [{ role: 'user', content: prompt }] : []);
 
+              // 1. Primary Engine: Google Gemini API (High-speed, live search grounding & deep reasoning)
               if (process.env.GEMINI_API_KEY) {
                 try {
                   let accumulated = '';
@@ -392,6 +305,7 @@ function geminiApiPlugin(): Plugin {
                 }
               }
 
+              // 2. Secondary Engine: OpenRouter key pool (if explicit user key or env keys exist)
               const chatKey = process.env.OPENROUTER_CHAT_API_KEY || process.env.OPENROUTER_API_KEY;
               const workKey = process.env.OPENROUTER_WORK_API_KEY || process.env.OPENROUTER_API_KEY;
               const candidateKeys = [
@@ -442,7 +356,9 @@ function geminiApiPlugin(): Plugin {
                         return;
                       }
                     }
-                  } catch (e: any) {}
+                  } catch (e: any) {
+                    // Try next candidate
+                  }
                 }
               }
 
@@ -457,27 +373,31 @@ function geminiApiPlugin(): Plugin {
           return;
         }
 
-        if (req.method === 'POST' && (url === '/api/gemini/stream' || url === '/api/ai/stream' || url?.startsWith('/api/ai/'))) {
+        if (req.method === 'POST' && (url === '/api/gemini/stream' || url === '/api/ai/stream' || url === '/api/ai/agent')) {
           let bodyStr = '';
           req.on('data', chunk => {
             bodyStr += chunk;
           });
 
           req.on('end', async () => {
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-cache, no-transform');
             res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Accel-Buffering', 'no');
 
-            const check = streamCircuitBreaker.canExecute();
-            if (!check.allowed) {
-              const errorMessage = check.reason || 'Service circuit breaker is currently OPEN. Please wait 15 seconds and try again.';
-              res.write(`data: ${JSON.stringify({ type: 'text-delta', delta: `⚠️ ${errorMessage}` })}\n\n`);
+            // 1. Circuit Breaker Guard: Check if downstream provider is in tripped state
+            if (!globalStreamingCircuitBreaker.canAttempt()) {
+              console.warn('[AI Stream] Circuit breaker is OPEN. Fast-failing with actionable recovery steps.');
+              const actionableMessage = globalStreamingCircuitBreaker.formatActionableErrorMessage();
+              res.write(`data: ${JSON.stringify({ type: 'text-delta', delta: actionableMessage })}\n\n`);
+              res.write(`data: ${JSON.stringify({ type: 'error', error: 'Circuit breaker open', code: 'CIRCUIT_BREAKER_OPEN' })}\n\n`);
               res.write(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error' })}\n\n`);
               res.write('data: [DONE]\n\n');
               res.end();
               return;
             }
 
+            let chunksYielded = 0;
             try {
               const body = bodyStr ? JSON.parse(bodyStr) : {};
               const stream = streamGeminiResponse({
@@ -488,40 +408,39 @@ function geminiApiPlugin(): Plugin {
               });
 
               for await (const delta of stream) {
-                if (delta) {
-                  res.write(`data: ${JSON.stringify({ type: 'text-delta', delta })}\n\n`);
-                }
+                chunksYielded++;
+                res.write(`data: ${JSON.stringify({ type: 'text-delta', delta })}\n\n`);
               }
 
-              streamCircuitBreaker.recordSuccess();
+              // Normal completion: record success to circuit breaker and cleanly terminate SSE
+              globalStreamingCircuitBreaker.recordSuccess();
               res.write(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`);
               res.write('data: [DONE]\n\n');
               res.end();
             } catch (err: any) {
-              streamCircuitBreaker.recordFailure();
-              console.error('[AI Stream Error]', err?.message || err);
-
-              let userErrorMsg = '⚠️ Stream processing failed. Please verify your connection or try again.';
-              const errMsg = String(err?.message || err).toLowerCase();
-              if (errMsg.includes('quota') || errMsg.includes('429') || errMsg.includes('resource_exhausted')) {
-                userErrorMsg = '⚠️ API Rate limit or Quota exceeded. Please check your Gemini API plan or wait a few moments before retrying.';
-              } else if (errMsg.includes('timeout') || errMsg.includes('abort')) {
-                userErrorMsg = '⚠️ Stream connection timed out waiting for AI model. Please retry your request.';
-              }
+              console.error('[AI Stream] Streaming provider error:', err?.message || err);
+              globalStreamingCircuitBreaker.recordFailure(err);
 
               try {
-                res.write(`data: ${JSON.stringify({ type: 'text-delta', delta: userErrorMsg })}\n\n`);
+                const actionableMessage = globalStreamingCircuitBreaker.formatActionableErrorMessage(err);
+                
+                // If stream died before sending any tokens, present the actionable advice directly to the user
+                if (chunksYielded === 0) {
+                  res.write(`data: ${JSON.stringify({ type: 'text-delta', delta: actionableMessage })}\n\n`);
+                }
+                
+                res.write(`data: ${JSON.stringify({ type: 'error', error: err?.message || 'Streaming failure' })}\n\n`);
                 res.write(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error' })}\n\n`);
                 res.write('data: [DONE]\n\n');
                 res.end();
-              } catch {
-                res.end();
+              } catch (writeErr) {
+                console.warn('[AI Stream] Failed to write circuit breaker error message:', writeErr);
+                try { res.end(); } catch {}
               }
             }
           });
           return;
         }
-
         next();
       });
     },

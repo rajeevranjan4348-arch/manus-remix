@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { extractWeatherQuery, fetchServerWeather, formatWeatherResponse } from '../../server/weatherService';
 
 const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -9,6 +10,26 @@ const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(da
     'Referrer-Policy': 'no-referrer',
   },
 });
+
+function createTextStreamResponse(text: string) {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: text })}\n\n`));
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`));
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+      controller.close();
+    }
+  });
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
+  });
+}
 
 export default async (req: Request) => {
   if (req.method !== 'POST') {
@@ -49,6 +70,27 @@ export default async (req: Request) => {
   }
 
   try {
+    const messages = Array.isArray(body.messages) ? body.messages : [];
+    const latestUserText =
+      [...messages].reverse().find((m: any) => m?.role === 'user' && typeof m?.content === 'string')?.content
+      || (typeof body.prompt === 'string' ? body.prompt : '');
+
+    // Weather Tool Calling Layer
+    const weatherCheck = extractWeatherQuery(latestUserText, messages);
+    if (weatherCheck.isWeather) {
+      if (weatherCheck.needsLocation || !weatherCheck.city) {
+        return createTextStreamResponse('Which city or location would you like to check the weather for? (e.g., Delhi, New York, London, Tokyo)');
+      }
+      try {
+        const weatherData = await fetchServerWeather(weatherCheck.city, 8000);
+        if (weatherData) {
+          return createTextStreamResponse(formatWeatherResponse(weatherData));
+        }
+      } catch (wErr) {
+        console.warn('[Netlify Agent] Weather fetch notice:', wErr);
+      }
+    }
+
     const apiKey = process.env.GEMINI_API_KEY;
     const openRouterKeys = [
       process.env.OPENROUTER_WORK_API_KEY,
@@ -98,11 +140,6 @@ export default async (req: Request) => {
     if (body.thinkHarder) {
       systemInstruction += `\n\n[EXTENDED REASONING MODE ACTIVE]\nReason carefully internally, then provide a concise answer without revealing private chain-of-thought.`;
     }
-
-    const messages = Array.isArray(body.messages) ? body.messages : [];
-    const latestUserText =
-      [...messages].reverse().find((m: any) => m?.role === 'user' && typeof m?.content === 'string')?.content
-      || (typeof body.prompt === 'string' ? body.prompt : '');
 
     // Keep greetings and ordinary conversation on the fast, non-search path.
     // Enable Google Search grounding for queries related to current events, recent news, or fact-checking.
@@ -299,8 +336,10 @@ export default async (req: Request) => {
                     controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                     controller.close();
                   } catch (err: any) {
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: err?.message || 'Stream error' })}\n\n`));
-                    controller.close();
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: `\n\n⚠️ ${err?.message || 'Stream error occurred.'}` })}\n\n`));
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`));
+                    controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                    try { controller.close(); } catch {}
                   }
                 }
               });
@@ -385,18 +424,23 @@ export default async (req: Request) => {
           controller.close();
         } catch (err: any) {
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: 'error', error: err?.message || 'Stream error' })}\n\n`)
+            encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: `\n\n⚠️ ${err?.message || 'The AI stream encountered an error.'}` })}\n\n`)
           );
-          controller.close();
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`)
+          );
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          try { controller.close(); } catch {}
         }
       },
     });
 
     return new Response(stream, {
       headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
         'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
       },
     });
   } catch (error: any) {
