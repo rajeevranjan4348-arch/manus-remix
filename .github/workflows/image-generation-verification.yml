@@ -1,0 +1,112 @@
+name: Image generation verification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/hooks/useAgentTask.ts"
+      - "netlify/functions/image-generation.ts"
+      - "netlify.toml"
+      - "package.json"
+      - ".github/workflows/image-generation-verification.yml"
+  workflow_dispatch:
+    inputs:
+      run_live_smoke:
+        description: "Call the deployed image-generation endpoint and verify it returns an image"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-generation-verification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  production-build:
+    name: Production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build production bundle
+        run: npm run build
+
+  live-image-generation:
+    name: Live image-generation smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_live_smoke }}
+    steps:
+      - name: Verify deployed image generation returns an actual image
+        env:
+          IMAGE_GENERATION_URL: ${{ secrets.IMAGE_GENERATION_URL }}
+        run: |
+          node --input-type=module <<'NODE'
+          const endpoint = process.env.IMAGE_GENERATION_URL;
+          if (!endpoint) {
+            console.error('Missing GitHub Actions secret IMAGE_GENERATION_URL. Set it to the deployed full endpoint URL, e.g. https://YOUR-SITE.netlify.app/api/image-generation');
+            process.exit(1);
+          }
+
+          let url;
+          try {
+            url = new URL(endpoint);
+          } catch {
+            console.error('IMAGE_GENERATION_URL must be a valid absolute URL.');
+            process.exit(1);
+          }
+          if (url.protocol !== 'https:') {
+            console.error('The live image-generation endpoint must use HTTPS.');
+            process.exit(1);
+          }
+
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 120000);
+          try {
+            const response = await fetch(url, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', accept: 'application/json' },
+              body: JSON.stringify({ prompt: 'A simple friendly paper airplane on a clean sky-blue background, minimal illustration.' }),
+              signal: controller.signal,
+            });
+            const raw = await response.text();
+            let data;
+            try { data = JSON.parse(raw); } catch {
+              console.error('Endpoint returned non-JSON content. HTTP status:', response.status);
+              process.exit(1);
+            }
+            if (!response.ok) {
+              console.error('Image generation endpoint returned HTTP', response.status, '-', data.error || data.message || 'unknown error');
+              process.exit(1);
+            }
+            if (data.success !== true || typeof data.imageDataUrl !== 'string' || !/^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(data.imageDataUrl)) {
+              console.error('Endpoint responded but did not return a valid base64 image data URL.');
+              process.exit(1);
+            }
+            const base64 = data.imageDataUrl.split(',')[1] || '';
+            if (base64.length < 100) {
+              console.error('Returned image payload is unexpectedly small.');
+              process.exit(1);
+            }
+            console.log('PASS: live image generation returned an image.');
+            console.log('Provider:', data.provider || 'not reported');
+            console.log('Model:', data.model || 'not reported');
+            console.log('MIME type:', data.mimeType || 'not reported');
+            console.log('Image payload bytes (approx.):', Math.floor(base64.length * 3 / 4));
+          } catch (error) {
+            console.error('Live image-generation check failed:', error.name === 'AbortError' ? 'request timed out after 120 seconds' : error.message);
+            process.exit(1);
+          } finally {
+            clearTimeout(timeout);
+          }
+          NODE
