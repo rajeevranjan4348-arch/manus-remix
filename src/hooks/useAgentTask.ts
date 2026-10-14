@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useAgent, Agent, webSearch, sandboxTools, fetchUrl, useBlinkAuth } from '@blinkdotnew/react';
 import { blink } from '@/lib/blink';
+import { parseAndroidControlIntent, executeAndroidControlIntent } from '@/lib/androidControl';
 import type { Sandbox } from '@blinkdotnew/sdk';
 import { getSettings, playNotificationSound } from '@/lib/settingsStore';
 import { speakCleanHumanVoice } from '@/lib/speechSynthesis';
@@ -634,6 +635,21 @@ Regarding **${promptText}**:
     setPhase('tool-calling');
     let enriched = prompt;
     const activeUserId = user?.id || 'usr_manus_default';
+
+    // Execute explicit allowlisted Android intents through the paired, authenticated device bridge.
+    // This is a real action path; a plan or model response alone is never treated as execution.
+    const androidIntent = parseAndroidControlIntent(prompt);
+    if (androidIntent) {
+      setPhase('tool-calling');
+      const deviceResult = await executeAndroidControlIntent(androidIntent);
+      const deviceContext = '\n\n[ANDROID CONTROL RESULT — ' + (deviceResult.success ? 'SUCCESS' : 'NOT COMPLETED') + ']\n' +
+        'Requested action: ' + androidIntent.label + '\n' +
+        'Result: ' + deviceResult.message + '\n' +
+        (deviceResult.data ? 'Bridge response: ' + JSON.stringify(deviceResult.data).slice(0, 2500) + '\n' : '') +
+        '[INSTRUCTION: Report this exact result. Never claim an action succeeded when the result is NOT COMPLETED.]';
+      setPhase('text-generation');
+      return enriched + deviceContext;
+    }
 
     // Automation coordinator: plan multi-step tasks using current server-side integration readiness.
     // This endpoint creates a plan only; real actions must still be confirmed by an actual connector/tool result.
