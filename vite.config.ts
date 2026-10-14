@@ -385,7 +385,7 @@ function geminiApiPlugin(): Plugin {
             const sendFailure = (message: string, code: string, retryable = true) => {
               sendEvent({ type: 'error', code, message, retryable });
               sendEvent({ type: 'finish', finishReason: 'error' });
-              sendEvent('[DONE]');
+              if (!res.writableEnded && !res.destroyed) res.write('data: [DONE]\\n\\n');
               if (!res.writableEnded) res.end();
             };
 
