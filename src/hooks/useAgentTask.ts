@@ -641,7 +641,11 @@ Regarding **${promptText}**:
     const androidIntent = parseAndroidControlIntent(prompt);
     if (androidIntent) {
       setPhase('tool-calling');
-      const deviceResult = await executeAndroidControlIntent(androidIntent);
+      const confirmed = !androidIntent.requiresConfirmation ||
+        (typeof window !== 'undefined' && window.confirm('Allow Manus to: ' + androidIntent.label + '?'));
+      const deviceResult = confirmed
+        ? await executeAndroidControlIntent(androidIntent, { confirmed: true })
+        : { success: false, message: 'Action cancelled by user.' };
       const deviceContext = '\n\n[ANDROID CONTROL RESULT — ' + (deviceResult.success ? 'SUCCESS' : 'NOT COMPLETED') + ']\n' +
         'Requested action: ' + androidIntent.label + '\n' +
         'Result: ' + deviceResult.message + '\n' +

@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "serverName": "manus-android-control",
+  "transport": {
+    "localMode": "trusted-wifi-companion",
+    "remoteMode": "authenticated-outbound-https-relay",
+    "neverExposeAdbPublicly": true
+  },
+  "tools": [
+    {
+      "name": "android.get_status",
+      "action": "status",
+      "risk": "read-only",
+      "requiresApproval": false,
+      "description": "Get paired device connectivity and permission status."
+    },
+    {
+      "name": "android.press_home",
+      "action": "home",
+      "risk": "device-navigation",
+      "requiresApproval": true,
+      "description": "Navigate to the Android home screen."
+    },
+    {
+      "name": "android.toggle_flashlight",
+      "action": "flashlight_toggle",
+      "risk": "device-state",
+      "requiresApproval": true,
+      "description": "Toggle the phone flashlight when supported and permitted."
+    },
+    {
+      "name": "android.volume_up",
+      "action": "volume_up",
+      "risk": "device-state",
+      "requiresApproval": true,
+      "description": "Increase device media/system volume within Android limits."
+    },
+    {
+      "name": "android.volume_down",
+      "action": "volume_down",
+      "risk": "device-state",
+      "requiresApproval": true,
+      "description": "Decrease device media/system volume within Android limits."
+    },
+    {
+      "name": "android.open_settings",
+      "action": "open_settings",
+      "risk": "device-navigation",
+      "requiresApproval": true,
+      "description": "Open Android Settings without silently changing protected settings."
+    },
+    {
+      "name": "android.launch_app",
+      "action": "launch_app",
+      "risk": "device-navigation",
+      "requiresApproval": true,
+      "arguments": {
+        "packageName": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+$",
+          "maxLength": 180
+        }
+      },
+      "description": "Launch a validated installed Android package."
+    },
+    {
+      "name": "android.search_in_app",
+      "action": "search_in_app",
+      "risk": "external-navigation",
+      "requiresApproval": true,
+      "arguments": {
+        "packageName": {
+          "type": "string",
+          "maxLength": 180
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        }
+      },
+      "description": "Open a supported app and submit a user-approved search query when that app exposes a supported search entry point."
+    },
+    {
+      "name": "android.call_contact",
+      "action": "call_contact",
+      "risk": "communication",
+      "requiresApproval": true,
+      "arguments": {
+        "contact": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      },
+      "description": "Open the system contact/dialer flow for a named contact. Never place a call silently; Android must show the final call UI and the user must confirm."
+    }
+  ],
+  "safety": {
+    "rejectUnknownActions": true,
+    "requirePairedFirebaseUid": true,
+    "requireExplicitApprovalForDeviceChanges": true,
+    "requireRequestExpiry": true,
+    "idempotencyKeyRequired": true,
+    "stopAndDisconnectRequired": true,
+    "neverAcceptArbitraryShell": true,
+    "neverAcceptRawAdbCommands": true
+  }
+}

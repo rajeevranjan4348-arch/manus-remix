@@ -43,6 +43,7 @@ import { ConversationActionBar } from './ConversationActionBar';
 import { VoiceInputButton, formatSpeechAutoFill } from '../voice/VoiceInputButton';
 import { SourceCitations, parseSourcesFromMarkdown } from './SourceCitations';
 import { WeatherWidgetCard } from './WeatherWidgetCard';
+import { LiveClockWidget } from './LiveClockWidget';
 import { ToolApprovalCard } from './ToolApprovalCard';
 import { extractWeatherQuery, fetchWeatherByCity, WeatherData } from '@/lib/weatherService';
 import { executeOpenUrl, executeDeviceCommand, VoiceCommandResult } from '@/lib/voiceCommands';
@@ -252,20 +253,22 @@ export function ChatView({
     toast.success(`Sent "${driveFile.name}" as context to AI Agent`);
   };
 
-  // Check user queries for live weather data
+  // Render live weather for weather prompts; city-less prompts use New Delhi as a sensible default.
   useEffect(() => {
+    let cancelled = false;
     messages.forEach(async (m) => {
-      if (m.role === 'user' && !weatherMap[m.id || m.content]) {
-        const query = extractWeatherQuery(m.content || '');
-        if (query.isWeather && query.city) {
-          const data = await fetchWeatherByCity(query.city);
-          if (data) {
-            setWeatherMap(prev => ({ ...prev, [m.id || m.content]: data }));
-          }
-        }
+      if (m.role !== 'user') return;
+      const key = m.id || m.content;
+      if (!key || weatherMap[key]) return;
+      const query = extractWeatherQuery(m.content || '');
+      if (!query.isWeather) return;
+      const data = await fetchWeatherByCity(query.city || 'New Delhi');
+      if (data && !cancelled) {
+        setWeatherMap(prev => prev[key] ? prev : ({ ...prev, [key]: data }));
       }
     });
-  }, [messages]);
+    return () => { cancelled = true; };
+  }, [messages, weatherMap]);
 
   const handleApproveTool = async () => {
     if (!pendingApproval) return;
@@ -920,6 +923,43 @@ export function ChatView({
                       return <RoutePlannerCard key={`route-${mapRequest.origin}-${mapRequest.destination}`} initialOrigin={mapRequest.origin} initialDestination={mapRequest.destination} autoCalculate />;
                     }
                     return <GoogleMapWidgetCard key={`location-${mapRequest.location}`} locationName={mapRequest.location} autoLocate zoom={12} />;
+                  })()}
+
+                  {(() => {
+                    const lastUser = displayMessages.slice(0, i).reverse().find((m: any) => m.role === 'user');
+                    const weatherQuery = extractWeatherQuery(lastUser?.content || '');
+                    const weatherKey = lastUser ? (lastUser.id || lastUser.content) : '';
+                    const weatherData = weatherKey ? weatherMap[weatherKey] : undefined;
+                    return weatherQuery.isWeather && weatherData ? (
+                      <WeatherWidgetCard data={weatherData} className="max-w-2xl w-full" />
+                    ) : null;
+                  })()}
+
+                  {(() => {
+                    const lastUser = displayMessages.slice(0, i).reverse().find((m: any) => m.role === 'user');
+                    const timePrompt = String(lastUser?.content || '').toLowerCase();
+                    const asksForTime = /\b(what(?:'s| is) the time|what time is it|time now|current time|tell me the time|show (?:me )?(?:the )?time|local time|time in [a-z\s]+|clock now)\b/i.test(timePrompt);
+                    const cityMatch = timePrompt.match(/\btime in ([a-z\s,]+?)(?:[?.!,;]|$)/i);
+                    const requestedCity = cityMatch?.[1]?.trim();
+                    const cityConfig: Record<string, { name: string; zone: string }> = {
+                      'new delhi': { name: 'New Delhi', zone: 'Asia/Kolkata' },
+                      'delhi': { name: 'New Delhi', zone: 'Asia/Kolkata' },
+                      'india': { name: 'India', zone: 'Asia/Kolkata' },
+                      'mumbai': { name: 'Mumbai', zone: 'Asia/Kolkata' },
+                      'jaipur': { name: 'Jaipur', zone: 'Asia/Kolkata' },
+                      'kolkata': { name: 'Kolkata', zone: 'Asia/Kolkata' },
+                      'chennai': { name: 'Chennai', zone: 'Asia/Kolkata' },
+                      'bengaluru': { name: 'Bengaluru', zone: 'Asia/Kolkata' },
+                      'london': { name: 'London', zone: 'Europe/London' },
+                      'new york': { name: 'New York', zone: 'America/New_York' },
+                      'tokyo': { name: 'Tokyo', zone: 'Asia/Tokyo' },
+                      'dubai': { name: 'Dubai', zone: 'Asia/Dubai' },
+                      'singapore': { name: 'Singapore', zone: 'Asia/Singapore' },
+                      'sydney': { name: 'Sydney', zone: 'Australia/Sydney' },
+                      'los angeles': { name: 'Los Angeles', zone: 'America/Los_Angeles' },
+                    };
+                    const city = requestedCity ? cityConfig[requestedCity.toLowerCase()] : undefined;
+                    return asksForTime ? <LiveClockWidget locationName={city?.name || 'New Delhi'} timeZone={city?.zone || 'Asia/Kolkata'} className="max-w-2xl w-full" /> : null;
                   })()}
 
                   {parsedSources.sources.length > 0 && (
