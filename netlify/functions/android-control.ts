@@ -23,7 +23,8 @@ function respond(data: unknown, status = 200) {
 }
 
 function getAdminAuth() {
-  if (getApps().length) return getAuth();
+  const defaultApp = getApps().find(app => app.name === '[DEFAULT]');
+  if (defaultApp) return getAuth(defaultApp);
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   if (!raw) return null;
   try {
@@ -48,10 +49,15 @@ export default async (req: Request) => {
   const adminAuth = getAdminAuth();
   if (!adminAuth) return respond({ error: 'Firebase Admin verification is not configured. Set FIREBASE_SERVICE_ACCOUNT_JSON in Netlify.', code: 'AUTH_NOT_CONFIGURED' }, 503);
 
+  let decodedToken: { uid: string };
   try {
-    await adminAuth.verifyIdToken(token, true);
+    decodedToken = await adminAuth.verifyIdToken(token, true);
   } catch {
     return respond({ error: 'Your session is invalid or expired. Sign in again.', code: 'UNAUTHORIZED' }, 401);
+  }
+  const allowedUid = process.env.ANDROID_CONTROL_ALLOWED_UID;
+  if (!allowedUid || decodedToken.uid !== allowedUid) {
+    return respond({ error: 'This account is not paired with the Android device.', code: 'DEVICE_ACCESS_DENIED' }, 403);
   }
 
   let body: any;
