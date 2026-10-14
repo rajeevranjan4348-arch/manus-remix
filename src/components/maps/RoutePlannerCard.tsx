@@ -46,6 +46,7 @@ function RouteMap({
   const routesLibrary = useMapsLibrary('routes');
   const rendererRef = useRef<any>(null);
   const serviceRef = useRef<any>(null);
+  const [serviceReady, setServiceReady] = useState(false);
 
   useEffect(() => {
     if (!map || !routesLibrary || !window.google?.maps) return;
@@ -56,15 +57,17 @@ function RouteMap({
       preserveViewport: false,
       polylineOptions: { strokeColor: '#3478F6', strokeWeight: 5, strokeOpacity: 0.9 },
     });
+    setServiceReady(true);
     return () => {
       rendererRef.current?.setMap(null);
       rendererRef.current = null;
       serviceRef.current = null;
+      setServiceReady(false);
     };
   }, [map, routesLibrary]);
 
   useEffect(() => {
-    if (!requestVersion || !serviceRef.current || !rendererRef.current || !window.google?.maps) return;
+    if (!requestVersion || !serviceReady || !serviceRef.current || !rendererRef.current || !window.google?.maps) return;
     let cancelled = false;
     onLoading(true);
     onError('');
@@ -97,7 +100,7 @@ function RouteMap({
       onLoading(false);
     });
     return () => { cancelled = true; };
-  }, [requestVersion, origin, destination, travelMode, onRoute, onError, onLoading]);
+  }, [requestVersion, origin, destination, travelMode, serviceReady, onRoute, onError, onLoading]);
 
   return null;
 }
