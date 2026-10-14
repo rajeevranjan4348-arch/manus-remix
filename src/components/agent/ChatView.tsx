@@ -49,6 +49,7 @@ import { executeOpenUrl, executeDeviceCommand, VoiceCommandResult } from '@/lib/
 import { GoogleDrivePickerModal } from '../workspace/GoogleDrivePickerModal';
 import { WorkspaceToolCard } from '../workspace/WorkspaceToolCard';
 import { GoogleMapWidgetCard } from '../maps/GoogleMapWidgetCard';
+import { RoutePlannerCard } from '../maps/RoutePlannerCard';
 import { GoogleDriveFileItem } from '@/lib/workspaceTools';
 import { WorkspaceMentionPicker, WORKSPACE_CONNECTOR_OPTIONS, WorkspaceConnectorOption } from '../chat/WorkspaceMentionPicker';
 import { fetchWorkspaceContextSummary } from '@/lib/workspaceContextService';
@@ -864,8 +865,15 @@ export function ChatView({
                     />
                   )}
 
+                  {/* Route Planner Detection */}
+                  {/(route planner|plan (?:a )?route|directions from|navigate from|route from|how do i get to|how to get to)/i.test(cleanedContent || '') && (() => {
+                    const latestUserPrompt = [...messages].reverse().find((message: any) => message?.role === 'user')?.content || prompt || '';
+                    const routeMatch = String(latestUserPrompt).match(/(?:route|directions|navigate)\\s+from\\s+(.+?)\\s+to\\s+(.+?)(?:[?.!]|$)/i);
+                    return <RoutePlannerCard initialOrigin={routeMatch?.[1]?.trim()} initialDestination={routeMatch?.[2]?.trim()} />;
+                  })()}
+
                   {/* Google Maps Widget Detection */}
-                  {/(map of|location of|show map|google map)/i.test(cleanedContent || '') && (
+                  {/(map of|location of|show map|google map)/i.test(cleanedContent || '') && !/(route planner|plan (?:a )?route|directions from|navigate from|route from|how do i get to|how to get to)/i.test(cleanedContent || '') && (
                     <GoogleMapWidgetCard locationName="Google Headquarters, Mountain View" latitude={37.4220} longitude={-122.0841} />
                   )}
 
