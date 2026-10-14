@@ -39,7 +39,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   responseTone: 'balanced',
 
   // Voice & Audio
-  voicePersona: 'marcus',
+  voicePersona: 'onyx',
   voiceInputLanguage: 'en-US',
   speechSpeed: 1.0,
   voicePitch: 1.0,
