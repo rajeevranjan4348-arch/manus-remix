@@ -702,7 +702,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#0B0C0E] text-white flex flex-col justify-between overflow-hidden select-none font-sans animate-in fade-in zoom-in-95 duration-300">
+    <div className="fixed inset-0 z-50 h-[100dvh] min-h-0 w-full bg-[#0B0C0E] text-white flex flex-col justify-between overflow-hidden select-none font-sans animate-in fade-in duration-200">
       
       {/* Top Header Bar */}
       <div className="h-16 px-6 flex items-center justify-between shrink-0 z-20">
@@ -1046,7 +1046,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
 
       {/* OVERLAY 3: Call Settings Popover (Matches Image 2) */}
       {activeOverlay === 'settings' && (
-        <div className="absolute top-16 right-6 w-80 bg-[#16171B] border border-white/10 rounded-3xl p-5 z-40 shadow-2xl animate-in zoom-in-95 duration-200">
+        <div className="fixed top-[calc(4rem+env(safe-area-inset-top))] right-3 sm:right-6 w-[min(20rem,calc(100vw-1.5rem))] max-h-[calc(100dvh-5.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain bg-[#16171B] border border-white/10 rounded-3xl p-4 sm:p-5 z-[100] shadow-2xl animate-in fade-in zoom-in-95 duration-200">
           <div className="flex items-center justify-between pb-4 border-b border-white/10">
             <div>
               <h3 className="font-bold text-sm text-white">Call Settings</h3>
