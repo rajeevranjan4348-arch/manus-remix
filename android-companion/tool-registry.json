@@ -62,6 +62,38 @@
         }
       },
       "description": "Launch a validated installed Android package."
+    },
+    {
+      "name": "android.search_in_app",
+      "action": "search_in_app",
+      "risk": "external-navigation",
+      "requiresApproval": true,
+      "arguments": {
+        "packageName": {
+          "type": "string",
+          "maxLength": 180
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        }
+      },
+      "description": "Open a supported app and submit a user-approved search query when that app exposes a supported search entry point."
+    },
+    {
+      "name": "android.call_contact",
+      "action": "call_contact",
+      "risk": "communication",
+      "requiresApproval": true,
+      "arguments": {
+        "contact": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      },
+      "description": "Open the system contact/dialer flow for a named contact. Never place a call silently; Android must show the final call UI and the user must confirm."
     }
   ],
   "safety": {
