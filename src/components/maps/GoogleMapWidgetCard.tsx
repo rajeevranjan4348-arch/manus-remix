@@ -16,6 +16,8 @@ interface GoogleMapWidgetCardProps {
   }>;
 }
 
+export const getGoogleMapsApiKey = () => import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCoOhAP8IKASkSa6jOp4AVe886-arwMzAU';
+
 export function GoogleMapWidgetCard({
   locationName = 'Singapore',
   latitude = 1.3521,
@@ -23,7 +25,7 @@ export function GoogleMapWidgetCard({
   zoom = 12,
   markers = []
 }: GoogleMapWidgetCardProps) {
-  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCoOhAP8IKASkSa6jOp4AVe886-arwMzAU';
+  const apiKey = getGoogleMapsApiKey();
   const [quotaExceeded, setQuotaExceeded] = useState(false);
   const [center, setCenter] = useState({ lat: latitude, lng: longitude });
 
