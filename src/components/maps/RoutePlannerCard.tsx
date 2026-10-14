@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { APIProvider, Map, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
+import { getGoogleMapsApiKey } from './GoogleMapWidgetCard';
 import { ArrowDownUp, CarFront, Footprints, Bike, LocateFixed, Navigation, Route, AlertCircle, LoaderCircle } from 'lucide-react';
 
 type TravelMode = 'DRIVING' | 'WALKING' | 'BICYCLING';
@@ -256,7 +257,7 @@ function RoutePlannerContent({
 }
 
 export function RoutePlannerCard(props: RoutePlannerCardProps) {
-  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  const apiKey = getGoogleMapsApiKey();
   if (!apiKey) {
     return (
       <section className="my-3 rounded-2xl border border-border bg-card p-4 text-card-foreground">
