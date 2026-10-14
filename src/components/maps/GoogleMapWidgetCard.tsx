@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
+import { APIProvider, Map, AdvancedMarker, Pin, useMapsLibrary } from '@vis.gl/react-google-maps';
 import { MapPin, Navigation, Search, AlertCircle, Compass } from 'lucide-react';
 
 interface GoogleMapWidgetCardProps {
@@ -17,6 +17,25 @@ interface GoogleMapWidgetCardProps {
   }>;
 }
 
+
+function LocationGeocoder({ locationName, enabled, onResolved }: { locationName: string; enabled: boolean; onResolved: (point: { lat: number; lng: number }) => void }) {
+  const geocodingLibrary = useMapsLibrary('geocoding');
+  useEffect(() => {
+    if (!enabled || !locationName.trim() || !geocodingLibrary || !window.google?.maps?.Geocoder) return;
+    let cancelled = false;
+    const geocoder = new window.google.maps.Geocoder();
+    geocoder.geocode({ address: locationName }, (results, status) => {
+      if (cancelled) return;
+      if (status === 'OK' && results?.[0]?.geometry?.location) {
+        const point = results[0].geometry.location;
+        onResolved({ lat: point.lat(), lng: point.lng() });
+      }
+    });
+    return () => { cancelled = true; };
+  }, [enabled, locationName, geocodingLibrary, onResolved]);
+  return null;
+}
+
 export const getGoogleMapsApiKey = () => import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCoOhAP8IKASkSa6jOp4AVe886-arwMzAU';
 
 export function GoogleMapWidgetCard({
@@ -32,20 +51,7 @@ export function GoogleMapWidgetCard({
   const [center, setCenter] = useState({ lat: latitude, lng: longitude });
   const [resolvedZoom, setResolvedZoom] = useState(zoom);
 
-  useEffect(() => {
-    if (!autoLocate || !locationName.trim() || !window.google?.maps?.Geocoder) return;
-    let cancelled = false;
-    const geocoder = new window.google.maps.Geocoder();
-    geocoder.geocode({ address: locationName }, (results, status) => {
-      if (cancelled) return;
-      if (status === 'OK' && results?.[0]?.geometry?.location) {
-        const point = results[0].geometry.location;
-        setCenter({ lat: point.lat(), lng: point.lng() });
-        setResolvedZoom(12);
-      }
-    });
-    return () => { cancelled = true; };
-  }, [autoLocate, locationName]);
+
 
   useEffect(() => {
     const handleQuotaExceeded = () => setQuotaExceeded(true);
@@ -96,6 +102,11 @@ export function GoogleMapWidgetCard({
       {/* Map Viewport */}
       <div className="w-full h-64 relative bg-muted/30">
         <APIProvider apiKey={apiKey}>
+          <LocationGeocoder
+            locationName={locationName}
+            enabled={autoLocate}
+            onResolved={(point) => { setCenter(point); setResolvedZoom(12); }}
+          />
           <Map
             mapId="DEMO_MAP_ID"
             center={center}
