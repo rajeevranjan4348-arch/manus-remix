@@ -124,7 +124,7 @@ export function ChatView({
     }
 
     const handleToolStart = (e: any) => {
-      if (status === 'error') return;
+      if ((status as string) === 'error') return;
       const msg = e?.detail?.message || (e?.detail?.tool ? `Processing tool: ${e.detail.tool}...` : 'Processing tool call...');
       setActiveToolCall(msg);
     };
@@ -1208,7 +1208,7 @@ export function ChatView({
           </div>
 
           {/* Bottom Row: Controls */}
-          <div className="flex items-center justify-between pt-0.5 border-t border-transparent gap-2 min-w-0 w-full">
+          <div className="flex items-center justify-between gap-2 sm:gap-3 pt-1 border-t border-transparent min-w-0 w-full">
             {/* Left Controls: Circular + Button & Attached Connector Tags */}
             <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 overflow-x-auto no-scrollbar py-0.5">
               <AttachmentMenu
@@ -1223,7 +1223,7 @@ export function ChatView({
               >
                 <button 
                   type="button"
-                  className="w-8 h-8 rounded-full border border-slate-200/90 dark:border-white/15 bg-white dark:bg-[#141518] hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                  className="w-9 h-9 rounded-full border border-slate-200/90 dark:border-white/15 bg-white dark:bg-[#141518] hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 shadow-2xs cursor-pointer active:scale-95 shrink-0"
                   title="Add attachments or options"
                   aria-label="Add attachments or options"
                 >
@@ -1287,7 +1287,7 @@ export function ChatView({
                     setInput('');
                   }
                 }}
-                className="w-8 h-8 sm:w-8.5 sm:h-8.5 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer shrink-0"
+                className="w-9 h-9 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer shrink-0"
                 size={16}
               />
               <button 
@@ -1304,7 +1304,7 @@ export function ChatView({
                 }}
                 disabled={(!isLoading && status !== 'running') && (!input.trim() && !attachedFile && activeConnectorTags.length === 0)}
                 className={cn(
-                  "w-8 h-8 sm:w-8.5 sm:h-8.5 rounded-full flex items-center justify-center transition-all shadow-2xs shrink-0",
+                  "w-9 h-9 rounded-full flex items-center justify-center transition-all duration-150 shadow-2xs shrink-0 cursor-pointer",
                   isLoading || status === 'running'
                     ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md cursor-pointer"
                     : (input.trim() || attachedFile || activeConnectorTags.length > 0)

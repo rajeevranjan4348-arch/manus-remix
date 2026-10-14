@@ -744,7 +744,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                   <button 
                     type="button"
                     disabled={isExtracting}
-                    className="w-8 h-8 rounded-full border border-slate-200/90 dark:border-white/15 bg-white dark:bg-[#141518] hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                    className="w-9 h-9 rounded-full border border-slate-200/90 dark:border-white/15 bg-white dark:bg-[#141518] hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 shadow-2xs cursor-pointer active:scale-95 shrink-0"
                     title="Add attachments or connectors"
                     aria-label="Add attachments or options"
                   >
@@ -851,14 +851,14 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                     const base = speechBasePromptRef.current;
                     setPrompt(base ? `${base} ${dictatedText}` : dictatedText);
                   }}
-                  className="w-8 h-8 sm:w-8.5 sm:h-8.5 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer shrink-0"
+                  className="w-9 h-9 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer shrink-0"
                   size={16}
                 />
                 <button 
                   type="button"
                   onClick={handleStart}
                   className={cn(
-                    "w-8 h-8 sm:w-8.5 sm:h-8.5 rounded-full flex items-center justify-center transition-all duration-150 cursor-pointer shadow-md shrink-0",
+                    "w-9 h-9 rounded-full flex items-center justify-center transition-all duration-150 cursor-pointer shadow-md shrink-0",
                     (prompt.trim() || activeConnectorTags.length > 0)
                       ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-lg opacity-100"
                       : "bg-foreground/10 text-foreground/40 dark:bg-white/10 dark:text-white/40 hover:bg-foreground/15 dark:hover:bg-white/20"
@@ -875,7 +875,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
           <div className="flex flex-col items-center justify-center gap-4 w-full">
             {/* Chat / Work mode switch centered in the middle */}
             <div className="flex justify-center w-full">
-              <div className="relative inline-flex items-center gap-1 rounded-full border border-slate-200/90 dark:border-border/80 bg-white/90 dark:bg-card/90 p-1 shadow-xs backdrop-blur-md max-w-full overflow-hidden select-none">
+              <div role="radiogroup" aria-label="Select AI Workspace Mode" className="relative inline-flex items-center gap-1 rounded-full border border-slate-200/90 dark:border-border/80 bg-white/90 dark:bg-card/90 p-1 shadow-xs backdrop-blur-md max-w-full overflow-hidden select-none">
                 {CHAT_WORK_MODES.map((mode) => {
                   const Icon = mode.icon;
                   const active = chatWorkMode === mode.id;
@@ -887,7 +887,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                       title={mode.desc}
                       aria-pressed={active}
                       className={cn(
-                        "relative z-10 inline-flex items-center justify-center gap-2 px-4 py-1.5 sm:px-5 sm:py-2 rounded-full text-xs sm:text-sm font-semibold transition-all duration-200 cursor-pointer shrink-0 whitespace-nowrap",
+                        "relative z-10 inline-flex items-center justify-center gap-2 px-4 py-1.5 sm:px-5 sm:py-2 rounded-full text-xs sm:text-sm font-semibold transition-all duration-200 cursor-pointer whitespace-nowrap shrink-0",
                         active
                           ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs"
                           : "text-muted-foreground hover:text-foreground hover:bg-slate-100 dark:hover:bg-accent/60"
@@ -897,7 +897,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                       <span className="shrink-0 leading-none">{mode.label}</span>
                       {active && (
                         <span 
-                          className="w-1.5 h-1.5 rounded-full bg-emerald-400 dark:bg-emerald-600 shrink-0 inline-block animate-pulse ml-0.5" 
+                          className="w-1.5 h-1.5 rounded-full bg-emerald-400 dark:bg-emerald-600 inline-block animate-pulse shrink-0 ml-0.5" 
                           aria-hidden="true" 
                         />
                       )}
@@ -909,7 +909,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
 
             {/* Action chips displayed together in a single row line when in Work mode */}
             {chatWorkMode === 'work' && (
-              <div className="flex min-w-0 w-full box-border items-center justify-start sm:justify-center gap-2 sm:gap-3 overflow-x-auto overscroll-x-contain scroll-px-3 no-scrollbar px-2 py-1 whitespace-nowrap">
+              <div className="flex min-w-0 w-full box-border items-center justify-start sm:justify-center gap-2 sm:gap-3 overflow-x-auto overscroll-x-contain scroll-px-2 no-scrollbar px-2 sm:px-4 py-1.5 whitespace-nowrap">
                 {ACTION_CHIPS.map((chip) => (
                   <button
                     key={chip.label}
@@ -948,7 +948,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                         setPrompt('');
                       }
                     }}
-                    className="inline-flex items-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-full border border-slate-200/90 dark:border-border/80 bg-white dark:bg-card text-xs sm:text-sm font-medium text-muted-foreground hover:text-foreground hover:border-primary/30 dark:hover:border-primary/40 hover:shadow-xs transition-all duration-150 cursor-pointer shrink-0 select-none active:scale-95"
+                    className="shrink-0 inline-flex items-center justify-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-full border border-slate-200/90 dark:border-border/80 bg-white dark:bg-card text-xs sm:text-sm font-medium text-muted-foreground hover:text-foreground hover:border-primary/30 dark:hover:border-primary/40 hover:shadow-xs transition-all duration-150 cursor-pointer select-none active:scale-95"
                   >
                     <chip.icon size={16} strokeWidth={2.4} className="shrink-0 text-primary/80" />
                     <span className="shrink-0 leading-none">{chip.label}</span>

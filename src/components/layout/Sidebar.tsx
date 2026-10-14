@@ -69,6 +69,8 @@ interface SidebarProps {
   activeTaskId?: string;
   onOpenHistory?: () => void;
   onOpenSettings?: () => void;
+  activeSteps?: any[];
+  activeTaskStatus?: string;
 }
 
 interface TaskHistory {

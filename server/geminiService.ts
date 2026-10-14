@@ -29,10 +29,11 @@ function normalizeModel(modelName?: string): string {
   return clean;
 }
 
-function needsLiveSearch(text: string): boolean {
-  return /\b(latest|today|current|currently|right now|breaking|live|real[\s-]?time|news|headlines|recent|this week|yesterday|weather|stock price|share price|exchange rate|world news|india news|tech news|latest updates|election results|box office|release date|latest version|price today|score|standings|forecast|who won|who is (the )?(prime minister|president|chief minister|ceo)|who are the (current|latest)\b)\b/i.test(text)
+export function needsLiveSearch(text: string): boolean {
+  return /\b(latest|today|current|currently|right now|breaking|live|real[\s-]?time|news|headlines|recent|this week|yesterday|weather|stock price|share price|exchange rate|world news|india news|tech news|latest updates|election results|box office|release date|latest version|price today|score|standings|forecast|fact[\s-]?check|verify|rumor|who won|who is (the )?(prime minister|president|chief minister|ceo)|who are the (current|latest)\b)\b/i.test(text)
     || /\b(202[5-9]|203\d)\b/.test(text)
-    || /\b(what happened|what's happening|whats happening|tell me about the latest|latest on)\b/i.test(text);
+    || /@(web_search|search|google)\b/i.test(text)
+    || /\b(what happened|what's happening|whats happening|tell me about the latest|latest on|is it true|debunk|myth)\b/i.test(text);
 }
 
 function generateResilientResponse(prompt: string, messages: ChatMessage[]): string {
