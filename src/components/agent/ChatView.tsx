@@ -76,8 +76,8 @@ function extractManusMapRequest(rawPrompt: string): ManusMapRequest | null {
   for (let i = 0; i < routePatterns.length; i++) {
     const match = text.match(routePatterns[i]);
     if (match) {
-      const from = clean(i === 2 ? match[2] : match[1]);
-      const to = clean(i === 2 ? match[1] : match[2]);
+      const from = clean(match[1]);
+      const to = clean(match[2]);
       if (from && to) return { kind: 'route', origin: from, destination: to };
     }
   }
