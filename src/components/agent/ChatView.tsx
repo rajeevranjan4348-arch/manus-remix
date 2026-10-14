@@ -252,20 +252,22 @@ export function ChatView({
     toast.success(`Sent "${driveFile.name}" as context to AI Agent`);
   };
 
-  // Check user queries for live weather data
+  // Render live weather for weather prompts; city-less prompts use New Delhi as a sensible default.
   useEffect(() => {
+    let cancelled = false;
     messages.forEach(async (m) => {
-      if (m.role === 'user' && !weatherMap[m.id || m.content]) {
-        const query = extractWeatherQuery(m.content || '');
-        if (query.isWeather && query.city) {
-          const data = await fetchWeatherByCity(query.city);
-          if (data) {
-            setWeatherMap(prev => ({ ...prev, [m.id || m.content]: data }));
-          }
-        }
+      if (m.role !== 'user') return;
+      const key = m.id || m.content;
+      if (!key || weatherMap[key]) return;
+      const query = extractWeatherQuery(m.content || '');
+      if (!query.isWeather) return;
+      const data = await fetchWeatherByCity(query.city || 'New Delhi');
+      if (data && !cancelled) {
+        setWeatherMap(prev => prev[key] ? prev : ({ ...prev, [key]: data }));
       }
     });
-  }, [messages]);
+    return () => { cancelled = true; };
+  }, [messages, weatherMap]);
 
   const handleApproveTool = async () => {
     if (!pendingApproval) return;
@@ -920,6 +922,16 @@ export function ChatView({
                       return <RoutePlannerCard key={`route-${mapRequest.origin}-${mapRequest.destination}`} initialOrigin={mapRequest.origin} initialDestination={mapRequest.destination} autoCalculate />;
                     }
                     return <GoogleMapWidgetCard key={`location-${mapRequest.location}`} locationName={mapRequest.location} autoLocate zoom={12} />;
+                  })()}
+
+                  {(() => {
+                    const lastUser = displayMessages.slice(0, i).reverse().find((m: any) => m.role === 'user');
+                    const weatherQuery = extractWeatherQuery(lastUser?.content || '');
+                    const weatherKey = lastUser ? (lastUser.id || lastUser.content) : '';
+                    const weatherData = weatherKey ? weatherMap[weatherKey] : undefined;
+                    return weatherQuery.isWeather && weatherData ? (
+                      <WeatherWidgetCard data={weatherData} className="max-w-2xl w-full" />
+                    ) : null;
                   })()}
 
                   {parsedSources.sources.length > 0 && (
