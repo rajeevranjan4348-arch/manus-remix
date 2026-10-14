@@ -1,5 +1,4 @@
 import { GoogleGenAI } from '@google/genai';
-import { extractWeatherQuery, fetchServerWeather, formatWeatherResponse } from './weatherService';
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -29,11 +28,10 @@ function normalizeModel(modelName?: string): string {
   return clean;
 }
 
-export function needsLiveSearch(text: string): boolean {
-  return /\b(latest|today|current|currently|right now|breaking|live|real[\s-]?time|news|headlines|recent|this week|yesterday|weather|stock price|share price|exchange rate|world news|india news|tech news|latest updates|election results|box office|release date|latest version|price today|score|standings|forecast|fact[\s-]?check|verify|rumor|who won|who is (the )?(prime minister|president|chief minister|ceo)|who are the (current|latest)\b)\b/i.test(text)
+function needsLiveSearch(text: string): boolean {
+  return /\b(latest|today|current|currently|right now|breaking|live|real[\s-]?time|news|headlines|recent|this week|yesterday|weather|stock price|share price|exchange rate|world news|india news|tech news|latest updates|election results|box office|release date|latest version|price today|score|standings|forecast|who won|who is (the )?(prime minister|president|chief minister|ceo)|who are the (current|latest)\b)\b/i.test(text)
     || /\b(202[5-9]|203\d)\b/.test(text)
-    || /@(web_search|search|google)\b/i.test(text)
-    || /\b(what happened|what's happening|whats happening|tell me about the latest|latest on|is it true|debunk|myth)\b/i.test(text);
+    || /\b(what happened|what's happening|whats happening|tell me about the latest|latest on)\b/i.test(text);
 }
 
 function generateResilientResponse(prompt: string, messages: ChatMessage[]): string {
@@ -109,18 +107,18 @@ Regarding **${prompt.trim()}**:
 
 export async function* streamGeminiResponse(options: StreamChatOptions) {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY environment variable is missing');
-  }
+  const latestUserText = [...options.messages].reverse()
+    .find(m => m.role === 'user')?.content || '';
 
-  const ai = new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
+  if (apiKey) {
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
       },
-    },
-  });
+    });
 
   const preferredModel = normalizeModel(options.model);
   // Order candidate models prioritizing active high-speed models
@@ -141,25 +139,6 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
 
   const latestUserText = [...options.messages].reverse()
     .find(m => m.role === 'user')?.content || '';
-
-  // Weather Tool Calling Layer
-  const weatherCheck = extractWeatherQuery(latestUserText, options.messages);
-  if (weatherCheck.isWeather) {
-    if (weatherCheck.needsLocation || !weatherCheck.city) {
-      yield 'Which city or location would you like to check the weather for? (e.g., Delhi, New York, London, Tokyo)';
-      return;
-    }
-    try {
-      const weatherData = await fetchServerWeather(weatherCheck.city, 8000);
-      if (weatherData) {
-        yield formatWeatherResponse(weatherData);
-        return;
-      }
-    } catch (wErr) {
-      console.warn('[Gemini Service] Weather tool fetch notice:', wErr);
-    }
-  }
-
   const useGoogleSearch = needsLiveSearch(latestUserText);
 
   if (useGoogleSearch) {
@@ -236,6 +215,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
       }
     }
   }
+}
 
   // If Gemini models failed or hit quota limits, seamlessly fall back to OpenRouter key pool
   const apiKeys = [
@@ -296,7 +276,6 @@ export async function* streamOpenRouterResponse(
           'HTTP-Referer': 'https://manus.im',
           'X-Title': 'Manus AI Agent',
         },
-        signal: AbortSignal.timeout(10000),
         body: JSON.stringify({
           model: model,
           messages: messages,

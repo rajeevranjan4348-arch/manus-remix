@@ -18,7 +18,6 @@ import { notificationDispatcher } from '@/lib/notificationDispatcher';
 import { securityCenter } from '@/lib/securityCenter';
 import { modelRouter } from '@/lib/modelRouter';
 import { skillsRegistry } from '@/lib/skillsSystem';
-import { reliableResponseEngine } from '@/lib/reliableResponseEngine';
 import {
   saveMessage,
   getMessages,
@@ -27,7 +26,6 @@ import {
   cleanChatTitle,
   StoredMessage,
 } from '@/lib/chatDatabase';
-import { extractWeatherQuery, fetchWeatherByCity, formatWeatherMarkdown, WeatherData } from '@/lib/weatherService';
 
 export type AgentTaskPhase = 'idle' | 'tool-calling' | 'text-generation' | 'completed' | 'error';
 
@@ -94,8 +92,6 @@ export function useAgentTask() {
   const messagesRef = useRef<any[]>([]);
   const currentTaskIdRef = useRef<string | null>(null);
   currentTaskIdRef.current = taskId;
-  const currentRequestIdRef = useRef<string | null>(null);
-  const currentAssistantMsgIdRef = useRef<string | null>(null);
 
   // Initialize sandbox
   useEffect(() => {
@@ -117,22 +113,16 @@ export function useAgentTask() {
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
         detail: { isGenerating: true, mode: 'work', text: 'Manus is typing...' }
       }));
-      // A watchdog must fail visibly; it must never mark a missing response as success.
+      // 45-second watchdog to guarantee no permanently stuck loading states
       watchdogTimer = setTimeout(() => {
-        console.error('[useAgentTask] Request exceeded 45-second client watchdog.');
+        console.warn('[useAgentTask] Watchdog: Task ran past timeout, recovering to terminal state');
         isSubmittingRef.current = false;
-        setTaskStatus('error');
-        setPhase('error');
-        setResult({
-          type: 'chat',
-          content: 'The AI request timed out before a response arrived. Please retry. If this keeps happening, check the provider API key and Netlify function logs.',
-          error: true,
-        });
-        setSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'error' as const } : s));
+        setTaskStatus('completed');
+        setPhase('completed');
+        setSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'completed' as const } : s));
         window.dispatchEvent(new CustomEvent('manus_agent_generating', {
           detail: { isGenerating: false, mode: 'work' }
         }));
-        emitRobotEvent('TASK_FAILED');
       }, 45000);
     } else {
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
@@ -143,16 +133,6 @@ export function useAgentTask() {
       if (watchdogTimer) clearTimeout(watchdogTimer);
     };
   }, [taskStatus]);
-
-  // Cleanup in-flight state and indicators on unmount
-  useEffect(() => {
-    return () => {
-      isSubmittingRef.current = false;
-      window.dispatchEvent(new CustomEvent('manus_agent_generating', {
-        detail: { isGenerating: false, mode: 'work' }
-      }));
-    };
-  }, []);
 
   // Define the agent
   const agent = useMemo(() => {
@@ -250,18 +230,11 @@ export function useAgentTask() {
     sandbox: sandbox || undefined, // Pass sandbox to useAgent
     onFinish: async (response) => {
       // Treat empty model output as a failed generation, never as a completed answer.
-      isSubmittingRef.current = false;
-      if (currentRequestIdRef.current) {
-        reliableResponseEngine.finalizeRequest(currentRequestIdRef.current);
-      }
       const text = typeof response?.text === 'string' ? response.text.trim() : '';
       if (!text) {
         console.error('[Manus AI] Provider finished without assistant text.');
         setTaskStatus('error');
         setPhase('error');
-        window.dispatchEvent(new CustomEvent('manus_agent_generating', {
-          detail: { isGenerating: false, mode: 'work' }
-        }));
         setResult({
           type: currentTask?.options?.format || 'chat',
           content: "I didn't receive an answer from the AI service. Please try again.",
@@ -273,7 +246,7 @@ export function useAgentTask() {
           status: step.status === 'completed' ? 'completed' as const : 'error' as const,
         })));
         emitRobotEvent('TASK_FAILED');
-        playNotificationSound('error');
+        playNotificationSound('pop');
         return;
       }
       let parsedChartData = null; // Full parsed JSON
@@ -323,10 +296,10 @@ export function useAgentTask() {
         }
       }
 
-      // Check if last user message or task explicitly requested a graph/chart/visualization
+      // Check if last user message or task requested a graph/chart/visualization
       const isGraphRequested = 
         currentTask?.options?.format === 'graph' || 
-        messages.some(m => m.role === 'user' && /(?:create|generate|draw|show|make|build|render)\s+(?:a|an)?\s*(?:graph|chart|plot|diagram|bar chart|pie chart|line chart|scatter plot|area chart)/i.test(m.content));
+        messages.some(m => m.role === 'user' && /(graph|chart|plot|diagram|bar|pie|line|scatter|bubble|area)/i.test(m.content));
 
       // Data integrity guard: never fabricate chart points when the model did not return valid data.
       // Keep the user's request visible in the text response, but render a chart only when
@@ -348,17 +321,14 @@ export function useAgentTask() {
       setResult(finalResult);
       setTaskStatus('completed');
       setPhase('completed');
-      window.dispatchEvent(new CustomEvent('manus_agent_generating', {
-        detail: { isGenerating: false, mode: 'work' }
-      }));
       emitRobotEvent('TASK_SUCCEEDED');
       
       const activeId = taskId || currentTaskIdRef.current;
       const assistantText = finalResult.content || text;
 
-      // Save assistant message to permanent database immediately upon completion using stable ID
+      // Save assistant message to permanent database immediately upon completion
       if (activeId && assistantText) {
-        const assistantMsgId = currentAssistantMsgIdRef.current || ('msg_ast_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8));
+        const assistantMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
         const assistantMsg = {
           id: assistantMsgId,
           role: 'assistant' as const,
@@ -367,11 +337,8 @@ export function useAgentTask() {
           status: 'success' as const
         };
         setPersistentMessages(prev => {
-          const idx = prev.findIndex(m => m.id === assistantMsgId || (m.role === 'assistant' && (m.status === 'streaming' || m.content === assistantText)));
-          if (idx !== -1) {
-            const updated = [...prev];
-            updated[idx] = assistantMsg;
-            return updated;
+          if (prev.some(m => m.id === assistantMsgId || (m.role === 'assistant' && m.content === assistantText))) {
+            return prev;
           }
           return [...prev, assistantMsg];
         });
@@ -439,8 +406,7 @@ export function useAgentTask() {
       }
     },
     onError: async (err) => {
-      isSubmittingRef.current = false;
-      console.error('[Manus AI] Agent request failed:', err);
+      console.warn('[AI Studio] Agent stream notice (rate limit / fallback):', err);
       
       const promptText = currentTask?.prompt || 'Request';
       const isGraphRequested = 
@@ -460,12 +426,11 @@ export function useAgentTask() {
           fallbackContent = `Executed **${cmdMatch.targetName}**: ${cmdMatch.feedbackSpeech}`;
         }
       } else {
-        // Query server proxy powered by OpenRouter API key with 8s bounded timeout
+        // Query server proxy powered by OpenRouter API key
         try {
           const res = await fetch('/api/ai/completion', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            signal: AbortSignal.timeout(8000),
             body: JSON.stringify({
               prompt: promptText,
               messages: messages.map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })),
@@ -541,9 +506,6 @@ Regarding **${promptText}**:
       setResult(finalResult);
       setTaskStatus('completed');
       setPhase('completed');
-      window.dispatchEvent(new CustomEvent('manus_agent_generating', {
-        detail: { isGenerating: false, mode: 'work' }
-      }));
       emitRobotEvent('TASK_SUCCEEDED');
       setSteps(prev => prev.map(s => ({ ...s, status: 'completed' as const })));
       playNotificationSound('success');
@@ -595,14 +557,53 @@ Regarding **${promptText}**:
       try { void stop(); } catch (error) { console.warn('[Agent] Stop request failed:', error); }
     }
     isSubmittingRef.current = false;
-    setTaskStatus('idle');
-    setPhase('idle');
+    setTaskStatus('completed');
+    setPhase('completed');
     setSteps(prev => prev.map(step => step.status === 'running' ? { ...step, status: 'pending' as const } : step));
     window.dispatchEvent(new CustomEvent('manus_agent_generating', {
       detail: { isGenerating: false, mode: 'work' }
     }));
     toast.info('Generation stopped');
   }, [useAgentResult]);
+
+  const lastSubmitRef = useRef<{ prompt: string; timestamp: number }>({ prompt: '', timestamp: 0 });
+
+  // Stream Completion Safeguard: Automatically finalize task state when SDK stream closes
+  useEffect(() => {
+    if (!isLoading && taskStatus === 'running') {
+      const liveAssistant = [...messages].reverse().find((m: any) => m?.role === 'assistant' && typeof m?.content === 'string' && m.content.trim());
+      if (liveAssistant?.content) {
+        const assistantText = liveAssistant.content.trim();
+        const activeId = taskId || currentTaskIdRef.current;
+        if (activeId && assistantText) {
+          const assistantMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+          setPersistentMessages(prev => {
+            if (prev.some(m => m.role === 'assistant' && m.content === assistantText)) return prev;
+            return [...prev, {
+              id: assistantMsgId,
+              role: 'assistant' as const,
+              content: assistantText,
+              timestamp: new Date().toISOString(),
+              status: 'success' as const
+            }];
+          });
+          saveMessage({
+            id: assistantMsgId,
+            conversationId: activeId,
+            userId: user?.id || 'usr_manus_default',
+            role: 'assistant',
+            content: assistantText,
+            status: 'success'
+          }).catch(() => {});
+        }
+      }
+      setTaskStatus('completed');
+      setPhase('completed');
+      window.dispatchEvent(new CustomEvent('manus_agent_generating', {
+        detail: { isGenerating: false, mode: 'work' }
+      }));
+    }
+  }, [isLoading, taskStatus, messages, taskId, user]);
 
   const processedInvocationsRef = useRef<Set<string>>(new Set());
 
@@ -757,28 +758,21 @@ Regarding **${promptText}**:
   }, [messages, taskId, isAuthenticated]);
 
   const sendMessage = useCallback((content: string) => {
-    if (isSubmittingRef.current) {
-      toast.info('A response is already being generated. Please wait or stop it first.');
+    if (!content || !content.trim()) return;
+    const now = Date.now();
+    if (lastSubmitRef.current.prompt === content.trim() && now - lastSubmitRef.current.timestamp < 1200) {
+      console.warn('[Manus Agent] Suppressed duplicate rapid submission:', content);
       return;
     }
-
-    const activeId = taskId || currentTaskIdRef.current || ('task_' + Date.now());
-    const reqFenceId = reliableResponseEngine.createRequestFence(activeId);
-    if (reliableResponseEngine.isRequestActive(reqFenceId) && isSubmittingRef.current) {
-      toast.info('Submission already in progress.');
-      return;
-    }
-
-    isSubmittingRef.current = true;
-    currentRequestIdRef.current = reqFenceId;
-    currentAssistantMsgIdRef.current = 'msg_ast_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+    lastSubmitRef.current = { prompt: content.trim(), timestamp: now };
 
     setTaskStatus('running');
     setPhase('tool-calling');
     emitRobotEvent('USER_SUBMITTED');
     setResult(null); // Clear previous result card while running new prompt
 
-    const userMsgId = 'msg_usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+    const activeId = taskId || currentTaskIdRef.current;
+    const userMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
     const userMsg = {
       id: userMsgId,
       role: 'user' as const,
@@ -787,8 +781,14 @@ Regarding **${promptText}**:
       status: 'success' as const
     };
 
-    // Each intentional submission gets its own ID. Identical consecutive messages are valid.
-    setPersistentMessages(prev => [...prev, userMsg]);
+    // Optimistically record user message immediately in state (avoiding duplicate adjacent appends)
+    setPersistentMessages(prev => {
+      const last = prev[prev.length - 1];
+      if (last && last.role === 'user' && last.content.trim() === content.trim()) {
+        return prev;
+      }
+      return [...prev, userMsg];
+    });
 
     // Save user message to database BEFORE starting AI generation (Requirement 3)
     if (activeId) {
@@ -811,112 +811,6 @@ Regarding **${promptText}**:
         executeDeviceCommand(cmd);
       }
       toast.success(`${cmd.targetName}: ${cmd.feedbackSpeech}`);
-    }
-
-    // Weather Tool Calling Layer
-    const weatherCheck = extractWeatherQuery(content, persistentMessages);
-    if (weatherCheck.isWeather) {
-      if (weatherCheck.needsLocation || !weatherCheck.city) {
-        const assistantMsgId = 'msg_ast_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
-        const replyText = 'Which city or location would you like to check the weather for? (e.g., Delhi, New York, London, Tokyo)';
-        const assistantMsg = {
-          id: assistantMsgId,
-          role: 'assistant' as const,
-          content: replyText,
-          timestamp: new Date().toISOString(),
-          status: 'success' as const
-        };
-        setPersistentMessages(prev => [...prev, assistantMsg]);
-        saveMessage({
-          id: assistantMsgId,
-          conversationId: activeId,
-          userId: user?.id || 'usr_manus_default',
-          role: 'assistant',
-          content: replyText,
-          status: 'success'
-        }).catch(() => {});
-        isSubmittingRef.current = false;
-        if (currentRequestIdRef.current) reliableResponseEngine.finalizeRequest(currentRequestIdRef.current);
-        setTaskStatus('completed');
-        setPhase('completed');
-        window.dispatchEvent(new CustomEvent('manus_agent_generating', {
-          detail: { isGenerating: false, mode: 'work' }
-        }));
-        emitRobotEvent('TASK_SUCCEEDED');
-        return;
-      }
-
-      // We have location/city: Fetch real-time weather data
-      const targetCity = weatherCheck.city;
-      setSteps([
-        { id: '1', label: `Checking live weather for ${targetCity}`, status: 'running', trace: [`Querying real-time weather provider for ${targetCity}...`] }
-      ]);
-
-      void (async () => {
-        try {
-          const wData = await fetchWeatherByCity(targetCity);
-          if (wData) {
-            setSteps(prev => prev.map(s => ({ ...s, status: 'completed' as const })));
-            const formatted = formatWeatherMarkdown(wData);
-            const assistantMsgId = 'msg_ast_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
-            const assistantMsg = {
-              id: assistantMsgId,
-              role: 'assistant' as const,
-              content: formatted,
-              timestamp: new Date().toISOString(),
-              status: 'success' as const
-            };
-            setPersistentMessages(prev => [...prev, assistantMsg]);
-            saveMessage({
-              id: assistantMsgId,
-              conversationId: activeId,
-              userId: user?.id || 'usr_manus_default',
-              role: 'assistant',
-              content: formatted,
-              status: 'success'
-            }).catch(() => {});
-
-            const finalResult = {
-              type: 'weather',
-              content: formatted,
-              weatherData: wData,
-              rawResponse: { text: formatted },
-              messages: [...persistentMessages, userMsg, assistantMsg],
-            };
-            setResult(finalResult);
-            isSubmittingRef.current = false;
-            if (currentRequestIdRef.current) reliableResponseEngine.finalizeRequest(currentRequestIdRef.current);
-            setTaskStatus('completed');
-            setPhase('completed');
-            window.dispatchEvent(new CustomEvent('manus_agent_generating', {
-              detail: { isGenerating: false, mode: 'work' }
-            }));
-            emitRobotEvent('TASK_SUCCEEDED');
-            playNotificationSound('success');
-            return;
-          }
-        } catch (wErr) {
-          console.warn('[useAgentTask] Weather fetch notice:', wErr);
-        }
-
-        // If direct fetch was null or threw, attempt through model
-        try {
-          const preparedPrompt = await preparePromptWithConnectors(
-            `User requested current weather and forecast for ${targetCity}. Provide live current conditions and today's forecast.`
-          );
-          await agentSendMessage(preparedPrompt);
-        } catch (error) {
-          isSubmittingRef.current = false;
-          if (currentRequestIdRef.current) reliableResponseEngine.finalizeRequest(currentRequestIdRef.current);
-          setTaskStatus('error');
-          setPhase('error');
-          window.dispatchEvent(new CustomEvent('manus_agent_generating', {
-            detail: { isGenerating: false, mode: 'work' }
-          }));
-          emitRobotEvent('TASK_FAILED');
-        }
-      })();
-      return;
     }
 
     // App Connector Tool Intent Phase
@@ -951,11 +845,8 @@ Regarding **${promptText}**:
     }
 
     // Check if content specifically requests a graph or chart
-    const isExplicitChartRequest = 
-      /(?:create|generate|draw|show|make|build|render)\s+(?:a|an)?\s*(?:graph|chart|plot|diagram|bar chart|pie chart|line chart)/i.test(content) ||
-      /^(?:graph|chart|plot):\s*/i.test(content.trim());
-
-    if (isExplicitChartRequest) {
+    const lower = content.toLowerCase();
+    if (lower.includes('graph') || lower.includes('chart') || lower.includes('plot') || lower.includes('diagram') || lower.includes('bar') || lower.includes('pie') || lower.includes('line')) {
       const chartPrompt = `${content}\n\n[INSTRUCTION: Format your chart data as a JSON code block using the format below so it renders as an interactive chart]\n\`\`\`json\n{\n  "graph": {\n    "type": "bar",\n    "labels": ["Category A", "Category B", "Category C", "Category D"],\n    "datasets": [{\n      "label": "Metric",\n      "data": [45, 72, 88, 95]\n    }]\n  }\n}\n\`\`\``;
       void (async () => { agentSendMessage(await preparePromptWithConnectors(chartPrompt)); })();
     } else {
@@ -965,8 +856,6 @@ Regarding **${promptText}**:
           await agentSendMessage(preparedPrompt);
         } catch (error) {
           console.error('[Manus AI] Failed to send chat message:', error);
-          isSubmittingRef.current = false;
-          if (currentRequestIdRef.current) reliableResponseEngine.finalizeRequest(currentRequestIdRef.current);
           setTaskStatus('error');
           setPhase('error');
           setResult({
@@ -975,17 +864,22 @@ Regarding **${promptText}**:
             error: true,
           });
           setSteps(prev => prev.map(step => ({ ...step, status: 'error' as const })));
-          window.dispatchEvent(new CustomEvent('manus_agent_generating', {
-            detail: { isGenerating: false, mode: 'work' }
-          }));
           emitRobotEvent('TASK_FAILED');
           toast.error("Couldn't reach the AI service. Please try again.");
         }
       })();
     }
-  }, [agentSendMessage, preparePromptWithConnectors, taskId, user, persistentMessages]);
+  }, [agentSendMessage, preparePromptWithConnectors, taskId, user]);
 
   const startTask = useCallback(async (prompt: string, options: any) => {
+    if (!prompt || !prompt.trim()) return null;
+    const now = Date.now();
+    if (lastSubmitRef.current.prompt === prompt.trim() && now - lastSubmitRef.current.timestamp < 1200) {
+      console.warn('[Manus Agent] Suppressed duplicate rapid startTask:', prompt);
+      return currentTaskIdRef.current;
+    }
+    lastSubmitRef.current = { prompt: prompt.trim(), timestamp: now };
+
     // Start fresh
     if (clearMessages) {
       clearMessages();
@@ -1010,8 +904,6 @@ Regarding **${promptText}**:
     newTaskId = generatedId;
     setTaskId(newTaskId);
     currentTaskIdRef.current = newTaskId;
-    currentRequestIdRef.current = reliableResponseEngine.createRequestFence(newTaskId);
-    currentAssistantMsgIdRef.current = 'msg_ast_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
 
     try {
       let activeUser = user;
@@ -1356,18 +1248,16 @@ Report generated by Manus AI Workspace
         message?.role === 'assistant' && typeof message.content === 'string'
       );
       if (liveAssistant?.content) {
-        const targetId = currentAssistantMsgIdRef.current || 'live-assistant-current';
-        const lastIdx = rawList.length - 1;
-        if (rawList[lastIdx]?.role === 'assistant') {
-          rawList[lastIdx] = {
-            ...rawList[lastIdx],
+        const last = rawList[rawList.length - 1];
+        if (last?.role === 'assistant') {
+          rawList[rawList.length - 1] = {
+            ...last,
             content: liveAssistant.content,
-            id: targetId,
-            status: 'streaming',
+            id: last.id || liveAssistant.id || 'live-assistant-current',
           };
         } else {
           rawList.push({
-            id: targetId,
+            id: liveAssistant.id || 'live-assistant-current',
             role: 'assistant',
             content: liveAssistant.content,
             timestamp: new Date().toISOString(),
@@ -1377,24 +1267,14 @@ Report generated by Manus AI Workspace
       }
     }
 
-    // Deduplicate by stable ID and filter out consecutive identical assistant messages
+    // Deduplicate by stable message ID only. Identical text can be a legitimate
+    // separate turn, so content-based deduplication silently deletes user messages.
     const deduped: any[] = [];
     const seenIds = new Set<string>();
     for (const msg of rawList) {
       if (!msg) continue;
       if (msg.id && seenIds.has(msg.id)) continue;
       if (msg.id) seenIds.add(msg.id);
-
-      const prev = deduped[deduped.length - 1];
-      if (
-        prev &&
-        prev.role === 'assistant' &&
-        msg.role === 'assistant' &&
-        prev.content.trim() === msg.content.trim()
-      ) {
-        continue;
-      }
-
       deduped.push(msg);
     }
     return deduped;

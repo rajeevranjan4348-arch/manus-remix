@@ -702,19 +702,29 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 h-screen supports-[height:100dvh]:h-[100dvh] min-h-0 min-w-0 w-full bg-[#0B0C0E] text-white flex flex-col overflow-hidden select-none font-sans animate-in fade-in duration-200">
+    <div className="fixed inset-0 min-h-screen min-h-[100dvh] h-[100dvh] max-h-[100dvh] w-screen max-w-full z-50 bg-[#0B0C0E] text-white flex flex-col justify-between overflow-hidden select-none font-sans pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] animate-in fade-in duration-300">
       
+      {/* Overlay Backdrop for Overlay Dismissal */}
+      {activeOverlay !== 'none' && (
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 transition-opacity"
+          onClick={() => setActiveOverlay('none')}
+          aria-hidden="true"
+        />
+      )}
+
       {/* Top Header Bar */}
-      <div className="shrink-0 min-w-0 pt-[env(safe-area-inset-top)] px-3 sm:px-6 flex items-center justify-between z-20">
+      <div className="h-14 sm:h-16 px-4 sm:px-6 flex items-center justify-between shrink-0 z-30 border-b border-white/5">
         {/* Left Icons: History & Live Transcript */}
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        <div className="flex items-center gap-3">
           <button
             onClick={() => setActiveOverlay(activeOverlay === 'history' ? 'none' : 'history')}
             className={cn(
-              "w-10 h-10 rounded-full flex items-center justify-center transition-all relative border border-white/10",
+              "w-10 h-10 rounded-full flex items-center justify-center transition-all relative border border-white/10 cursor-pointer",
               activeOverlay === 'history' ? "bg-white/20 text-white" : "bg-white/5 text-white/80 hover:bg-white/10"
             )}
             title="Voice History"
+            aria-label="Voice History"
           >
             <History size={18} />
             {voiceHistory.length > 0 && (
@@ -727,17 +737,18 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
           <button
             onClick={() => setActiveOverlay(activeOverlay === 'transcript' ? 'none' : 'transcript')}
             className={cn(
-              "w-10 h-10 rounded-full flex items-center justify-center transition-all border border-white/10",
+              "w-10 h-10 rounded-full flex items-center justify-center transition-all border border-white/10 cursor-pointer",
               activeOverlay === 'transcript' ? "bg-white/20 text-white" : "bg-white/5 text-white/80 hover:bg-white/10"
             )}
             title="Live Call Transcript"
+            aria-label="Live Call Transcript"
           >
             <MessageSquare size={18} />
           </button>
         </div>
 
         {/* Center: Assistant Branding */}
-        <div className="flex flex-col items-center min-w-0 px-1">
+        <div className="flex flex-col items-center pointer-events-none">
           <h2 className="text-base font-bold tracking-tight text-white flex items-center gap-1.5">
             Manus AI
           </h2>
@@ -750,20 +761,21 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
         <button
           onClick={() => setActiveOverlay(activeOverlay === 'settings' ? 'none' : 'settings')}
           className={cn(
-            "w-10 h-10 rounded-full flex items-center justify-center transition-all border border-white/10",
+            "w-10 h-10 rounded-full flex items-center justify-center transition-all border border-white/10 cursor-pointer",
             activeOverlay === 'settings' ? "bg-white/20 text-white" : "bg-white/5 text-white/80 hover:bg-white/10"
           )}
           title="Call Settings"
+          aria-label="Call Settings"
         >
           <SlidersHorizontal size={18} />
         </button>
       </div>
 
       {/* Main Center Stage: Grok 3D Interactive Avatar & Uiverse 3D Sphere */}
-      <div className="flex-1 min-h-0 min-w-0 flex flex-col items-center justify-center relative z-10 px-3 sm:px-6 py-2 overflow-y-auto overflow-x-hidden">
+      <div className="flex-1 min-h-0 flex flex-col items-center justify-center relative z-10 px-4 sm:px-6 py-2 overflow-y-auto overscroll-contain custom-scrollbar">
         
         {/* Interactive Avatar / Sphere Stage */}
-        <div className="relative my-auto min-h-0 min-w-0 max-w-full flex items-center justify-center shrink">
+        <div className="relative my-auto flex items-center justify-center max-h-[35dvh] sm:max-h-[42dvh] shrink-0">
           {avatarStyle === 'sphere' ? (
             <VoicePulseOrb
               callStatus={callStatus}
@@ -788,7 +800,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
         </div>
 
         {/* Status Text & Live Transcript */}
-        <div className="text-center space-y-2 sm:space-y-3 mt-3 sm:mt-6 max-w-md min-w-0 w-full px-2 sm:px-4 shrink-0">
+        <div className="text-center space-y-2 sm:space-y-3 mt-2 sm:mt-4 max-w-md w-full px-4 shrink-0">
           <p className="text-xl sm:text-2xl font-semibold text-white tracking-tight line-clamp-2">
             {liveTranscript ? `"${liveTranscript}"` : statusText}
           </p>
@@ -839,26 +851,29 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
 
         {/* Inline Keyboard Text Input (Uiverse Cobp Chatbot Component) */}
         {showKeyboardInput && (
-          <CobpChatInput
-            onSubmit={(text) => handleUserSpoken(text)}
-            placeholder="Imagine Something...✦˚"
-          />
+          <div className="w-full max-w-md mt-3 shrink-0">
+            <CobpChatInput
+              onSubmit={(text) => handleUserSpoken(text)}
+              placeholder="Imagine Something...✦˚"
+            />
+          </div>
         )}
       </div>
 
       {/* Bottom Controls */}
-      <div className="shrink-0 pt-3 sm:pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] px-3 sm:px-6 flex flex-col items-center gap-3 sm:gap-5 z-20 max-w-full">
-        <div className="flex items-center justify-center gap-6 sm:gap-10 max-w-full">
+      <div className="pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-2 sm:pt-4 px-4 sm:px-6 flex flex-col items-center gap-2 sm:gap-4 shrink-0 z-20">
+        <div className="flex items-center justify-center gap-8 sm:gap-10 w-full max-w-xs">
           {/* Pause / Resume Button */}
-          <div className="flex flex-col items-center gap-2">
+          <div className="flex flex-col items-center gap-1.5">
             <button
               onClick={togglePause}
               className={cn(
-                "w-16 h-16 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-lg",
+                "w-13 h-13 sm:w-16 sm:h-16 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-lg active:scale-95",
                 callStatus === 'paused'
                   ? "bg-white text-black ring-4 ring-white/20"
                   : "bg-[#1E2024] text-white hover:bg-white/15"
               )}
+              aria-label={callStatus === 'paused' ? 'Resume Call' : 'Pause Call'}
             >
               {callStatus === 'paused' ? <Play size={24} /> : <Pause size={24} />}
             </button>
@@ -868,10 +883,11 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
           </div>
 
           {/* End Call Button */}
-          <div className="flex flex-col items-center gap-2">
+          <div className="flex flex-col items-center gap-1.5">
             <button
               onClick={handleEndCall}
-              className="w-16 h-16 rounded-full bg-[#E11D48] text-white flex items-center justify-center transition-all hover:bg-rose-700 active:scale-95 shadow-lg shadow-rose-900/30 cursor-pointer"
+              className="w-13 h-13 sm:w-16 sm:h-16 rounded-full bg-[#E11D48] text-white flex items-center justify-center transition-all hover:bg-rose-700 active:scale-95 shadow-lg shadow-rose-900/30 cursor-pointer"
+              aria-label="End Call"
             >
               <PhoneOff size={26} />
             </button>
@@ -891,10 +907,13 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
         )}
       </div>
 
-      {/* OVERLAY 1: Live Call Transcript Drawer (Matches Image 4) */}
+      {/* OVERLAY 1: Live Call Transcript Drawer */}
       {activeOverlay === 'transcript' && (
-        <div className="absolute inset-y-0 left-0 w-full sm:w-96 bg-[#121316] border-r border-white/10 z-40 flex flex-col shadow-2xl animate-in slide-in-from-left duration-300">
-          <div className="p-4 border-b border-white/10 flex items-center justify-between">
+        <div 
+          className="fixed inset-y-0 left-0 w-full sm:w-96 max-w-full sm:max-w-md bg-[#121316] border-r border-white/10 z-50 flex flex-col shadow-2xl animate-in slide-in-from-left duration-300 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="p-4 border-b border-white/10 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg bg-white/10 text-white flex items-center justify-center">
                 <MessageSquare size={16} />
@@ -906,13 +925,14 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
             </div>
             <button
               onClick={() => setActiveOverlay('none')}
-              className="p-1.5 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+              className="p-1.5 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors cursor-pointer"
+              aria-label="Close Transcript"
             >
               <X size={18} />
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-4 custom-scrollbar">
             {messages.map((msg) => (
               <div
                 key={msg.id}
@@ -935,7 +955,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
           </div>
 
           {onSendMessageToChat && messages.length > 1 && (
-            <div className="p-3 border-t border-white/10">
+            <div className="p-3 border-t border-white/10 shrink-0">
               <button
                 onClick={() => {
                   const summary = messages.map(m => `${m.sender.toUpperCase()}: ${m.text}`).join('\n');
@@ -953,10 +973,13 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
         </div>
       )}
 
-      {/* OVERLAY 2: Voice History Drawer (Matches Image 3) */}
+      {/* OVERLAY 2: Voice History Drawer */}
       {activeOverlay === 'history' && (
-        <div className="absolute inset-y-0 left-0 w-full sm:w-96 bg-[#121316] border-r border-white/10 z-40 flex flex-col shadow-2xl animate-in slide-in-from-left duration-300">
-          <div className="p-4 border-b border-white/10 flex items-center justify-between">
+        <div 
+          className="fixed inset-y-0 left-0 w-full sm:w-96 max-w-full sm:max-w-md bg-[#121316] border-r border-white/10 z-50 flex flex-col shadow-2xl animate-in slide-in-from-left duration-300 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="p-4 border-b border-white/10 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg bg-black border border-white/10 text-white flex items-center justify-center">
                 <History size={16} />
@@ -972,14 +995,16 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
                   saveHistory([]);
                   toast.info('Voice history cleared');
                 }}
-                className="p-1.5 rounded-lg hover:bg-white/10 text-white/60 hover:text-red-400 transition-colors"
+                className="p-1.5 rounded-lg hover:bg-white/10 text-white/60 hover:text-red-400 transition-colors cursor-pointer"
                 title="Clear History"
+                aria-label="Clear History"
               >
                 <Trash2 size={16} />
               </button>
               <button
                 onClick={() => setActiveOverlay('none')}
-                className="p-1.5 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+                className="p-1.5 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors cursor-pointer"
+                aria-label="Close History"
               >
                 <X size={18} />
               </button>
@@ -987,7 +1012,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
           </div>
 
           {/* Search bar */}
-          <div className="p-4 pb-2">
+          <div className="p-4 pb-2 shrink-0">
             <div className="flex items-center gap-2 px-3 py-2 bg-white/5 border border-white/10 rounded-xl">
               <Search size={14} className="text-white/40" />
               <input
@@ -1001,7 +1026,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
           </div>
 
           {/* Past Voice Items List */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-3 custom-scrollbar">
             {filteredHistory.map((item) => (
               <div
                 key={item.id}
@@ -1026,7 +1051,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
 
                   <button
                     onClick={() => handleResendHistory(item)}
-                    className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-black hover:bg-neutral-900 border border-white/15 text-white text-xs font-semibold transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-black hover:bg-neutral-900 border border-white/15 text-white text-xs font-semibold transition-colors cursor-pointer"
                   >
                     <RotateCcw size={12} />
                     <span>Re-send</span>
@@ -1044,34 +1069,38 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
         </div>
       )}
 
-      {/* OVERLAY 3: Call Settings Popover (Matches Image 2) */}
+      {/* OVERLAY 3: Call Settings Popover */}
       {activeOverlay === 'settings' && (
-        <div className="fixed top-[calc(env(safe-area-inset-top)+0.75rem)] right-3 sm:right-6 w-[min(20rem,calc(100vw-1.5rem))] max-h-[calc(100vh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-1.5rem)] supports-[height:100dvh]:max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-1.5rem)] overflow-y-auto overscroll-contain [scrollbar-gutter:stable] bg-[#16171B] border border-white/10 rounded-3xl p-4 sm:p-5 z-[100] shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-          <div className="flex items-center justify-between pb-4 border-b border-white/10">
+        <div 
+          className="fixed top-16 right-3 sm:right-6 left-3 sm:left-auto w-[calc(100vw-1.5rem)] sm:w-80 max-w-xs sm:max-w-80 bg-[#16171B] border border-white/10 rounded-2xl sm:rounded-3xl p-4 sm:p-5 z-50 shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[calc(100dvh-5rem-env(safe-area-inset-top,0px))] overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between pb-3 sm:pb-4 border-b border-white/10 shrink-0">
             <div>
               <h3 className="font-bold text-sm text-white">Call Settings</h3>
               <p className="text-[11px] text-white/40">Manus AI Voice Configuration</p>
             </div>
             <button
               onClick={() => setActiveOverlay('none')}
-              className="p-1 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+              className="p-1.5 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors cursor-pointer"
+              aria-label="Close Settings"
             >
               <X size={16} />
             </button>
           </div>
 
-          <div className="space-y-4 pt-4">
+          <div className="space-y-4 pt-4 overflow-y-auto overscroll-contain custom-scrollbar pr-1 flex-1 min-h-0">
             {/* Speech rate */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-white/80 text-xs font-medium">
-                <Volume2 size={16} className="text-white/60" />
+                <Volume2 size={16} className="text-white/60 shrink-0" />
                 <span>Speech rate</span>
               </div>
               <Select value={speechRate} onValueChange={setSpeechRate}>
-                <SelectTrigger className="w-24 h-8 bg-white/5 border-white/10 text-xs text-white rounded-xl">
+                <SelectTrigger className="w-24 h-8 bg-white/5 border-white/10 text-xs text-white rounded-xl shrink-0 cursor-pointer">
                   <SelectValue placeholder="1.0x" />
                 </SelectTrigger>
-                <SelectContent className="bg-[#1C1E22] border-white/10 text-white">
+                <SelectContent position="popper" sideOffset={4} className="bg-[#1C1E22] border-white/10 text-white z-[100]">
                   <SelectItem value="0.8">0.8x</SelectItem>
                   <SelectItem value="1.0">1.0x</SelectItem>
                   <SelectItem value="1.2">1.2x</SelectItem>
@@ -1081,9 +1110,9 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
             </div>
 
             {/* Voice playback */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-white/80 text-xs font-medium">
-                <Mic size={16} className="text-white/60" />
+                <Mic size={16} className="text-white/60 shrink-0" />
                 <span>Voice playback</span>
               </div>
               <Select 
@@ -1099,10 +1128,10 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
                   });
                 }}
               >
-                <SelectTrigger className="w-36 h-8 bg-white/5 border-white/10 text-xs text-white rounded-xl">
+                <SelectTrigger className="w-36 h-8 bg-white/5 border-white/10 text-xs text-white rounded-xl shrink-0 cursor-pointer">
                   <SelectValue placeholder="Marcus" />
                 </SelectTrigger>
-                <SelectContent className="bg-[#1C1E22] border-white/10 text-white">
+                <SelectContent position="popper" sideOffset={4} className="bg-[#1C1E22] border-white/10 text-white z-[100]">
                   {DEFAULT_VOICES.map(v => (
                     <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
                   ))}
@@ -1111,9 +1140,9 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
             </div>
 
             {/* 3D Avatar Model */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-white/80 text-xs font-medium">
-                <Sparkles size={16} className="text-white/60" />
+                <Sparkles size={16} className="text-white/60 shrink-0" />
                 <span>3D Avatar Style</span>
               </div>
               <Select 
@@ -1123,10 +1152,10 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
                   localStorage.setItem('grok_avatar_style', val);
                 }}
               >
-                <SelectTrigger className="w-32 h-8 bg-white/5 border-white/10 text-xs text-white rounded-xl">
+                <SelectTrigger className="w-32 h-8 bg-white/5 border-white/10 text-xs text-white rounded-xl shrink-0 cursor-pointer">
                   <SelectValue placeholder="Orbit Sphere" />
                 </SelectTrigger>
-                <SelectContent className="bg-[#1C1E22] border-white/10 text-white">
+                <SelectContent position="popper" sideOffset={4} className="bg-[#1C1E22] border-white/10 text-white z-[100]">
                   <SelectItem value="sphere">Orbit Sphere</SelectItem>
                   <SelectItem value="geometric">Grok Core</SelectItem>
                   <SelectItem value="bot">Cyber Bot</SelectItem>
@@ -1136,9 +1165,9 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
             </div>
 
             {/* 3D Avatar Aura Color */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-white/80 text-xs font-medium">
-                <span className="w-4 h-4 rounded-full bg-black inline-block border border-white/40 shadow-xs" />
+                <span className="w-4 h-4 rounded-full bg-black inline-block border border-white/40 shadow-xs shrink-0" />
                 <span>Aura Color</span>
               </div>
               <Select 
@@ -1148,10 +1177,10 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
                   localStorage.setItem('grok_color_theme', val);
                 }}
               >
-                <SelectTrigger className="w-32 h-8 bg-white/5 border-white/10 text-xs text-white rounded-xl">
+                <SelectTrigger className="w-32 h-8 bg-white/5 border-white/10 text-xs text-white rounded-xl shrink-0 cursor-pointer">
                   <SelectValue placeholder="Obsidian Black" />
                 </SelectTrigger>
-                <SelectContent className="bg-[#1C1E22] border-white/10 text-white">
+                <SelectContent position="popper" sideOffset={4} className="bg-[#1C1E22] border-white/10 text-white z-[100]">
                   <SelectItem value="electric-blue">Obsidian Black</SelectItem>
                   <SelectItem value="cyber-cyan">Cyber Cyan</SelectItem>
                   <SelectItem value="neon-purple">Neon Violet</SelectItem>

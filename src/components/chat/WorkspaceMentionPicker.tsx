@@ -139,18 +139,10 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
   {
     id: 'web_search',
     tag: '@web_search',
-    label: 'Google Search & News',
-    description: 'Real-time live Google Search results, news citations & fact-checking',
+    label: 'Web Search',
+    description: 'Real-time live internet search & fact verification',
     icon: Globe,
-    colorClass: 'text-blue-500 bg-blue-500/10'
-  },
-  {
-    id: 'search',
-    tag: '@search',
-    label: 'Google Search (Real-time)',
-    description: 'Discuss current events, cite recent news & fact-check with live Google Search',
-    icon: Globe,
-    colorClass: 'text-blue-500 bg-blue-500/10'
+    colorClass: 'text-indigo-500 bg-indigo-500/10'
   },
   {
     id: 'code_sandbox',

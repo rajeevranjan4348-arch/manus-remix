@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { APIProvider, Map, AdvancedMarker, Pin, useMapsLibrary } from '@vis.gl/react-google-maps';
+import React, { useState, useEffect } from 'react';
+import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
 import { MapPin, Navigation, Search, AlertCircle, Compass } from 'lucide-react';
 
 interface GoogleMapWidgetCardProps {
@@ -7,7 +7,6 @@ interface GoogleMapWidgetCardProps {
   latitude?: number;
   longitude?: number;
   zoom?: number;
-  autoLocate?: boolean;
   markers?: Array<{
     id: string;
     title: string;
@@ -17,45 +16,16 @@ interface GoogleMapWidgetCardProps {
   }>;
 }
 
-
-function LocationGeocoder({ locationName, enabled, onResolved }: { locationName: string; enabled: boolean; onResolved: (point: { lat: number; lng: number }) => void }) {
-  const geocodingLibrary = useMapsLibrary('geocoding');
-  useEffect(() => {
-    if (!enabled || !locationName.trim() || !geocodingLibrary || !window.google?.maps?.Geocoder) return;
-    let cancelled = false;
-    const geocoder = new window.google.maps.Geocoder();
-    geocoder.geocode({ address: locationName }, (results, status) => {
-      if (cancelled) return;
-      if (status === 'OK' && results?.[0]?.geometry?.location) {
-        const point = results[0].geometry.location;
-        onResolved({ lat: point.lat(), lng: point.lng() });
-      }
-    });
-    return () => { cancelled = true; };
-  }, [enabled, locationName, geocodingLibrary, onResolved]);
-  return null;
-}
-
-export const getGoogleMapsApiKey = () => import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCoOhAP8IKASkSa6jOp4AVe886-arwMzAU';
-
 export function GoogleMapWidgetCard({
   locationName = 'Singapore',
   latitude = 1.3521,
   longitude = 103.8198,
   zoom = 12,
-  autoLocate = false,
   markers = []
 }: GoogleMapWidgetCardProps) {
-  const apiKey = getGoogleMapsApiKey();
+  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCoOhAP8IKASkSa6jOp4AVe886-arwMzAU';
   const [quotaExceeded, setQuotaExceeded] = useState(false);
   const [center, setCenter] = useState({ lat: latitude, lng: longitude });
-  const [resolvedZoom, setResolvedZoom] = useState(zoom);
-  const handleLocationResolved = useCallback((point: { lat: number; lng: number }) => {
-    setCenter(point);
-    setResolvedZoom(12);
-  }, []);
-
-
 
   useEffect(() => {
     const handleQuotaExceeded = () => setQuotaExceeded(true);
@@ -106,15 +76,10 @@ export function GoogleMapWidgetCard({
       {/* Map Viewport */}
       <div className="w-full h-64 relative bg-muted/30">
         <APIProvider apiKey={apiKey}>
-          <LocationGeocoder
-            locationName={locationName}
-            enabled={autoLocate}
-            onResolved={handleLocationResolved}
-          />
           <Map
             mapId="DEMO_MAP_ID"
-            center={center}
-            zoom={resolvedZoom}
+            defaultCenter={center}
+            defaultZoom={zoom}
             gestureHandling="greedy"
             disableDefaultUI={false}
             internalUsageAttributionIds={["gmp_mcp_codeassist_v1_aistudio"]}

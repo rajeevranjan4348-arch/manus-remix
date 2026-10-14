@@ -38,7 +38,7 @@ export function WeatherWidgetCard({ data, className }: WeatherWidgetCardProps) {
   return (
     <div
       className={cn(
-        "rounded-2xl border border-border/80 bg-gradient-to-br from-white via-white to-sky-50/40 dark:from-card dark:via-card dark:to-sky-950/20 p-5 shadow-sm hover:shadow-md transition-all max-w-xl mx-auto my-3 text-foreground animate-weather-card",
+        "rounded-2xl border border-border/80 bg-gradient-to-br from-white via-white to-sky-50/40 dark:from-card dark:via-card dark:to-sky-950/20 p-5 shadow-sm hover:shadow-md transition-all max-w-xl mx-auto my-3 text-foreground",
         className
       )}
     >
@@ -121,12 +121,6 @@ export function WeatherWidgetCard({ data, className }: WeatherWidgetCardProps) {
           </div>
         </div>
       )}
-
-      {/* Source Attribution */}
-      <div className="pt-2.5 mt-2 border-t border-border/40 flex items-center justify-between text-[10px] text-muted-foreground">
-        <span>Units: {useFahrenheit ? 'Fahrenheit (°F)' : 'Celsius (°C)'}, km/h, %</span>
-        <span>Source: {data.source || 'Open-Meteo Real-Time Weather API'}</span>
-      </div>
     </div>
   );
 }

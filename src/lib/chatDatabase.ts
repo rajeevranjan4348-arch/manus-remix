@@ -70,6 +70,10 @@ function getIndexedDB(): IDBFactory | null {
   return window.indexedDB || (window as any).mozIndexedDB || (window as any).webkitIndexedDB || (window as any).msIndexedDB || null;
 }
 
+export function isIndexedDBSupported(): boolean {
+  return typeof window !== 'undefined' && Boolean(getIndexedDB());
+}
+
 function openDatabase(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
 
@@ -191,16 +195,18 @@ export async function createConversation(data: {
     metadata: data.metadata || {},
   };
 
-  try {
-    const db = await openDatabase();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_CONVERSATIONS, 'readwrite');
-      tx.objectStore(STORE_CONVERSATIONS).put(conversation);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (err) {
-    console.warn('[ChatDB] IndexedDB error, using fallback:', err);
+  if (isIndexedDBSupported()) {
+    try {
+      const db = await openDatabase();
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_CONVERSATIONS, 'readwrite');
+        tx.objectStore(STORE_CONVERSATIONS).put(conversation);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch (err) {
+      console.warn('[ChatDB] IndexedDB error, using fallback:', err);
+    }
   }
 
   // Also mirror to fallback storage for cross-backup
@@ -216,17 +222,19 @@ export async function createConversation(data: {
 export async function getConversation(id: string): Promise<StoredConversation | null> {
   if (!id) return null;
 
-  try {
-    const db = await openDatabase();
-    const result = await new Promise<StoredConversation | null>((resolve, reject) => {
-      const tx = db.transaction(STORE_CONVERSATIONS, 'readonly');
-      const req = tx.objectStore(STORE_CONVERSATIONS).get(id);
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => reject(req.error);
-    });
-    if (result) return result;
-  } catch (err) {
-    console.warn('[ChatDB] IndexedDB get error:', err);
+  if (isIndexedDBSupported()) {
+    try {
+      const db = await openDatabase();
+      const result = await new Promise<StoredConversation | null>((resolve, reject) => {
+        const tx = db.transaction(STORE_CONVERSATIONS, 'readonly');
+        const req = tx.objectStore(STORE_CONVERSATIONS).get(id);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+      });
+      if (result) return result;
+    } catch (err) {
+      console.warn('[ChatDB] IndexedDB get error:', err);
+    }
   }
 
   const fallback = getFallbackConversations().find(c => c.id === id);
@@ -246,16 +254,18 @@ export async function updateConversation(id: string, updates: Partial<StoredConv
     updatedAt: updates.updatedAt || now,
   };
 
-  try {
-    const db = await openDatabase();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_CONVERSATIONS, 'readwrite');
-      tx.objectStore(STORE_CONVERSATIONS).put(updated);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (err) {
-    console.warn('[ChatDB] IndexedDB update error:', err);
+  if (isIndexedDBSupported()) {
+    try {
+      const db = await openDatabase();
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_CONVERSATIONS, 'readwrite');
+        tx.objectStore(STORE_CONVERSATIONS).put(updated);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch (err) {
+      console.warn('[ChatDB] IndexedDB update error:', err);
+    }
   }
 
   const fallbackList = getFallbackConversations().map(c => c.id === id ? updated : c);
@@ -273,17 +283,21 @@ export async function listConversations(options?: {
 }): Promise<StoredConversation[]> {
   let list: StoredConversation[] = [];
 
-  try {
-    const db = await openDatabase();
-    list = await new Promise<StoredConversation[]>((resolve, reject) => {
-      const tx = db.transaction(STORE_CONVERSATIONS, 'readonly');
-      const store = tx.objectStore(STORE_CONVERSATIONS);
-      const req = store.getAll();
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => reject(req.error);
-    });
-  } catch (err) {
-    console.warn('[ChatDB] IndexedDB list error, using fallback:', err);
+  if (isIndexedDBSupported()) {
+    try {
+      const db = await openDatabase();
+      list = await new Promise<StoredConversation[]>((resolve, reject) => {
+        const tx = db.transaction(STORE_CONVERSATIONS, 'readonly');
+        const store = tx.objectStore(STORE_CONVERSATIONS);
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+    } catch (err) {
+      console.warn('[ChatDB] IndexedDB list error, using fallback:', err);
+      list = getFallbackConversations();
+    }
+  } else {
     list = getFallbackConversations();
   }
 
@@ -355,12 +369,6 @@ export async function deleteConversation(id: string): Promise<boolean> {
   const fallbackMsgs = getFallbackMessages().filter(m => m.conversationId !== id);
   saveFallbackMessages(fallbackMsgs);
 
-  // Clean up periodic chat auto-save backup in localStorage
-  try {
-    const { clearChatHistoryBackup } = await import('@/lib/chatAutoSave');
-    clearChatHistoryBackup(id);
-  } catch {}
-
   notifyDbUpdated(id);
   deleteConversationFromFirestore(id).catch(() => {});
   return true;
@@ -412,16 +420,18 @@ export async function saveMessage(data: {
     metadata: data.metadata || {},
   };
 
-  try {
-    const db = await openDatabase();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_MESSAGES, 'readwrite');
-      tx.objectStore(STORE_MESSAGES).put(message);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (err) {
-    console.warn('[ChatDB] IndexedDB saveMessage error:', err);
+  if (isIndexedDBSupported()) {
+    try {
+      const db = await openDatabase();
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_MESSAGES, 'readwrite');
+        tx.objectStore(STORE_MESSAGES).put(message);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch (err) {
+      console.warn('[ChatDB] IndexedDB saveMessage error:', err);
+    }
   }
 
   // Backup to fallback messages
@@ -451,18 +461,22 @@ export async function getMessages(conversationId: string): Promise<StoredMessage
 
   let list: StoredMessage[] = [];
 
-  try {
-    const db = await openDatabase();
-    list = await new Promise<StoredMessage[]>((resolve, reject) => {
-      const tx = db.transaction(STORE_MESSAGES, 'readonly');
-      const store = tx.objectStore(STORE_MESSAGES);
-      const index = store.index('conversationId');
-      const req = index.getAll(IDBKeyRange.only(conversationId));
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => reject(req.error);
-    });
-  } catch (err) {
-    console.warn('[ChatDB] IndexedDB getMessages error, using fallback:', err);
+  if (isIndexedDBSupported()) {
+    try {
+      const db = await openDatabase();
+      list = await new Promise<StoredMessage[]>((resolve, reject) => {
+        const tx = db.transaction(STORE_MESSAGES, 'readonly');
+        const store = tx.objectStore(STORE_MESSAGES);
+        const index = store.index('conversationId');
+        const req = index.getAll(IDBKeyRange.only(conversationId));
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+    } catch (err) {
+      console.warn('[ChatDB] IndexedDB getMessages error, using fallback:', err);
+      list = getFallbackMessages().filter(m => m.conversationId === conversationId);
+    }
+  } else {
     list = getFallbackMessages().filter(m => m.conversationId === conversationId);
   }
 

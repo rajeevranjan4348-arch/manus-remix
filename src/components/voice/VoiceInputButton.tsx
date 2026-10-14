@@ -20,43 +20,6 @@ interface VoiceInputButtonProps {
   autoSubmitOnSpeech?: boolean;
 }
 
-/**
- * Extracts and accumulates both final and interim transcripts from SpeechRecognition results.
- */
-export function extractTranscriptFromResults(results: any): { finalTranscript: string; interimTranscript: string; fullTranscript: string } {
-  let finalTranscript = '';
-  let interimTranscript = '';
-
-  if (!results || typeof results.length !== 'number') {
-    return { finalTranscript: '', interimTranscript: '', fullTranscript: '' };
-  }
-
-  for (let i = 0; i < results.length; ++i) {
-    const result = results[i];
-    const text = (result?.[0]?.transcript || '').trim();
-    if (!text) continue;
-    if (result.isFinal) {
-      finalTranscript += (finalTranscript ? ' ' : '') + text;
-    } else {
-      interimTranscript += (interimTranscript ? ' ' : '') + text;
-    }
-  }
-
-  const fullTranscript = [finalTranscript, interimTranscript].filter(Boolean).join(' ').trim();
-  return { finalTranscript, interimTranscript, fullTranscript };
-}
-
-/**
- * Combines previously typed text with newly dictated speech transcript.
- */
-export function formatSpeechAutoFill(baseText: string, dictatedText: string): string {
-  const base = (baseText || '').trim();
-  const dictated = (dictatedText || '').trim();
-  if (!base) return dictated;
-  if (!dictated) return base;
-  return `${base} ${dictated}`;
-}
-
 export function VoiceInputButton({
   onTranscript,
   onListeningStateChange,
@@ -170,12 +133,24 @@ export function VoiceInputButton({
       };
 
       recognition.onresult = async (event: any) => {
-        const { finalTranscript, fullTranscript } = extractTranscriptFromResults(event.results);
+        let finalTranscript = '';
+        let interimTranscript = '';
 
-        if (!fullTranscript) return;
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const result = event.results[i];
+          const text = result[0]?.transcript || '';
+          if (result.isFinal) {
+            finalTranscript += text;
+          } else {
+            interimTranscript += text;
+          }
+        }
 
-        // Provide real-time live transcription to input area (auto-filling)
-        onTranscript(fullTranscript);
+        const currentText = (finalTranscript || interimTranscript).trim();
+        if (!currentText) return;
+
+        // Provide real-time live transcription to input area
+        onTranscript(currentText);
 
         if (finalTranscript.trim()) {
           const transcript = finalTranscript.trim();
@@ -301,14 +276,14 @@ export function VoiceInputButton({
         aria-label={isListening ? 'Stop listening' : 'Start voice command or speech input'}
         title={isListening ? 'Listening... click to stop' : 'Voice command or question (e.g. "Open YouTube", "Weather in Paris")'}
         className={cn(
-          "relative flex items-center justify-center rounded-full transition-all cursor-pointer shrink-0 active:scale-95",
+          "relative flex items-center justify-center rounded-full transition-all cursor-pointer",
           isListening
             ? "bg-rose-500 text-white animate-pulse shadow-md shadow-rose-500/30 ring-2 ring-rose-400"
             : "hover:bg-[var(--fill-tsp-gray-main)] dark:hover:bg-accent text-[var(--icon-primary)] dark:text-foreground",
           className
         )}
       >
-        {isListening ? <MicOff size={size} className="shrink-0" /> : <Mic size={size} className="shrink-0" />}
+        {isListening ? <MicOff size={size} /> : <Mic size={size} />}
       </button>
 
       <MicrophonePermissionModal 

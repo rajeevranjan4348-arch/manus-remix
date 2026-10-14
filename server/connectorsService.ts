@@ -612,3 +612,28 @@ export async function executeServerConnectorTool(
       };
   }
 }
+
+/**
+ * Return current connectors registry and connection statuses for a user
+ */
+export function getConnectorsRegistry(userId: string) {
+  const supported = [
+    { id: 'github', name: 'GitHub', slug: 'github', key: 'github', keywords: ['github', 'repository', 'repos', 'pull request', 'issue'] },
+    { id: 'slack', name: 'Slack', slug: 'slack', key: 'slack', keywords: ['slack', 'channel', 'message'] },
+    { id: 'notion', name: 'Notion', slug: 'notion', key: 'notion', keywords: ['notion', 'page', 'database'] },
+    { id: 'linear', name: 'Linear', slug: 'linear', key: 'linear', keywords: ['linear', 'issue', 'ticket'] },
+    { id: 'dropbox', name: 'Dropbox', slug: 'dropbox', key: 'dropbox', keywords: ['dropbox', 'file'] },
+    { id: 'outlook', name: 'Outlook', slug: 'outlook', key: 'outlook', keywords: ['outlook', 'email', 'calendar'] },
+    { id: 'onedrive', name: 'OneDrive', slug: 'onedrive', key: 'onedrive', keywords: ['onedrive', 'document'] },
+  ];
+  return supported.map(c => {
+    const token = getUserToken(userId, c.id);
+    return {
+      ...c,
+      connected: Boolean(token),
+      authenticated: Boolean(token),
+      status: token ? 'connected' : 'not_connected',
+    };
+  });
+}
+

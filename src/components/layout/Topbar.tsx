@@ -154,26 +154,26 @@ export function Topbar({ onToggleSidebar, onOpenHistory, onNewTask, onOpenSettin
 
       {/* Middle section: Centered Model Selection on Home OR Interactive Robot Head on Chat Page */}
       {isAtHome ? (
-        <div className="absolute left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 max-w-[calc(100%-130px)] sm:max-w-md justify-center" ref={dropdownRef}>
+        <div className="absolute left-1/2 -translate-x-1/2 z-20 flex items-center gap-2.5" ref={dropdownRef}>
           <button
             onClick={() => setIsOpen(!isOpen)}
-            className="flex items-center gap-1.5 sm:gap-2 bg-white/80 dark:bg-card/90 backdrop-blur-md border border-border/80 hover:border-foreground/20 px-3 py-1.5 sm:px-3.5 sm:py-1.5 rounded-full shadow-xs hover:shadow-md hover:scale-[1.03] active:scale-[0.98] transition-all duration-200 cursor-pointer text-foreground group shrink-0 min-w-0"
+            className="flex items-center gap-2 bg-white/80 dark:bg-card/90 backdrop-blur-md border border-border/80 hover:border-foreground/20 px-3.5 py-1.5 rounded-full shadow-xs hover:shadow-md hover:scale-[1.03] active:scale-[0.98] transition-all duration-200 cursor-pointer text-foreground group"
             title="Select AI Model"
           >
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-            <span className="text-xs sm:text-sm font-semibold tracking-tight truncate max-w-[120px] sm:max-w-none">{currentModel.name}</span>
-            <ChevronDown size={14} strokeWidth={2.4} className={`text-muted-foreground transition-transform duration-200 shrink-0 ${isOpen ? 'rotate-180' : ''}`} />
+            <span className="text-sm font-semibold tracking-tight">{currentModel.name}</span>
+            <ChevronDown size={16} strokeWidth={2.4} className={`text-muted-foreground transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
           </button>
 
           {/* Subtle Typing Indicator Chip */}
           {isGenerating && (
-            <div className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 dark:bg-emerald-950/60 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 rounded-full text-xs font-medium animate-in fade-in zoom-in-95 duration-200 shadow-xs backdrop-blur-sm shrink-0 max-w-[140px]">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-500/10 dark:bg-emerald-950/60 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 rounded-full text-xs font-medium animate-in fade-in zoom-in-95 duration-200 shadow-xs backdrop-blur-sm shrink-0">
               <span className="flex items-center gap-1 shrink-0">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.3s]" />
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.15s]" />
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" />
               </span>
-              <span className="text-[11px] font-semibold tracking-tight truncate">
+              <span className="text-[11.5px] font-semibold tracking-tight whitespace-nowrap">
                 {generationText}
               </span>
             </div>
@@ -223,10 +223,10 @@ export function Topbar({ onToggleSidebar, onOpenHistory, onNewTask, onOpenSettin
           )}
         </div>
       ) : (
-        <div className="absolute left-1/2 -translate-x-1/2 z-20 flex items-center justify-center gap-2 max-w-[calc(100%-160px)]">
+        <div className="absolute left-1/2 -translate-x-1/2 z-20 flex items-center justify-center gap-2.5">
           <button
             onClick={handleRobotTap}
-            className="p-1 rounded-2xl hover:bg-manus-soft/80 dark:hover:bg-accent/80 transition-all duration-200 cursor-pointer group flex items-center justify-center hover:scale-105 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 shrink-0"
+            className="p-1 rounded-2xl hover:bg-manus-soft/80 dark:hover:bg-accent/80 transition-all duration-200 cursor-pointer group flex items-center justify-center hover:scale-105 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             title="Tap Robot face to customize settings 😊"
             aria-label="Customize robot settings"
           >
@@ -234,20 +234,20 @@ export function Topbar({ onToggleSidebar, onOpenHistory, onNewTask, onOpenSettin
               <RobotHead
                 state={isHappyExpression ? 'happy' : (liveRobotState as any) || (robotSettings.robotState as any) || 'idle'}
                 shape={(robotSettings.robotShape as any) || 'rectangle'}
-                size={44}
+                size={50}
               />
             </div>
           </button>
 
           {/* Subtle Typing Indicator Chip */}
           {isGenerating && (
-            <div className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 dark:bg-emerald-950/60 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 rounded-full text-xs font-medium animate-in fade-in zoom-in-95 duration-200 shadow-xs backdrop-blur-sm shrink-0 max-w-[130px]">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-500/10 dark:bg-emerald-950/60 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 rounded-full text-xs font-medium animate-in fade-in zoom-in-95 duration-200 shadow-xs backdrop-blur-sm shrink-0">
               <span className="flex items-center gap-1 shrink-0">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.3s]" />
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.15s]" />
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" />
               </span>
-              <span className="text-[11px] font-semibold tracking-tight truncate">
+              <span className="text-[11.5px] font-semibold tracking-tight whitespace-nowrap">
                 {generationText}
               </span>
             </div>

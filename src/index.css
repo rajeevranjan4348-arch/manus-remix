@@ -1074,20 +1074,3 @@ svg.lucide {
   max-width: 1.25rem;
   max-height: 1.25rem;
 }
-
-/* Weather Card Smooth Fade-In and Slide-Up Animation */
-@keyframes weatherCardSlideUp {
-  from {
-    opacity: 0;
-    transform: translateY(18px) scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.animate-weather-card {
-  animation: weatherCardSlideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-

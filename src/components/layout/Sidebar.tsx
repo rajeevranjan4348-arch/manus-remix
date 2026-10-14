@@ -69,8 +69,6 @@ interface SidebarProps {
   activeTaskId?: string;
   onOpenHistory?: () => void;
   onOpenSettings?: () => void;
-  activeSteps?: any[];
-  activeTaskStatus?: string;
 }
 
 interface TaskHistory {
@@ -375,187 +373,166 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
     }
   };
 
-  return (
-    <>
-      {/* Mobile Backdrop with smooth fade in/out */}
-      <div 
-        onClick={onToggle}
-        className={cn(
-          "fixed inset-0 bg-black/50 z-40 lg:hidden backdrop-blur-xs transition-opacity duration-300 ease-in-out",
-          isOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
-        )}
-        aria-hidden={!isOpen}
-      />
+  // Collapsed Sidebar (Icon Mode)
+  if (!isOpen) {
+    return (
+      <aside className="w-16 h-screen border-r border-border/40 bg-manus-soft dark:bg-sidebar flex flex-col items-center py-6 hidden lg:flex shrink-0 transition-colors">
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button 
+                onClick={onToggle}
+                className="p-2 rounded-xl hover:bg-manus-cream dark:hover:bg-accent transition-all duration-200 group relative mb-6 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 smooth-press"
+                title="Open sidebar"
+              >
+                <div className="group-hover:opacity-0 transition-opacity">
+                  <Logo size={26} />
+                </div>
+                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <PanelLeft size={26} strokeWidth={2.4} />
+                </div>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Open sidebar</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
 
-      {/* Desktop Collapsed Sidebar (Icon Rail) with smooth width and opacity transition */}
-      <aside
-        className={cn(
-          "h-screen border-r border-border/40 bg-manus-soft dark:bg-sidebar flex-col items-center py-6 hidden lg:flex shrink-0 transition-all duration-300 ease-in-out overflow-hidden z-20",
-          isOpen 
-            ? "w-0 opacity-0 pointer-events-none border-r-0 p-0" 
-            : "w-16 opacity-100 pointer-events-auto"
-        )}
-        aria-hidden={isOpen}
-      >
-        <div className="w-16 flex flex-col items-center h-full shrink-0">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button 
-                  onClick={onToggle}
-                  className="p-2 rounded-xl hover:bg-manus-cream dark:hover:bg-accent transition-all duration-200 group relative mb-6 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 smooth-press"
-                  title="Open sidebar"
-                >
-                  <div className="group-hover:opacity-0 transition-opacity">
-                    <Logo size={26} />
-                  </div>
-                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <PanelLeft size={26} strokeWidth={2.4} />
-                  </div>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="right">Open sidebar</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          {/* Primary Navigation Icons */}
-          <nav className="space-y-3 w-full flex flex-col items-center">
-            {navItems.map((item) => (
-              <TooltipProvider key={item.id}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={() => item.action ? item.action() : setActiveTab(item.id)}
-                      className={cn(
-                        "p-2.5 rounded-xl transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95",
-                        activeTab === item.id && !item.action
-                          ? "bg-white dark:bg-card border border-border text-foreground shadow-sm" 
-                          : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
-                      )}
-                    >
-                      <item.icon size={23} strokeWidth={2.5} />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">{item.label}</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            ))}
-          </nav>
-
-          {/* Quick Project Shortcuts in Collapsed View */}
-          <div className="w-full pt-4 mt-4 border-t border-border/60 flex flex-col items-center space-y-2">
-            {projects.slice(0, 4).map((proj) => {
-              const IconComp = PROJECT_ICON_MAP[proj.icon] || Folder;
-              const colorTheme = PROJECT_COLOR_MAP[proj.color] || PROJECT_COLOR_MAP.indigo;
-              return (
-                <TooltipProvider key={proj.id}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => {
-                          onToggle();
-                          setSelectedProjectView(proj);
-                        }}
-                        className={cn(
-                          "w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-2xs hover:scale-105",
-                          colorTheme.bg
-                        )}
-                      >
-                        <IconComp size={18} strokeWidth={2.4} />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">
-                      <p className="font-bold text-xs">{proj.name}</p>
-                      <p className="text-[10px] text-muted-foreground">{proj.description || 'Project'}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              );
-            })}
-          </div>
-
-          {/* Quick Recent Task Sessions in Collapsed View */}
-          <div className="w-full flex-1 flex flex-col items-center pt-3 mt-2 border-t border-border/60 space-y-2 overflow-y-auto custom-scrollbar">
-            {tasks.slice(0, 6).map((task) => {
-              const title = formatTaskTitle(task);
-              const isActive = activeTaskId === task.id;
-              return (
-                <TooltipProvider key={task.id}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => navigate(`/task/${task.id}`)}
-                        className={cn(
-                          "p-2.5 rounded-xl transition-all relative group cursor-pointer",
-                          isActive
-                            ? "bg-primary text-primary-foreground shadow-sm"
-                            : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
-                        )}
-                      >
-                        <MessageSquare size={19} strokeWidth={2.4} />
-                        {isActive && (
-                          <span className="absolute -left-1 top-1/2 -translate-y-1/2 w-1 h-3.5 bg-primary rounded-r-full" />
-                        )}
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right" className="max-w-xs p-2.5">
-                      <p className="font-semibold text-xs text-foreground leading-tight">{title}</p>
-                      <div className="flex items-center gap-1.5 mt-1 text-[10px] text-muted-foreground">
-                        <span>{getRelativeTime(task.created_at)}</span>
-                      </div>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              );
-            })}
-          </div>
-
-          {/* Firebase Cloud Sync Icon in Collapsed View */}
-          <div className="mt-auto mb-2 flex flex-col items-center">
-            <TooltipProvider>
+        {/* Primary Navigation Icons */}
+        <nav className="space-y-3 w-full flex flex-col items-center">
+          {navItems.map((item) => (
+            <TooltipProvider key={item.id}>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
-                    onClick={fbUser ? () => fbSignOut() : () => signInWithGoogle()}
-                    className="w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer bg-white/80 dark:bg-card border border-border/80 hover:border-foreground/30 shadow-xs"
-                  >
-                    {fbUser ? (
-                      fbUser.photoURL ? (
-                        <img src={fbUser.photoURL} alt="" className="w-7 h-7 rounded-full object-cover" />
-                      ) : (
-                        <div className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-xs">
-                          {(fbUser.displayName || fbUser.email || 'U')[0].toUpperCase()}
-                        </div>
-                      )
-                    ) : (
-                      <Cloud size={18} className="text-muted-foreground hover:text-foreground" />
+                    onClick={() => item.action ? item.action() : setActiveTab(item.id)}
+                    className={cn(
+                      "p-2.5 rounded-xl transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95",
+                      activeTab === item.id && !item.action
+                        ? "bg-white dark:bg-card border border-border text-foreground shadow-sm" 
+                        : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
                     )}
+                  >
+                    <item.icon size={23} strokeWidth={2.5} />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="right">
-                  {fbUser ? `${fbUser.displayName || fbUser.email} (Click to sign out)` : 'Sign in with Google (Firebase)'}
-                </TooltipContent>
+                <TooltipContent side="right">{item.label}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
-          </div>
+          ))}
+        </nav>
+
+        {/* Quick Project Shortcuts in Collapsed View */}
+        <div className="w-full pt-4 mt-4 border-t border-border/60 flex flex-col items-center space-y-2">
+          {projects.slice(0, 4).map((proj) => {
+            const IconComp = PROJECT_ICON_MAP[proj.icon] || Folder;
+            const colorTheme = PROJECT_COLOR_MAP[proj.color] || PROJECT_COLOR_MAP.indigo;
+            return (
+              <TooltipProvider key={proj.id}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => {
+                        onToggle();
+                        setSelectedProjectView(proj);
+                      }}
+                      className={cn(
+                        "w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-2xs hover:scale-105",
+                        colorTheme.bg
+                      )}
+                    >
+                      <IconComp size={18} strokeWidth={2.4} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    <p className="font-bold text-xs">{proj.name}</p>
+                    <p className="text-[10px] text-muted-foreground">{proj.description || 'Project'}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            );
+          })}
+        </div>
+
+        {/* Quick Recent Task Sessions in Collapsed View */}
+        <div className="w-full flex-1 flex flex-col items-center pt-3 mt-2 border-t border-border/60 space-y-2 overflow-y-auto custom-scrollbar">
+          {tasks.slice(0, 6).map((task) => {
+            const title = formatTaskTitle(task);
+            const isActive = activeTaskId === task.id;
+            return (
+              <TooltipProvider key={task.id}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => navigate(`/task/${task.id}`)}
+                      className={cn(
+                        "p-2.5 rounded-xl transition-all relative group cursor-pointer",
+                        isActive
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
+                      )}
+                    >
+                      <MessageSquare size={19} strokeWidth={2.4} />
+                      {isActive && (
+                        <span className="absolute -left-1 top-1/2 -translate-y-1/2 w-1 h-3.5 bg-primary rounded-r-full" />
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" className="max-w-xs p-2.5">
+                    <p className="font-semibold text-xs text-foreground leading-tight">{title}</p>
+                    <div className="flex items-center gap-1.5 mt-1 text-[10px] text-muted-foreground">
+                      <span>{getRelativeTime(task.created_at)}</span>
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            );
+          })}
+        </div>
+
+        {/* Firebase Cloud Sync Icon in Collapsed View */}
+        <div className="mt-auto mb-2 flex flex-col items-center">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={fbUser ? () => fbSignOut() : () => signInWithGoogle()}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer bg-white/80 dark:bg-card border border-border/80 hover:border-foreground/30 shadow-xs"
+                >
+                  {fbUser ? (
+                    fbUser.photoURL ? (
+                      <img src={fbUser.photoURL} alt="" className="w-7 h-7 rounded-full object-cover" />
+                    ) : (
+                      <div className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-xs">
+                        {(fbUser.displayName || fbUser.email || 'U')[0].toUpperCase()}
+                      </div>
+                    )
+                  ) : (
+                    <Cloud size={18} className="text-muted-foreground hover:text-foreground" />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                {fbUser ? `${fbUser.displayName || fbUser.email} (Click to sign out)` : 'Sign in with Google (Firebase)'}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
       </aside>
+    );
+  }
 
-      {/* Expanded Sidebar with smooth slide-in/out transition */}
-      <aside 
-        className={cn(
-          "h-screen border-r border-border/40 bg-manus-soft dark:bg-sidebar flex flex-col fixed inset-y-0 left-0 lg:static z-50 shrink-0",
-          "transform transition-all duration-300 ease-in-out",
-          "w-[82vw] max-w-[280px] sm:w-64",
-          isOpen 
-            ? "translate-x-0 shadow-2xl lg:shadow-none lg:w-64 lg:opacity-100 lg:pointer-events-auto" 
-            : "-translate-x-full pointer-events-none lg:-translate-x-full lg:w-0 lg:opacity-0 lg:border-r-0 lg:overflow-hidden"
-        )}
-        aria-hidden={!isOpen}
-      >
-        <div className="w-[82vw] max-w-[280px] sm:w-64 h-full flex flex-col shrink-0 overflow-hidden">
-          {/* Header with Logo and Close Toggle */}
-          <div className="p-4 sm:p-5 flex items-center justify-between">
+  // Expanded Sidebar
+  return (
+    <>
+      {/* Mobile Backdrop */}
+      <div 
+        onClick={onToggle}
+        className="fixed inset-0 bg-black/50 z-40 lg:hidden backdrop-blur-xs transition-opacity duration-250 ease-out animate-in fade-in"
+      />
+
+      <aside className="w-[82vw] max-w-[280px] sm:w-64 h-screen border-r border-border/40 bg-manus-soft dark:bg-sidebar flex flex-col fixed inset-y-0 left-0 lg:static z-50 shrink-0 transition-[transform,width,colors] duration-250 ease-[cubic-bezier(0.16,1,0.3,1)] shadow-2xl lg:shadow-none animate-in slide-in-from-left gpu-accelerated">
+        {/* Header with Logo and Close Toggle */}
+        <div className="p-4 sm:p-5 flex items-center justify-between">
           <ManusLogo showBadge={true} />
           <button 
             onClick={onToggle}
@@ -984,7 +961,6 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
               <span>Sign in with Google</span>
             </button>
           )}
-        </div>
         </div>
       </aside>
 

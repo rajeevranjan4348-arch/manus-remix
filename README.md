@@ -1,59 +1,49 @@
-# Enhanced Vite React TypeScript Template
+# Manus AI Agent Clone (Manus Remix)
 
-This template includes built-in detection for missing CSS variables between your Tailwind config and CSS files.
+A powerful autonomous AI agent workspace built with React, Vite, TypeScript, and Tailwind CSS. Features multi-step reasoning, real-time research, data analysis, interactive previews, multimodal capabilities, and an integrated tool execution framework.
 
-## Features
+## Core Features
 
-- **CSS Variable Detection**: Automatically detects if CSS variables referenced in `tailwind.config.cjs` are defined in `src/index.css`
-- **Enhanced Linting**: Includes ESLint, Stylelint, and custom CSS variable validation
-- **Shadcn/ui**: Pre-configured with all Shadcn components
-- **Modern Stack**: Vite + React + TypeScript + Tailwind CSS
+- **Multi-Step Autonomous Agent**: Autonomous problem solving with structured thinking, step-by-step reasoning, tool approvals, and real-time execution tracking.
+- **Rich Chat & Reasoning Interface**: Contextual thought processes, markdown rendering with syntax highlighting, source citations, and charts.
+- **Website Builder & Live Previews**: Built-in website generator with live interactive iframe preview and code view.
+- **Voice & Multimodal Support**: High-fidelity Web Speech API voice synthesis and speech recognition, 3D interactive avatar (Three.js), and camera integration.
+- **Connectors & Tools**: Integrations for web search (Firecrawl / Agent Reach), Google Maps, Google Drive, and public data APIs.
+- **Task Management & History**: IndexedDB and Firebase Firestore persistence for chat sessions, checkpoints, and task history.
+- **Modern Responsive Design**: Accessible Shadcn UI primitives, Tailwind styling, smooth dark/light theme switching, and keyboard navigation.
 
-## Available Scripts
+## Tech Stack
+
+- **Runtime & Build**: Node.js, Vite, TypeScript
+- **UI Framework**: React 18, Tailwind CSS, Lucide Icons, Radix UI, Framer Motion
+- **3D Graphics & Audio**: Three.js, React Three Fiber, Web Speech API, Web Audio API
+- **Persistence & Cloud**: Firebase (Firestore, Auth), IndexedDB
+- **Data Visualization**: Recharts
+
+## Getting Started
+
+### Installation
 
 ```bash
-# Run all linting (includes CSS variable check)
-npm run lint
-
-# Check only CSS variables
-npm run check:css-vars
-
-# Individual linting
-npm run lint:js    # ESLint
-npm run lint:css   # Stylelint
+npm install
 ```
 
-## CSS Variable Detection
+### Development
 
-The template includes a custom script that:
-
-1. **Parses `tailwind.config.cjs`** to find all `var(--variable)` references
-2. **Parses `src/index.css`** to find all defined CSS variables (`--variable:`)
-3. **Cross-references** them to find missing definitions
-4. **Reports undefined variables** with clear error messages
-
-### Example Output
-
-When CSS variables are missing:
-```
-❌ Undefined CSS variables found in tailwind.config.cjs:
-   --sidebar-background
-   --sidebar-foreground
-   --sidebar-primary
-
-Add these variables to src/index.css
+```bash
+npm run dev
 ```
 
-When all variables are defined:
+The application runs on `http://localhost:3000`.
+
+### Building for Production
+
+```bash
+npm run build
 ```
-✅ All CSS variables in tailwind.config.cjs are defined
+
+### Running Tests
+
+```bash
+npm test
 ```
-
-## How It Works
-
-The detection happens during the `npm run lint` command, which will:
-- Exit with error code 1 if undefined variables are found
-- Show exactly which variables need to be added to your CSS file
-- Integrate seamlessly with your development workflow
-
-This prevents runtime CSS issues where Tailwind classes reference undefined CSS variables.

@@ -24,8 +24,7 @@ import {
   Settings,
   Zap,
   AlertCircle,
-  RotateCw,
-  Loader2
+  RotateCw
 } from 'lucide-react';
 import { ConnectorsPopupMenu } from '../chat/ConnectorsPopupMenu';
 import { ConnectorsStorePanel, CONNECTOR_CATALOG } from '../connectors/ConnectorsStorePanel';
@@ -93,53 +92,6 @@ export function ChatView({
   const [pendingApproval, setPendingApproval] = useState<VoiceCommandResult | null>(null);
   const [weatherMap, setWeatherMap] = useState<Record<string, WeatherData>>({});
   const [completedTypewriters, setCompletedTypewriters] = useState<Record<string, boolean>>({});
-  const [activeToolCall, setActiveToolCall] = useState<string | null>(null);
-
-  // Clean up tool call progress indicators on error, completion, reset, or idle state
-  useEffect(() => {
-    if (status === 'error' || status === 'completed' || status === 'idle' || !isLoading) {
-      setActiveToolCall(null);
-    }
-  }, [status, isLoading]);
-
-  // Synchronize active tool call indicator from running task steps or custom events
-  useEffect(() => {
-    if (status === 'error') {
-      setActiveToolCall(null);
-      return;
-    }
-
-    if (status === 'running' || isLoading) {
-      const runningStep = steps.find(s => s.status === 'running');
-      if (runningStep) {
-        const lbl = runningStep.label.toLowerCase();
-        if (lbl.includes('weather')) {
-          setActiveToolCall(runningStep.label || 'Searching weather data...');
-        } else if (lbl.includes('search') || lbl.includes('research')) {
-          setActiveToolCall(runningStep.label || 'Searching the web...');
-        } else if (lbl.includes('code') || lbl.includes('sandbox')) {
-          setActiveToolCall(runningStep.label || 'Executing code sandbox...');
-        }
-      }
-    }
-
-    const handleToolStart = (e: any) => {
-      if ((status as string) === 'error') return;
-      const msg = e?.detail?.message || (e?.detail?.tool ? `Processing tool: ${e.detail.tool}...` : 'Processing tool call...');
-      setActiveToolCall(msg);
-    };
-    const handleToolEnd = () => {
-      setActiveToolCall(null);
-    };
-
-    window.addEventListener('manus_tool_start', handleToolStart);
-    window.addEventListener('manus_tool_end', handleToolEnd);
-    return () => {
-      window.removeEventListener('manus_tool_start', handleToolStart);
-      window.removeEventListener('manus_tool_end', handleToolEnd);
-      setActiveToolCall(null);
-    };
-  }, [steps, status, isLoading]);
 
   // Granular robot reaction sync with task status and active execution step
   useEffect(() => {
@@ -192,7 +144,7 @@ export function ChatView({
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
       const scrollHeight = textareaRef.current.scrollHeight;
-      const targetHeight = Math.max(Math.min(scrollHeight, 120), 26);
+      const targetHeight = Math.max(Math.min(scrollHeight, 90), 22);
       textareaRef.current.style.height = `${targetHeight}px`;
     }
   }, [input]);
@@ -253,37 +205,20 @@ export function ChatView({
     toast.success(`Sent "${driveFile.name}" as context to AI Agent`);
   };
 
-  // Check user queries for live weather data and update active tool progress indicator
+  // Check user queries for live weather data
   useEffect(() => {
-    let isCancelled = false;
     messages.forEach(async (m) => {
       if (m.role === 'user' && !weatherMap[m.id || m.content]) {
-        const query = extractWeatherQuery(m.content || '', messages.slice(0, messages.indexOf(m)));
+        const query = extractWeatherQuery(m.content || '');
         if (query.isWeather && query.city) {
-          try {
-            if (status !== 'error') {
-              setActiveToolCall(`Searching weather data for ${query.city}...`);
-            }
-            const data = await fetchWeatherByCity(query.city);
-            if (!isCancelled && data) {
-              setWeatherMap(prev => ({ ...prev, [m.id || m.content]: data }));
-            }
-          } catch (err) {
-            console.error('[ChatView] Weather fetch error:', err);
-          } finally {
-            if (!isCancelled) {
-              setActiveToolCall(null);
-            }
+          const data = await fetchWeatherByCity(query.city);
+          if (data) {
+            setWeatherMap(prev => ({ ...prev, [m.id || m.content]: data }));
           }
         }
       }
     });
-
-    return () => {
-      isCancelled = true;
-      setActiveToolCall(null);
-    };
-  }, [messages, weatherMap, status]);
+  }, [messages]);
 
   const handleApproveTool = async () => {
     if (!pendingApproval) return;
@@ -460,16 +395,7 @@ export function ChatView({
       if (
         prev &&
         prev.role === msg.role &&
-        prev.role === 'user' &&
         cleanUserMessage(prev.content || '').trim().toLowerCase() === cleanUserMessage(msg.content || '').trim().toLowerCase()
-      ) {
-        continue;
-      }
-      if (
-        prev &&
-        prev.role === 'assistant' &&
-        msg.role === 'assistant' &&
-        (prev.content || '').trim() === (msg.content || '').trim()
       ) {
         continue;
       }
@@ -576,8 +502,7 @@ export function ChatView({
         match.includes('"graph"') || 
         match.includes('"labels"') || 
         match.includes('"datasets"') ||
-        match.includes('"files"') ||
-        match.includes('"weather"')
+        match.includes('"files"')
       ) {
         return '';
       }
@@ -728,10 +653,14 @@ export function ChatView({
     );
   };
 
-  const isAssistantWorking = (isLoading || status === 'running') && status !== 'error' && status !== 'completed';
-  const hasAssistantOutput = displayMessages.some((m: any) => 
-    m.role === 'assistant' && (Boolean(cleanMessageContent(m.content)) || Boolean(m.content?.trim()))
-  );
+  const isAssistantWorking = isLoading || status === 'running';
+  const hasVisibleAssistantMessage = displayMessages.some((m: any) => {
+    if (m?.role !== 'assistant') return false;
+    const raw = m.content || '';
+    const { thought, content: extracted } = extractThoughtProcess(raw);
+    const cleanedContent = cleanMessageContent(extracted || raw);
+    return Boolean(cleanedContent || thought);
+  });
   const activeRunningStep = steps.find(s => s.status === 'running');
   const typingStatus = activeRunningStep 
     ? activeRunningStep.label 
@@ -739,8 +668,74 @@ export function ChatView({
       ? "Manus is reasoning deeply..." 
       : "Manus is thinking...";
 
+  // Real-time multi-step task completion calculations
+  const totalStepsCount = steps.length;
+  const completedStepsCount = steps.filter(s => s.status === 'completed').length;
+  const runningStepIndex = steps.findIndex(s => s.status === 'running');
+  const hasActiveSteps = totalStepsCount > 0;
+
+  let progressPercent = 0;
+  if (status === 'completed') {
+    progressPercent = 100;
+  } else if (hasActiveSteps) {
+    if (runningStepIndex !== -1) {
+      progressPercent = Math.min(99, Math.round(((completedStepsCount + 0.5) / totalStepsCount) * 100));
+    } else {
+      progressPercent = Math.min(100, Math.round((completedStepsCount / totalStepsCount) * 100));
+    }
+  } else if (status === 'running') {
+    progressPercent = 25;
+  }
+
   return (
     <div className="flex flex-col h-full bg-manus-cream dark:bg-background relative">
+      {/* Real-Time Multi-Step Task Completion Progress Bar */}
+      {(hasActiveSteps || status === 'running' || status === 'completed') && (
+        <div className="sticky top-0 z-30 w-full bg-background/95 backdrop-blur-md border-b border-border/40 px-4 py-2.5 transition-all duration-300 shadow-xs">
+          <div className="max-w-3xl mx-auto space-y-1.5">
+            <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
+              <div className="flex items-center gap-2 truncate">
+                <span className="relative flex h-2 w-2 shrink-0">
+                  {status === 'running' && (
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/70 opacity-75"></span>
+                  )}
+                  <span className={cn("relative inline-flex rounded-full h-2 w-2", status === 'completed' ? "bg-green-500" : status === 'error' ? "bg-destructive" : "bg-primary")}></span>
+                </span>
+                <span className="font-semibold text-foreground truncate">
+                  {status === 'completed' 
+                    ? 'Task Completed' 
+                    : status === 'error'
+                    ? 'Execution Error'
+                    : activeRunningStep 
+                    ? activeRunningStep.label 
+                    : 'Processing Multi-Step Task...'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {hasActiveSteps && (
+                  <span className="text-[11px] text-muted-foreground/80 font-mono">
+                    Step {runningStepIndex !== -1 ? runningStepIndex + 1 : completedStepsCount} of {totalStepsCount}
+                  </span>
+                )}
+                <span className="font-mono text-xs font-bold text-primary">
+                  {progressPercent}%
+                </span>
+              </div>
+            </div>
+            {/* Animated Progress Bar */}
+            <div className="w-full h-1.5 bg-muted/60 rounded-full overflow-hidden" role="progressbar" aria-valuenow={progressPercent} aria-valuemin={0} aria-valuemax={100}>
+              <div 
+                className={cn(
+                  "h-full transition-all duration-500 ease-out rounded-full",
+                  status === 'completed' ? "bg-green-500" : status === 'error' ? "bg-destructive" : "bg-primary"
+                )}
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Chat Area */}
       <div ref={containerRef} onScroll={handleConversationScroll} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-20 pt-6 pb-40 space-y-8 custom-scrollbar scroll-smooth">
         
@@ -884,36 +879,18 @@ export function ChatView({
                     <GoogleMapWidgetCard locationName="Google Headquarters, Mountain View" latitude={37.4220} longitude={-122.0841} />
                   )}
 
-                  {/* Real-Time Weather Widget Card */}
-                  {(() => {
-                    // Check if raw content contains JSON weather data
-                    const weatherJsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?"weather"[\s\S]*?)\s*```/);
-                    if (weatherJsonMatch) {
-                      try {
-                        const parsed = JSON.parse(weatherJsonMatch[1]);
-                        if (parsed?.weather?.locationName && typeof parsed?.weather?.temperature === 'number') {
-                          return <WeatherWidgetCard data={parsed.weather} />;
-                        }
-                      } catch {}
-                    }
-                    // Check weatherMap for this message
-                    const directWeather = weatherMap[msg.id || ''] || weatherMap[raw];
-                    if (directWeather) {
-                      return <WeatherWidgetCard data={directWeather} />;
-                    }
-                    // Check previous user message
-                    const prevUser = displayMessages.slice(0, i).reverse().find((m: any) => m.role === 'user');
-                    if (prevUser) {
-                      const userWeather = weatherMap[prevUser.id || ''] || weatherMap[prevUser.content || ''];
-                      if (userWeather) {
-                        return <WeatherWidgetCard data={userWeather} />;
-                      }
-                    }
-                    return null;
-                  })()}
-
                   {parsedSources.sources.length > 0 && (
                     <SourceCitations sources={parsedSources.sources} />
+                  )}
+
+                  {isAssistantWorking && isLatestAssistant && (
+                    <div className="pt-1">
+                      <ContextualThinking
+                        prompt={messages.filter((message: any) => message?.role === 'user').slice(-1)[0]?.content || prompt}
+                        activeStep={activeRunningStep?.label}
+                        deepMode={isThinkHarder}
+                      />
+                    </div>
                   )}
 
                   {cleanedContent ? (
@@ -1000,26 +977,8 @@ export function ChatView({
           );
         })()}
 
-        {/* Visual Progress Indicator: explicitly shows when AI is processing tool calls (e.g. Searching weather data...) */}
-        {activeToolCall && status !== 'error' && (
-          <div 
-            className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-2 duration-300"
-            data-testid="tool-progress-indicator"
-          >
-            <div className="flex-1 space-y-2.5 min-w-0">
-              <div className="flex items-center gap-2.5">
-                <ManusLogo showBadge={true} />
-              </div>
-              <div className="inline-flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-blue-50/90 dark:bg-blue-950/40 border border-blue-200/80 dark:border-blue-800/60 text-blue-700 dark:text-blue-300 text-xs font-medium shadow-xs">
-                <Loader2 size={14} className="animate-spin text-blue-600 dark:text-blue-400 shrink-0" />
-                <span>{activeToolCall}</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Prompt-aware thinking animation: shown ONLY while waiting for initial tokens */}
-        {isAssistantWorking && !hasAssistantOutput && !activeToolCall && (
+        {/* Prompt-aware thinking animation: stages adapt to the user's request */}
+        {isAssistantWorking && !hasVisibleAssistantMessage && (
           <div className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="flex-1 space-y-2.5 min-w-0">
               <div className="flex items-center gap-2.5">
@@ -1065,10 +1024,7 @@ export function ChatView({
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      setActiveToolCall(null);
-                      onReset();
-                    }}
+                    onClick={onReset}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted text-xs font-medium transition-all cursor-pointer text-muted-foreground hover:text-foreground"
                   >
                     <span>Reset</span>
@@ -1202,15 +1158,15 @@ export function ChatView({
               }}
               rows={1}
               placeholder={isThinkHarder ? "Ask with deep reasoning..." : "Type a message or ask anything..."}
-              className="w-full bg-transparent border-none outline-none resize-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-[15px] sm:text-base leading-snug sm:leading-relaxed p-0 focus:ring-0 focus:outline-none min-h-[26px] sm:min-h-[28px] max-h-[130px] custom-scrollbar"
+              className="w-full bg-transparent border-none outline-none resize-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-[14px] sm:text-[15px] leading-snug p-0 focus:ring-0 focus:outline-none min-h-[22px] sm:min-h-[24px] max-h-[90px] custom-scrollbar"
               disabled={isLoading}
             />
           </div>
 
           {/* Bottom Row: Controls */}
-          <div className="flex items-center justify-between gap-2 sm:gap-3 pt-1 border-t border-transparent min-w-0 w-full">
+          <div className="flex items-center justify-between pt-0.5 border-t border-transparent">
             {/* Left Controls: Circular + Button & Attached Connector Tags */}
-            <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 overflow-x-auto no-scrollbar py-0.5">
+            <div className="flex items-center gap-2.5 flex-wrap">
               <AttachmentMenu
                 onFileSelect={handleFileSelect}
                 isThinkHarder={isThinkHarder}
@@ -1223,17 +1179,17 @@ export function ChatView({
               >
                 <button 
                   type="button"
-                  className="w-9 h-9 rounded-full border border-slate-200/90 dark:border-white/15 bg-white dark:bg-[#141518] hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                  className="w-8 h-8 rounded-full border border-slate-200/90 dark:border-white/15 bg-white dark:bg-[#141518] hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 shadow-2xs cursor-pointer active:scale-95"
                   title="Add attachments or options"
                   aria-label="Add attachments or options"
                 >
-                  <Plus size={16} className="text-slate-800 dark:text-slate-200 shrink-0" />
+                  <Plus size={16} className="text-slate-800 dark:text-slate-200" />
                 </button>
               </AttachmentMenu>
 
               {/* Selected Connector Tags */}
               {activeConnectorTags.length > 0 && (
-                <div className="flex items-center gap-1.5 shrink-0">
+                <div className="flex items-center gap-2 shrink-0">
                   {activeConnectorTags.map((tagId) => {
                     const opt = WORKSPACE_CONNECTOR_OPTIONS.find(o => o.id === tagId) || CONNECTOR_CATALOG.find(c => c.id === tagId);
                     if (!opt) return null;
@@ -1246,18 +1202,18 @@ export function ChatView({
                       <div 
                         key={tagId} 
                         onClick={() => setSelectedConfigConnectorId(tagId)}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-800/40 text-[#2563eb] dark:text-[#93c5fd] font-semibold text-xs rounded-full cursor-pointer hover:opacity-80 transition-opacity select-none shrink-0"
+                        className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-800/40 text-[#2563eb] dark:text-[#93c5fd] font-semibold text-xs rounded-full cursor-pointer hover:opacity-80 transition-opacity select-none shrink-0"
                         title="Click to view connector parameters or details"
                       >
                         <IconComp className="w-3.5 h-3.5 shrink-0" />
-                        <span className="truncate max-w-[120px]">{displayName}</span>
+                        <span>{displayName}</span>
                         <button 
                           type="button" 
                           onClick={(e) => {
                             e.stopPropagation();
                             removeConnectorTag(tagId);
                           }}
-                          className="p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full text-current/70 hover:text-current shrink-0"
+                          className="p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full text-current/70 hover:text-current"
                           title="Remove connector"
                         >
                           <X size={12} />
@@ -1270,7 +1226,7 @@ export function ChatView({
             </div>
 
             {/* Right Controls: Mic & Circular Send Button */}
-            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto">
+            <div className="flex items-center gap-2.5">
               <VoiceInputButton
                 onListeningStateChange={(listening) => {
                   if (listening) {
@@ -1287,8 +1243,8 @@ export function ChatView({
                     setInput('');
                   }
                 }}
-                className="w-9 h-9 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer shrink-0"
-                size={16}
+                className="w-8 h-8 sm:w-8.5 sm:h-8.5 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer"
+                size={18}
               />
               <button 
                 type="button"
@@ -1304,7 +1260,7 @@ export function ChatView({
                 }}
                 disabled={(!isLoading && status !== 'running') && (!input.trim() && !attachedFile && activeConnectorTags.length === 0)}
                 className={cn(
-                  "w-9 h-9 rounded-full flex items-center justify-center transition-all duration-150 shadow-2xs shrink-0 cursor-pointer",
+                  "w-8 h-8 sm:w-8.5 sm:h-8.5 rounded-full flex items-center justify-center transition-all shadow-2xs",
                   isLoading || status === 'running'
                     ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md cursor-pointer"
                     : (input.trim() || attachedFile || activeConnectorTags.length > 0)
@@ -1316,7 +1272,7 @@ export function ChatView({
               >
                 {isLoading || status === 'running'
                   ? <Square size={11} fill="currentColor" strokeWidth={2.5} />
-                  : <ArrowUp size={16} strokeWidth={2.6} className="font-bold shrink-0" />}
+                  : <ArrowUp size={18} className="font-bold" />}
               </button>
             </div>
           </div>

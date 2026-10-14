@@ -172,15 +172,11 @@ export function getBestHumanVoice(preferredPersona?: string): SpeechSynthesisVoi
       if (match) return match;
     }
     if (persona === 'onyx') {
-      // Prefer installed neural/natural male voices before applying a subtle baritone pitch.
-      const deepMalePatterns = ['guy online (natural)', 'christopher online (natural)', 'ryan online (natural)', 'david', 'mark', 'guy', 'christopher', 'daniel', 'alex', 'tom'];
-      for (const pattern of deepMalePatterns) {
-        const match = candidatePool.find(v => {
-          const name = v.name.toLowerCase();
-          return name.includes(pattern) && !name.includes('female') && !name.includes('child');
-        });
-        if (match) return match;
-      }
+      const match = candidatePool.find(v => {
+        const name = v.name.toLowerCase();
+        return (name.includes('david') || name.includes('alex') || name.includes('tom') || name.includes('mark')) && !name.includes('female');
+      });
+      if (match) return match;
     }
     if (persona === 'echo' || persona === 'tintin') {
       const match = candidatePool.find(v => {

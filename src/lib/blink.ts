@@ -50,36 +50,24 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
     ? options.messages.filter((m: any) => m.role === 'user').slice(-1)[0]?.content || ''
     : options.prompt || '';
 
-  const requestId = options.requestId || `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const isWebsite = options.sandbox || (agentConfig?.system && agentConfig.system.includes('Website Builder')) || lastUserMsg.toLowerCase().includes('website');
 
   const stream = new ReadableStream({
     async start(controller) {
-      let isFinalized = false;
       const sendEvent = (event: any) => {
-        if (isFinalized) return;
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
         } catch {}
       };
 
-      const finalizeStream = (finishReason = 'stop') => {
-        if (isFinalized) return;
-        isFinalized = true;
-        sendEvent({ type: 'finish', finishReason });
-        try {
-          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-          controller.close();
-        } catch {}
-      };
-
-      // 1. Try real Gemini streaming from our server endpoint with 15s bounded timeout
+      // 1. Try real Gemini streaming from our server endpoint.
       let serviceFailureMessage = 'The AI response service is temporarily unavailable. Please check your connection and try again.';
       try {
         const streamEndpoint = '/api/gemini/stream';
         const res = await nativeFetch(streamEndpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(60000),
           body: JSON.stringify({
             messages: options.messages || [{ role: 'user', content: lastUserMsg }],
             prompt: lastUserMsg,
@@ -89,7 +77,6 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
               return m === 'gemini-2.5-flash' || m === 'gemini-3-flash' || m === 'gemini-3.0-flash' ? 'gemini-3.8-flash' : m;
             })(),
             thinkHarder: Boolean(options.thinkHarder),
-            requestId,
           }),
         });
 
@@ -111,44 +98,12 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
 
         if (res.ok && res.body) {
           const reader = res.body.getReader();
-          const decoder = new TextDecoder();
-          let lineBuffer = '';
-
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            const textChunk = decoder.decode(value, { stream: true });
-            lineBuffer += textChunk;
-            const lines = lineBuffer.split('\n');
-            lineBuffer = lines.pop() || '';
-
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (!trimmed || trimmed.startsWith(':')) continue;
-              if (trimmed === 'data: [DONE]' || trimmed === 'data:[DONE]') {
-                continue;
-              }
-              if (trimmed.startsWith('data: ') || trimmed.startsWith('data:')) {
-                const jsonStr = trimmed.startsWith('data: ') ? trimmed.slice(6) : trimmed.slice(5);
-                try {
-                  const ev = JSON.parse(jsonStr);
-                  // If server sends type: error, transform into text-delta so client doesn't stall
-                  if (ev.type === 'error') {
-                    sendEvent({
-                      type: 'text-delta',
-                      delta: `\n\n⚠️ ${ev.error || 'The AI service encountered an error.'}`
-                    });
-                  } else {
-                    sendEvent(ev);
-                  }
-                } catch {
-                  // Pass-through raw chunk if not json
-                  controller.enqueue(encoder.encode(`${line}\n`));
-                }
-              }
-            }
+            controller.enqueue(value);
           }
-          finalizeStream();
+          controller.close();
           return;
         }
       } catch (err: any) {
@@ -157,10 +112,10 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
         } else if (err instanceof TypeError) {
           serviceFailureMessage = 'Could not reach the AI server. Check your internet connection and try again.';
         }
-        console.warn('[AI Studio] Gemini stream request notice:', err?.message || err);
+        console.warn('[AI Studio] Gemini stream request failed:', err);
       }
 
-      // 2. Resilient local fallback: never simulate fake reports, provide helpful answers
+      // 2. Honest local fallback: never simulate successful tools or invent factual answers.
       const cleanMsg = lastUserMsg.toLowerCase().trim();
       if (/^(?:hi|hello|hey|hiya|howdy|good morning|good afternoon|good evening)[!?.\s,]*$/i.test(cleanMsg)) {
         sendEvent({
@@ -170,10 +125,12 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
       } else {
         sendEvent({
           type: 'text-delta',
-          delta: serviceFailureMessage
+          delta: serviceFailureMessage + ' Your request was not completed, and no external action is being reported as successful.'
         });
       }
-      finalizeStream();
+      sendEvent({ type: 'finish', finishReason: 'stop' });
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+      controller.close();
     }
   });
 
@@ -208,8 +165,8 @@ if (typeof window !== 'undefined' && window.fetch) {
   window.fetch = async function(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as any)?.url || '';
 
-    // NEVER intercept our internal Gemini endpoint
-    if (urlStr && !urlStr.includes('/api/gemini/') && (urlStr.includes('/api/ai/') || urlStr.includes('api.blink.new'))) {
+    // NEVER intercept our local server API endpoints (/api/*)
+    if (urlStr && !urlStr.startsWith('/api/') && !urlStr.includes('/api/gemini/') && (urlStr.includes('api.blink.new') || urlStr.includes('blink.new/api/'))) {
       // Parse payload
       let bodyObj: any = {};
       try {

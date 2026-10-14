@@ -19,28 +19,8 @@
   status = 200
 
 [[redirects]]
-  from = "/api/android-control"
-  to = "/.netlify/functions/android-control"
-  status = 200
-
-[[redirects]]
-  from = "/api/automation-agent"
-  to = "/.netlify/functions/automation-agent"
-  status = 200
-
-[[redirects]]
-  from = "/api/image-generation"
-  to = "/.netlify/functions/image-generation"
-  status = 200
-
-[[redirects]]
   from = "/api/web-search"
   to = "/.netlify/functions/web-search"
-  status = 200
-
-[[redirects]]
-  from = "/api/weather*"
-  to = "/.netlify/functions/weather"
   status = 200
 
 [[redirects]]

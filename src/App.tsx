@@ -40,7 +40,7 @@ function TaskView({
 
   return (
     <ChatView
-      prompt={currentTask?.prompt || messages.find(m => m.role === 'user')?.content || ''}
+      prompt={currentTask?.prompt || ''}
       messages={messages}
       steps={steps}
       result={result}
@@ -210,9 +210,7 @@ function AppContent() {
         onNewTask={handleReset}
         onOpenHistory={() => setIsHistoryOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
-        activeTaskId={location.pathname.startsWith('/task/') ? location.pathname.split('/')[2] : (agentTask.taskId || undefined)}
-        activeSteps={isWebsiteActive ? websiteSteps : agentTask.steps}
-        activeTaskStatus={isWebsiteActive ? (websiteStatus === 'idle' ? 'running' : websiteStatus) : agentTask.taskStatus}
+        activeTaskId={location.pathname.startsWith('/task/') ? location.pathname.split('/')[2] : undefined}
       />
       <div className="flex-1 flex flex-col min-w-0">
         {!isWebsiteActive && (
