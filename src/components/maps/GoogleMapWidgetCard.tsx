@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { APIProvider, Map, AdvancedMarker, Pin, useMapsLibrary } from '@vis.gl/react-google-maps';
 import { MapPin, Navigation, Search, AlertCircle, Compass } from 'lucide-react';
 
@@ -50,6 +50,10 @@ export function GoogleMapWidgetCard({
   const [quotaExceeded, setQuotaExceeded] = useState(false);
   const [center, setCenter] = useState({ lat: latitude, lng: longitude });
   const [resolvedZoom, setResolvedZoom] = useState(zoom);
+  const handleLocationResolved = useCallback((point: { lat: number; lng: number }) => {
+    setCenter(point);
+    setResolvedZoom(12);
+  }, []);
 
 
 
@@ -105,7 +109,7 @@ export function GoogleMapWidgetCard({
           <LocationGeocoder
             locationName={locationName}
             enabled={autoLocate}
-            onResolved={(point) => { setCenter(point); setResolvedZoom(12); }}
+            onResolved={handleLocationResolved}
           />
           <Map
             mapId="DEMO_MAP_ID"
