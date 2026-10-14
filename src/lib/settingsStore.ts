@@ -124,7 +124,7 @@ export const settingsStore = {
 /**
  * Play gentle synthesized chime using Web Audio API (zero audio file dependencies)
  */
-export function playNotificationSound(type: 'success' | 'send' | 'pop' = 'pop') {
+export function playNotificationSound(type: 'success' | 'send' | 'pop' | 'error' = 'pop') {
   try {
     const settings = getSettings();
     if (!settings.soundEffects) return;
@@ -140,6 +140,17 @@ export function playNotificationSound(type: 'success' | 'send' | 'pop' = 'pop') 
 
     osc.connect(gain);
     gain.connect(ctx.destination);
+
+    if (type === 'error') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(300, now);
+      osc.frequency.exponentialRampToValueAtTime(150, now + 0.15);
+      gain.gain.setValueAtTime(0.06, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      osc.start(now);
+      osc.stop(now + 0.15);
+      return;
+    }
 
     if (type === 'send') {
       // Crisp subtle upward click

@@ -144,7 +144,7 @@ export function ChatView({
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
       const scrollHeight = textareaRef.current.scrollHeight;
-      const targetHeight = Math.max(Math.min(scrollHeight, 120), 26);
+      const targetHeight = Math.max(Math.min(scrollHeight, 90), 22);
       textareaRef.current.style.height = `${targetHeight}px`;
     }
   }, [input]);
@@ -654,6 +654,13 @@ export function ChatView({
   };
 
   const isAssistantWorking = isLoading || status === 'running';
+  const hasVisibleAssistantMessage = displayMessages.some((m: any) => {
+    if (m?.role !== 'assistant') return false;
+    const raw = m.content || '';
+    const { thought, content: extracted } = extractThoughtProcess(raw);
+    const cleanedContent = cleanMessageContent(extracted || raw);
+    return Boolean(cleanedContent || thought);
+  });
   const activeRunningStep = steps.find(s => s.status === 'running');
   const typingStatus = activeRunningStep 
     ? activeRunningStep.label 
@@ -810,6 +817,16 @@ export function ChatView({
                     <SourceCitations sources={parsedSources.sources} />
                   )}
 
+                  {isAssistantWorking && isLatestAssistant && (
+                    <div className="pt-1">
+                      <ContextualThinking
+                        prompt={messages.filter((message: any) => message?.role === 'user').slice(-1)[0]?.content || prompt}
+                        activeStep={activeRunningStep?.label}
+                        deepMode={isThinkHarder}
+                      />
+                    </div>
+                  )}
+
                   {cleanedContent ? (
                     <div className="pt-0.5">
                       <ConversationActionBar 
@@ -895,7 +912,7 @@ export function ChatView({
         })()}
 
         {/* Prompt-aware thinking animation: stages adapt to the user's request */}
-        {isAssistantWorking && (
+        {isAssistantWorking && !hasVisibleAssistantMessage && (
           <div className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="flex-1 space-y-2.5 min-w-0">
               <div className="flex items-center gap-2.5">
@@ -1075,7 +1092,7 @@ export function ChatView({
               }}
               rows={1}
               placeholder={isThinkHarder ? "Ask with deep reasoning..." : "Type a message or ask anything..."}
-              className="w-full bg-transparent border-none outline-none resize-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-[15px] sm:text-base leading-snug sm:leading-relaxed p-0 focus:ring-0 focus:outline-none min-h-[26px] sm:min-h-[28px] max-h-[130px] custom-scrollbar"
+              className="w-full bg-transparent border-none outline-none resize-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-[14px] sm:text-[15px] leading-snug p-0 focus:ring-0 focus:outline-none min-h-[22px] sm:min-h-[24px] max-h-[90px] custom-scrollbar"
               disabled={isLoading}
             />
           </div>

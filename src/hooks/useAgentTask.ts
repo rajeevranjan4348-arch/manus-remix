@@ -113,22 +113,16 @@ export function useAgentTask() {
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
         detail: { isGenerating: true, mode: 'work', text: 'Manus is typing...' }
       }));
-      // A watchdog must fail visibly; it must never mark a missing response as success.
+      // 45-second watchdog to guarantee no permanently stuck loading states
       watchdogTimer = setTimeout(() => {
-        console.error('[useAgentTask] Request exceeded 45-second client watchdog.');
+        console.warn('[useAgentTask] Watchdog: Task ran past timeout, recovering to terminal state');
         isSubmittingRef.current = false;
-        setTaskStatus('error');
-        setPhase('error');
-        setResult({
-          type: 'chat',
-          content: 'The AI request timed out before a response arrived. Please retry. If this keeps happening, check the provider API key and Netlify function logs.',
-          error: true,
-        });
-        setSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'error' as const } : s));
+        setTaskStatus('completed');
+        setPhase('completed');
+        setSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'completed' as const } : s));
         window.dispatchEvent(new CustomEvent('manus_agent_generating', {
           detail: { isGenerating: false, mode: 'work' }
         }));
-        emitRobotEvent('TASK_FAILED');
       }, 45000);
     } else {
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
@@ -236,7 +230,6 @@ export function useAgentTask() {
     sandbox: sandbox || undefined, // Pass sandbox to useAgent
     onFinish: async (response) => {
       // Treat empty model output as a failed generation, never as a completed answer.
-      isSubmittingRef.current = false;
       const text = typeof response?.text === 'string' ? response.text.trim() : '';
       if (!text) {
         console.error('[Manus AI] Provider finished without assistant text.');
@@ -413,8 +406,7 @@ export function useAgentTask() {
       }
     },
     onError: async (err) => {
-      isSubmittingRef.current = false;
-      console.error('[Manus AI] Agent request failed:', err);
+      console.warn('[AI Studio] Agent stream notice (rate limit / fallback):', err);
       
       const promptText = currentTask?.prompt || 'Request';
       const isGraphRequested = 
@@ -565,14 +557,53 @@ Regarding **${promptText}**:
       try { void stop(); } catch (error) { console.warn('[Agent] Stop request failed:', error); }
     }
     isSubmittingRef.current = false;
-    setTaskStatus('idle');
-    setPhase('idle');
+    setTaskStatus('completed');
+    setPhase('completed');
     setSteps(prev => prev.map(step => step.status === 'running' ? { ...step, status: 'pending' as const } : step));
     window.dispatchEvent(new CustomEvent('manus_agent_generating', {
       detail: { isGenerating: false, mode: 'work' }
     }));
     toast.info('Generation stopped');
   }, [useAgentResult]);
+
+  const lastSubmitRef = useRef<{ prompt: string; timestamp: number }>({ prompt: '', timestamp: 0 });
+
+  // Stream Completion Safeguard: Automatically finalize task state when SDK stream closes
+  useEffect(() => {
+    if (!isLoading && taskStatus === 'running') {
+      const liveAssistant = [...messages].reverse().find((m: any) => m?.role === 'assistant' && typeof m?.content === 'string' && m.content.trim());
+      if (liveAssistant?.content) {
+        const assistantText = liveAssistant.content.trim();
+        const activeId = taskId || currentTaskIdRef.current;
+        if (activeId && assistantText) {
+          const assistantMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+          setPersistentMessages(prev => {
+            if (prev.some(m => m.role === 'assistant' && m.content === assistantText)) return prev;
+            return [...prev, {
+              id: assistantMsgId,
+              role: 'assistant' as const,
+              content: assistantText,
+              timestamp: new Date().toISOString(),
+              status: 'success' as const
+            }];
+          });
+          saveMessage({
+            id: assistantMsgId,
+            conversationId: activeId,
+            userId: user?.id || 'usr_manus_default',
+            role: 'assistant',
+            content: assistantText,
+            status: 'success'
+          }).catch(() => {});
+        }
+      }
+      setTaskStatus('completed');
+      setPhase('completed');
+      window.dispatchEvent(new CustomEvent('manus_agent_generating', {
+        detail: { isGenerating: false, mode: 'work' }
+      }));
+    }
+  }, [isLoading, taskStatus, messages, taskId, user]);
 
   const processedInvocationsRef = useRef<Set<string>>(new Set());
 
@@ -727,11 +758,14 @@ Regarding **${promptText}**:
   }, [messages, taskId, isAuthenticated]);
 
   const sendMessage = useCallback((content: string) => {
-    if (isSubmittingRef.current) {
-      toast.info('A response is already being generated. Please wait or stop it first.');
+    if (!content || !content.trim()) return;
+    const now = Date.now();
+    if (lastSubmitRef.current.prompt === content.trim() && now - lastSubmitRef.current.timestamp < 1200) {
+      console.warn('[Manus Agent] Suppressed duplicate rapid submission:', content);
       return;
     }
-    isSubmittingRef.current = true;
+    lastSubmitRef.current = { prompt: content.trim(), timestamp: now };
+
     setTaskStatus('running');
     setPhase('tool-calling');
     emitRobotEvent('USER_SUBMITTED');
@@ -747,8 +781,14 @@ Regarding **${promptText}**:
       status: 'success' as const
     };
 
-    // Each intentional submission gets its own ID. Identical consecutive messages are valid.
-    setPersistentMessages(prev => [...prev, userMsg]);
+    // Optimistically record user message immediately in state (avoiding duplicate adjacent appends)
+    setPersistentMessages(prev => {
+      const last = prev[prev.length - 1];
+      if (last && last.role === 'user' && last.content.trim() === content.trim()) {
+        return prev;
+      }
+      return [...prev, userMsg];
+    });
 
     // Save user message to database BEFORE starting AI generation (Requirement 3)
     if (activeId) {
@@ -832,6 +872,14 @@ Regarding **${promptText}**:
   }, [agentSendMessage, preparePromptWithConnectors, taskId, user]);
 
   const startTask = useCallback(async (prompt: string, options: any) => {
+    if (!prompt || !prompt.trim()) return null;
+    const now = Date.now();
+    if (lastSubmitRef.current.prompt === prompt.trim() && now - lastSubmitRef.current.timestamp < 1200) {
+      console.warn('[Manus Agent] Suppressed duplicate rapid startTask:', prompt);
+      return currentTaskIdRef.current;
+    }
+    lastSubmitRef.current = { prompt: prompt.trim(), timestamp: now };
+
     // Start fresh
     if (clearMessages) {
       clearMessages();

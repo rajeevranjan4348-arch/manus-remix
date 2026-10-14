@@ -318,7 +318,7 @@ function geminiApiPlugin(): Plugin {
           return;
         }
 
-        if (req.method === 'POST' && (url === '/api/gemini/stream' || url === '/api/ai/stream' || url === '/api/ai/agent')) {
+        if (req.method === 'POST' && (url === '/api/gemini/stream' || url === '/api/ai/stream' || url?.startsWith('/api/ai/'))) {
           let bodyStr = '';
           req.on('data', chunk => {
             bodyStr += chunk;

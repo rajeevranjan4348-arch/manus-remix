@@ -15,13 +15,14 @@
     "android:debug": "npm run build && cap sync android && cd android && ./gradlew assembleDebug"
   },
   "devDependencies": {
+    "@capacitor/cli": "^7.4.3",
     "@firebase/eslint-plugin-security-rules": "^0.0.2",
     "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.11",
     "eslint": "^10.12.0",
     "typescript": "~5.9.3",
     "vite": "^7.2.4",
-    "@capacitor/cli": "^7.4.3"
+    "vitest": "^5.0.4"
   },
   "dependencies": {
     "@blinkdotnew/react": "^1.0.2",
