@@ -14,7 +14,13 @@ import {
   HardDrive, 
   FileText, 
   FileSpreadsheet, 
+  Presentation,
   CheckSquare, 
+  FileCheck,
+  Contact,
+  MessageCircle,
+  Video,
+  StickyNote,
   Globe, 
   Terminal, 
   BarChart2, 
@@ -36,6 +42,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { googleSignIn, logoutWorkspace, getAccessToken, getCurrentUser } from '@/lib/workspaceAuth';
+import { handleConnectorError } from '@/lib/connectors';
 import { toast } from 'sonner';
 
 export interface ConnectorItem {
@@ -54,7 +61,7 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
   {
     id: 'gmail',
     name: 'Gmail',
-    desc: 'Read, search, and generate email drafts directly from Gmail',
+    desc: 'Read, search, draft, reply to, and send emails directly with Gmail',
     category: 'workspace',
     icon: Mail,
     iconBg: 'bg-red-500/10 text-red-500',
@@ -63,7 +70,7 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
   {
     id: 'calendar',
     name: 'Google Calendar',
-    desc: 'Fetch schedule, upcoming events, and create calendar meetings',
+    desc: 'Fetch schedule, search events, check availability, and schedule meetings',
     category: 'workspace',
     icon: Calendar,
     iconBg: 'bg-blue-500/10 text-blue-500',
@@ -72,7 +79,7 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
   {
     id: 'drive',
     name: 'Google Drive',
-    desc: 'Access, search, and attach files from Google Drive',
+    desc: 'Browse, search, upload, create folders, share, and manage Google Drive files',
     category: 'workspace',
     icon: HardDrive,
     iconBg: 'bg-emerald-500/10 text-emerald-500',
@@ -81,7 +88,7 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
   {
     id: 'docs',
     name: 'Google Docs',
-    desc: 'Query written documents and generate Google Docs content',
+    desc: 'Read, create, format, write, and append text to Google Docs documents',
     category: 'workspace',
     icon: FileText,
     iconBg: 'bg-blue-600/10 text-blue-600',
@@ -90,19 +97,73 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
   {
     id: 'sheets',
     name: 'Google Sheets',
-    desc: 'Analyze spreadsheets, rows, tables, and data files',
+    desc: 'Create, read, append data, and update cells and formulas in Google Sheets',
     category: 'workspace',
     icon: FileSpreadsheet,
     iconBg: 'bg-emerald-600/10 text-emerald-600',
     isWorkspaceAuth: true,
   },
   {
+    id: 'slides',
+    name: 'Google Slides',
+    desc: 'Create slide decks, read presentation text, and append new slides',
+    category: 'workspace',
+    icon: Presentation,
+    iconBg: 'bg-amber-600/10 text-amber-600',
+    isWorkspaceAuth: true,
+  },
+  {
     id: 'tasks',
     name: 'Google Tasks',
-    desc: 'Manage pending to-dos and sync active task lists',
+    desc: 'Track to-dos, create tasks, set due dates, and mark tasks completed',
     category: 'workspace',
     icon: CheckSquare,
     iconBg: 'bg-amber-500/10 text-amber-500',
+    isWorkspaceAuth: true,
+  },
+  {
+    id: 'forms',
+    name: 'Google Forms',
+    desc: 'Create surveys and forms, add questions, and inspect respondent submissions',
+    category: 'workspace',
+    icon: FileCheck,
+    iconBg: 'bg-purple-600/10 text-purple-600',
+    isWorkspaceAuth: true,
+  },
+  {
+    id: 'contacts',
+    name: 'Google Contacts',
+    desc: 'Search address book, create contacts, and manage colleagues details',
+    category: 'workspace',
+    icon: Contact,
+    iconBg: 'bg-cyan-600/10 text-cyan-600',
+    isWorkspaceAuth: true,
+  },
+  {
+    id: 'chat',
+    name: 'Google Chat',
+    desc: 'List spaces and rooms, and post messages directly to Google Chat',
+    category: 'workspace',
+    icon: MessageCircle,
+    iconBg: 'bg-green-600/10 text-green-600',
+    isWorkspaceAuth: true,
+  },
+  {
+    id: 'meet',
+    name: 'Google Meet',
+    desc: 'Schedule video calls and generate instant Google Meet links',
+    category: 'workspace',
+    icon: Video,
+    iconBg: 'bg-emerald-500/10 text-emerald-500',
+    isWorkspaceAuth: true,
+  },
+  {
+    id: 'keep',
+    name: 'Google Keep',
+    desc: 'Capture quick notes, thoughts, and memos synced with your account',
+    category: 'workspace',
+    icon: StickyNote,
+    iconBg: 'bg-yellow-500/10 text-yellow-500',
     isWorkspaceAuth: true,
   },
   {
@@ -131,42 +192,6 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
     icon: BarChart2,
     iconBg: 'bg-purple-500/10 text-purple-500',
     defaultEnabled: true,
-  },
-  {
-    id: 'deep_research',
-    name: 'Deep Research',
-    desc: 'Multi-source document synthesis & deep web research',
-    category: 'agent',
-    icon: Sparkles,
-    iconBg: 'bg-amber-500/10 text-amber-500',
-    defaultEnabled: false,
-  },
-  {
-    id: 'github',
-    name: 'GitHub Integrations',
-    desc: 'Triage pull requests, issues, CI logs, and repository code',
-    category: 'third_party',
-    icon: Github,
-    iconBg: 'bg-slate-800/10 dark:bg-white/10 text-slate-900 dark:text-white',
-    requiresAuth: true,
-  },
-  {
-    id: 'health',
-    name: 'Health & Fitness',
-    desc: 'Analyze health data, workout metrics, and activity logs',
-    category: 'third_party',
-    icon: Activity,
-    iconBg: 'bg-rose-500/10 text-rose-500',
-    requiresAuth: true,
-  },
-  {
-    id: 'figma',
-    name: 'Figma Canvas',
-    desc: 'Inspect design files, components, and layout specs',
-    category: 'third_party',
-    icon: Figma,
-    iconBg: 'bg-purple-600/10 text-purple-600',
-    requiresAuth: true,
   }
 ];
 
@@ -229,14 +254,14 @@ export function ConnectorsStorePanel({
         toast.success(`Google Workspace connected as ${res.user.email}`);
         
         // Auto enable Google connectors
-        const workspaceIds = ['gmail', 'calendar', 'drive', 'docs', 'sheets', 'tasks'];
+        const workspaceIds = ['gmail', 'calendar', 'drive', 'docs', 'sheets', 'slides', 'tasks', 'forms', 'contacts', 'chat', 'meet', 'keep'];
         const next = Array.from(new Set([...enabledConnectors, ...workspaceIds]));
         setEnabledConnectors(next);
         localStorage.setItem('manus_enabled_connectors', JSON.stringify(next));
         window.dispatchEvent(new CustomEvent('manus_connectors_updated', { detail: next }));
       }
     } catch (err: any) {
-      toast.error('Failed to authenticate Google Workspace');
+      handleConnectorError('gmail', err, { issueType: 'connection_failed', customMessage: 'Failed to authenticate Google Workspace' });
     } finally {
       setIsConnectingGoogle(false);
     }

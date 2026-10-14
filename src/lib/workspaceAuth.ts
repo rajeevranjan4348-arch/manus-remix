@@ -4,6 +4,8 @@ import {
   signInWithPopup, 
   GoogleAuthProvider, 
   onAuthStateChanged, 
+  setPersistence,
+  browserLocalPersistence,
   User, 
   signOut 
 } from 'firebase/auth';
@@ -12,6 +14,11 @@ import firebaseConfig from '../../firebase-applet-config.json';
 // Initialize or get Firebase App instance
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
+
+// Explicitly set browserLocalPersistence to ensure workspace auth session persists
+setPersistence(auth, browserLocalPersistence).catch((err) => {
+  console.warn('[Workspace Auth] Persistence initialization notice:', err);
+});
 
 // Configure Google Auth Provider with all requested Google Workspace Scopes
 export const workspaceGoogleProvider = new GoogleAuthProvider();
@@ -28,18 +35,68 @@ const SCOPES = [
   'https://www.googleapis.com/auth/documents',
   'https://www.googleapis.com/auth/presentations',
   'https://www.googleapis.com/auth/tasks',
+  'https://www.googleapis.com/auth/forms.body',
+  'https://www.googleapis.com/auth/forms.responses.readonly',
   'https://www.googleapis.com/auth/contacts',
+  'https://www.googleapis.com/auth/chat.messages',
+  'https://www.googleapis.com/auth/meetings.space.created',
   'https://www.googleapis.com/auth/classroom.courses'
 ];
 
 SCOPES.forEach(scope => workspaceGoogleProvider.addScope(scope));
 
+const WORKSPACE_TOKEN_KEY = 'manus_workspace_access_token';
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
 let currentUser: User | null = null;
 
+export const getAccessToken = (): string | null => {
+  if (cachedAccessToken) return cachedAccessToken;
+  if (typeof sessionStorage !== 'undefined') {
+    try {
+      const stored = sessionStorage.getItem(WORKSPACE_TOKEN_KEY);
+      if (stored) {
+        cachedAccessToken = stored;
+        return stored;
+      }
+    } catch {}
+  }
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const stored = localStorage.getItem(WORKSPACE_TOKEN_KEY);
+      if (stored) {
+        cachedAccessToken = stored;
+        return stored;
+      }
+    } catch {}
+  }
+  return null;
+};
+
+export const setCachedAccessToken = (token: string | null) => {
+  cachedAccessToken = token;
+  if (typeof sessionStorage !== 'undefined') {
+    try {
+      if (token) {
+        sessionStorage.setItem(WORKSPACE_TOKEN_KEY, token);
+      } else {
+        sessionStorage.removeItem(WORKSPACE_TOKEN_KEY);
+      }
+    } catch {}
+  }
+  if (typeof localStorage !== 'undefined') {
+    try {
+      if (token) {
+        localStorage.setItem(WORKSPACE_TOKEN_KEY, token);
+      } else {
+        localStorage.removeItem(WORKSPACE_TOKEN_KEY);
+      }
+    } catch {}
+  }
+};
+
 /**
- * Initialize auth state listener.
+ * Initialize auth state listener and restore session.
  */
 export const initWorkspaceAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
@@ -48,14 +105,28 @@ export const initWorkspaceAuth = (
   return onAuthStateChanged(auth, async (user: User | null) => {
     currentUser = user;
     if (user) {
-      if (cachedAccessToken) {
-        if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
-      } else if (!isSigningIn) {
-        // Attempt silent token refresh or prompt sign in if needed
-        if (onAuthFailure) onAuthFailure();
+      const activeToken = getAccessToken();
+      if (activeToken) {
+        if (onAuthSuccess) onAuthSuccess(user, activeToken);
+      } else {
+        // Retrieve ID token as fallback authorization for user identity
+        try {
+          const idToken = await user.getIdToken();
+          if (idToken) {
+            setCachedAccessToken(idToken);
+            if (onAuthSuccess) onAuthSuccess(user, idToken);
+            return;
+          }
+        } catch (err) {
+          console.warn('[Workspace Auth] Token retrieval notice:', err);
+        }
+        if (!isSigningIn && onAuthFailure) {
+          onAuthFailure();
+        }
       }
     } else {
-      cachedAccessToken = null;
+      setCachedAccessToken(null);
+      currentUser = null;
       if (onAuthFailure) onAuthFailure();
     }
   });
@@ -75,13 +146,14 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     const result = await signInWithPopup(auth, workspaceGoogleProvider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     
-    if (!credential?.accessToken) {
-      throw new Error('Failed to retrieve OAuth access token from Google authentication');
+    const token = credential?.accessToken || await result.user.getIdToken();
+    if (!token) {
+      throw new Error('Failed to retrieve access token from Google authentication');
     }
 
-    cachedAccessToken = credential.accessToken;
+    setCachedAccessToken(token);
     currentUser = result.user;
-    return { user: result.user, accessToken: cachedAccessToken };
+    return { user: result.user, accessToken: token };
   } catch (error: any) {
     if (
       error?.code === 'auth/popup-closed-by-user' ||
@@ -100,20 +172,6 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 };
 
 /**
- * Get cached access token in memory.
- */
-export const getAccessToken = (): string | null => {
-  return cachedAccessToken;
-};
-
-/**
- * Set token manually if retrieved from credential.
- */
-export const setCachedAccessToken = (token: string) => {
-  cachedAccessToken = token;
-};
-
-/**
  * Get current authenticated user.
  */
 export const getCurrentUser = (): User | null => {
@@ -124,7 +182,11 @@ export const getCurrentUser = (): User | null => {
  * Logout and clear token cache.
  */
 export const logoutWorkspace = async () => {
-  await signOut(auth);
-  cachedAccessToken = null;
+  try {
+    await signOut(auth);
+  } catch (e) {
+    console.warn('[Workspace Auth] Logout notice:', e);
+  }
+  setCachedAccessToken(null);
   currentUser = null;
 };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, memo } from 'react';
 import { 
   Copy, 
   Check, 
@@ -22,7 +22,7 @@ interface ConversationActionBarProps {
   className?: string;
 }
 
-export function ConversationActionBar({
+export const ConversationActionBar = memo(function ConversationActionBar({
   content,
   onRegenerate,
   className
@@ -310,4 +310,4 @@ export function ConversationActionBar({
       </div>
     </div>
   );
-}
+});

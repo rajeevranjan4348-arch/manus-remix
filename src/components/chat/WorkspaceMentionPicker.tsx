@@ -5,16 +5,20 @@ import {
   HardDrive, 
   FileText, 
   FileSpreadsheet, 
+  Presentation,
   CheckSquare, 
+  FileCheck,
+  Contact,
+  MessageCircle,
+  Video,
+  StickyNote,
   Sparkles, 
   Globe, 
   Terminal, 
   BarChart2, 
-  Activity, 
-  Figma, 
   Plug,
   Check,
-  Github
+  Layers
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -29,10 +33,18 @@ export interface WorkspaceConnectorOption {
 
 export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
   {
+    id: 'workspace',
+    tag: '@workspace',
+    label: 'Google Workspace (All)',
+    description: 'Autonomous assistant across all Google Workspace apps',
+    icon: Sparkles,
+    colorClass: 'text-purple-500 bg-purple-500/10'
+  },
+  {
     id: 'gmail',
     tag: '@gmail',
     label: 'Gmail',
-    description: 'Read, search, and generate email drafts directly from Gmail',
+    description: 'Read, search, draft, reply to, and send emails directly',
     icon: Mail,
     colorClass: 'text-red-500 bg-red-500/10'
   },
@@ -40,7 +52,7 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     id: 'calendar',
     tag: '@calendar',
     label: 'Google Calendar',
-    description: 'Fetch upcoming events, today\'s schedule & meetings',
+    description: 'Fetch upcoming events, schedule meetings & check availability',
     icon: Calendar,
     colorClass: 'text-blue-500 bg-blue-500/10'
   },
@@ -48,7 +60,7 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     id: 'drive',
     tag: '@drive',
     label: 'Google Drive',
-    description: 'Access recent files, documents, and spreadsheets from Drive',
+    description: 'Search files, create folders, upload and share documents',
     icon: HardDrive,
     colorClass: 'text-emerald-500 bg-emerald-500/10'
   },
@@ -56,7 +68,7 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     id: 'docs',
     tag: '@docs',
     label: 'Google Docs',
-    description: 'Query Google Docs content and written documents',
+    description: 'Create, read, write, append, and format documents',
     icon: FileText,
     colorClass: 'text-blue-600 bg-blue-600/10'
   },
@@ -64,25 +76,65 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     id: 'sheets',
     tag: '@sheets',
     label: 'Google Sheets',
-    description: 'Analyze spreadsheet rows, data tables & sheets',
+    description: 'Create sheets, read rows, update cells & formulas',
     icon: FileSpreadsheet,
     colorClass: 'text-emerald-600 bg-emerald-600/10'
+  },
+  {
+    id: 'slides',
+    tag: '@slides',
+    label: 'Google Slides',
+    description: 'Create slide decks, read slides text & append new slides',
+    icon: Presentation,
+    colorClass: 'text-amber-600 bg-amber-600/10'
   },
   {
     id: 'tasks',
     tag: '@tasks',
     label: 'Google Tasks',
-    description: 'Fetch active to-do items, reminders, and task lists',
+    description: 'Fetch to-dos, create tasks, set due dates & mark complete',
     icon: CheckSquare,
     colorClass: 'text-amber-500 bg-amber-500/10'
   },
   {
-    id: 'workspace',
-    tag: '@workspace',
-    label: 'Google Workspace (All)',
-    description: 'Aggregate Calendar schedule, Gmail inbox & Drive files together',
-    icon: Sparkles,
-    colorClass: 'text-purple-500 bg-purple-500/10'
+    id: 'forms',
+    tag: '@forms',
+    label: 'Google Forms',
+    description: 'Create forms/surveys, add questions & inspect respondent data',
+    icon: FileCheck,
+    colorClass: 'text-purple-600 bg-purple-600/10'
+  },
+  {
+    id: 'contacts',
+    tag: '@contacts',
+    label: 'Google Contacts',
+    description: 'Search address book, create contacts & view colleague info',
+    icon: Contact,
+    colorClass: 'text-cyan-600 bg-cyan-600/10'
+  },
+  {
+    id: 'chat',
+    tag: '@chat',
+    label: 'Google Chat',
+    description: 'List spaces, post messages & collaborate in Google Chat',
+    icon: MessageCircle,
+    colorClass: 'text-green-600 bg-green-600/10'
+  },
+  {
+    id: 'meet',
+    tag: '@meet',
+    label: 'Google Meet',
+    description: 'Schedule video calls & generate instant Google Meet links',
+    icon: Video,
+    colorClass: 'text-emerald-500 bg-emerald-500/10'
+  },
+  {
+    id: 'keep',
+    tag: '@keep',
+    label: 'Google Keep',
+    description: 'Capture quick notes, memos & notes synced with your account',
+    icon: StickyNote,
+    colorClass: 'text-yellow-500 bg-yellow-500/10'
   },
   {
     id: 'web_search',
@@ -107,38 +159,6 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     description: 'Render interactive graphs, charts & visualizers',
     icon: BarChart2,
     colorClass: 'text-purple-500 bg-purple-500/10'
-  },
-  {
-    id: 'deep_research',
-    tag: '@deep_research',
-    label: 'Deep Research',
-    description: 'Multi-source document synthesis & deep web research',
-    icon: Sparkles,
-    colorClass: 'text-amber-500 bg-amber-500/10'
-  },
-  {
-    id: 'github',
-    tag: '@github',
-    label: 'GitHub',
-    description: 'Triage pull requests, issues, CI logs, and repository code',
-    icon: Github,
-    colorClass: 'text-slate-800 dark:text-white bg-slate-800/10'
-  },
-  {
-    id: 'health',
-    tag: '@health',
-    label: 'Health & Fitness',
-    description: 'Analyze health metrics, workout data & activity logs',
-    icon: Activity,
-    colorClass: 'text-rose-500 bg-rose-500/10'
-  },
-  {
-    id: 'figma',
-    tag: '@figma',
-    label: 'Figma Canvas',
-    description: 'Inspect design files, components & layout specs',
-    icon: Figma,
-    colorClass: 'text-purple-600 bg-purple-600/10'
   }
 ];
 

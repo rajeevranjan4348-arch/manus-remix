@@ -47,6 +47,20 @@ export function WebsiteBuilderView({
     }
   }, [status, previewUrl]);
 
+  // Topbar typing indicator synchronization
+  React.useEffect(() => {
+    const isBuilding = status === 'running' || isLoading;
+    if (isBuilding) {
+      window.dispatchEvent(new CustomEvent('manus_agent_generating', {
+        detail: { isGenerating: true, mode: 'website', text: 'Building website...' }
+      }));
+    } else {
+      window.dispatchEvent(new CustomEvent('manus_agent_generating', {
+        detail: { isGenerating: false, mode: 'website' }
+      }));
+    }
+  }, [status, isLoading]);
+
   React.useEffect(() => {
     if (sidebarRef.current) {
       const ctx = gsap.context(() => {

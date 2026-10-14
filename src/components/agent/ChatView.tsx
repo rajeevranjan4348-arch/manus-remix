@@ -1,9 +1,8 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { 
   ArrowUp,
-  Square,
-  SquarePen,
-  MoreVertical, 
+  ArrowDown,
+  Square, 
   Plus, 
   Mic, 
   Search, 
@@ -23,12 +22,15 @@ import {
   AtSign,
   Plug,
   Settings,
-  Zap
+  Zap,
+  AlertCircle,
+  RotateCw
 } from 'lucide-react';
 import { ConnectorsPopupMenu } from '../chat/ConnectorsPopupMenu';
 import { ConnectorsStorePanel, CONNECTOR_CATALOG } from '../connectors/ConnectorsStorePanel';
 import { ConnectorConfigModal } from '../connectors/ConnectorConfigModal';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
+import { readFileForAI, formatFileSize } from '@/lib/fileValidation';
 import { cn } from '@/lib/utils';
 import { Logo, ManusLogo } from '../layout/Logo';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -64,7 +66,7 @@ interface ChatViewProps {
   onReset: () => void;
   onExport?: () => void;
   onSubmit: (prompt: string) => void;
-  onStop: () => void;
+  onStop?: () => void;
   isLoading: boolean;
 }
 
@@ -78,23 +80,10 @@ export function ChatView({
   onReset, 
   onExport, 
   onSubmit,
+  onStop,
   isLoading 
 }: ChatViewProps) {
   const [input, setInput] = React.useState('');
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const isLongPrompt = input.length > 120 || input.includes('\n');
-
-  // Grow the composer as the user types or pastes, instead of trapping long prompts in two lines.
-  useEffect(() => {
-    const textarea = inputRef.current;
-    if (!textarea) return;
-    textarea.style.height = 'auto';
-    const maxHeight = Math.min(window.innerHeight * 0.45, 420);
-    const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
-    textarea.style.height = `${Math.max(36, nextHeight)}px`;
-    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
-  }, [input]);
-  const [showChatMenu, setShowChatMenu] = useState(false);
   const [expandedSteps, setExpandedSteps] = React.useState<Record<string, boolean>>({});
   const [isThinkHarder, setIsThinkHarder] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
@@ -103,10 +92,6 @@ export function ChatView({
   const [pendingApproval, setPendingApproval] = useState<VoiceCommandResult | null>(null);
   const [weatherMap, setWeatherMap] = useState<Record<string, WeatherData>>({});
   const [completedTypewriters, setCompletedTypewriters] = useState<Record<string, boolean>>({});
-
-  const handleTypewriterComplete = React.useCallback((msgKey: string) => {
-    setCompletedTypewriters(prev => prev[msgKey] ? prev : { ...prev, [msgKey]: true });
-  }, []);
 
   // Granular robot reaction sync with task status and active execution step
   useEffect(() => {
@@ -151,6 +136,18 @@ export function ChatView({
   const dragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const speechBaseInputRef = useRef<string>('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize chat typing area smoothly as user types while keeping initial height compact
+  React.useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      const scrollHeight = textareaRef.current.scrollHeight;
+      const targetHeight = Math.max(Math.min(scrollHeight, 120), 26);
+      textareaRef.current.style.height = `${targetHeight}px`;
+    }
+  }, [input]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -202,9 +199,10 @@ export function ChatView({
     setActiveConnectorTags(prev => prev.filter(t => t !== tagId));
   };
 
-  const handleDriveFileSelect = (driveFile: GoogleDriveFileItem) => {
-    const driveText = `[Selected Google Drive File: ${driveFile.name}]\nLink: ${driveFile.webViewLink || 'N/A'}\nType: ${driveFile.mimeType}`;
-    onSubmit(driveText);
+  const handleDriveFileSelect = (driveFile: GoogleDriveFileItem, contextString?: string) => {
+    const textToSend = contextString || `[Selected Google Drive File: ${driveFile.name}]\nLink: ${driveFile.webViewLink || 'N/A'}\nType: ${driveFile.mimeType}`;
+    onSubmit(textToSend);
+    toast.success(`Sent "${driveFile.name}" as context to AI Agent`);
   };
 
   // Check user queries for live weather data
@@ -360,22 +358,16 @@ export function ChatView({
 
     if (attachedFile) {
       try {
-        const isTextFile = attachedFile.type.startsWith('text/') || 
-                           attachedFile.name.endsWith('.csv') || 
-                           attachedFile.name.endsWith('.json') || 
-                           attachedFile.name.endsWith('.txt') || 
-                           attachedFile.name.endsWith('.md') ||
-                           attachedFile.name.endsWith('.js') ||
-                           attachedFile.name.endsWith('.py');
-        if (isTextFile) {
-          const textContent = await attachedFile.text();
-          const preview = textContent.slice(0, 12000);
-          message = `[Attached File: ${attachedFile.name}]\n\`\`\`\n${preview}\n\`\`\`\n${message}`.trim();
+        const aiFile = await readFileForAI(attachedFile);
+        if (aiFile.dataUrl) {
+          // Multimodal image attachment for vision analysis
+          message = `${aiFile.summary}\n[Attached Image Data URL: ${aiFile.dataUrl.slice(0, 100)}...]\n${message}`.trim();
         } else {
-          message = `[Attached File: ${attachedFile.name} (${(attachedFile.size / 1024).toFixed(1)} KB)]\n${message}`.trim();
+          message = `${aiFile.summary}\n${message}`.trim();
         }
-      } catch {
-        message = `[Attached File: ${attachedFile.name}]\n${message}`.trim();
+      } catch (err: any) {
+        console.warn('File reading error:', err);
+        message = `[Attached File: ${attachedFile.name} (${formatFileSize(attachedFile.size)})]\n${message}`.trim();
       }
     }
     if (isThinkHarder) {
@@ -391,19 +383,86 @@ export function ChatView({
   // Smart auto-follow: follow streamed output while the reader stays near the bottom.
   // If they scroll upward to read earlier messages, stop forcing the scroll position.
   const shouldAutoScrollRef = React.useRef(true);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+
+  const displayMessages = React.useMemo(() => {
+    const list: any[] = [];
+    const seenIds = new Set<string>();
+    for (const msg of messages) {
+      if (!msg) continue;
+      if (msg.id && seenIds.has(msg.id)) continue;
+      const prev = list[list.length - 1];
+      if (
+        prev &&
+        prev.role === msg.role &&
+        cleanUserMessage(prev.content || '').trim().toLowerCase() === cleanUserMessage(msg.content || '').trim().toLowerCase()
+      ) {
+        continue;
+      }
+      if (msg.id) seenIds.add(msg.id);
+      list.push(msg);
+    }
+    return list;
+  }, [messages]);
+
+  const scrollToBottom = React.useCallback((behavior: ScrollBehavior = 'smooth') => {
+    const container = containerRef.current;
+    if (container) {
+      shouldAutoScrollRef.current = true;
+      setShowScrollToBottom(false);
+      if (behavior === 'smooth') {
+        container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+      } else {
+        container.scrollTop = container.scrollHeight;
+      }
+    }
+  }, []);
+
+  const handleTypewriterComplete = React.useCallback((msgKey: string) => {
+    setCompletedTypewriters(prev => prev[msgKey] ? prev : { ...prev, [msgKey]: true });
+    if (shouldAutoScrollRef.current && containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    }
+  }, []);
 
   const handleConversationScroll = React.useCallback(() => {
     const container = containerRef.current;
     if (!container) return;
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-    shouldAutoScrollRef.current = distanceFromBottom < 120;
+    const isAtBottom = distanceFromBottom < 80;
+    shouldAutoScrollRef.current = isAtBottom;
+    setShowScrollToBottom(!isAtBottom);
   }, []);
 
   useEffect(() => {
-    if (shouldAutoScrollRef.current) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    if (shouldAutoScrollRef.current && containerRef.current) {
+      // Use direct position update during active token streaming to prevent frame animation cancellation stutters
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
   }, [messages, steps, result, isLoading, status]);
+
+  // Use ResizeObserver on container children to keep bottom in view as new message/content/images/charts render
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let rafId: number | null = null;
+    const observer = new ResizeObserver(() => {
+      if (shouldAutoScrollRef.current && container) {
+        if (rafId) cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(() => {
+          container.scrollTop = container.scrollHeight;
+        });
+      }
+    });
+
+    Array.from(container.children).forEach(child => observer.observe(child));
+
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      observer.disconnect();
+    };
+  }, []);
 
   // Initial animation
   useEffect(() => {
@@ -595,9 +654,6 @@ export function ChatView({
   };
 
   const isAssistantWorking = isLoading || status === 'running';
-  // Rich results are finalized only after the response lifecycle completes. This prevents
-  // out-of-band visualizations/files from appearing while later assistant text is still streaming.
-  const isResponseSettled = status === 'completed' && !isLoading;
   const activeRunningStep = steps.find(s => s.status === 'running');
   const typingStatus = activeRunningStep 
     ? activeRunningStep.label 
@@ -607,191 +663,171 @@ export function ChatView({
 
   return (
     <div className="flex flex-col h-full bg-manus-cream dark:bg-background relative">
-      {/* Chat page actions: new chat and overflow menu */}
-      <div className="absolute top-3 right-4 z-30 flex items-center gap-1.5">
-        <button
-          type="button"
-          onClick={() => {
-            setShowChatMenu(false);
-            setInput('');
-            setAttachedFile(null);
-            setActiveConnectorTags([]);
-            onReset();
-          }}
-          className="h-11 w-11 rounded-full flex items-center justify-center bg-white/90 dark:bg-[#292929] text-foreground border border-border/50 shadow-sm hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
-          title="New chat"
-          aria-label="New chat"
-        >
-          <SquarePen size={21} strokeWidth={2.2} />
-        </button>
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => setShowChatMenu(prev => !prev)}
-            className="h-11 w-11 rounded-full flex items-center justify-center bg-white/90 dark:bg-[#292929] text-foreground border border-border/50 shadow-sm hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
-            title="Chat options"
-            aria-label="Chat options"
-            aria-expanded={showChatMenu}
-          >
-            <MoreVertical size={21} strokeWidth={2.2} />
-          </button>
-          {showChatMenu && (
-            <div className="absolute right-0 top-12 min-w-44 rounded-xl border border-border bg-white dark:bg-[#242424] p-1.5 shadow-xl">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowChatMenu(false);
-                  setInput('');
-                  setAttachedFile(null);
-                  setActiveConnectorTags([]);
-                  onReset();
-                }}
-                className="w-full flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
-              >
-                <SquarePen size={16} />
-                <span>New chat</span>
-              </button>
-              {onExport && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowChatMenu(false);
-                    onExport();
-                  }}
-                  className="w-full flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 transition-colors"
-                >
-                  <FileText size={16} />
-                  <span>Export conversation</span>
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
       {/* Chat Area */}
       <div ref={containerRef} onScroll={handleConversationScroll} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-20 pt-6 pb-40 space-y-8 custom-scrollbar scroll-smooth">
         
         {/* Render Conversation Messages in Chronological Order */}
-        {(() => {
-          const list: any[] = [];
-          const seenIds = new Set<string>();
-          for (const msg of messages) {
-            if (!msg) continue;
-            if (msg.id && seenIds.has(msg.id)) continue;
-            const prev = list[list.length - 1];
-            if (
-              prev &&
-              prev.role === msg.role &&
-              cleanUserMessage(prev.content || '').trim().toLowerCase() === cleanUserMessage(msg.content || '').trim().toLowerCase()
-            ) {
-              continue;
-            }
-            if (msg.id) seenIds.add(msg.id);
-            list.push(msg);
+        {displayMessages.map((msg, i) => {
+          if (msg.role === 'user') {
+            return (
+              <div key={msg.id || i} className="flex justify-end my-2 chat-message-enter">
+                <div className="bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium max-w-[80%] shadow-xs leading-relaxed">
+                  {cleanUserMessage(msg.content)}
+                </div>
+              </div>
+            );
           }
 
-          return list.map((msg, i) => {
-            if (msg.role === 'user') {
-              return (
-                <div key={msg.id || i} className="flex justify-end my-2 chat-message-enter">
-                  <div className="bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium max-w-[80%] shadow-xs leading-relaxed">
-                    {cleanUserMessage(msg.content)}
+          if (msg.role === 'assistant') {
+            const raw = msg.content || '';
+            const { thought, content: extracted } = extractThoughtProcess(raw);
+            const cleanedContent = cleanMessageContent(extracted || raw);
+            const parsedSources = parseSourcesFromMarkdown(cleanedContent);
+            // While a response is streaming, the hook may include an empty assistant placeholder.
+            // Do not render its Manus header alongside the dedicated thinking indicator.
+            if (!cleanedContent && !thought && isAssistantWorking) return null;
+            if (!cleanedContent && !thought && raw && (result || chartData)) return null;
+
+            const msgKey = msg.id || `msg-${i}-${cleanedContent.slice(0, 20)}`;
+            const isCompleted = Boolean(completedTypewriters[msgKey]);
+            const isLatestAssistant = i === displayMessages.length - 1 || (i === displayMessages.length - 2 && displayMessages[displayMessages.length - 1]?.role !== 'assistant');
+            const shouldAnimate = !isCompleted && isLatestAssistant;
+
+            return (
+              <div key={msg.id || i} className="flex gap-4 max-w-3xl mx-auto my-3 chat-message-enter">
+                <div className="flex-1 space-y-3 min-w-0">
+                  <div className="flex items-center gap-3">
+                    <ManusLogo showBadge={true} />
                   </div>
-                </div>
-              );
-            }
 
-            if (msg.role === 'assistant') {
-              const raw = msg.content || '';
-              const { thought, content: extracted } = extractThoughtProcess(raw);
-              const cleanedContent = cleanMessageContent(extracted || raw);
-              const parsedSources = parseSourcesFromMarkdown(cleanedContent);
-              // While a response is streaming, the hook may include an empty assistant placeholder.
-              // Do not render its Manus header alongside the dedicated thinking indicator.
-              if (!cleanedContent && !thought && isAssistantWorking) return null;
-              if (!cleanedContent && !thought && raw && (result || chartData)) return null;
+                  {thought && (
+                    <ThoughtProcess
+                      thoughtText={thought}
+                      defaultExpanded={false}
+                    />
+                  )}
 
-              const msgKey = msg.id || `msg-${i}-${cleanedContent.slice(0, 20)}`;
-              const isCompleted = Boolean(completedTypewriters[msgKey]);
-              const isLatestAssistant = i === list.length - 1 || (i === list.length - 2 && list[list.length - 1]?.role !== 'assistant');
-              const shouldAnimate = !isCompleted && isLatestAssistant;
-
-              return (
-                <div key={msg.id || i} className="flex gap-4 max-w-3xl mx-auto my-3 chat-message-enter">
-                  <div className="flex-1 space-y-3 min-w-0">
-                    <div className="flex items-center gap-3">
-                      <ManusLogo showBadge={true} />
+                  {cleanedContent ? (
+                    <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
+                      <MarkdownRenderer 
+                        content={parsedSources.cleanedContent} 
+                        animateTypewriter={shouldAnimate}
+                        onTypewriterComplete={() => handleTypewriterComplete(msgKey)}
+                        onTypewriterTick={() => {
+                          if (shouldAutoScrollRef.current && containerRef.current) {
+                            containerRef.current.scrollTop = containerRef.current.scrollHeight;
+                          }
+                        }}
+                      />
                     </div>
+                  ) : null}
 
-                    {thought && (
-                      <ThoughtProcess
-                        thoughtText={thought}
-                        defaultExpanded={false}
-                      />
-                    )}
+                  {/* Google Calendar Tool Card Detection */}
+                  {/(schedule|calendar event|meeting|add event to calendar)/i.test(cleanedContent || '') && (
+                    <WorkspaceToolCard
+                      type="calendar_event"
+                      data={{
+                        summary: 'Team Sync & Project Discussion',
+                        description: 'Scheduled via Manus Workspace AI Assistant',
+                        startDateTime: new Date(Date.now() + 86400000).toISOString(),
+                        endDateTime: new Date(Date.now() + 90000000).toISOString(),
+                      }}
+                    />
+                  )}
 
-                    {cleanedContent ? (
-                      <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
-                        <MarkdownRenderer 
-                          content={parsedSources.cleanedContent} 
-                          animateTypewriter={shouldAnimate}
-                          onTypewriterComplete={() => handleTypewriterComplete(msgKey)}
-                        />
-                      </div>
-                    ) : null}
+                  {/* Gmail Draft Tool Card Detection */}
+                  {/(draft email|email draft|save draft|gmail draft)/i.test(cleanedContent || '') && (
+                    <WorkspaceToolCard
+                      type="gmail_draft"
+                      data={{
+                        subject: 'Project Status & Follow-up',
+                        body: 'Hi Team,\n\nHere is the updated summary and action items discussed in our current session.\n\nBest regards,\nManus AI',
+                      }}
+                    />
+                  )}
 
-                    {/* Google Calendar Tool Card Detection */}
-                    {isResponseSettled && /(schedule|calendar event|meeting|add event to calendar)/i.test(cleanedContent || '') && (
-                      <WorkspaceToolCard
-                        type="calendar_event"
-                        data={{
-                          summary: 'Team Sync & Project Discussion',
-                          description: 'Scheduled via Manus Workspace AI Assistant',
-                          startDateTime: new Date(Date.now() + 86400000).toISOString(),
-                          endDateTime: new Date(Date.now() + 90000000).toISOString(),
+                  {/* Google Doc Tool Card Detection */}
+                  {/(create google doc|new google doc|doc proposal|draft document)/i.test(cleanedContent || '') && (
+                    <WorkspaceToolCard
+                      type="google_doc"
+                      data={{
+                        title: 'Workspace Document',
+                        content: cleanedContent.slice(0, 300) + '...',
+                      }}
+                    />
+                  )}
+
+                  {/* Google Sheet Tool Card Detection */}
+                  {/(create google sheet|spreadsheet proposal|new spreadsheet)/i.test(cleanedContent || '') && (
+                    <WorkspaceToolCard
+                      type="google_sheet"
+                      data={{
+                        title: 'Workspace Spreadsheet',
+                        values: [['Item', 'Category', 'Status', 'Date']],
+                      }}
+                    />
+                  )}
+
+                  {/* Google Slide Tool Card Detection */}
+                  {/(create presentation|slides presentation|new google slide)/i.test(cleanedContent || '') && (
+                    <WorkspaceToolCard
+                      type="google_slide"
+                      data={{
+                        title: 'Workspace Presentation Deck',
+                      }}
+                    />
+                  )}
+
+                  {/* Google Meet Tool Card Detection */}
+                  {/(google meet|instant meeting|video call link)/i.test(cleanedContent || '') && (
+                    <WorkspaceToolCard
+                      type="google_meet"
+                      data={{
+                        summary: 'Manus Video Meeting',
+                        startDateTime: new Date().toISOString(),
+                        endDateTime: new Date(Date.now() + 3600000).toISOString(),
+                      }}
+                    />
+                  )}
+
+                  {/* Google Task Tool Card Detection */}
+                  {/(add to-do|create task|new task list|google task)/i.test(cleanedContent || '') && (
+                    <WorkspaceToolCard
+                      type="google_task"
+                      data={{
+                        title: 'Follow-up Task',
+                        notes: 'Created via Manus Assistant',
+                      }}
+                    />
+                  )}
+
+                  {/* Google Maps Widget Detection */}
+                  {/(map of|location of|show map|google map)/i.test(cleanedContent || '') && (
+                    <GoogleMapWidgetCard locationName="Google Headquarters, Mountain View" latitude={37.4220} longitude={-122.0841} />
+                  )}
+
+                  {parsedSources.sources.length > 0 && (
+                    <SourceCitations sources={parsedSources.sources} />
+                  )}
+
+                  {cleanedContent ? (
+                    <div className="pt-0.5">
+                      <ConversationActionBar 
+                        content={cleanedContent}
+                        onRegenerate={() => {
+                          const lastUser = displayMessages.slice(0, i).reverse().find((m: any) => m.role === 'user');
+                          const promptToReRun = lastUser?.content ? cleanUserMessage(lastUser.content) : prompt;
+                          if (promptToReRun) onSubmit(promptToReRun);
                         }}
                       />
-                    )}
-
-                    {/* Gmail Draft Tool Card Detection */}
-                    {isResponseSettled && /(draft email|email draft|save draft|gmail draft)/i.test(cleanedContent || '') && (
-                      <WorkspaceToolCard
-                        type="gmail_draft"
-                        data={{
-                          subject: 'Project Status & Follow-up',
-                          body: 'Hi Team,\n\nHere is the updated summary and action items discussed in our current session.\n\nBest regards,\nManus AI',
-                        }}
-                      />
-                    )}
-
-                    {/* Google Maps Widget Detection */}
-                    {isResponseSettled && /(map of|location of|show map|google map)/i.test(cleanedContent || '') && (
-                      <GoogleMapWidgetCard locationName="Google Headquarters, Mountain View" latitude={37.4220} longitude={-122.0841} />
-                    )}
-
-                    {isResponseSettled && parsedSources.sources.length > 0 && (
-                      <SourceCitations sources={parsedSources.sources} />
-                    )}
-
-                    {cleanedContent ? (
-                      <div className="pt-0.5">
-                        <ConversationActionBar 
-                          content={cleanedContent}
-                          onRegenerate={() => {
-                            const lastUser = list.slice(0, i).reverse().find((m: any) => m.role === 'user');
-                            const promptToReRun = lastUser?.content ? cleanUserMessage(lastUser.content) : prompt;
-                            if (promptToReRun) onSubmit(promptToReRun);
-                          }}
-                        />
-                      </div>
-                    ) : null}
-                  </div>
+                    </div>
+                  ) : null}
                 </div>
-              );
-            }
-            return null;
-          });
-        })()}
+              </div>
+            );
+          }
+          return null;
+        })}
 
         {/* Steps / Task Progress */}
         {steps.length > 0 && (
@@ -811,7 +847,7 @@ export function ChatView({
           );
           const hasFiles = Boolean(result?.files && Array.isArray(result.files) && result.files.length > 0);
 
-          if (!isResponseSettled || !result || (!hasChart && !hasFiles)) return null;
+          if (!result || (!hasChart && !hasFiles)) return null;
 
           return (
             <div className="flex gap-4 max-w-3xl mx-auto my-4 animate-in fade-in slide-in-from-bottom-3 duration-500">
@@ -876,8 +912,62 @@ export function ChatView({
           </div>
         )}
 
+        {/* Error State Card with Retry & Reset Controls */}
+        {status === 'error' && !isAssistantWorking && (
+          <div className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="w-8 shrink-0 flex items-start pt-1">
+              <div className="w-8 h-8 rounded-full bg-destructive/10 text-destructive flex items-center justify-center">
+                <AlertCircle size={16} />
+              </div>
+            </div>
+            <div className="flex-1 space-y-2.5 min-w-0">
+              <div className="p-4 rounded-2xl bg-destructive/5 border border-destructive/20 text-sm">
+                <p className="font-semibold text-destructive mb-1">Execution Interrupted</p>
+                <p className="text-muted-foreground text-xs leading-relaxed">
+                  The request encountered a network timeout or provider interruption. You can retry the operation safely.
+                </p>
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const lastUser = [...displayMessages].reverse().find((m: any) => m.role === 'user');
+                      const promptToRetry = lastUser?.content ? cleanUserMessage(lastUser.content) : prompt;
+                      if (promptToRetry) onSubmit(promptToRetry);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive text-white hover:bg-destructive/90 text-xs font-medium transition-all shadow-xs cursor-pointer"
+                  >
+                    <RotateCw size={13} />
+                    <span>Retry Request</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onReset}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted text-xs font-medium transition-all cursor-pointer text-muted-foreground hover:text-foreground"
+                  >
+                    <span>Reset</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div ref={bottomRef} className="h-36 shrink-0" /> {/* Spacer for bottom input */}
       </div>
+
+      {/* Floating Scroll-to-bottom button when user scrolled up */}
+      {showScrollToBottom && (
+        <button
+          type="button"
+          onClick={() => scrollToBottom('smooth')}
+          className="absolute bottom-28 right-6 sm:right-12 z-30 flex items-center gap-2 px-3.5 py-2 rounded-full bg-primary text-primary-foreground shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 transition-all text-xs font-semibold cursor-pointer animate-in fade-in slide-in-from-bottom-2 duration-200"
+          title="Scroll to latest message"
+          aria-label="Scroll to latest message"
+        >
+          <ArrowDown size={14} className="animate-bounce" />
+          <span>Latest message</span>
+        </button>
+      )}
 
       {/* Input Area - Floating Bottom */}
       <div className="absolute bottom-3 left-0 right-0 px-4 flex flex-col items-center gap-2 z-20">
@@ -893,10 +983,11 @@ export function ChatView({
               </div>
             )}
             {attachedFile && (
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white dark:bg-card border border-border rounded-full text-xs font-medium shadow-md animate-in fade-in zoom-in duration-200">
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-white dark:bg-card border border-border rounded-full text-xs font-medium shadow-md animate-in fade-in zoom-in duration-200">
                 <FileText size={13} className="text-primary" />
-                <span className="truncate max-w-[150px]">{attachedFile.name}</span>
-                <button onClick={() => setAttachedFile(null)} className="p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full ml-1">
+                <span className="truncate max-w-[150px] font-semibold">{attachedFile.name}</span>
+                <span className="text-[10px] text-muted-foreground uppercase">({formatFileSize(attachedFile.size)})</span>
+                <button onClick={() => setAttachedFile(null)} className="p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full ml-1" title="Remove attachment">
                   <X size={10} />
                 </button>
               </div>
@@ -909,8 +1000,7 @@ export function ChatView({
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           className={cn(
-            "w-full min-w-0 max-w-3xl box-border bg-[#303030] dark:bg-[#303030] rounded-full shadow-xl border border-white/10 px-3 sm:px-6 py-3 sm:py-3.5 flex flex-row gap-2 sm:gap-4 transition-all focus-within:ring-2 focus-within:ring-primary/20 relative",
-            isLongPrompt ? "rounded-3xl items-end" : "items-center",
+            "w-full max-w-3xl bg-white dark:bg-[#1a1b1e] rounded-[1.75rem] sm:rounded-[2rem] shadow-xl border border-slate-200/80 dark:border-border/60 px-3.5 py-2.5 sm:px-4.5 sm:py-3 flex flex-col gap-1.5 sm:gap-2 transition-[box-shadow,border-color,background-color] duration-200 ease-out focus-within:ring-2 focus-within:ring-primary/20 relative gpu-accelerated",
             isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30"
           )}
         >
@@ -924,7 +1014,7 @@ export function ChatView({
           )}
 
           {isDragging && (
-            <div className="absolute inset-0 bg-slate-100/95 dark:bg-slate-900/95 border-2 border-dashed border-foreground rounded-full flex items-center justify-center gap-3 z-30 backdrop-blur-xs transition-all animate-in fade-in zoom-in duration-200 pointer-events-none">
+            <div className="absolute inset-0 bg-slate-100/95 dark:bg-slate-900/95 border-2 border-dashed border-foreground rounded-[1.75rem] sm:rounded-[2rem] flex items-center justify-center gap-3 z-30 backdrop-blur-xs transition-all animate-in fade-in zoom-in duration-200 pointer-events-none">
               <Upload className="w-5 h-5 text-foreground animate-bounce" />
               <span className="font-semibold text-sm text-foreground">Drop files, images or datasets here</span>
             </div>
@@ -940,24 +1030,10 @@ export function ChatView({
             onOpenConfigModal={(id) => setSelectedConfigConnectorId(id)}
           />
 
-          {/* Compact pill composer: attachment action */}
-          <AttachmentMenu
-            onFileSelect={handleFileSelect}
-            isThinkHarder={isThinkHarder}
-            onToggleThinkHarder={() => setIsThinkHarder(prev => !prev)}
-            activePlugins={activePlugins}
-            onTogglePlugin={handleTogglePlugin}
-            onSendMessageToChat={(text) => onSubmit(text)}
-            onOpenGoogleDrivePicker={() => setIsDrivePickerOpen(true)}
-            onOpenConnectors={() => setIsConnectorsMenuOpen(true)}
-          >
-            <button type="button" className="shrink-0 w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center text-white hover:bg-white/10 transition-colors active:scale-95" title="Add attachments or options" aria-label="Add attachments or options">
-              <Plus size={28} strokeWidth={1.8} />
-            </button>
-          </AttachmentMenu>
-          <div className="flex-1 min-w-0 flex items-center">
+          {/* Top Row: Textarea for typing message */}
+          <div className="w-full flex flex-col min-h-[26px] sm:min-h-[28px]">
             <textarea
-              ref={inputRef}
+              ref={textareaRef}
               value={input}
               onChange={(e) => handleInputChange(e as any)}
               onKeyDown={(e) => {
@@ -998,17 +1074,39 @@ export function ChatView({
                 }
               }}
               rows={1}
-              placeholder={isThinkHarder ? "Ask with deep reasoning..." : "Reply to Manus"}
-              className="w-full min-w-0 bg-transparent border-none outline-none resize-none text-white placeholder:text-white/60 text-base sm:text-lg leading-relaxed p-0 focus:ring-0 focus:outline-none min-h-[36px] max-h-[45vh] overflow-y-hidden"
+              placeholder={isThinkHarder ? "Ask with deep reasoning..." : "Type a message or ask anything..."}
+              className="w-full bg-transparent border-none outline-none resize-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-[15px] sm:text-base leading-snug sm:leading-relaxed p-0 focus:ring-0 focus:outline-none min-h-[26px] sm:min-h-[28px] max-h-[130px] custom-scrollbar"
               disabled={isLoading}
             />
           </div>
 
-          {/* Right-side controls inside the pill composer */}
-          <div className="flex-1 min-w-0 overflow-hidden">
+          {/* Bottom Row: Controls */}
+          <div className="flex items-center justify-between pt-0.5 border-t border-transparent">
+            {/* Left Controls: Circular + Button & Attached Connector Tags */}
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <AttachmentMenu
+                onFileSelect={handleFileSelect}
+                isThinkHarder={isThinkHarder}
+                onToggleThinkHarder={() => setIsThinkHarder(prev => !prev)}
+                activePlugins={activePlugins}
+                onTogglePlugin={handleTogglePlugin}
+                onSendMessageToChat={(text) => onSubmit(text)}
+                onOpenGoogleDrivePicker={() => setIsDrivePickerOpen(true)}
+                onOpenConnectors={() => setIsConnectorsMenuOpen(true)}
+              >
+                <button 
+                  type="button"
+                  className="w-8 h-8 rounded-full border border-slate-200/90 dark:border-white/15 bg-white dark:bg-[#141518] hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 shadow-2xs cursor-pointer active:scale-95"
+                  title="Add attachments or options"
+                  aria-label="Add attachments or options"
+                >
+                  <Plus size={16} className="text-slate-800 dark:text-slate-200" />
+                </button>
+              </AttachmentMenu>
+
               {/* Selected Connector Tags */}
               {activeConnectorTags.length > 0 && (
-                <div className="flex items-center gap-2 min-w-0 overflow-x-auto no-scrollbar">
+                <div className="flex items-center gap-2 shrink-0">
                   {activeConnectorTags.map((tagId) => {
                     const opt = WORKSPACE_CONNECTOR_OPTIONS.find(o => o.id === tagId) || CONNECTOR_CATALOG.find(c => c.id === tagId);
                     if (!opt) return null;
@@ -1044,30 +1142,54 @@ export function ChatView({
               )}
             </div>
 
-            <div className="flex items-center gap-1 sm:gap-3 shrink-0">
+            {/* Right Controls: Mic & Circular Send Button */}
+            <div className="flex items-center gap-2.5">
               <VoiceInputButton
-                onTranscript={(text) => setInput(prev => prev ? `${prev} ${text}` : text)}
-                className="w-9 h-9 sm:w-10 sm:h-10 rounded-full hover:bg-white/10 transition-colors flex items-center justify-center text-white cursor-pointer"
-                size={23}
+                onListeningStateChange={(listening) => {
+                  if (listening) {
+                    speechBaseInputRef.current = input.trim();
+                  }
+                }}
+                onTranscript={(dictatedText) => {
+                  const base = speechBaseInputRef.current;
+                  setInput(base ? `${base} ${dictatedText}` : dictatedText);
+                }}
+                onAutoSubmit={(finalText) => {
+                  if (finalText.trim()) {
+                    onSubmit(finalText.trim());
+                    setInput('');
+                  }
+                }}
+                className="w-8 h-8 sm:w-8.5 sm:h-8.5 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer"
+                size={18}
               />
               <button 
                 type="button"
-                onClick={isLoading || status === 'running' ? onStop : handleSend}
-                disabled={!isLoading && status !== 'running' && (!input.trim() && !attachedFile && activeConnectorTags.length === 0)}
+                onClick={() => {
+                  if (isLoading || status === 'running') {
+                    if (onStop) {
+                      onStop();
+                      toast.info('Response stopped');
+                    }
+                  } else {
+                    handleSend();
+                  }
+                }}
+                disabled={(!isLoading && status !== 'running') && (!input.trim() && !attachedFile && activeConnectorTags.length === 0)}
                 className={cn(
-                  "w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center transition-all shadow-2xs",
+                  "w-8 h-8 sm:w-8.5 sm:h-8.5 rounded-full flex items-center justify-center transition-all shadow-2xs",
                   isLoading || status === 'running'
-                    ? "bg-white text-black dark:bg-white dark:text-black cursor-pointer hover:scale-105 active:scale-95"
+                    ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md cursor-pointer"
                     : (input.trim() || attachedFile || activeConnectorTags.length > 0)
-                      ? "bg-white text-black hover:scale-105 active:scale-95 shadow-md cursor-pointer"
-                      : "bg-white/15 text-white/45 cursor-not-allowed"
+                      ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md cursor-pointer"
+                      : "bg-[#e2e8f0]/80 dark:bg-muted text-slate-400 dark:text-muted-foreground cursor-not-allowed"
                 )}
-                title={isLoading || status === 'running' ? "Stop generating" : "Send message"}
-                aria-label={isLoading || status === 'running' ? "Stop generating" : "Send message"}
+                title={isLoading || status === 'running' ? "Stop response" : "Send message"}
+                aria-label={isLoading || status === 'running' ? "Stop response" : "Send message"}
               >
                 {isLoading || status === 'running'
-                  ? <Square size={15} fill="currentColor" strokeWidth={3.5} />
-                  : <ArrowUp size={20} strokeWidth={3} />}
+                  ? <Square size={11} fill="currentColor" strokeWidth={2.5} />
+                  : <ArrowUp size={18} className="font-bold" />}
               </button>
             </div>
           </div>

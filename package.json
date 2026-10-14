@@ -7,6 +7,7 @@
     "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 3000",
+    "test": "vitest run",
     "lint": "tsc --noEmit",
     "android:sync": "npm run build && cap sync android",
     "android:add": "cap add android",
@@ -14,8 +15,10 @@
     "android:debug": "npm run build && cap sync android && cd android && ./gradlew assembleDebug"
   },
   "devDependencies": {
+    "@firebase/eslint-plugin-security-rules": "^0.0.2",
     "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.11",
+    "eslint": "^10.12.0",
     "typescript": "~5.9.3",
     "vite": "^7.2.4",
     "@capacitor/cli": "^7.4.3"

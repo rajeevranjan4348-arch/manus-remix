@@ -17,6 +17,32 @@ export interface PermissionsStatus {
 /**
  * Query current permission status across supported browser APIs
  */
+export async function checkMicrophonePermissionState(): Promise<PermissionState> {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return 'unsupported';
+  if (!window.isSecureContext) return 'denied';
+
+  if (navigator.permissions && navigator.permissions.query) {
+    try {
+      const mic = await navigator.permissions.query({ name: 'microphone' as any });
+      return mic.state as PermissionState;
+    } catch {}
+  }
+
+  // Fallback: check device labels via enumerateDevices
+  if (navigator.mediaDevices?.enumerateDevices) {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const hasGrantedAudio = devices.some(d => d.kind === 'audioinput' && d.label !== '');
+      if (hasGrantedAudio) return 'granted';
+    } catch {}
+  }
+
+  return 'prompt';
+}
+
+/**
+ * Query current permission status across supported browser APIs
+ */
 export async function getPermissionsStatus(): Promise<PermissionsStatus> {
   const result: PermissionsStatus = {
     microphone: 'prompt',
@@ -49,6 +75,21 @@ export async function getPermissionsStatus(): Promise<PermissionsStatus> {
     try {
       const cam = await navigator.permissions.query({ name: 'camera' as any });
       result.camera = cam.state as PermissionState;
+    } catch {}
+  }
+
+  // Fallback: Check device labels via enumerateDevices if query wasn't granted
+  if (navigator.mediaDevices?.enumerateDevices) {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const hasGrantedAudio = devices.some(d => d.kind === 'audioinput' && d.label !== '');
+      if (hasGrantedAudio) {
+        result.microphone = 'granted';
+      }
+      const hasGrantedVideo = devices.some(d => d.kind === 'videoinput' && d.label !== '');
+      if (hasGrantedVideo) {
+        result.camera = 'granted';
+      }
     } catch {}
   }
 
@@ -157,7 +198,46 @@ export async function requestMicrophonePermission(): Promise<boolean> {
 }
 
 /**
- * Request camera access (prompts browser permission dialog)
+ * Request camera access (prompts browser permission dialog and returns boolean)
+ */
+export async function requestCameraAccess(): Promise<boolean> {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+    return false;
+  }
+
+  if (!window.isSecureContext) {
+    console.warn('[Camera Permission] A secure HTTPS context is required.');
+    return false;
+  }
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    console.warn('[Camera Permission] getUserMedia is unavailable in this browser or embedded frame.');
+    return false;
+  }
+
+  let stream: MediaStream | null = null;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+    });
+    return stream.getVideoTracks().some((track) => track.readyState === 'live');
+  } catch (error) {
+    const name = error instanceof DOMException ? error.name : '';
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
+      console.warn('[Camera Permission] Access was denied. Check browser site permissions and camera settings.');
+    } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+      console.warn('[Camera Permission] No camera device was found.');
+    } else {
+      console.warn('[Camera Permission] Could not obtain camera access:', error);
+    }
+    return false;
+  } finally {
+    stream?.getTracks().forEach((track) => track.stop());
+  }
+}
+
+/**
+ * Request camera access (prompts browser permission dialog and returns MediaStream)
  */
 export async function requestCameraPermission(): Promise<MediaStream | null> {
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {

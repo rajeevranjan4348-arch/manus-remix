@@ -24,21 +24,69 @@ const PREMIUM_VOICE_KEYWORDS = [
   'neural',
   'multilingual',
   'google us english',
-  'google uk english female',
   'google uk english male',
-  'samantha',
-  'karen',
+  'google uk english female',
+  'guy',
+  'christopher',
+  'ryan',
+  'eric',
   'daniel',
   'oliver',
+  'alex',
+  'samantha',
+  'karen',
   'ava',
   'serena',
   'rachel',
-  'guy',
   'jenny',
   'aria',
   'zoe',
   'microsoft',
 ];
+
+// Specific keywords that identify natural and high-fidelity male voices across browsers and OSes
+const MALE_VOICE_KEYWORDS = [
+  'microsoft guy online (natural)',
+  'microsoft christopher online (natural)',
+  'microsoft ryan online (natural)',
+  'microsoft eric online (natural)',
+  'microsoft guy',
+  'microsoft christopher',
+  'microsoft david',
+  'microsoft mark',
+  'google uk english male',
+  'google us english male',
+  'daniel (enhanced)',
+  'daniel (premium)',
+  'daniel',
+  'oliver (enhanced)',
+  'oliver',
+  'alex',
+  'tom (enhanced)',
+  'tom',
+  'evan (enhanced)',
+  'evan',
+  'nathan (enhanced)',
+  'nathan',
+  'arthur',
+  'george',
+  'rishi',
+  'lee',
+  'guy',
+  'en-us-x-sfg#male',
+  'en-us-x-iol#male',
+  'en-us-x-tpd#male',
+  'male',
+];
+
+/**
+ * Checks if a voice matches any male characteristics
+ */
+export function isMaleVoice(voice: SpeechSynthesisVoice): boolean {
+  const name = voice.name.toLowerCase();
+  if (name.includes('female')) return false;
+  return MALE_VOICE_KEYWORDS.some(kw => name.includes(kw));
+}
 
 /**
  * Strips code blocks, markdown punctuation, links, headers, and internal tags
@@ -107,13 +155,48 @@ export function getBestHumanVoice(preferredPersona?: string): SpeechSynthesisVoi
   const englishVoices = voices.filter(v => v.lang.startsWith('en'));
   const candidatePool = englishVoices.length > 0 ? englishVoices : voices;
 
-  const persona = (preferredPersona || getSettings().voicePersona || 'nova').toLowerCase();
+  const persona = (preferredPersona || getSettings().voicePersona || 'marcus').toLowerCase();
 
   // Specific gender / tone preferences based on persona
-  const wantsMale = persona === 'onyx' || persona === 'echo';
+  const wantsMale = persona === 'marcus' || persona === 'onyx' || persona === 'echo' || persona === 'tintin' || persona === 'guy' || persona === 'daniel' || persona === 'oliver';
   const wantsFemale = persona === 'nova' || persona === 'shimmer' || persona === 'alloy';
 
-  // 1. Try to find a premium matching voice for persona
+  // 1. If male voice is requested, prioritize natural human male voices
+  if (wantsMale) {
+    // 1a. Try to match specific persona names first (e.g. Guy, Christopher, Daniel, Oliver, Alex)
+    if (persona === 'marcus' || persona === 'guy') {
+      const match = candidatePool.find(v => {
+        const name = v.name.toLowerCase();
+        return (name.includes('guy') || name.includes('christopher') || name.includes('daniel') || name.includes('ryan')) && !name.includes('female');
+      });
+      if (match) return match;
+    }
+    if (persona === 'onyx') {
+      const match = candidatePool.find(v => {
+        const name = v.name.toLowerCase();
+        return (name.includes('david') || name.includes('alex') || name.includes('tom') || name.includes('mark')) && !name.includes('female');
+      });
+      if (match) return match;
+    }
+    if (persona === 'echo' || persona === 'tintin') {
+      const match = candidatePool.find(v => {
+        const name = v.name.toLowerCase();
+        return (name.includes('oliver') || name.includes('evan') || name.includes('nathan') || name.includes('george')) && !name.includes('female');
+      });
+      if (match) return match;
+    }
+
+    // 1b. Match any high quality natural/neural male voice from the keywords
+    for (const kw of MALE_VOICE_KEYWORDS) {
+      const match = candidatePool.find(v => {
+        const name = v.name.toLowerCase();
+        return name.includes(kw) && !name.includes('female');
+      });
+      if (match) return match;
+    }
+  }
+
+  // 2. Try to find a premium matching female voice if female persona requested
   if (wantsFemale) {
     const femaleMatch = candidatePool.find(v => {
       const name = v.name.toLowerCase();
@@ -125,23 +208,13 @@ export function getBestHumanVoice(preferredPersona?: string): SpeechSynthesisVoi
     if (femaleMatch) return femaleMatch;
   }
 
-  if (wantsMale) {
-    const maleMatch = candidatePool.find(v => {
-      const name = v.name.toLowerCase();
-      return (
-        name.includes('male') || name.includes('daniel') || name.includes('oliver') || name.includes('guy') || name.includes('alex') || name.includes('george')
-      );
-    });
-    if (maleMatch) return maleMatch;
-  }
-
-  // 2. Search for any high quality / natural / neural voices
+  // 3. Search for any high quality / natural / neural voices
   for (const keyword of PREMIUM_VOICE_KEYWORDS) {
     const match = candidatePool.find(v => v.name.toLowerCase().includes(keyword));
     if (match) return match;
   }
 
-  // 3. Prefer non-local service or default english voice
+  // 4. Default english voice
   const defaultEn = candidatePool.find(v => v.default) || candidatePool[0];
   return defaultEn || voices[0] || null;
 }
@@ -165,24 +238,52 @@ export function speakCleanHumanVoice(text: string, options: SpeakOptions = {}): 
   const userSettings = getSettings();
   const utterance = new SpeechSynthesisUtterance(cleaned);
 
+  // Assign best human voice first to inspect its characteristics
+  const voice = getBestHumanVoice(options.voicePersona);
+  if (voice) {
+    utterance.voice = voice;
+  }
+
+  const voiceIsExplicitMale = voice ? isMaleVoice(voice) : false;
+  const persona = (options.voicePersona || userSettings.voicePersona || 'marcus').toLowerCase();
+
+  let personaPitchMultiplier = 1.0;
+  let personaRateMultiplier = 1.0;
+
+  if (persona === 'marcus') {
+    // Warm, articulate, refined human male voice
+    personaPitchMultiplier = voiceIsExplicitMale ? 0.95 : 0.86;
+    personaRateMultiplier = 0.98;
+  } else if (persona === 'onyx') {
+    // Deep, resonant, rich baritone human male voice
+    personaPitchMultiplier = voiceIsExplicitMale ? 0.88 : 0.80;
+    personaRateMultiplier = 0.96;
+  } else if (persona === 'echo') {
+    // Smooth, warm conversational human male voice
+    personaPitchMultiplier = voiceIsExplicitMale ? 0.93 : 0.87;
+    personaRateMultiplier = 1.0;
+  } else if (persona === 'tintin' || persona === 'guy') {
+    // Crisp, natural young male voice
+    personaPitchMultiplier = voiceIsExplicitMale ? 0.98 : 0.90;
+    personaRateMultiplier = 1.02;
+  } else if (persona === 'shimmer') {
+    personaPitchMultiplier = 1.08;
+  } else if (persona === 'nova') {
+    personaPitchMultiplier = 1.02;
+  }
+
   // Maximum loud and clean volume (scale 0.0 to 1.0)
   utterance.volume = options.volume !== undefined ? options.volume : 1.0;
 
-  // Natural human cadence (0.95 - 1.05 sounds most natural and pleasant)
+  // Natural human cadence
   const defaultRate = userSettings.speechSpeed || 1.0;
-  utterance.rate = options.rate !== undefined ? options.rate : defaultRate;
+  const targetRate = (options.rate !== undefined ? options.rate : defaultRate) * personaRateMultiplier;
+  utterance.rate = Math.max(0.7, Math.min(1.6, targetRate));
 
   // Human-sounding natural pitch
-  // Base pitch comes from user settings or options (0.5 to 1.5)
   const basePitch = options.pitch !== undefined 
     ? options.pitch 
     : (userSettings.voicePitch !== undefined ? userSettings.voicePitch : 1.0);
-
-  const persona = (options.voicePersona || userSettings.voicePersona || 'nova').toLowerCase();
-  let personaPitchMultiplier = 1.0;
-  if (persona === 'onyx') personaPitchMultiplier = 0.92; // Deeper human pitch
-  if (persona === 'shimmer') personaPitchMultiplier = 1.06; // Brighter human pitch
-  if (persona === 'echo') personaPitchMultiplier = 0.96; // Smooth resonance
 
   // Audio filter optimization: clamp pitch within natural human formants (0.5 to 1.6)
   const calculatedPitch = Math.max(0.5, Math.min(1.6, basePitch * personaPitchMultiplier));
@@ -190,14 +291,7 @@ export function speakCleanHumanVoice(text: string, options: SpeakOptions = {}): 
 
   // Audio processing filter for crisp pronunciation and background noise reduction
   if (userSettings.enableAudioFilter) {
-    // With audio filter enabled, remove micro-pauses and clean punctuation breathing
     utterance.volume = 1.0;
-  }
-
-  // Assign best human voice
-  const voice = getBestHumanVoice(options.voicePersona);
-  if (voice) {
-    utterance.voice = voice;
   }
 
   utterance.onstart = () => {

@@ -1,11 +1,12 @@
 {
-  "projectId": "eternal-envoy-cnzsc",
-  "appId": "1:1056255463247:web:67bcf40f82eb2f82053f3a",
-  "apiKey": "AIzaSyAD66mlueNPn8xWg__kL-cvMpsq3xucPx0",
-  "authDomain": "eternal-envoy-cnzsc.firebaseapp.com",
-  "storageBucket": "eternal-envoy-cnzsc.firebasestorage.app",
-  "messagingSenderId": "1056255463247",
+  "projectId": "project-7098f552-8286-488d-a37",
+  "appId": "1:733866730436:web:c2a5447f0e4ccf49c87a91",
+  "apiKey": "AIzaSyDm_-p8U67WDqYbFKGSjwPmRQFO6js5boY",
+  "authDomain": "project-7098f552-8286-488d-a37.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-manusremix-982bbd9c-b93f-476a-8054-fcc42f594ade",
+  "storageBucket": "project-7098f552-8286-488d-a37.firebasestorage.app",
+  "messagingSenderId": "733866730436",
   "measurementId": "",
-  "oAuthClientId": "1056255463247-qq35u4rossckt4dlblq8m4t7l9c8ap8p.apps.googleusercontent.com",
+  "oAuthClientId": "733866730436-8m4u8is0qkdbku5tdsqm7p7m83o90kcv.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

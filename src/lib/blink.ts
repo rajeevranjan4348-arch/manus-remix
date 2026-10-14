@@ -8,6 +8,7 @@ const TASKS_STORAGE_KEY = 'manus_agent_tasks';
 
 function getStoredTasks(): any[] {
   try {
+    if (typeof localStorage === 'undefined') return [];
     const raw = localStorage.getItem(TASKS_STORAGE_KEY);
     return raw ? JSON.parse(raw) : [];
   } catch {
@@ -17,6 +18,7 @@ function getStoredTasks(): any[] {
 
 function saveStoredTasks(tasks: any[]): void {
   try {
+    if (typeof localStorage === 'undefined') return;
     localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks));
   } catch (e) {
     console.warn('Failed to save tasks to localStorage:', e);
@@ -71,8 +73,8 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
             prompt: lastUserMsg,
             systemInstruction: agentConfig?.system,
             model: (() => {
-              const m = (agentConfig?.model?.replace(/^google\//, '') || 'gemini-2.5-flash').trim();
-              return m === 'gemini-3-flash' ? 'gemini-2.5-flash' : m;
+              const m = (agentConfig?.model?.replace(/^google\//, '') || 'gemini-3.8-flash').trim();
+              return m === 'gemini-2.5-flash' || m === 'gemini-3-flash' || m === 'gemini-3.0-flash' ? 'gemini-3.8-flash' : m;
             })(),
             thinkHarder: Boolean(options.thinkHarder),
           }),
@@ -153,7 +155,7 @@ if (Agent && Agent.prototype) {
       finishReason: 'stop',
       steps: [],
       usage: { inputTokens: 0, outputTokens: 0 },
-      _billing: { model: this.config?.model || 'google/gemini-2.5-flash', creditsCharged: 0, costUSD: 0 },
+      _billing: { model: this.config?.model || 'google/gemini-3.8-flash', creditsCharged: 0, costUSD: 0 },
     };
   };
 }
@@ -182,7 +184,7 @@ if (typeof window !== 'undefined' && window.fetch) {
             text: 'Analysis generated successfully.',
             steps: [],
             usage: { inputTokens: 0, outputTokens: 0 },
-            _billing: { model: 'google/gemini-2.5-flash', creditsCharged: 0, costUSD: 0 }
+            _billing: { model: 'google/gemini-3.8-flash', creditsCharged: 0, costUSD: 0 }
           }
         }), {
           headers: { 'Content-Type': 'application/json' },
@@ -458,6 +460,9 @@ export const blink: any = new Proxy(baseClient || {}, {
                 return () => {};
               };
             }
+            if (authProp === 'me') {
+              return async () => null;
+            }
             return () => {
               throw new Error('Blink authentication is unavailable. Configure VITE_BLINK_PROJECT_ID and VITE_BLINK_PUBLISHABLE_KEY.');
             };
@@ -466,6 +471,15 @@ export const blink: any = new Proxy(baseClient || {}, {
       }
       return new Proxy(realAuth, {
         get(authTarget, authProp, receiver) {
+          if (authProp === 'me') {
+            return async () => {
+              try {
+                return await authTarget.me();
+              } catch {
+                return null;
+              }
+            };
+          }
           const value = Reflect.get(authTarget, authProp, receiver);
           return typeof value === 'function' ? value.bind(authTarget) : value;
         },

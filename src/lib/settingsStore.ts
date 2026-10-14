@@ -28,6 +28,8 @@ export const DEFAULT_SETTINGS: UserSettings = {
   enableCodeSandbox: true,
   deepResearchMode: false,
   streamingSpeed: 'fast',
+  openRouterApiKey: '',
+  workModeApiKey: '',
 
   // Personalization
   userName: '',
@@ -37,7 +39,8 @@ export const DEFAULT_SETTINGS: UserSettings = {
   responseTone: 'balanced',
 
   // Voice & Audio
-  voicePersona: 'nova',
+  voicePersona: 'marcus',
+  voiceInputLanguage: 'en-US',
   speechSpeed: 1.0,
   voicePitch: 1.0,
   enableAudioFilter: true,
@@ -53,6 +56,9 @@ export const DEFAULT_SETTINGS: UserSettings = {
 };
 
 export function getSettings(): UserSettings {
+  if (typeof localStorage === 'undefined') {
+    return { ...DEFAULT_SETTINGS };
+  }
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return { ...DEFAULT_SETTINGS };
@@ -62,7 +68,6 @@ export function getSettings(): UserSettings {
       ...parsed,
     };
   } catch (err) {
-    console.error('Failed to load settings:', err);
     return { ...DEFAULT_SETTINGS };
   }
 }
@@ -101,12 +106,20 @@ export function resetSettings(): UserSettings {
     localStorage.removeItem(SETTINGS_KEY);
     const defaults = { ...DEFAULT_SETTINGS };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(defaults));
-    window.dispatchEvent(new CustomEvent('manus_settings_updated', { detail: defaults }));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('manus_settings_updated', { detail: defaults }));
+    }
     return defaults;
   } catch (err) {
     return { ...DEFAULT_SETTINGS };
   }
 }
+
+export const settingsStore = {
+  get: getSettings,
+  save: saveSettings,
+  reset: resetSettings,
+};
 
 /**
  * Play gentle synthesized chime using Web Audio API (zero audio file dependencies)

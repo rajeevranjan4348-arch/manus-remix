@@ -32,6 +32,8 @@ import { speakCleanHumanVoice, stopCleanSpeech } from '@/lib/speechSynthesis';
 import { matchVoiceCommand, executeOpenUrl, executeDeviceCommand } from '@/lib/voiceCommands';
 import { extractWeatherQuery, fetchWeatherByCity } from '@/lib/weatherService';
 import { requestMicrophonePermission } from '@/lib/permissionsManager';
+import { getSettings, saveSettings } from '@/lib/settingsStore';
+import { MicrophonePermissionModal } from './MicrophonePermissionModal';
 
 export interface VoiceMessage {
   id: string;
@@ -54,10 +56,12 @@ interface VoiceCallModalProps {
 }
 
 const DEFAULT_VOICES = [
-  { id: 'tintin', name: 'Tintin (Natural)' },
-  { id: 'nova', name: 'Nova (Warm)' },
+  { id: 'marcus', name: 'Marcus (Human Male)' },
+  { id: 'onyx', name: 'Onyx (Deep Male)' },
+  { id: 'echo', name: 'Echo (Smooth Male)' },
+  { id: 'tintin', name: 'Tintin (Natural Male)' },
+  { id: 'nova', name: 'Nova (Warm Female)' },
   { id: 'alloy', name: 'Alloy (Balanced)' },
-  { id: 'echo', name: 'Echo (Calm)' },
   { id: 'shimmer', name: 'Shimmer (Energetic)' },
 ];
 
@@ -87,7 +91,9 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
 
   // Settings State
   const [speechRate, setSpeechRate] = useState('1.0');
-  const [selectedVoice, setSelectedVoice] = useState('tintin');
+  const [selectedVoice, setSelectedVoice] = useState<string>(() => {
+    return getSettings().voicePersona || 'marcus';
+  });
   const [openingEnabled, setOpeningEnabled] = useState(true);
   const [voiceInterruptEnabled, setVoiceInterruptEnabled] = useState(true);
   const [keyboardEnabled, setKeyboardEnabled] = useState(true);
@@ -111,6 +117,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
   });
 
   // Speech Recognition & Synthesis references
+  const [showPermissionModal, setShowPermissionModal] = useState(false);
   const recognitionRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesis | null>(null);
   const isListeningRef = useRef(false);
@@ -164,11 +171,11 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
           rec.continuous = true;
           rec.interimResults = true;
           rec.maxAlternatives = 1;
-          // Match the device/browser language (e.g. hi-IN or en-IN) instead of
-          // forcing en-US, which can prevent recognition of the user's speech.
-          rec.lang = typeof navigator !== 'undefined' && navigator.language
-            ? navigator.language
-            : 'en-IN';
+          const settings = getSettings();
+          const preferredLang = settings.voiceInputLanguage || 'auto';
+          rec.lang = preferredLang === 'auto'
+            ? (typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en-IN')
+            : preferredLang;
 
           rec.onstart = () => {
             isRecognitionStartingRef.current = false;
@@ -277,12 +284,20 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
           setCallStatus('paused');
           isCallPausedRef.current = true;
           setStatusText('Allow microphone access to start voice chat');
+          setShowPermissionModal(true);
           if (!window.isSecureContext) {
             toast.error('Microphone access requires HTTPS. Open Manus using its secure https:// address.');
           } else if (!navigator.mediaDevices?.getUserMedia) {
             toast.error('This browser or embedded preview does not support microphone access. Open Manus directly in Chrome.');
           } else {
-            toast.error('Microphone access was blocked. In Chrome, open Site settings → Microphone → Allow, then reload Manus and try again.');
+            toast.error('Microphone access was blocked.', {
+              description: 'In Chrome, open Site settings → Microphone → Allow, then try again.',
+              action: {
+                label: 'Unblock Guide 🎙️',
+                onClick: () => setShowPermissionModal(true),
+              },
+              duration: 8000,
+            });
           }
           return;
         }
@@ -360,9 +375,14 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
       let id = voiceTaskIdRef.current;
 
       if (!id) {
-        const user = await blink.auth.me();
+        let activeUser = null;
+        try {
+          activeUser = await blink.auth.me();
+        } catch {
+          activeUser = null;
+        }
         const task = await (blink.db as any).tasks.create({
-          userId: user?.id || 'usr_manus_default',
+          userId: activeUser?.id || 'usr_manus_default',
           prompt: title,
           outputFormat: 'report',
           chartType: 'auto',
@@ -1066,9 +1086,21 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
                 <Mic size={16} className="text-white/60" />
                 <span>Voice playback</span>
               </div>
-              <Select value={selectedVoice} onValueChange={setSelectedVoice}>
-                <SelectTrigger className="w-28 h-8 bg-white/5 border-white/10 text-xs text-white rounded-xl">
-                  <SelectValue placeholder="Tintin" />
+              <Select 
+                value={selectedVoice} 
+                onValueChange={(val) => {
+                  setSelectedVoice(val);
+                  saveSettings({ voicePersona: val as any });
+                  const vName = DEFAULT_VOICES.find(v => v.id === val)?.name || val;
+                  speakCleanHumanVoice(`Voice changed to ${vName}.`, {
+                    voicePersona: val,
+                    rate: parseFloat(speechRate) || 1.0,
+                    volume: 1.0,
+                  });
+                }}
+              >
+                <SelectTrigger className="w-36 h-8 bg-white/5 border-white/10 text-xs text-white rounded-xl">
+                  <SelectValue placeholder="Marcus" />
                 </SelectTrigger>
                 <SelectContent className="bg-[#1C1E22] border-white/10 text-white">
                   {DEFAULT_VOICES.map(v => (
@@ -1153,6 +1185,19 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
           </div>
         </div>
       )}
+
+      <MicrophonePermissionModal
+        isOpen={showPermissionModal}
+        onClose={() => setShowPermissionModal(false)}
+        onPermissionGranted={() => {
+          setShowPermissionModal(false);
+          isCallPausedRef.current = false;
+          hasMicPermissionRef.current = true;
+          setCallStatus('listening');
+          setStatusText('Listening... speak now');
+          startRecognitionSafely();
+        }}
+      />
     </div>
   );
 }

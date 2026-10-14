@@ -10,6 +10,7 @@ import { SettingsModal } from './components/settings/SettingsModal';
 import { useAgentTask } from './hooks/useAgentTask';
 import { useWebsiteBuilder } from './hooks/useWebsiteBuilder';
 import { BlinkProvider, BlinkAuthProvider, useBlinkAuth } from '@blinkdotnew/react';
+import { FirebaseProvider } from './context/FirebaseContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { Toaster } from './components/ui/sonner';
 import { blink } from './lib/blink';
@@ -202,13 +203,13 @@ function AppContent() {
   }
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden">
+    <div className="flex h-screen w-full max-w-full bg-background overflow-hidden">
       <Sidebar 
         isOpen={isSidebarOpen} 
         onToggle={() => setIsSidebarOpen(!isSidebarOpen)} 
         onNewTask={handleReset}
         onOpenHistory={() => setIsHistoryOpen(true)}
-        onOpenSettings={() => { setSettingsInitialTab('general'); setIsSettingsOpen(true); }}
+        onOpenSettings={() => setIsSettingsOpen(true)}
         activeTaskId={location.pathname.startsWith('/task/') ? location.pathname.split('/')[2] : undefined}
       />
       <div className="flex-1 flex flex-col min-w-0">
@@ -217,33 +218,38 @@ function AppContent() {
             onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
             onOpenHistory={() => setIsHistoryOpen(true)} 
             onNewTask={handleReset}
-            onOpenSettings={() => { setSettingsInitialTab('general'); setIsSettingsOpen(true); }}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+            onExport={agentTask.exportToPDF}
             showNewTask={hasSentMessage}
           />
         )}
-        <main className="flex-1 overflow-hidden relative">
+        <main className="flex-1 overflow-hidden relative transition-all duration-300 ease-out">
           {isWebsiteActive ? (
-            <WebsiteBuilderView
-              websiteName={websiteTask?.websiteName || 'Website'}
-              steps={websiteSteps}
-              status={websiteStatus === 'idle' ? 'running' : websiteStatus as any}
-              onReset={handleReset}
-              previewUrl={previewUrl}
-              isLoading={isBuilding || isInitializing}
-            />
-          ) : (
-            <Routes>
-              <Route path="/" element={<Home onStartTask={handleStartTask} />} />
-              <Route 
-                path="/task/:taskId" 
-                element={
-                  <TaskView 
-                    useAgentTaskResult={agentTask} 
-                    onReset={handleReset} 
-                  />
-                } 
+            <div className="w-full h-full animate-in fade-in-0 slide-in-from-bottom-2 duration-350 ease-out">
+              <WebsiteBuilderView
+                websiteName={websiteTask?.websiteName || 'Website'}
+                steps={websiteSteps}
+                status={websiteStatus === 'idle' ? 'running' : websiteStatus as any}
+                onReset={handleReset}
+                previewUrl={previewUrl}
+                isLoading={isBuilding || isInitializing}
               />
-            </Routes>
+            </div>
+          ) : (
+            <div key={location.pathname} className="w-full h-full animate-in fade-in-0 slide-in-from-bottom-2 duration-350 ease-out">
+              <Routes>
+                <Route path="/" element={<Home onStartTask={handleStartTask} />} />
+                <Route 
+                  path="/task/:taskId" 
+                  element={
+                    <TaskView 
+                      useAgentTaskResult={agentTask} 
+                      onReset={handleReset} 
+                    />
+                  } 
+                />
+              </Routes>
+            </div>
           )}
         </main>
       </div>
@@ -273,16 +279,18 @@ function AppContent() {
 export default function App() {
   return (
     <ThemeProvider>
-      <BlinkProvider 
-        projectId={PROJECT_ID} 
-        publishableKey={PUBLISHABLE_KEY}
-      >
-        <BlinkAuthProvider>
-          <BrowserRouter>
-            <AppContent />
-          </BrowserRouter>
-        </BlinkAuthProvider>
-      </BlinkProvider>
+      <FirebaseProvider>
+        <BlinkProvider 
+          projectId={PROJECT_ID} 
+          publishableKey={PUBLISHABLE_KEY}
+        >
+          <BlinkAuthProvider>
+            <BrowserRouter>
+              <AppContent />
+            </BrowserRouter>
+          </BlinkAuthProvider>
+        </BlinkProvider>
+      </FirebaseProvider>
     </ThemeProvider>
   );
 }

@@ -35,10 +35,14 @@ import {
   Lock,
   Radio,
   ExternalLink,
-  Info
+  Info,
+  Cloud,
+  MessageSquare,
+  Layers
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getCurrentUser, getAccessToken, googleSignIn } from '@/lib/workspaceAuth';
+import { getConnectorState, startOAuthFlow, disconnectConnector, handleConnectorError } from '@/lib/connectors';
 import { toast } from 'sonner';
 
 export interface ConnectorConfigModalProps {
@@ -248,7 +252,104 @@ export const CONNECTOR_METADATA_MAP: Record<string, ConnectorMetadataDef> = {
     docOverview: 'Connects to GitHub REST API to summarize open pull requests, review issue discussions, and inspect repository commits.',
     samplePrompts: [
       "List open pull requests requiring review in my repository",
-      "Summarize recent commits pushed to main branch"
+      "Summarize recent commits pushed to main branch",
+      "Search my GitHub repositories for authentication bugs"
+    ]
+  },
+  notion: {
+    id: 'notion',
+    tag: '@notion',
+    name: 'Notion',
+    desc: 'Search workspace pages, databases, and notes in Notion.',
+    category: 'Third Party',
+    icon: BookOpen,
+    colorClass: 'text-stone-600 dark:text-stone-300',
+    bgClass: 'bg-stone-500/10',
+    borderClass: 'border-stone-500/30',
+    docOverview: 'Accesses Notion workspace pages, documents, and database entries to summarize notes and answer questions.',
+    samplePrompts: [
+      "Find the latest document in Notion",
+      "Search Notion for project roadmap and notes"
+    ]
+  },
+  slack: {
+    id: 'slack',
+    tag: '@slack',
+    name: 'Slack',
+    desc: 'Search Slack messages, channels, and post workspace updates.',
+    category: 'Third Party',
+    icon: MessageSquare,
+    colorClass: 'text-emerald-600',
+    bgClass: 'bg-emerald-500/10',
+    borderClass: 'border-emerald-500/30',
+    docOverview: 'Searches channel messages and team discussions in Slack to summarize deployment logs and team updates.',
+    samplePrompts: [
+      "Search Slack for messages about deployment",
+      "Summarize recent discussions in #general"
+    ]
+  },
+  onedrive: {
+    id: 'onedrive',
+    tag: '@onedrive',
+    name: 'Microsoft OneDrive',
+    desc: 'Access and search files stored in Microsoft OneDrive.',
+    category: 'Third Party',
+    icon: Cloud,
+    colorClass: 'text-sky-600',
+    bgClass: 'bg-sky-500/10',
+    borderClass: 'border-sky-500/30',
+    docOverview: 'Finds documents, spreadsheets, and files saved in Microsoft OneDrive.',
+    samplePrompts: [
+      "Search OneDrive for Q3 budget report",
+      "Find my latest spreadsheet in OneDrive"
+    ]
+  },
+  outlook: {
+    id: 'outlook',
+    tag: '@outlook',
+    name: 'Microsoft Outlook',
+    desc: 'Search Outlook emails, drafts, and calendar appointments.',
+    category: 'Third Party',
+    icon: Mail,
+    colorClass: 'text-blue-600',
+    bgClass: 'bg-blue-600/10',
+    borderClass: 'border-blue-600/30',
+    docOverview: 'Searches Microsoft Outlook email messages and appointments.',
+    samplePrompts: [
+      "Search my Outlook emails for project updates",
+      "Summarize unread Outlook messages"
+    ]
+  },
+  dropbox: {
+    id: 'dropbox',
+    tag: '@dropbox',
+    name: 'Dropbox',
+    desc: 'Search files, PDFs, and folders in Dropbox.',
+    category: 'Third Party',
+    icon: HardDrive,
+    colorClass: 'text-indigo-600',
+    bgClass: 'bg-indigo-600/10',
+    borderClass: 'border-indigo-600/30',
+    docOverview: 'Accesses Dropbox cloud storage to locate documents, PDFs, and shared folders.',
+    samplePrompts: [
+      "Find design spec PDF in Dropbox",
+      "Search Dropbox for team assets"
+    ]
+  },
+  linear: {
+    id: 'linear',
+    tag: '@linear',
+    name: 'Linear',
+    desc: 'Track software issues, sprints, and feature roadmaps in Linear.',
+    category: 'Third Party',
+    icon: Layers,
+    colorClass: 'text-purple-600',
+    bgClass: 'bg-purple-600/10',
+    borderClass: 'border-purple-600/30',
+    docOverview: 'Queries software bug tickets, active sprint tasks, and project roadmaps in Linear.',
+    samplePrompts: [
+      "Check Linear issues for sprint bugs",
+      "Search Linear tickets assigned to my team"
     ]
   }
 };
@@ -340,7 +441,11 @@ export function ConnectorConfigModal({
         description: `Verified connection and latency (~94ms). Ready for query context.`
       });
     } catch (e: any) {
-      toast.error(`Connection check failed: ${e.message || 'Unknown error'}`);
+      if (connectorId) {
+        handleConnectorError(connectorId, e);
+      } else {
+        toast.error(`Connection check failed: ${e.message || 'Unknown error'}`);
+      }
     } finally {
       setIsTesting(false);
     }

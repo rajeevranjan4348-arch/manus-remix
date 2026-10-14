@@ -35,7 +35,7 @@ export function useWebsiteBuilder() {
 
   // Define the website builder agent
   const agent = useMemo(() => new Agent({
-    model: 'google/gemini-2.5-flash',
+    model: 'google/gemini-3.8-flash',
     system: `You are Manus Website Builder, an expert at creating beautiful websites quickly.
 
 Your mission: Build a complete, production-ready website based on user requirements.
@@ -315,8 +315,16 @@ Be efficient, create clean code, and ensure the preview works perfectly.`,
     setCurrentTask({ prompt, websiteName });
     setTaskStatus('running');
     try {
-      const activeUser = user || await blink.auth.me();
-      const taskRecord = await (blink.db as any).tasks.create({ userId: activeUser?.id || 'usr_manus_default', prompt, title: websiteName, websiteName, outputFormat: 'website', mode: 'work', status: 'running', result: null, steps: JSON.stringify(STEP_ORDER.map((label, index) => ({ id: String(index + 1), label, status: index === 0 ? 'running' : 'pending', trace: [] }))) });
+      let activeUser = user;
+      if (!activeUser) {
+        try {
+          activeUser = await blink.auth.me();
+        } catch {
+          activeUser = null;
+        }
+      }
+      const userId = activeUser?.id || 'usr_manus_default';
+      const taskRecord = await (blink.db as any).tasks.create({ userId, prompt, title: websiteName, websiteName, outputFormat: 'website', mode: 'work', status: 'running', result: null, steps: JSON.stringify(STEP_ORDER.map((label, index) => ({ id: String(index + 1), label, status: index === 0 ? 'running' : 'pending', trace: [] }))) });
       workTaskIdRef.current = taskRecord.id;
       window.dispatchEvent(new Event('manus_tasks_updated'));
     } catch (error) {

@@ -1,0 +1,162 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Helper for validation of User
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'email']) &&
+        data.keys().hasOnly(['id', 'email', 'displayName', 'photoURL', 'createdAt']) &&
+        data.id is string && isValidId(data.id) && data.id == request.auth.uid &&
+        data.email is string && data.email.size() <= 256 &&
+        (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 128)) &&
+        (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1024)) &&
+        (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64));
+    }
+
+    // Helper for validation of Settings
+    function isValidSettings(data) {
+      return data.keys().hasAll(['userId', 'theme']) &&
+        data.keys().hasOnly(['userId', 'theme', 'defaultMode', 'language', 'defaultModel', 'voicePersona', 'updatedAt']) &&
+        data.userId is string && data.userId == request.auth.uid &&
+        data.theme in ['light', 'dark', 'system'] &&
+        (!('defaultMode' in data) || data.defaultMode in ['chat', 'work']) &&
+        (!('language' in data) || (data.language is string && data.language.size() <= 10)) &&
+        (!('defaultModel' in data) || (data.defaultModel is string && data.defaultModel.size() <= 64)) &&
+        (!('voicePersona' in data) || data.voicePersona in ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer', 'marcus', 'tintin', 'guy']) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    // Helper for validation of Memories
+    function isValidMemories(data) {
+      return (!('records' in data) || data.records is list) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    // Helper for validation of Project
+    function isValidProject(data) {
+      return data.keys().hasAll(['id', 'userId', 'name', 'created_at', 'updated_at']) &&
+        data.keys().hasOnly(['id', 'userId', 'name', 'description', 'icon', 'color', 'customInstructions', 'created_at', 'updated_at', 'taskIds']) &&
+        data.id is string && isValidId(data.id) &&
+        data.userId is string && data.userId == request.auth.uid &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 128 &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 1000)) &&
+        (!('icon' in data) || (data.icon is string && data.icon.size() <= 64)) &&
+        (!('color' in data) || (data.color is string && data.color.size() <= 64)) &&
+        (!('customInstructions' in data) || (data.customInstructions is string && data.customInstructions.size() <= 10000)) &&
+        data.created_at is string && data.created_at.size() <= 64 &&
+        data.updated_at is string && data.updated_at.size() <= 64;
+    }
+
+    // Helper for validation of Conversation
+    function isValidConversation(data) {
+      return data.keys().hasAll(['id', 'userId', 'title', 'createdAt', 'updatedAt', 'mode', 'status']) &&
+        data.keys().hasOnly(['id', 'userId', 'title', 'createdAt', 'updatedAt', 'mode', 'outputFormat', 'chartType', 'projectId', 'status', 'result', 'steps', 'prompt', 'messages']) &&
+        data.id is string && isValidId(data.id) &&
+        data.userId is string && data.userId == request.auth.uid &&
+        data.title is string && data.title.size() <= 256 &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64 &&
+        data.mode in ['chat', 'work'] &&
+        data.status in ['idle', 'running', 'completed', 'error'] &&
+        (!('outputFormat' in data) || (data.outputFormat is string && data.outputFormat.size() <= 64)) &&
+        (!('chartType' in data) || (data.chartType is string && data.chartType.size() <= 64)) &&
+        (!('projectId' in data) || data.projectId == null || (data.projectId is string && data.projectId.size() <= 128)) &&
+        (!('result' in data) || (data.result is string && data.result.size() <= 500000)) &&
+        (!('prompt' in data) || (data.prompt is string && data.prompt.size() <= 10000));
+    }
+
+    // Helper for validation of Message
+    function isValidMessage(data) {
+      return data.keys().hasAll(['id', 'conversationId', 'userId', 'role', 'content', 'timestamp', 'status']) &&
+        data.keys().hasOnly(['id', 'conversationId', 'userId', 'role', 'content', 'timestamp', 'status', 'error', 'metadata']) &&
+        data.id is string && isValidId(data.id) &&
+        data.conversationId is string && isValidId(data.conversationId) &&
+        data.userId is string && data.userId == request.auth.uid &&
+        data.role in ['user', 'assistant', 'system'] &&
+        data.content is string && data.content.size() <= 500000 &&
+        data.timestamp is string && data.timestamp.size() <= 64 &&
+        data.status in ['pending', 'success', 'failed', 'streaming'];
+    }
+
+    // Healthcheck / test connection route (scoped to verified client or test)
+    match /test/connection {
+      allow get: if isSignedIn() || request.time != null;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidId(userId) && isValidUser(incoming()) && incoming().id == existing().id;
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      // User Settings & Memories subcollection
+      match /settings/{settingsId} {
+        allow get: if isOwner(userId) && isValidId(settingsId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(settingsId) && (
+          (settingsId == 'preferences' && isValidSettings(incoming())) ||
+          (settingsId == 'memories' && isValidMemories(incoming()))
+        );
+        allow update: if isOwner(userId) && isValidId(settingsId) && (
+          (settingsId == 'preferences' && isValidSettings(incoming()) && incoming().userId == existing().userId) ||
+          (settingsId == 'memories' && isValidMemories(incoming()))
+        );
+        allow delete: if isOwner(userId) && isValidId(settingsId);
+      }
+    }
+
+    // Projects collection
+    match /projects/{projectId} {
+      allow get: if isSignedIn() && isValidId(projectId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(projectId) && incoming().userId == request.auth.uid && isValidProject(incoming());
+      allow update: if isSignedIn() && isValidId(projectId) && existing().userId == request.auth.uid && incoming().userId == existing().userId && isValidProject(incoming());
+      allow delete: if isSignedIn() && isValidId(projectId) && existing().userId == request.auth.uid;
+    }
+
+    // Conversations collection
+    match /conversations/{conversationId} {
+      allow get: if isSignedIn() && isValidId(conversationId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(conversationId) && incoming().userId == request.auth.uid && isValidConversation(incoming());
+      allow update: if isSignedIn() && isValidId(conversationId) && existing().userId == request.auth.uid && incoming().userId == existing().userId && isValidConversation(incoming());
+      allow delete: if isSignedIn() && isValidId(conversationId) && existing().userId == request.auth.uid;
+
+      // Messages subcollection
+      match /messages/{messageId} {
+        allow get: if isSignedIn() && isValidId(messageId) && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid;
+        allow list: if isSignedIn() && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid;
+        allow create: if isSignedIn() && isValidId(messageId) && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid && incoming().userId == request.auth.uid && isValidMessage(incoming());
+        allow update: if isSignedIn() && isValidId(messageId) && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid && existing().userId == request.auth.uid && incoming().userId == existing().userId && isValidMessage(incoming());
+        allow delete: if isSignedIn() && isValidId(messageId) && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid;
+      }
+    }
+  }
+}

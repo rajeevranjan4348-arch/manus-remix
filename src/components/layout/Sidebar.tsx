@@ -29,7 +29,11 @@ import {
   FolderKanban,
   Check,
   ChevronRight,
-  Plug
+  Plug,
+  Cloud,
+  LogIn,
+  LogOut,
+  User as UserIcon
 } from 'lucide-react';
 import { ConnectorsStorePanel } from '../connectors/ConnectorsStorePanel';
 import { cn } from '@/lib/utils';
@@ -37,6 +41,7 @@ import { Logo, ManusLogo } from './Logo';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent } from '@/components/ui/dropdown-menu';
 import { useBlinkAuth } from '@blinkdotnew/react';
+import { useFirebase } from '@/context/FirebaseContext';
 import { blink } from '@/lib/blink';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -187,12 +192,13 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
   const [showAllProjects, setShowAllProjects] = useState(false);
 
   const { isAuthenticated, user } = useBlinkAuth();
+  const { user: fbUser, signInWithGoogle, signOut: fbSignOut } = useFirebase();
   const navigate = useNavigate();
 
   useEffect(() => {
     loadTasks();
     loadProjects();
-  }, [isAuthenticated, user, activeTaskId]);
+  }, [isAuthenticated, user, fbUser, activeTaskId]);
 
   useEffect(() => {
     const handleProjectsUpdated = () => {
@@ -360,6 +366,13 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
     return projects.find(p => p.id === activeProjectId);
   }, [projects, activeProjectId]);
 
+  const handleMobileSelect = (action?: () => void) => {
+    if (action) action();
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      onToggle();
+    }
+  };
+
   // Collapsed Sidebar (Icon Mode)
   if (!isOpen) {
     return (
@@ -369,14 +382,14 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
             <TooltipTrigger asChild>
               <button 
                 onClick={onToggle}
-                className="p-2 rounded-xl hover:bg-manus-cream dark:hover:bg-accent transition-all group relative mb-6 cursor-pointer"
+                className="p-2 rounded-xl hover:bg-manus-cream dark:hover:bg-accent transition-all duration-200 group relative mb-6 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 smooth-press"
                 title="Open sidebar"
               >
                 <div className="group-hover:opacity-0 transition-opacity">
-                  <Logo size={24} />
+                  <Logo size={26} />
                 </div>
                 <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                  <PanelLeft size={24} />
+                  <PanelLeft size={26} strokeWidth={2.4} />
                 </div>
               </button>
             </TooltipTrigger>
@@ -393,7 +406,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                   <button
                     onClick={() => item.action ? item.action() : setActiveTab(item.id)}
                     className={cn(
-                      "p-2.5 rounded-xl transition-all cursor-pointer",
+                      "p-2.5 rounded-xl transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95",
                       activeTab === item.id && !item.action
                         ? "bg-white dark:bg-card border border-border text-foreground shadow-sm" 
                         : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
@@ -427,7 +440,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                         colorTheme.bg
                       )}
                     >
-                      <IconComp size={16} />
+                      <IconComp size={18} strokeWidth={2.4} />
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="right">
@@ -458,7 +471,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                           : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
                       )}
                     >
-                      <MessageSquare size={17} />
+                      <MessageSquare size={19} strokeWidth={2.4} />
                       {isActive && (
                         <span className="absolute -left-1 top-1/2 -translate-y-1/2 w-1 h-3.5 bg-primary rounded-r-full" />
                       )}
@@ -475,6 +488,35 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
             );
           })}
         </div>
+
+        {/* Firebase Cloud Sync Icon in Collapsed View */}
+        <div className="mt-auto mb-2 flex flex-col items-center">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={fbUser ? () => fbSignOut() : () => signInWithGoogle()}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer bg-white/80 dark:bg-card border border-border/80 hover:border-foreground/30 shadow-xs"
+                >
+                  {fbUser ? (
+                    fbUser.photoURL ? (
+                      <img src={fbUser.photoURL} alt="" className="w-7 h-7 rounded-full object-cover" />
+                    ) : (
+                      <div className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-xs">
+                        {(fbUser.displayName || fbUser.email || 'U')[0].toUpperCase()}
+                      </div>
+                    )
+                  ) : (
+                    <Cloud size={18} className="text-muted-foreground hover:text-foreground" />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                {fbUser ? `${fbUser.displayName || fbUser.email} (Click to sign out)` : 'Sign in with Google (Firebase)'}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
       </aside>
     );
   }
@@ -485,19 +527,19 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
       {/* Mobile Backdrop */}
       <div 
         onClick={onToggle}
-        className="fixed inset-0 bg-black/40 z-30 lg:hidden backdrop-blur-xs animate-in fade-in"
+        className="fixed inset-0 bg-black/50 z-40 lg:hidden backdrop-blur-xs transition-opacity duration-250 ease-out animate-in fade-in"
       />
 
-      <aside className="w-64 h-screen border-r border-border/40 bg-manus-soft dark:bg-sidebar flex flex-col fixed inset-y-0 left-0 lg:static z-40 shrink-0 transition-colors shadow-xl lg:shadow-none">
+      <aside className="w-[82vw] max-w-[280px] sm:w-64 h-screen border-r border-border/40 bg-manus-soft dark:bg-sidebar flex flex-col fixed inset-y-0 left-0 lg:static z-50 shrink-0 transition-[transform,width,colors] duration-250 ease-[cubic-bezier(0.16,1,0.3,1)] shadow-2xl lg:shadow-none animate-in slide-in-from-left gpu-accelerated">
         {/* Header with Logo and Close Toggle */}
-        <div className="p-5 flex items-center justify-between">
+        <div className="p-4 sm:p-5 flex items-center justify-between">
           <ManusLogo showBadge={true} />
           <button 
             onClick={onToggle}
-            className="p-2 text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent rounded-lg transition-colors cursor-pointer"
+            className="p-2 text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent rounded-lg transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 smooth-press"
             title="Collapse sidebar"
           >
-            <PanelLeft size={18} />
+            <PanelLeft size={21} strokeWidth={2.4} />
           </button>
         </div>
 
@@ -506,15 +548,15 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
           {navItems.map((item) => (
             <button
               key={item.id}
-              onClick={() => item.action ? item.action() : setActiveTab(item.id)}
+              onClick={() => handleMobileSelect(() => item.action ? item.action() : setActiveTab(item.id))}
               className={cn(
-                "w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-all font-medium text-sm cursor-pointer",
+                "w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-all duration-200 font-medium text-sm cursor-pointer hover:scale-[1.02] hover:shadow-xs active:scale-[0.98]",
                 activeTab === item.id && !item.action
                   ? "bg-white dark:bg-card border border-border text-foreground shadow-sm" 
                   : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
               )}
             >
-              <item.icon size={18} />
+              <item.icon size={21} strokeWidth={2.4} />
               <span>{item.label}</span>
             </button>
           ))}
@@ -530,19 +572,19 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
               aria-label={showAllProjects ? "Show less projects" : "Show all projects"}
               className="flex items-center gap-2 text-left rounded-md text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
             >
-              <Folder size={18} />
+              <Folder size={20} strokeWidth={2.4} />
               <h3 className="text-sm font-semibold tracking-wide">Projects</h3>
-              <ChevronRight size={14} className={cn("transition-transform", showAllProjects && "rotate-90")} />
+              <ChevronRight size={16} strokeWidth={2.4} className={cn("transition-transform", showAllProjects && "rotate-90")} />
             </button>
             <button 
               onClick={() => {
                 setProjectToEdit(null);
                 setIsProjectModalOpen(true);
               }}
-              className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent transition-colors cursor-pointer"
+              className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent transition-all duration-200 cursor-pointer hover:scale-110 hover:shadow-2xs active:scale-95"
               title="Create new project"
             >
-              <Plus size={14} />
+              <Plus size={16} strokeWidth={2.4} />
             </button>
           </div>
 
@@ -565,14 +607,14 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                       }
                     }}
                     className={cn(
-                      "w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl transition-all text-left text-xs font-medium cursor-pointer",
+                      "w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl transition-all duration-150 text-left text-xs font-medium cursor-pointer hover:scale-[1.01] hover:shadow-2xs active:scale-[0.99]",
                       isFiltered
                         ? "bg-primary/10 text-primary font-semibold border border-primary/30"
                         : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
                     )}
                   >
                     <div className={cn("w-6 h-6 rounded-lg flex items-center justify-center shrink-0 font-semibold shadow-2xs", colorTheme.bg)}>
-                      <IconComp size={13} />
+                      <IconComp size={15} strokeWidth={2.4} />
                     </div>
 
                     <span className="truncate flex-1 pr-5">{proj.name}</span>
@@ -590,7 +632,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                         onClick={(e) => e.stopPropagation()}
                         className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                       >
-                        <MoreHorizontal size={13} />
+                        <MoreHorizontal size={15} strokeWidth={2.4} />
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-44 p-1">
@@ -598,7 +640,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                         onClick={() => setSelectedProjectView(proj)}
                         className="flex items-center gap-2 cursor-pointer text-xs"
                       >
-                        <FolderKanban size={13} />
+                        <FolderKanban size={15} strokeWidth={2.4} />
                         <span>View Details</span>
                       </DropdownMenuItem>
 
@@ -609,7 +651,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                         }}
                         className="flex items-center gap-2 cursor-pointer text-xs"
                       >
-                        <Edit3 size={13} />
+                        <Edit3 size={15} strokeWidth={2.4} />
                         <span>Edit Project</span>
                       </DropdownMenuItem>
 
@@ -619,7 +661,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                         onClick={() => setProjectToDelete(proj)}
                         className="flex items-center gap-2 text-red-600 hover:text-red-700 cursor-pointer text-xs"
                       >
-                        <Trash2 size={13} />
+                        <Trash2 size={15} strokeWidth={2.4} />
                         <span>Delete Project</span>
                       </DropdownMenuItem>
                     </DropdownMenuContent>
@@ -635,7 +677,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
               }}
               className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded-xl hover:bg-manus-cream dark:hover:bg-accent font-medium"
             >
-              <Plus size={14} className="text-primary" />
+              <Plus size={16} strokeWidth={2.4} className="text-primary" />
               <span>New project</span>
             </button>
 
@@ -645,7 +687,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
               className="w-full flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded-xl hover:bg-manus-cream dark:hover:bg-accent font-medium"
             >
               <span>Show less</span>
-              <ChevronRight size={13} className=" -rotate-90" />
+              <ChevronRight size={15} strokeWidth={2.4} className="-rotate-90" />
             </button>
           </div>
           )}
@@ -668,21 +710,21 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
               {onOpenHistory && (
                 <button 
                   onClick={onOpenHistory}
-                  className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent transition-colors cursor-pointer"
+                  className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent transition-all duration-200 cursor-pointer hover:scale-110 hover:shadow-2xs active:scale-95"
                   title="Open full history panel"
                 >
-                  <HistoryIcon size={14} />
+                  <HistoryIcon size={16} strokeWidth={2.4} />
                 </button>
               )}
               <button 
                 onClick={() => setIsSearchOpen(!isSearchOpen)}
                 className={cn(
-                  "p-1 rounded-md transition-colors cursor-pointer",
+                  "p-1 rounded-md transition-all duration-200 cursor-pointer hover:scale-110 hover:shadow-2xs active:scale-95",
                   isSearchOpen ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent"
                 )}
                 title="Search task history"
               >
-                <Search size={14} />
+                <Search size={16} strokeWidth={2.4} />
               </button>
             </div>
           </div>
@@ -697,7 +739,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                   className="p-0.5 rounded-full hover:bg-primary/20 text-primary cursor-pointer"
                   title="Clear project filter"
                 >
-                  <X size={12} />
+                  <X size={14} strokeWidth={2.4} />
                 </button>
               </div>
             </div>
@@ -707,7 +749,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
           {isSearchOpen && (
             <div className="px-2 mb-2 animate-in fade-in slide-in-from-top-1 duration-200">
               <div className="flex items-center gap-2 px-2.5 py-1.5 bg-white dark:bg-card border border-border rounded-xl text-xs shadow-xs">
-                <Search size={13} className="text-muted-foreground shrink-0" />
+                <Search size={15} strokeWidth={2.4} className="text-muted-foreground shrink-0" />
                 <input
                   type="text"
                   value={searchQuery}
@@ -721,7 +763,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                     onClick={() => setSearchQuery('')}
                     className="p-0.5 hover:bg-slate-100 dark:hover:bg-white/10 rounded-full text-muted-foreground"
                   >
-                    <X size={12} />
+                    <X size={14} strokeWidth={2.4} />
                   </button>
                 )}
               </div>
@@ -746,7 +788,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                     <div key={task.id} className="relative group">
                       <button
                         onClick={() => {
-                          navigate(`/task/${task.id}`);
+                          handleMobileSelect(() => navigate(`/task/${task.id}`));
                         }}
                         className={cn(
                           "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-all text-left cursor-pointer",
@@ -756,7 +798,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                         )}
                         title={task.prompt}
                       >
-                        <MessageSquare size={15} className={cn(
+                        <MessageSquare size={17} strokeWidth={2.3} className={cn(
                           "shrink-0 transition-colors",
                           isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
                         )} />
@@ -789,7 +831,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                             )}
                             title="Task options"
                           >
-                            <MoreHorizontal size={14} />
+                            <MoreHorizontal size={16} strokeWidth={2.4} />
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48 p-1">
@@ -797,7 +839,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                             onClick={() => navigate(`/task/${task.id}`)}
                             className="flex items-center gap-2 cursor-pointer text-xs"
                           >
-                            <ExternalLink size={13} />
+                            <ExternalLink size={15} strokeWidth={2.4} />
                             <span>Open session</span>
                           </DropdownMenuItem>
                           
@@ -805,7 +847,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                             onClick={(e) => handleStartRename(task.id, e as any, formatTaskTitle(task))}
                             className="flex items-center gap-2 cursor-pointer text-xs"
                           >
-                            <Edit3 size={13} />
+                            <Edit3 size={15} strokeWidth={2.4} />
                             <span>Rename chat</span>
                           </DropdownMenuItem>
 
@@ -813,7 +855,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                             onClick={(e) => handleCopyTaskId(task.id, e as any)}
                             className="flex items-center gap-2 cursor-pointer text-xs"
                           >
-                            <Copy size={13} />
+                            <Copy size={15} strokeWidth={2.4} />
                             <span>Copy Task ID</span>
                           </DropdownMenuItem>
 
@@ -821,7 +863,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                           {projects.length > 0 && (
                             <DropdownMenuSub>
                               <DropdownMenuSubTrigger className="flex items-center gap-2 cursor-pointer text-xs">
-                                <FolderKanban size={13} />
+                                <FolderKanban size={15} strokeWidth={2.4} />
                                 <span>Assign to Project</span>
                               </DropdownMenuSubTrigger>
                               <DropdownMenuSubContent className="w-44 p-1">
@@ -832,7 +874,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                                     className="flex items-center justify-between cursor-pointer text-xs"
                                   >
                                     <span className="truncate">{p.name}</span>
-                                    {task.projectId === p.id && <Check size={12} className="text-primary" />}
+                                    {task.projectId === p.id && <Check size={14} strokeWidth={2.5} className="text-primary" />}
                                   </DropdownMenuItem>
                                 ))}
                               </DropdownMenuSubContent>
@@ -845,7 +887,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
                             onClick={(e) => handleDeleteTask(task.id, e as any, formatTaskTitle(task))}
                             className="flex items-center gap-2 text-red-600 hover:text-red-700 cursor-pointer text-xs"
                           >
-                            <Trash2 size={13} />
+                            <Trash2 size={15} strokeWidth={2.4} />
                             <span>Delete session</span>
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -875,6 +917,50 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
               </div>
             )}
           </div>
+        </div>
+
+        {/* Firebase Cloud Sync & User Profile Footer */}
+        <div className="p-3 border-t border-border/40 bg-card/30 mt-auto">
+          {fbUser ? (
+            <div className="flex items-center justify-between gap-2 p-1.5 rounded-xl bg-card border border-border/60 shadow-2xs">
+              <div className="flex items-center gap-2 min-w-0">
+                {fbUser.photoURL ? (
+                  <img src={fbUser.photoURL} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 border border-border" />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs shrink-0">
+                    {(fbUser.displayName || fbUser.email || 'U')[0].toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-foreground truncate">{fbUser.displayName || 'Firebase User'}</p>
+                  <div className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                    <Cloud size={11} className="shrink-0 animate-pulse" />
+                    <span className="truncate">Cloud Synced</span>
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => fbSignOut()}
+                className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors cursor-pointer shrink-0"
+                title="Sign out of Firebase"
+              >
+                <LogOut size={15} />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => signInWithGoogle()}
+              className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-foreground text-background font-medium text-xs shadow-xs hover:opacity-90 transition-all cursor-pointer"
+            >
+              <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+                <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+              </svg>
+              <span>Sign in with Google</span>
+            </button>
+          )}
         </div>
       </aside>
 

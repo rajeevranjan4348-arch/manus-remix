@@ -6,9 +6,12 @@ import { matchVoiceCommand, executeOpenUrl, executeDeviceCommand, VoiceCommandRe
 import { speakCleanHumanVoice } from '@/lib/speechSynthesis';
 import { getSettings } from '@/lib/settingsStore';
 import { emitRobotEvent } from '@/hooks/useRobotStateController';
+import { MicrophonePermissionModal } from './MicrophonePermissionModal';
+import { checkMicrophonePermissionState } from '@/lib/permissionsManager';
 
 interface VoiceInputButtonProps {
   onTranscript: (text: string) => void;
+  onListeningStateChange?: (isListening: boolean) => void;
   onAutoSubmit?: (text: string) => void;
   onExecuteCommand?: (cmd: VoiceCommandResult) => void;
   onRequestApproval?: (cmd: VoiceCommandResult) => void;
@@ -19,6 +22,7 @@ interface VoiceInputButtonProps {
 
 export function VoiceInputButton({
   onTranscript,
+  onListeningStateChange,
   onAutoSubmit,
   onExecuteCommand,
   onRequestApproval,
@@ -27,6 +31,7 @@ export function VoiceInputButton({
   autoSubmitOnSpeech = false,
 }: VoiceInputButtonProps) {
   const [isListening, setIsListening] = useState(false);
+  const [showPermissionModal, setShowPermissionModal] = useState(false);
   const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
@@ -49,41 +54,60 @@ export function VoiceInputButton({
         } catch {}
       }
       setIsListening(false);
+      onListeningStateChange?.(false);
       emitRobotEvent('VOICE_LISTENING_STOPPED');
       window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
       return;
     }
 
-    // Request access from the user's click, then release the temporary stream
-    // before SpeechRecognition opens its own microphone session.
+    // Check secure context
     if (!window.isSecureContext) {
+      setShowPermissionModal(true);
       toast.error('Microphone access requires HTTPS or localhost. Open Manus through its secure site.');
       return;
     }
-    if (!navigator.mediaDevices?.getUserMedia) {
-      toast.error('Microphone access is unavailable in this browser. Please use an up-to-date Chrome browser.');
-      return;
-    }
-    let permissionStream: MediaStream | null = null;
+
+    // Check if permission is known to be denied
     try {
-      permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (error) {
-      const name = error instanceof Error ? error.name : '';
-      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-        toast.error('Microphone permission was blocked. Allow Microphone for this site in browser settings, then try again.');
-      } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-        toast.error('No microphone was found. Connect or enable a microphone and try again.');
-      } else {
-        toast.error('Could not access the microphone. Check site permissions and ensure no other app is using it.');
+      const permState = await checkMicrophonePermissionState();
+      if (permState === 'denied') {
+        setShowPermissionModal(true);
+        toast.error('Microphone permission was blocked.', {
+          description: 'Allow Microphone for this site in browser settings, then try again.',
+          action: {
+            label: 'Unblock Guide 🎙️',
+            onClick: () => setShowPermissionModal(true),
+          },
+          duration: 7000,
+        });
+        return;
       }
-      return;
-    } finally {
-      permissionStream?.getTracks().forEach((track) => track.stop());
-    }
+    } catch {}
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      toast.error('Voice recognition is not supported in this browser. Please use Chrome, Edge, or Safari.');
+      // If SpeechRecognition is missing, test getUserMedia or inform user
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setShowPermissionModal(true);
+        toast.error('Voice recognition is not supported in this browser. Please use Chrome, Edge, or Safari.');
+        return;
+      }
+
+      // Check if getUserMedia can be requested
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((t) => t.stop());
+        toast.info('Audio recording is supported. For live speech dictation, Chrome or Edge is recommended.');
+      } catch (e: any) {
+        setShowPermissionModal(true);
+        toast.error('Microphone permission was blocked.', {
+          description: 'Allow Microphone in browser settings to dictate prompts.',
+          action: {
+            label: 'How to Fix 🎙️',
+            onClick: () => setShowPermissionModal(true),
+          },
+        });
+      }
       return;
     }
 
@@ -91,10 +115,18 @@ export function VoiceInputButton({
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
       recognition.interimResults = true;
-      recognition.lang = 'en-US';
+
+      const settings = getSettings();
+      const preferredLang = settings.voiceInputLanguage || 'en-US';
+      const actualLang = preferredLang === 'auto'
+        ? (typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en-US')
+        : preferredLang;
+
+      recognition.lang = actualLang;
 
       recognition.onstart = () => {
         setIsListening(true);
+        onListeningStateChange?.(true);
         emitRobotEvent('VOICE_LISTENING_STARTED');
         window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'listening' }));
         toast.info('🎙️ Listening... Speak into microphone', { duration: 3000 });
@@ -169,7 +201,32 @@ export function VoiceInputButton({
       };
 
       recognition.onerror = (event: any) => {
-        if (event.error !== 'no-speech' && event.error !== 'aborted') {
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          console.warn('[Voice Recognition] Permission blocked:', event.error);
+          setShowPermissionModal(true);
+          toast.error('Microphone permission was blocked.', {
+            description: 'Allow Microphone for this site in browser settings, then try again.',
+            action: {
+              label: 'Unblock Guide 🎙️',
+              onClick: () => setShowPermissionModal(true),
+            },
+            duration: 8000,
+          });
+          emitRobotEvent('TASK_FAILED');
+          window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'error' }));
+        } else if (event.error === 'audio-capture') {
+          console.warn('[Voice Recognition] Audio capture error:', event.error);
+          setShowPermissionModal(true);
+          toast.error('No microphone found or another app is using it.', {
+            action: {
+              label: 'Troubleshoot',
+              onClick: () => setShowPermissionModal(true),
+            },
+            duration: 6000,
+          });
+          emitRobotEvent('TASK_FAILED');
+          window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'error' }));
+        } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
           console.warn('[Voice Recognition]', event.error);
           toast.error(`Microphone error: ${event.error}`);
           emitRobotEvent('TASK_FAILED');
@@ -178,39 +235,68 @@ export function VoiceInputButton({
           window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
         }
         setIsListening(false);
+        onListeningStateChange?.(false);
       };
 
       recognition.onend = () => {
         setIsListening(false);
+        onListeningStateChange?.(false);
         emitRobotEvent('VOICE_LISTENING_STOPPED');
         window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
       };
 
       recognitionRef.current = recognition;
       recognition.start();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Speech recognition error:', err);
-      toast.error('Could not start microphone');
+      if (err?.name === 'NotAllowedError' || err?.message?.includes('denied') || err?.message?.includes('not-allowed')) {
+        setShowPermissionModal(true);
+        toast.error('Microphone permission was blocked.', {
+          description: 'Allow Microphone in browser settings to speak to Manus.',
+          action: {
+            label: 'Unblock Guide 🎙️',
+            onClick: () => setShowPermissionModal(true),
+          },
+          duration: 8000,
+        });
+      } else {
+        toast.error('Could not start microphone');
+      }
       setIsListening(false);
+      onListeningStateChange?.(false);
       window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'error' }));
     }
   };
 
   return (
-    <button
-      type="button"
-      onClick={toggleListening}
-      aria-label={isListening ? 'Stop listening' : 'Start voice command or speech input'}
-      title={isListening ? 'Listening... click to stop' : 'Voice command or question (e.g. "Open YouTube", "Weather in Paris")'}
-      className={cn(
-        "relative flex items-center justify-center rounded-full transition-all cursor-pointer",
-        isListening
-          ? "bg-rose-500 text-white animate-pulse shadow-md shadow-rose-500/30 ring-2 ring-rose-400"
-          : "hover:bg-[var(--fill-tsp-gray-main)] dark:hover:bg-accent text-[var(--icon-primary)] dark:text-foreground",
-        className
-      )}
-    >
-      {isListening ? <MicOff size={size} /> : <Mic size={size} />}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={toggleListening}
+        aria-label={isListening ? 'Stop listening' : 'Start voice command or speech input'}
+        title={isListening ? 'Listening... click to stop' : 'Voice command or question (e.g. "Open YouTube", "Weather in Paris")'}
+        className={cn(
+          "relative flex items-center justify-center rounded-full transition-all cursor-pointer",
+          isListening
+            ? "bg-rose-500 text-white animate-pulse shadow-md shadow-rose-500/30 ring-2 ring-rose-400"
+            : "hover:bg-[var(--fill-tsp-gray-main)] dark:hover:bg-accent text-[var(--icon-primary)] dark:text-foreground",
+          className
+        )}
+      >
+        {isListening ? <MicOff size={size} /> : <Mic size={size} />}
+      </button>
+
+      <MicrophonePermissionModal 
+        isOpen={showPermissionModal}
+        onClose={() => setShowPermissionModal(false)}
+        onPermissionGranted={() => {
+          setShowPermissionModal(false);
+          setTimeout(() => {
+            toggleListening();
+          }, 300);
+        }}
+      />
+    </>
   );
 }
+

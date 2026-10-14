@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import { Brain, ChevronDown, ChevronUp, Copy, Check, Sparkles, Lightbulb, Workflow, Cpu } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -11,7 +11,7 @@ interface ThoughtProcessProps {
   defaultExpanded?: boolean;
 }
 
-export function ThoughtProcess({
+export const ThoughtProcess = memo(function ThoughtProcess({
   thoughtText,
   durationSeconds,
   isLive = false,
@@ -140,4 +140,4 @@ export function ThoughtProcess({
       )}
     </div>
   );
-}
+});

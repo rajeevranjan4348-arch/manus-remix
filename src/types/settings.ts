@@ -2,7 +2,7 @@ export type AppTheme = 'light' | 'dark' | 'system';
 export type AppMode = 'chat' | 'work';
 export type AppLanguage = 'en' | 'hi' | 'es' | 'fr' | 'de' | 'ja' | 'zh';
 export type ResponseTone = 'balanced' | 'concise' | 'professional' | 'creative' | 'academic';
-export type VoicePersona = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
+export type VoicePersona = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' | 'marcus' | 'tintin' | 'guy';
 
 export interface UserSettings {
   // General
@@ -30,6 +30,8 @@ export interface UserSettings {
   enableCodeSandbox: boolean;
   deepResearchMode: boolean;
   streamingSpeed: 'normal' | 'fast' | 'instant';
+  openRouterApiKey?: string;
+  workModeApiKey?: string;
 
   // Personalization
   userName: string;
@@ -40,6 +42,7 @@ export interface UserSettings {
 
   // Voice & Audio
   voicePersona: VoicePersona;
+  voiceInputLanguage?: string; // BCP-47 language tag for voice-to-text input (e.g., 'en-US', 'hi-IN', 'es-ES', 'fr-FR', 'auto')
   speechSpeed: number; // 0.75, 1.0, 1.25, 1.5
   voicePitch: number; // 0.5 to 1.5 (default: 1.0)
   enableAudioFilter: boolean; // audio processing filter for noise reduction & clarity

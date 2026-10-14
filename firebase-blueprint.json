@@ -1,0 +1,292 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique user ID matching auth UID",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "description": "Email address of user",
+          "maxLength": 256
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name of user",
+          "maxLength": 128
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "Avatar URL of user",
+          "maxLength": 1024
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Account creation timestamp",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "email"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "Preferences and configuration for a user",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "User ID matching auth UID",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "theme": {
+          "type": "string",
+          "description": "Active UI theme",
+          "enum": ["light", "dark", "system"]
+        },
+        "defaultMode": {
+          "type": "string",
+          "description": "Default execution mode",
+          "enum": ["chat", "work"]
+        },
+        "language": {
+          "type": "string",
+          "description": "Application display language",
+          "maxLength": 10
+        },
+        "defaultModel": {
+          "type": "string",
+          "description": "Default AI model identifier",
+          "maxLength": 64
+        },
+        "voicePersona": {
+          "type": "string",
+          "description": "Preferred voice persona",
+          "enum": ["alloy", "echo", "fable", "onyx", "nova", "shimmer", "marcus", "tintin", "guy"]
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last settings update timestamp",
+          "maxLength": 64
+        }
+      },
+      "required": ["userId", "theme"]
+    },
+    "UserMemories": {
+      "title": "UserMemories",
+      "description": "Long-term memories and facts for a user",
+      "type": "object",
+      "properties": {
+        "records": {
+          "type": "array",
+          "description": "List of memory records"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp",
+          "maxLength": 64
+        }
+      }
+    },
+    "Project": {
+      "title": "Project",
+      "description": "Organizational container for agent tasks and sessions",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique project identifier",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner user ID",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Project title",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "description": {
+          "type": "string",
+          "description": "Project description",
+          "maxLength": 1000
+        },
+        "icon": {
+          "type": "string",
+          "description": "Project icon identifier",
+          "maxLength": 64
+        },
+        "color": {
+          "type": "string",
+          "description": "Project color accent",
+          "maxLength": 64
+        },
+        "customInstructions": {
+          "type": "string",
+          "description": "Custom prompt instructions for the project",
+          "maxLength": 10000
+        },
+        "created_at": {
+          "type": "string",
+          "description": "Creation timestamp",
+          "maxLength": 64
+        },
+        "updated_at": {
+          "type": "string",
+          "description": "Last update timestamp",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "userId", "name", "created_at", "updated_at"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Autonomous task and chat conversation session",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique session ID",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner user ID",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "description": "Conversation topic title",
+          "maxLength": 256
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp",
+          "maxLength": 64
+        },
+        "mode": {
+          "type": "string",
+          "description": "Execution mode",
+          "enum": ["chat", "work"]
+        },
+        "outputFormat": {
+          "type": "string",
+          "description": "Requested output format",
+          "maxLength": 64
+        },
+        "chartType": {
+          "type": "string",
+          "description": "Requested chart type",
+          "maxLength": 64
+        },
+        "projectId": {
+          "type": "string",
+          "description": "Associated project ID if assigned",
+          "maxLength": 128
+        },
+        "status": {
+          "type": "string",
+          "description": "Execution status",
+          "enum": ["idle", "running", "completed", "error"]
+        },
+        "result": {
+          "type": "string",
+          "description": "Serialized execution result or summary",
+          "maxLength": 500000
+        },
+        "prompt": {
+          "type": "string",
+          "description": "Initial task prompt",
+          "maxLength": 10000
+        }
+      },
+      "required": ["id", "userId", "title", "createdAt", "updatedAt", "mode", "status"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Individual message in a conversation",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique message ID",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "conversationId": {
+          "type": "string",
+          "description": "Parent conversation ID",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Sender user ID",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "role": {
+          "type": "string",
+          "description": "Role of the author",
+          "enum": ["user", "assistant", "system"]
+        },
+        "content": {
+          "type": "string",
+          "description": "Message body content",
+          "maxLength": 500000
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Timestamp string",
+          "maxLength": 64
+        },
+        "status": {
+          "type": "string",
+          "description": "Delivery / execution state",
+          "enum": ["pending", "success", "failed", "streaming"]
+        }
+      },
+      "required": ["id", "conversationId", "userId", "role", "content", "timestamp", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Stores user profile information"
+    },
+    "/users/{userId}/settings/{settingsId}": {
+      "schema": "UserSettings",
+      "description": "Stores user settings and preferences"
+    },
+    "/projects/{projectId}": {
+      "schema": "Project",
+      "description": "Stores workspace projects"
+    },
+    "/conversations/{conversationId}": {
+      "schema": "Conversation",
+      "description": "Stores chat and agent task conversations"
+    },
+    "/conversations/{conversationId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Stores conversation messages"
+    }
+  }
+}

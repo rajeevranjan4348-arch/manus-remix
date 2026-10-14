@@ -34,6 +34,12 @@ export interface StoredConversation {
   metadata?: Record<string, any>;
 }
 
+import {
+  saveConversationToFirestore,
+  deleteConversationFromFirestore,
+  saveMessageToFirestore
+} from './firestoreService';
+
 const DB_NAME = 'manus_permanent_chat_db';
 const DB_VERSION = 1;
 const STORE_CONVERSATIONS = 'conversations';
@@ -203,6 +209,7 @@ export async function createConversation(data: {
   saveFallbackConversations(fallbackList);
 
   notifyDbUpdated(id);
+  saveConversationToFirestore(conversation).catch(() => {});
   return conversation;
 }
 
@@ -255,6 +262,7 @@ export async function updateConversation(id: string, updates: Partial<StoredConv
   saveFallbackConversations(fallbackList);
 
   notifyDbUpdated(id);
+  saveConversationToFirestore(updated).catch(() => {});
   return updated;
 }
 
@@ -348,6 +356,7 @@ export async function deleteConversation(id: string): Promise<boolean> {
   saveFallbackMessages(fallbackMsgs);
 
   notifyDbUpdated(id);
+  deleteConversationFromFirestore(id).catch(() => {});
   return true;
 }
 
@@ -427,6 +436,7 @@ export async function saveMessage(data: {
   }
 
   notifyDbUpdated(data.conversationId);
+  saveMessageToFirestore(message).catch(() => {});
   return message;
 }
 

@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { 
   Calendar, Mail, Check, AlertCircle, ExternalLink, Loader2, Sparkles, Clock, 
-  MapPin, User, FileText, Table, CheckSquare, Video, StickyNote 
+  MapPin, User, FileText, Table, CheckSquare, Video, StickyNote, Presentation, FileCheck 
 } from 'lucide-react';
 import { 
   createGoogleCalendarEvent, createGmailDraft, createGoogleDoc, createGoogleSheet, 
+  createGoogleSlide, createGoogleForm,
   createGoogleTask, createGoogleMeetCall, createGoogleKeepNote,
   CalendarEventPayload, GmailDraftPayload 
 } from '@/lib/workspaceTools';
@@ -12,7 +13,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
 export interface WorkspaceToolCardProps {
-  type: 'calendar_event' | 'gmail_draft' | 'google_doc' | 'google_sheet' | 'google_task' | 'google_meet' | 'google_keep';
+  type: 'calendar_event' | 'gmail_draft' | 'google_doc' | 'google_sheet' | 'google_slide' | 'google_form' | 'google_task' | 'google_meet' | 'google_keep';
   data: any;
   onSuccess?: (res: any) => void;
 }
@@ -41,6 +42,12 @@ export function WorkspaceToolCard({ type, data, onSuccess }: WorkspaceToolCardPr
       } else if (type === 'google_sheet') {
         res = await createGoogleSheet(data.title, data.values);
         toast.success(`Google Sheet "${data.title}" created!`);
+      } else if (type === 'google_slide') {
+        res = await createGoogleSlide(data.title);
+        toast.success(`Google Slide "${data.title}" created!`);
+      } else if (type === 'google_form') {
+        res = await createGoogleForm(data.title);
+        toast.success(`Google Form "${data.title}" created!`);
       } else if (type === 'google_task') {
         res = await createGoogleTask(data.title, data.notes, data.dueDate);
         toast.success(`Google Task "${data.title}" created!`);
@@ -244,15 +251,17 @@ export function WorkspaceToolCard({ type, data, onSuccess }: WorkspaceToolCardPr
     );
   }
 
-  // Google Doc, Sheet, Task, Meet, Keep universal card renderer
-  if (['google_doc', 'google_sheet', 'google_task', 'google_meet', 'google_keep'].includes(type)) {
+  // Google Doc, Sheet, Slide, Form, Task, Meet, Keep universal card renderer
+  if (['google_doc', 'google_sheet', 'google_slide', 'google_form', 'google_task', 'google_meet', 'google_keep'].includes(type)) {
     const config = {
       google_doc: { label: 'Google Doc Proposal', icon: FileText, color: 'text-blue-500', border: 'border-blue-500/30', btn: 'bg-blue-600 hover:bg-blue-700' },
       google_sheet: { label: 'Google Sheet Proposal', icon: Table, color: 'text-emerald-500', border: 'border-emerald-500/30', btn: 'bg-emerald-600 hover:bg-emerald-700' },
+      google_slide: { label: 'Google Slide Proposal', icon: Presentation, color: 'text-amber-500', border: 'border-amber-500/30', btn: 'bg-amber-600 hover:bg-amber-700' },
+      google_form: { label: 'Google Form Proposal', icon: FileCheck, color: 'text-purple-500', border: 'border-purple-500/30', btn: 'bg-purple-600 hover:bg-purple-700' },
       google_task: { label: 'Google Task Proposal', icon: CheckSquare, color: 'text-amber-500', border: 'border-amber-500/30', btn: 'bg-amber-600 hover:bg-amber-700' },
       google_meet: { label: 'Google Meet Call Proposal', icon: Video, color: 'text-indigo-500', border: 'border-indigo-500/30', btn: 'bg-indigo-600 hover:bg-indigo-700' },
       google_keep: { label: 'Google Keep Note Proposal', icon: StickyNote, color: 'text-amber-500', border: 'border-amber-500/30', btn: 'bg-amber-600 hover:bg-amber-700' },
-    }[type as 'google_doc' | 'google_sheet' | 'google_task' | 'google_meet' | 'google_keep'];
+    }[type as 'google_doc' | 'google_sheet' | 'google_slide' | 'google_form' | 'google_task' | 'google_meet' | 'google_keep'];
 
     const Icon = config.icon;
 

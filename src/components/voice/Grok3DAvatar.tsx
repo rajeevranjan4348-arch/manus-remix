@@ -104,7 +104,8 @@ export function Grok3DAvatar({
     shockwave: 0,
     time: 0,
     blinkTimer: 0,
-    isBlinking: false
+    isBlinking: false,
+    showIndiaTime: false
   });
 
   // Keep stateRef in sync with props
@@ -440,9 +441,10 @@ export function Grok3DAvatar({
       stateRef.current.isDragging = false;
     };
 
-    // Click triggers shockwave ripple
+    // Click triggers shockwave ripple and toggles exact Time of India on cyber visor screen 👀
     const handleClick = () => {
       stateRef.current.shockwave = 1.0;
+      stateRef.current.showIndiaTime = !stateRef.current.showIndiaTime;
     };
 
     container.addEventListener('mousedown', handlePointerDown);
@@ -476,7 +478,33 @@ export function Grok3DAvatar({
       visorCtx.shadowBlur = 18;
       visorCtx.fillStyle = coreHex;
 
-      if (isThinking) {
+      if (stateRef.current.showIndiaTime) {
+        // Draw exact India Standard Time on the visor screen where eyes are!
+        const now = new Date();
+        const indiaTimeStr = new Intl.DateTimeFormat('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: true,
+        }).format(now);
+
+        visorCtx.fillStyle = cyanHex;
+        visorCtx.font = 'bold 22px sans-serif';
+        visorCtx.textAlign = 'center';
+        visorCtx.fillText('🇮🇳 IST TIME', 256, 85);
+
+        visorCtx.fillStyle = '#ffffff';
+        visorCtx.font = 'bold 36px monospace';
+        visorCtx.fillText(indiaTimeStr, 256, 130);
+
+        // Expressive eyes glowing below clock
+        visorCtx.fillStyle = coreHex;
+        visorCtx.beginPath();
+        visorCtx.arc(175, 170, 12, 0, Math.PI * 2);
+        visorCtx.arc(335, 170, 12, 0, Math.PI * 2);
+        visorCtx.fill();
+      } else if (isThinking) {
         // Thinking eyes: rotating radar rings / loading arcs
         const angle = time * 5;
         [leftEyeX, rightEyeX].forEach(x => {

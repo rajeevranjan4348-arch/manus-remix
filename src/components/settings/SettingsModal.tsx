@@ -21,8 +21,14 @@ import {
   Terminal, 
   VolumeX, 
   Keyboard,
-  Bot
+  Bot,
+  Github,
+  Cloud,
+  Flame,
+  Database as DatabaseIcon
 } from 'lucide-react';
+import { useFirebase } from '@/context/FirebaseContext';
+import { GitHubRepositoryBrowser } from './GitHubRepositoryBrowser';
 import { 
   UserSettings, 
   AppTheme, 
@@ -39,12 +45,38 @@ import {
   importWorkspaceBackup, 
   clearAllWorkspaceHistory 
 } from '@/lib/settingsStore';
+import { requestMicrophonePermission, requestCameraAccess, getPermissionsStatus, PermissionState } from '@/lib/permissionsManager';
+import { MicrophonePermissionModal } from '@/components/voice/MicrophonePermissionModal';
 import { useTheme } from '@/context/ThemeContext';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Slider } from '@/components/ui/slider';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { speakCleanHumanVoice, stopCleanSpeech } from '@/lib/speechSynthesis';
+
+const VOICE_LANGUAGE_OPTIONS = [
+  { code: 'en-US', name: 'English (United States)', flag: '🇺🇸' },
+  { code: 'en-GB', name: 'English (United Kingdom)', flag: '🇬🇧' },
+  { code: 'en-IN', name: 'English (India)', flag: '🇮🇳' },
+  { code: 'hi-IN', name: 'Hindi (हिंदी - भारत)', flag: '🇮🇳' },
+  { code: 'es-ES', name: 'Spanish (Español - España)', flag: '🇪🇸' },
+  { code: 'es-MX', name: 'Spanish (Español - México)', flag: '🇲🇽' },
+  { code: 'fr-FR', name: 'French (Français)', flag: '🇫🇷' },
+  { code: 'de-DE', name: 'German (Deutsch)', flag: '🇩🇪' },
+  { code: 'ja-JP', name: 'Japanese (日本語)', flag: '🇯🇵' },
+  { code: 'zh-CN', name: 'Chinese Mandarin (中文 - 简体)', flag: '🇨🇳' },
+  { code: 'zh-HK', name: 'Chinese Cantonese (粵語 - 香港)', flag: '🇭🇰' },
+  { code: 'pt-BR', name: 'Portuguese (Português - Brasil)', flag: '🇧🇷' },
+  { code: 'it-IT', name: 'Italian (Italiano)', flag: '🇮🇹' },
+  { code: 'ko-KR', name: 'Korean (한국어)', flag: '🇰🇷' },
+  { code: 'ar-SA', name: 'Arabic (العربية)', flag: '🇸🇦' },
+  { code: 'ru-RU', name: 'Russian (Русский)', flag: '🇷🇺' },
+  { code: 'nl-NL', name: 'Dutch (Nederlands)', flag: '🇳🇱' },
+  { code: 'tr-TR', name: 'Turkish (Türkçe)', flag: '🇹🇷' },
+  { code: 'vi-VN', name: 'Vietnamese (Tiếng Việt)', flag: '🇻🇳' },
+  { code: 'auto', name: 'Browser Auto-Detect', flag: '🌐' },
+];
 import { WorkspaceConnectButton } from '../workspace/WorkspaceConnectButton';
 import { RobotHead } from 'robot-heads';
 
@@ -61,19 +93,30 @@ interface SettingsModalProps {
   initialTab?: SettingsTab;
 }
 
-type SettingsTab = 'general' | 'robot' | 'ai' | 'personalization' | 'voice' | 'data' | 'about';
+type SettingsTab = 'general' | 'robot' | 'ai' | 'personalization' | 'voice' | 'data' | 'connectors' | 'about';
 
 export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProps) {
   const { theme, setTheme } = useTheme();
+  const { user: fbUser, signInWithGoogle, signOut: fbSignOut } = useFirebase();
   const [settings, setSettings] = useState<UserSettings>(getSettings());
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab || 'general');
   const [isExporting, setIsExporting] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [micStatus, setMicStatus] = useState<PermissionState>('prompt');
+  const [cameraStatus, setCameraStatus] = useState<PermissionState>('prompt');
+  const [showMicHelpModal, setShowMicHelpModal] = useState(false);
+
+  const checkMediaPermissions = async () => {
+    const status = await getPermissionsStatus();
+    setMicStatus(status.microphone);
+    setCameraStatus(status.camera);
+  };
 
   useEffect(() => {
     if (isOpen) {
       setSettings(getSettings());
       setShowClearConfirm(false);
+      checkMediaPermissions();
       if (initialTab) {
         setActiveTab(initialTab);
       }
@@ -182,6 +225,7 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
 
   const tabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
     { id: 'general', label: 'General', icon: Sun },
+    { id: 'connectors', label: 'GitHub & Repos', icon: Github },
     { id: 'robot', label: 'Robot', icon: Bot },
     { id: 'ai', label: 'AI & Models', icon: Brain },
     { id: 'personalization', label: 'Personalization', icon: User },
@@ -408,6 +452,33 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                   </div>
                   <WorkspaceConnectButton />
                 </div>
+
+                {/* GitHub Connection & Repositories Quick Row */}
+                <div className="pt-4 border-t border-border/50 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-foreground">GitHub Integration</p>
+                    <p className="text-[11px] text-muted-foreground">Browse user-accessible public & private repositories</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('connectors')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border/70 hover:bg-muted text-xs font-medium transition-colors cursor-pointer"
+                  >
+                    <Github size={13} />
+                    <span>Browse Repositories</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* GITHUB & REPOSITORIES TAB */}
+            {activeTab === 'connectors' && (
+              <div className="space-y-4 animate-in fade-in duration-100">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">GitHub Repositories</h3>
+                  <p className="text-xs text-muted-foreground">Browse, search, and inspect user-accessible repositories for your GitHub connection.</p>
+                </div>
+                <GitHubRepositoryBrowser />
               </div>
             )}
 
@@ -525,7 +596,7 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                     {[
                       { id: 'manus-1.6-lite', name: 'Manus 1.6 Lite', desc: 'Fast execution for quick chats and requests', tag: 'Fast' },
                       { id: 'manus-1.6-max', name: 'Manus 1.6 Max', desc: 'Deep reasoning and complex autonomous flows', tag: 'Pro' },
-                      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', desc: 'Multimodal vision and rapid document analysis', tag: 'Vision' },
+                      { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', desc: 'Multimodal vision and rapid document analysis', tag: 'Vision' },
                       { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', desc: 'High precision code and structured engineering', tag: 'Code' },
                     ].map((m) => {
                       const isSelected = settings.defaultModel === m.id;
@@ -736,12 +807,14 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                   
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {[
+                      { id: 'marcus', name: 'Marcus', desc: 'Human Male • Warm' },
+                      { id: 'onyx', name: 'Onyx', desc: 'Deep Male • Resonant' },
+                      { id: 'echo', name: 'Echo', desc: 'Smooth Male • Calm' },
+                      { id: 'tintin', name: 'Tintin', desc: 'Natural Male • Crisp' },
                       { id: 'nova', name: 'Nova', desc: 'Warm Human' },
-                      { id: 'alloy', name: 'Alloy', desc: 'Neutral Human' },
-                      { id: 'echo', name: 'Echo', desc: 'Smooth Male' },
-                      { id: 'fable', name: 'Fable', desc: 'Clear Natural' },
-                      { id: 'onyx', name: 'Onyx', desc: 'Deep Male' },
+                      { id: 'alloy', name: 'Alloy', desc: 'Neutral Natural' },
                       { id: 'shimmer', name: 'Shimmer', desc: 'Bright Female' },
+                      { id: 'fable', name: 'Fable', desc: 'Clear Natural' },
                     ].map((v) => {
                       const isSelected = settings.voicePersona === v.id;
                       return (
@@ -749,7 +822,7 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                           key={v.id}
                           onClick={() => {
                             updateSetting('voicePersona', v.id as VoicePersona);
-                            speakCleanHumanVoice(`Hello! This is ${v.name}, speaking clearly in high-fidelity audio.`, {
+                            speakCleanHumanVoice(`Hello! This is ${v.name}, speaking to you in natural human audio.`, {
                               voicePersona: v.id,
                               rate: settings.speechSpeed,
                               volume: 1.0,
@@ -775,6 +848,45 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                       );
                     })}
                   </div>
+                </div>
+
+                {/* Voice Input Language (Voice-to-Text) Selector */}
+                <div className="pt-4 border-t border-border/50">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                        Voice Input Language (Voice-to-Text)
+                        <Globe size={13} className="text-muted-foreground" />
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Select your preferred spoken language for dictating prompts and voice messaging
+                      </p>
+                    </div>
+                  </div>
+
+                  <Select
+                    value={settings.voiceInputLanguage || 'en-US'}
+                    onValueChange={(val) => {
+                      updateSetting('voiceInputLanguage', val);
+                      const opt = VOICE_LANGUAGE_OPTIONS.find(o => o.code === val);
+                      toast.success(`Voice input language set to ${opt?.name || val}`);
+                    }}
+                  >
+                    <SelectTrigger className="w-full h-9 text-xs bg-card/40 border-border/60">
+                      <SelectValue placeholder="Select preferred voice input language" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-60 overflow-y-auto">
+                      {VOICE_LANGUAGE_OPTIONS.map((lang) => (
+                        <SelectItem key={lang.code} value={lang.code} className="text-xs cursor-pointer">
+                          <span className="flex items-center gap-2">
+                            <span>{lang.flag}</span>
+                            <span className="font-medium">{lang.name}</span>
+                            <span className="text-[10px] font-mono text-muted-foreground ml-2 opacity-80">({lang.code})</span>
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="pt-4 border-t border-border/50">
@@ -870,6 +982,136 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                   </div>
                 </div>
 
+                {/* Microphone & Camera Permission Check */}
+                <div className="pt-4 border-t border-border/50 space-y-3">
+                  <p className="text-xs font-semibold text-foreground uppercase tracking-wider text-muted-foreground/80">
+                    Device Access & Media Permissions
+                  </p>
+
+                  {/* Microphone Permission */}
+                  <div className="p-3.5 rounded-xl border border-border/60 bg-card/40 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-medium text-foreground flex items-center gap-2">
+                          Microphone Permission
+                          {micStatus === 'granted' && (
+                            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                              Granted 🟢
+                            </span>
+                          )}
+                          {micStatus === 'prompt' && (
+                            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-semibold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                              Permission Needed 🟡
+                            </span>
+                          )}
+                          {(micStatus === 'denied' || micStatus === 'unsupported') && (
+                            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-semibold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                              Blocked / Denied 🔴
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          {micStatus === 'granted'
+                            ? 'Microphone is active and ready for voice input & live calls.'
+                            : micStatus === 'denied'
+                            ? 'Microphone access is blocked in your browser. Unblock in site settings.'
+                            : 'Request microphone access to dictate prompts and talk with AI.'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          toast.info('Requesting microphone permission...');
+                          const granted = await requestMicrophonePermission();
+                          await checkMediaPermissions();
+                          if (granted) {
+                            toast.success('Microphone permission GRANTED! 🎙️', { icon: '🎙️' });
+                          } else {
+                            toast.error('Microphone permission was not granted. Please check browser site settings -> Microphone -> Allow.', { duration: 5000 });
+                          }
+                        }}
+                        className="px-3.5 py-1.5 rounded-xl border border-border hover:border-foreground/40 bg-muted/50 hover:bg-muted text-xs font-semibold text-foreground transition-all cursor-pointer shrink-0 ml-3 shadow-xs"
+                      >
+                        {micStatus === 'granted' ? 'Re-test Mic 🎙️' : 'Grant / Enable Mic 🎙️'}
+                      </button>
+                    </div>
+
+                    {micStatus === 'denied' && (
+                      <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-[11px] text-rose-600 dark:text-rose-300 flex items-center justify-between gap-2">
+                        <div>
+                          <p className="font-semibold">Microphone access is blocked</p>
+                          <p className="mt-0.5 opacity-90">Allow Microphone in your browser address bar settings to dictate prompts.</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowMicHelpModal(true)}
+                          className="px-2.5 py-1 rounded-lg bg-rose-500 text-white font-medium text-xs hover:bg-rose-600 transition-colors shrink-0 cursor-pointer shadow-xs"
+                        >
+                          Unblock Guide 🎙️
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Camera Permission */}
+                  <div className="p-3.5 rounded-xl border border-border/60 bg-card/40 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-medium text-foreground flex items-center gap-2">
+                          Camera Permission
+                          {cameraStatus === 'granted' && (
+                            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                              Granted 🟢
+                            </span>
+                          )}
+                          {cameraStatus === 'prompt' && (
+                            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-semibold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                              Permission Needed 🟡
+                            </span>
+                          )}
+                          {(cameraStatus === 'denied' || cameraStatus === 'unsupported') && (
+                            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-semibold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                              Blocked / Denied 🔴
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          {cameraStatus === 'granted'
+                            ? 'Camera is active and ready for visual attachments & photo captures.'
+                            : cameraStatus === 'denied'
+                            ? 'Camera access is blocked in your browser. Unblock in site settings.'
+                            : 'Request camera access to capture photos and analyze documents with AI.'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          toast.info('Requesting camera permission...');
+                          const granted = await requestCameraAccess();
+                          await checkMediaPermissions();
+                          if (granted) {
+                            toast.success('Camera permission GRANTED! 📷', { icon: '📷' });
+                          } else {
+                            toast.error('Camera permission was not granted. Please check browser site settings -> Camera -> Allow.', { duration: 5000 });
+                          }
+                        }}
+                        className="px-3.5 py-1.5 rounded-xl border border-border hover:border-foreground/40 bg-muted/50 hover:bg-muted text-xs font-semibold text-foreground transition-all cursor-pointer shrink-0 ml-3 shadow-xs"
+                      >
+                        {cameraStatus === 'granted' ? 'Re-test Camera 📷' : 'Grant / Enable Camera 📷'}
+                      </button>
+                    </div>
+
+                    {cameraStatus === 'denied' && (
+                      <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-[11px] text-rose-600 dark:text-rose-300">
+                        <p className="font-semibold">How to enable Camera in Chrome/Edge:</p>
+                        <p className="mt-0.5 opacity-90">1. Click the lock/sliders icon 🔒 in the browser address bar above.</p>
+                        <p className="opacity-90">2. Toggle <strong>Camera</strong> to <strong>Allow</strong>.</p>
+                        <p className="opacity-90">3. Reload the page and click <em>Re-test Camera</em> above.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 <div className="pt-4 border-t border-border/50 flex items-center justify-between">
                   <div>
                     <p className="text-xs font-medium text-foreground">Auto-Play Audio</p>
@@ -894,6 +1136,76 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
             {/* DATA & PRIVACY TAB */}
             {activeTab === 'data' && (
               <div className="space-y-6 animate-in fade-in duration-100">
+                {/* Firebase Cloud Sync & Database Card */}
+                <div className="p-4 rounded-xl border border-border/80 bg-card/60 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0">
+                        <Flame size={18} />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-semibold text-foreground flex items-center gap-2">
+                          Firebase Firestore Cloud Sync
+                          <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            Active 🟢
+                          </span>
+                        </h4>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Project: <span className="font-mono text-foreground font-medium">eternal-envoy-cnzsc</span> (asia-southeast1)
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-muted/30 border border-border/40 text-[11px] space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Database Engine:</span>
+                      <span className="font-medium text-foreground">Cloud Firestore (Enterprise)</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Authentication:</span>
+                      <span className="font-medium text-foreground">{fbUser ? fbUser.email : 'Google Login Available'}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Persistent Collections:</span>
+                      <span className="font-mono text-[10px] text-foreground">users, conversations, messages, projects</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <div className="text-[11px] text-muted-foreground">
+                      {fbUser ? (
+                        <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                          Signed in as {fbUser.displayName || fbUser.email}
+                        </span>
+                      ) : (
+                        <span>Sign in to automatically sync your chats & projects across devices.</span>
+                      )}
+                    </div>
+                    {fbUser ? (
+                      <button
+                        onClick={() => fbSignOut()}
+                        className="px-3 py-1.5 text-xs font-medium border border-border hover:border-destructive hover:text-destructive rounded-lg transition-colors cursor-pointer"
+                      >
+                        Sign Out
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => signInWithGoogle()}
+                        className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold bg-foreground text-background rounded-lg hover:opacity-90 transition-opacity cursor-pointer shadow-xs"
+                      >
+                        <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+                          <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                          <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                          <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                          <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                        </svg>
+                        <span>Sign in with Google</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
                 <div>
                   <p className="text-xs font-medium text-foreground mb-1">Backup & Restore</p>
                   <p className="text-[11px] text-muted-foreground mb-3">
@@ -1031,6 +1343,15 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
           </button>
         </div>
       </div>
+
+      <MicrophonePermissionModal
+        isOpen={showMicHelpModal}
+        onClose={() => setShowMicHelpModal(false)}
+        onPermissionGranted={async () => {
+          setShowMicHelpModal(false);
+          await checkMediaPermissions();
+        }}
+      />
     </div>
   );
 }

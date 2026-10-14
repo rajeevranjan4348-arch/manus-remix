@@ -4,7 +4,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { VoiceCallModal } from '../voice/VoiceCallModal';
+import { LiveCameraModal } from '../camera/LiveCameraModal';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
+import { validateFile } from '@/lib/fileValidation';
 
 export interface AttachmentMenuProps {
   onFileSelect: (file: File) => void;
@@ -31,49 +33,29 @@ export function AttachmentMenu({
 }: AttachmentMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isVoiceCallOpen, setIsVoiceCallOpen] = useState(false);
+  const [isLiveCameraOpen, setIsLiveCameraOpen] = useState(false);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const photosInputRef = useRef<HTMLInputElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
 
-  const handleCameraClick = async () => {
-    // Request browser camera permission explicitly before opening the native camera picker.
-    // The temporary stream is immediately released; the file input handles the actual capture.
-    if (!window.isSecureContext) {
-      toast.error('Camera access requires HTTPS or localhost. Open Manus through its secure site.');
-      return;
-    }
-    if (!navigator.mediaDevices?.getUserMedia) {
-      // Some mobile browsers expose the native camera picker without getUserMedia.
-      cameraInputRef.current?.click();
-      return;
-    }
-
-    let permissionStream: MediaStream | null = null;
-    try {
-      permissionStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
-      permissionStream.getTracks().forEach((track) => track.stop());
-      permissionStream = null;
-      cameraInputRef.current?.click();
-    } catch (error) {
-      permissionStream?.getTracks().forEach((track) => track.stop());
-      const name = error instanceof Error ? error.name : '';
-      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-        toast.error('Camera permission was blocked. Allow Camera for this site in browser settings, then try again.');
-      } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-        toast.error('No camera was found on this device.');
-      } else {
-        toast.error('Could not access the camera. Check site permissions and try again.');
-      }
-    }
+  const handleCameraClick = () => {
+    // Open production-ready Live Camera Preview modal with front/rear switch & snap
+    setIsOpen(false);
+    setIsLiveCameraOpen(true);
   };
 
   const handleCameraChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      const val = validateFile(file);
+      if (!val.valid) {
+        toast.error(val.error);
+        return;
+      }
       saveSharedFileToLibrary(file, 'Camera Capture').catch(console.error);
       onFileSelect(file);
       setIsOpen(false);
-      toast.success(`Photo captured & saved to Library: ${file.name}`);
+      toast.success(`Photo captured & saved to Library: ${val.sanitizedName}`);
     }
     // Allow selecting/capturing the same image again.
     e.target.value = '';
@@ -82,21 +64,35 @@ export function AttachmentMenu({
   const handlePhotosChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      const val = validateFile(file);
+      if (!val.valid) {
+        toast.error(val.error);
+        return;
+      }
       saveSharedFileToLibrary(file, 'Photo Attachment').catch(console.error);
       onFileSelect(file);
       setIsOpen(false);
-      toast.success(`Image attached & saved to Library: ${file.name}`);
+      toast.success(`Image attached & saved to Library: ${val.sanitizedName}`);
     }
+    e.target.value = '';
   };
 
   const handleFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    for (const file of files) {
+      const val = validateFile(file);
+      if (!val.valid) {
+        toast.error(val.error);
+        continue;
+      }
       saveSharedFileToLibrary(file, 'File Attachment').catch(console.error);
       onFileSelect(file);
-      setIsOpen(false);
-      toast.success(`File attached & saved to Library: ${file.name}`);
+      toast.success(`File attached: ${val.sanitizedName} (${val.sizeFormatted})`);
     }
+    setIsOpen(false);
+    e.target.value = '';
   };
 
   return (
@@ -120,7 +116,8 @@ export function AttachmentMenu({
       <input
         ref={filesInputRef}
         type="file"
-        accept=".csv,.xlsx,.xls,.pdf,.txt,.json,.doc,.docx"
+        multiple
+        accept=".csv,.xlsx,.xls,.pdf,.txt,.json,.doc,.docx,.md,.py,.js,.ts,.tsx,.html,.css"
         onChange={handleFilesChange}
         className="hidden"
       />
@@ -145,7 +142,7 @@ export function AttachmentMenu({
               className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer"
             >
               <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-white/10 text-slate-800 dark:text-white flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                <PhoneCall size={20} />
+                <PhoneCall size={22} strokeWidth={2.4} />
               </div>
               <div className="flex flex-col">
                 <span className="font-semibold text-base text-slate-900 dark:text-white tracking-tight">Voice call</span>
@@ -161,7 +158,7 @@ export function AttachmentMenu({
               className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer"
             >
               <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform text-slate-800 dark:text-white">
-                <Camera size={20} />
+                <Camera size={22} strokeWidth={2.4} />
               </div>
               <span className="font-semibold text-base text-slate-900 dark:text-white tracking-tight">Camera</span>
             </button>
@@ -174,7 +171,7 @@ export function AttachmentMenu({
               className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer"
             >
               <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform text-slate-800 dark:text-white">
-                <Image size={20} />
+                <Image size={22} strokeWidth={2.4} />
               </div>
               <span className="font-semibold text-base text-slate-900 dark:text-white tracking-tight">Photos</span>
             </button>
@@ -187,7 +184,7 @@ export function AttachmentMenu({
               className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer"
             >
               <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform text-slate-800 dark:text-white">
-                <Paperclip size={20} />
+                <Paperclip size={22} strokeWidth={2.4} />
               </div>
               <span className="font-semibold text-base text-slate-900 dark:text-white tracking-tight">Files</span>
             </button>
@@ -206,8 +203,8 @@ export function AttachmentMenu({
               }}
               className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer"
             >
-              <div className="w-10 h-10 rounded-full bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                <Plug size={20} />
+              <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-white/10 text-slate-800 dark:text-white flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <Plug size={22} strokeWidth={2.4} className="text-slate-800 dark:text-white" />
               </div>
               <div className="flex flex-col">
                 <span className="font-semibold text-base text-slate-900 dark:text-white tracking-tight">Connectors</span>
@@ -239,7 +236,7 @@ export function AttachmentMenu({
                     ? "bg-purple-600 text-white shadow-[0_0_12px_rgba(168,85,247,0.4)]"
                     : "bg-slate-100 dark:bg-white/10 text-slate-800 dark:text-white"
                 )}>
-                  <Brain size={20} />
+                  <Brain size={22} strokeWidth={2.4} />
                 </div>
                 <div className="flex flex-col">
                   <span className={cn(
@@ -271,6 +268,16 @@ export function AttachmentMenu({
         isOpen={isVoiceCallOpen}
         onClose={() => setIsVoiceCallOpen(false)}
         onSendMessageToChat={onSendMessageToChat}
+      />
+
+      {/* Live Camera Modal (Real-time preview, front/rear toggle, photo capture) */}
+      <LiveCameraModal
+        isOpen={isLiveCameraOpen}
+        onClose={() => setIsLiveCameraOpen(false)}
+        onCapture={(file) => {
+          onFileSelect(file);
+          setIsOpen(false);
+        }}
       />
     </>
   );
