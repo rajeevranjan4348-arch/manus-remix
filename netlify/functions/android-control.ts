@@ -68,6 +68,20 @@ export default async (req: Request) => {
   const args = body?.args && typeof body.args === 'object' && !Array.isArray(body.args) ? body.args : {};
 
   if (!allowedActions.has(action)) return respond({ error: 'This Android action is not allowed.', code: 'ACTION_NOT_ALLOWED' }, 400);
+  const confirmationRequired = action !== 'status' && action !== 'home';
+  if (confirmationRequired && body?.confirmed !== true) {
+    return respond({ error: 'User confirmation is required for this Android action.', code: 'CONFIRMATION_REQUIRED' }, 403);
+  }
+  if (action === 'search_in_app') {
+    if (typeof args.packageName !== 'string' || args.packageName.length > 180 || !/^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+$/.test(args.packageName) || typeof args.query !== 'string' || !args.query.trim() || args.query.length > 160) {
+      return respond({ error: 'A valid app package and search query are required.', code: 'INVALID_ARGUMENT' }, 400);
+    }
+  }
+  if (action === 'call_contact') {
+    if (typeof args.contact !== 'string' || !args.contact.trim() || args.contact.length > 80) {
+      return respond({ error: 'A valid contact name is required.', code: 'INVALID_ARGUMENT' }, 400);
+    }
+  }
   if (action === 'launch_app') {
     const packageName = args.packageName;
     if (typeof packageName !== 'string' || packageName.length > 180 || !/^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$/.test(packageName)) {
