@@ -1028,3 +1028,49 @@ html[data-page-hidden="true"] *::after {
 img, video, canvas, svg {
   max-width: 100%;
 }
+
+
+/* Consistent, standard-sized controls and icons */
+:root {
+  --control-height: 2.25rem;
+  --control-icon-size: 1rem;
+}
+
+/* Keep interactive controls close to the compact, comfortable ChatGPT scale. */
+button,
+[role="button"] {
+  font-size: 0.875rem;
+}
+
+button:not([data-size="icon"]),
+[role="button"]:not([data-size="icon"]) {
+  min-height: var(--control-height);
+}
+
+button svg.lucide,
+[role="button"] svg.lucide,
+a[aria-label] svg.lucide {
+  width: var(--control-icon-size);
+  height: var(--control-icon-size);
+  flex-shrink: 0;
+}
+
+/* Icon-only controls use a consistent 36px touch target without oversized chrome. */
+button:has(> svg:only-child),
+button[aria-label]:has(svg:only-child),
+[role="button"]:has(> svg:only-child) {
+  width: var(--control-height);
+  min-width: var(--control-height);
+  height: var(--control-height);
+  min-height: var(--control-height);
+  padding: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Prevent oversized Lucide icons from disrupting normal text and control layouts. */
+svg.lucide {
+  max-width: 1.25rem;
+  max-height: 1.25rem;
+}
