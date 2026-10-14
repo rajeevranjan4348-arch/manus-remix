@@ -23,7 +23,7 @@ export const DEFAULT_LONG_CONTEXT_MODEL = 'gemini-2.5-flash';
 
 function normalizeModel(modelName?: string): string {
   if (!modelName) return DEFAULT_LONG_CONTEXT_MODEL;
-  const clean = modelName.replace(/^google\\//, '').trim();
+  const clean = modelName.replace(/^google\//, '').trim();
   if (clean === 'gemini-3-flash' || clean === 'gemini-3.0-flash' ||
       clean === 'gemini-2.0-flash' || clean === 'gemini-1.5-flash') {
     return DEFAULT_LONG_CONTEXT_MODEL;
