@@ -1,4 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
+import { extractWeatherQuery, fetchServerWeather, formatWeatherResponse } from './weatherService';
+import { geminiCircuitBreaker } from './circuitBreaker';
+
+export { geminiCircuitBreaker };
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -28,10 +32,11 @@ function normalizeModel(modelName?: string): string {
   return clean;
 }
 
-function needsLiveSearch(text: string): boolean {
-  return /\b(latest|today|current|currently|right now|breaking|live|real[\s-]?time|news|headlines|recent|this week|yesterday|weather|stock price|share price|exchange rate|world news|india news|tech news|latest updates|election results|box office|release date|latest version|price today|score|standings|forecast|who won|who is (the )?(prime minister|president|chief minister|ceo)|who are the (current|latest)\b)\b/i.test(text)
+export function needsLiveSearch(text: string): boolean {
+  return /\b(latest|today|current|currently|right now|breaking|live|real[\s-]?time|news|headlines|recent|this week|yesterday|weather|stock price|share price|exchange rate|world news|india news|tech news|latest updates|election results|box office|release date|latest version|price today|score|standings|forecast|fact[\s-]?check|verify|rumor|who won|who is (the )?(prime minister|president|chief minister|ceo)|who are the (current|latest)\b)\b/i.test(text)
     || /\b(202[5-9]|203\d)\b/.test(text)
-    || /\b(what happened|what's happening|whats happening|tell me about the latest|latest on)\b/i.test(text);
+    || /@(web_search|search|google)\b/i.test(text)
+    || /\b(what happened|what's happening|whats happening|tell me about the latest|latest on|is it true|debunk|myth)\b/i.test(text);
 }
 
 function generateResilientResponse(prompt: string, messages: ChatMessage[]): string {
@@ -107,18 +112,18 @@ Regarding **${prompt.trim()}**:
 
 export async function* streamGeminiResponse(options: StreamChatOptions) {
   const apiKey = process.env.GEMINI_API_KEY;
-  const latestUserText = [...options.messages].reverse()
-    .find(m => m.role === 'user')?.content || '';
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY environment variable is missing');
+  }
 
-  if (apiKey) {
-    const ai = new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
+  const ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
       },
-    });
+    },
+  });
 
   const preferredModel = normalizeModel(options.model);
   // Order candidate models prioritizing active high-speed models
@@ -139,6 +144,25 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
 
   const latestUserText = [...options.messages].reverse()
     .find(m => m.role === 'user')?.content || '';
+
+  // Weather Tool Calling Layer
+  const weatherCheck = extractWeatherQuery(latestUserText, options.messages);
+  if (weatherCheck.isWeather) {
+    if (weatherCheck.needsLocation || !weatherCheck.city) {
+      yield 'Which city or location would you like to check the weather for? (e.g., Delhi, New York, London, Tokyo)';
+      return;
+    }
+    try {
+      const weatherData = await fetchServerWeather(weatherCheck.city, 8000);
+      if (weatherData) {
+        yield formatWeatherResponse(weatherData);
+        return;
+      }
+    } catch (wErr) {
+      console.warn('[Gemini Service] Weather tool fetch notice:', wErr);
+    }
+  }
+
   const useGoogleSearch = needsLiveSearch(latestUserText);
 
   if (useGoogleSearch) {
@@ -162,60 +186,77 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     });
   }
 
-  for (const model of candidateModels) {
-    // Attempt with Google Search grounding if applicable, and if that fails, retry without tools
-    const toolConfigs = useGoogleSearch ? [{ tools: [{ googleSearch: {} }] }, {}] : [{}];
+  // 1. Evaluate Gemini Server-Side Circuit Breaker status
+  const canAttemptGemini = geminiCircuitBreaker.canAttempt();
+  if (!canAttemptGemini) {
+    console.warn(`[Gemini Circuit Breaker] Circuit is currently ${geminiCircuitBreaker.getState()}. Fast-failing Gemini to prevent latency and timeout hangs during outage.`);
+  } else {
+    for (const model of candidateModels) {
+      // Attempt with Google Search grounding if applicable, and if that fails, retry without tools
+      const toolConfigs = useGoogleSearch ? [{ tools: [{ googleSearch: {} }] }, {}] : [{}];
 
-    for (const toolConfig of toolConfigs) {
-      try {
-        const responseStream = await ai.models.generateContentStream({
-          model,
-          contents,
-          config: {
-            systemInstruction: systemPrompt,
-            ...toolConfig,
-          },
-        });
+      for (const toolConfig of toolConfigs) {
+        try {
+          const responseStream = await ai.models.generateContentStream({
+            model,
+            contents,
+            config: {
+              systemInstruction: systemPrompt,
+              ...toolConfig,
+            },
+          });
 
-        let hasYielded = false;
-        const sources = new Map<string, string>();
+          let hasYielded = false;
+          const sources = new Map<string, string>();
 
-        for await (const chunk of responseStream) {
-          const text = chunk.text;
-          if (text) {
-            hasYielded = true;
-            yield text;
-          }
+          for await (const chunk of responseStream) {
+            const text = chunk.text;
+            if (text) {
+              hasYielded = true;
+              yield text;
+            }
 
-          const groundingChunks = chunk?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-          for (const groundingChunk of groundingChunks) {
-            const web = groundingChunk?.web;
-            if (typeof web?.uri === 'string' && /^https?:\/\//i.test(web.uri)) {
-              sources.set(web.uri, typeof web.title === 'string' && web.title.trim() ? web.title : web.uri);
+            const groundingChunks = chunk?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+            for (const groundingChunk of groundingChunks) {
+              const web = groundingChunk?.web;
+              if (typeof web?.uri === 'string' && /^https?:\/\//i.test(web.uri)) {
+                sources.set(web.uri, typeof web.title === 'string' && web.title.trim() ? web.title : web.uri);
+              }
             }
           }
-        }
 
-        if (useGoogleSearch && sources.size > 0) {
-          yield '\n\n**Sources**\n' + Array.from(sources.entries())
-            .slice(0, 8)
-            .map(([url, title]) => `- [${title.replace(/[\[\]]/g, '')}](${url})`)
-            .join('\n');
-        }
+          if (useGoogleSearch && sources.size > 0) {
+            yield '\n\n**Sources**\n' + Array.from(sources.entries())
+              .slice(0, 8)
+              .map(([url, title]) => `- [${title.replace(/[\[\]]/g, '')}](${url})`)
+              .join('\n');
+          }
 
-        if (hasYielded) {
-          return; // Successfully streamed the response
+          if (hasYielded) {
+            geminiCircuitBreaker.recordSuccess();
+            return; // Successfully streamed the response
+          }
+        } catch (err: any) {
+          geminiCircuitBreaker.recordFailure(err);
+          const isRateLimit = err?.status === 429 || err?.message?.includes('429') || err?.message?.includes('RESOURCE_EXHAUSTED');
+          console.log(`[AI Model Router] Model ${model} attempt notice (status: ${err?.status || (isRateLimit ? 429 : 'fallback')}). Breaker state: ${geminiCircuitBreaker.getState()}`);
+          
+          if (!geminiCircuitBreaker.canAttempt()) {
+            console.warn('[Gemini Circuit Breaker] Breaker tripped to OPEN. Aborting further model retries to prevent outage stall.');
+            break;
+          }
+
+          if (isRateLimit) {
+            await new Promise(r => setTimeout(r, 250));
+          }
         }
-      } catch (err: any) {
-        const isRateLimit = err?.status === 429 || err?.message?.includes('429') || err?.message?.includes('RESOURCE_EXHAUSTED');
-        console.log(`[AI Model Router] Model ${model} attempt notice (status: ${err?.status || (isRateLimit ? 429 : 'fallback')}). Trying fallback configuration...`);
-        if (isRateLimit) {
-          await new Promise(r => setTimeout(r, 250));
-        }
+      }
+
+      if (!geminiCircuitBreaker.canAttempt()) {
+        break;
       }
     }
   }
-}
 
   // If Gemini models failed or hit quota limits, seamlessly fall back to OpenRouter key pool
   const apiKeys = [
@@ -234,6 +275,18 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     } catch (orErr: any) {
       console.log('[AI Model Router] OpenRouter key unavailable, attempting fallback...');
     }
+  }
+
+  // If circuit breaker is OPEN and no external providers succeeded, provide the user with structured, actionable recovery feedback
+  if (geminiCircuitBreaker.getState() === 'OPEN') {
+    console.log('[Gemini Circuit Breaker] Emitting actionable recovery feedback directly to user');
+    const actionableFeedback = geminiCircuitBreaker.formatActionableRecoveryMessage();
+    const words = actionableFeedback.split(/(\s+)/);
+    for (let i = 0; i < words.length; i += 3) {
+      yield words.slice(i, i + 3).join('');
+      await new Promise(r => setTimeout(r, 15));
+    }
+    return;
   }
 
   // Graceful resilient synthesizer fallback ensures user requests never receive unhandled 500 crashes
@@ -276,6 +329,7 @@ export async function* streamOpenRouterResponse(
           'HTTP-Referer': 'https://manus.im',
           'X-Title': 'Manus AI Agent',
         },
+        signal: AbortSignal.timeout(10000),
         body: JSON.stringify({
           model: model,
           messages: messages,

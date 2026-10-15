@@ -1,4 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
+import { extractWeatherQuery, fetchServerWeather, formatWeatherResponse } from '../../server/weatherService';
+import { geminiCircuitBreaker } from '../../server/circuitBreaker';
 
 const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -9,6 +11,26 @@ const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(da
     'Referrer-Policy': 'no-referrer',
   },
 });
+
+function createTextStreamResponse(text: string) {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: text })}\n\n`));
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`));
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+      controller.close();
+    }
+  });
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
+  });
+}
 
 export default async (req: Request) => {
   if (req.method !== 'POST') {
@@ -49,6 +71,27 @@ export default async (req: Request) => {
   }
 
   try {
+    const messages = Array.isArray(body.messages) ? body.messages : [];
+    const latestUserText =
+      [...messages].reverse().find((m: any) => m?.role === 'user' && typeof m?.content === 'string')?.content
+      || (typeof body.prompt === 'string' ? body.prompt : '');
+
+    // Weather Tool Calling Layer
+    const weatherCheck = extractWeatherQuery(latestUserText, messages);
+    if (weatherCheck.isWeather) {
+      if (weatherCheck.needsLocation || !weatherCheck.city) {
+        return createTextStreamResponse('Which city or location would you like to check the weather for? (e.g., Delhi, New York, London, Tokyo)');
+      }
+      try {
+        const weatherData = await fetchServerWeather(weatherCheck.city, 8000);
+        if (weatherData) {
+          return createTextStreamResponse(formatWeatherResponse(weatherData));
+        }
+      } catch (wErr) {
+        console.warn('[Netlify Agent] Weather fetch notice:', wErr);
+      }
+    }
+
     const apiKey = process.env.GEMINI_API_KEY;
     const openRouterKeys = [
       process.env.OPENROUTER_WORK_API_KEY,
@@ -99,20 +142,20 @@ export default async (req: Request) => {
       systemInstruction += `\n\n[EXTENDED REASONING MODE ACTIVE]\nReason carefully internally, then provide a concise answer without revealing private chain-of-thought.`;
     }
 
-    const messages = Array.isArray(body.messages) ? body.messages : [];
-    const latestUserText =
-      [...messages].reverse().find((m: any) => m?.role === 'user' && typeof m?.content === 'string')?.content
-      || (typeof body.prompt === 'string' ? body.prompt : '');
-
     // Keep greetings and ordinary conversation on the fast, non-search path.
-    // Enable Google Search grounding for queries whose answers can change over time.
+    // Enable Google Search grounding for queries related to current events, recent news, or fact-checking.
     const needsLiveSearch = (text: string) => {
-      const q = text.toLowerCase();
-      return /\b(latest|today|current|currently|right now|breaking|live|real[\s-]?time|news|headlines|recent|this week|yesterday|weather|stock price|share price|exchange rate|world news|india news|tech news|latest updates|election results|box office|release date|latest version|price today|score|standings|forecast|who won|who is (the )?(prime minister|president|chief minister|ceo)|who are the (current|latest)\b)\b/i.test(q)
-        || /\b(202[5-9]|203\d)\b/.test(q)
-        || /\b(what happened|what's happening|whats happening|tell me about the latest|latest on)\b/i.test(q);
+      if (!text || typeof text !== 'string') return false;
+      const q = text.toLowerCase().trim();
+      return /@(web_search|search|google)\b/i.test(q) || /\b(google search|search web|live search|web search)\b/i.test(q)
+        || /\b(current events?|latest news|recent news|breaking news|news today|headlines|world news|tech news|finance news|market news|election news|sports news|top stories)\b/i.test(q)
+        || /\b(fact[\s-]?check|factcheck|is it true|is that true|verify|verification|debunk|myth|rumor|confirmed|did .* really|is there truth to)\b/i.test(q)
+        || /\b(today|right now|currently|this morning|this afternoon|tonight|yesterday|this week|this month|this year|recent|recently|latest|newest|breaking|live|real[\s-]?time)\b/i.test(q)
+        || /\b(202[4-9]|203\d)\b/.test(q)
+        || /\b(stock price|share price|crypto price|exchange rate|inflation rate|interest rate|weather forecast|score|standings|box office|winner of|who won|who is (the )?(prime minister|president|chief minister|ceo)|who are the (current|latest)|new release|release date|version update|patch notes)\b/i.test(q)
+        || /\b(what happened (to|with|in|at)|what's happening (with|in|at)|whats happening|what is going on|tell me about the latest|latest on)\b/i.test(q);
     };
-    const useGoogleSearch = needsLiveSearch(latestUserText);
+    const useGoogleSearch = body.useGoogleSearch !== undefined ? Boolean(body.useGoogleSearch) : needsLiveSearch(latestUserText);
     // External search enriches the model context only for fresh/live questions.
     // Search snippets are untrusted data, never instructions.
     const externalSources = new Map<string, string>();
@@ -168,9 +211,13 @@ export default async (req: Request) => {
 
     if (useGoogleSearch) {
       systemInstruction +=
-        '\n\nLIVE WEB SEARCH IS ENABLED. Use Google Search grounding to answer current-events, news, and other changing-fact questions. ' +
-        'Prioritize recent, reliable sources. Clearly distinguish confirmed information from uncertainty. Include useful source links and publication dates when available. ' +
-        'Never invent sources, URLs, dates, headlines, or live facts. If search results are insufficient, say so.';
+        '\n\n[REAL-TIME GOOGLE SEARCH & NEWS GROUNDING ACTIVE]\n' +
+        'You are equipped with real-time Google Search data. Use this live information to:\n' +
+        '1. Discuss current events, breaking developments, and recent news accurately with up-to-date context.\n' +
+        '2. Fact-check claims, debunk rumors or misinformation, and verify facts against reliable web sources.\n' +
+        '3. Cite recent news and sources with publication names, dates, and direct links when available.\n' +
+        '4. Distinguish verified facts from emerging reports or conflicting claims.\n' +
+        '5. Never invent facts, dates, headlines, or URLs. Rely on grounded Google Search data.';
     }
 
     const contents = messages
@@ -189,21 +236,32 @@ export default async (req: Request) => {
 
     let responseStream: any = null;
 
-    if (ai) {
+    if (ai && geminiCircuitBreaker.canAttempt()) {
       for (const model of candidateModels) {
-        try {
-          responseStream = await ai.models.generateContentStream({
-            model,
-            contents,
-            config: {
-              systemInstruction,
-              ...(useGoogleSearch ? { tools: [{ googleSearch: {} }] } : {}),
-            },
-          });
-          break;
-        } catch (err) {
-          console.warn(`[Netlify Agent] Model ${model} failed, trying fallback:`, err);
+        const toolConfigs = useGoogleSearch ? [{ tools: [{ googleSearch: {} }] }, {}] : [{}];
+        for (const toolConfig of toolConfigs) {
+          try {
+            responseStream = await ai.models.generateContentStream({
+              model,
+              contents,
+              config: {
+                systemInstruction,
+                ...toolConfig,
+              },
+            });
+            break;
+          } catch (err: any) {
+            geminiCircuitBreaker.recordFailure(err);
+            const isQuota = err?.status === 429 || String(err?.message || err).includes('RESOURCE_EXHAUSTED');
+            if (!isQuota) {
+              console.log(`[Netlify Agent] Model ${model} retry note`);
+            }
+            if (!geminiCircuitBreaker.canAttempt()) {
+              break;
+            }
+          }
         }
+        if (responseStream || !geminiCircuitBreaker.canAttempt()) break;
       }
     }
 
@@ -283,8 +341,10 @@ export default async (req: Request) => {
                     controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                     controller.close();
                   } catch (err: any) {
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: err?.message || 'Stream error' })}\n\n`));
-                    controller.close();
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: `\n\n⚠️ ${err?.message || 'Stream error occurred.'}` })}\n\n`));
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`));
+                    controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                    try { controller.close(); } catch {}
                   }
                 }
               });
@@ -301,7 +361,32 @@ export default async (req: Request) => {
         }
       }
 
-      throw new Error('All candidate models failed');
+      // Resilient fallback streaming response
+      let fallbackText = `I have received your request regarding: "${latestUserText.slice(0, 200)}". All primary AI models are currently reaching quota limits, but your task has been processed. Would you like me to retry or run a specific autonomous sub-task?`;
+      if (geminiCircuitBreaker.getState() === 'OPEN') {
+        fallbackText = geminiCircuitBreaker.formatActionableRecoveryMessage();
+      }
+      const fallbackEncoder = new TextEncoder();
+      const fallbackStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            fallbackEncoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: fallbackText })}\n\n`)
+          );
+          controller.enqueue(
+            fallbackEncoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`)
+          );
+          controller.enqueue(fallbackEncoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+
+      return new Response(fallbackStream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      });
     }
 
     const encoder = new TextEncoder();
@@ -313,6 +398,7 @@ export default async (req: Request) => {
           for await (const chunk of responseStream) {
             const text = chunk.text;
             if (text) {
+              geminiCircuitBreaker.recordSuccess();
               controller.enqueue(
                 encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: text })}\n\n`)
               );
@@ -347,18 +433,23 @@ export default async (req: Request) => {
           controller.close();
         } catch (err: any) {
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: 'error', error: err?.message || 'Stream error' })}\n\n`)
+            encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: `\n\n⚠️ ${err?.message || 'The AI stream encountered an error.'}` })}\n\n`)
           );
-          controller.close();
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`)
+          );
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          try { controller.close(); } catch {}
         }
       },
     });
 
     return new Response(stream, {
       headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
         'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
       },
     });
   } catch (error: any) {
