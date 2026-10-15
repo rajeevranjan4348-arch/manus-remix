@@ -569,8 +569,8 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   };
 
   return (
-    <div ref={containerRef} className="w-full h-full overflow-y-auto flex flex-col items-center p-6 md:py-10 bg-manus-cream dark:bg-background">
-      <div className="w-full max-w-4xl space-y-6 sm:space-y-8 my-auto">
+    <div ref={containerRef} className="box-border w-full min-h-full min-h-[100dvh] overflow-x-hidden overflow-y-auto flex flex-col items-center px-4 py-6 sm:p-6 md:py-10 bg-manus-cream dark:bg-background">
+      <div className="box-border w-full max-w-4xl min-w-0 space-y-6 sm:space-y-8 my-auto">
         <div className="flex flex-col items-center animate-on-load" aria-label="Manus AI robot assistant">
           <div
             className="relative shrink-0 cursor-pointer select-none"
@@ -639,7 +639,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             className={cn(
-              "w-full bg-white dark:bg-[#1a1b1e] rounded-[1.75rem] shadow-lg border border-slate-200/80 dark:border-border/60 px-3.5 py-2.5 sm:px-4.5 sm:py-3 flex flex-col gap-1.5 sm:gap-2 transition-[box-shadow,border-color,background-color] duration-200 ease-out focus-within:ring-2 focus-within:ring-primary/20 relative z-[2] gpu-accelerated",
+              "box-border w-full min-w-0 shrink-0 bg-white dark:bg-[#1a1b1e] rounded-[1.75rem] shadow-lg border border-slate-200/80 dark:border-border/60 px-3.5 py-2.5 sm:px-4.5 sm:py-3 flex flex-col gap-1.5 sm:gap-2 transition-[box-shadow,border-color,background-color] duration-200 ease-out focus-within:ring-2 focus-within:ring-primary/20 relative z-[2]",
               isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30",
               isListening && "ring-2 ring-rose-500/40 border-rose-400 dark:border-rose-500/60 shadow-lg shadow-rose-500/10"
             )}
