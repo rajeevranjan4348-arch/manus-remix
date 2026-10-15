@@ -228,7 +228,7 @@ export function ConnectorsStorePanel({
     if (saved) {
       try { return JSON.parse(saved); } catch {}
     }
-    return propActiveConnectors || ['web_search', 'code_sandbox', 'charts', 'gmail', 'calendar', 'drive'];
+    return propActiveConnectors || ['web_search', 'code_sandbox', 'charts', 'image_generation', 'gmail', 'calendar', 'drive'];
   });
 
   useEffect(() => {
