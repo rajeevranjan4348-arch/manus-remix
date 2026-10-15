@@ -601,6 +601,18 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
               aria-label={`Manus AI robot assistant, ${isHappyExpression ? 'happy' : robotState}`}
               className={`shrink-0 transform transition-transform ${showIndiaClock ? 'opacity-20' : ''}`}
             />
+            {/* Fallback visor: masks merged eye pixels from robot-heads and restores distinct eyes on the rectangular shell. */}
+            {robotShape === 'rectangle' && !showIndiaClock && (
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute left-[19%] top-[29%] z-[1] flex h-[40%] w-[62%] items-center justify-center rounded-[16%] border border-black/80 bg-[#080b12] shadow-[inset_0_0_8px_rgba(0,0,0,0.9)]"
+              >
+                <div className="flex w-full items-center justify-center gap-[19%]">
+                  <span className="block h-[22px] w-[13px] max-h-[34%] rounded-[3px] bg-white shadow-[0_0_9px_rgba(255,255,255,0.95)] animate-[robotEyeGlow_2.8s_ease-in-out_infinite]" />
+                  <span className="block h-[22px] w-[13px] max-h-[34%] rounded-[3px] bg-white shadow-[0_0_9px_rgba(255,255,255,0.95)] animate-[robotEyeGlow_2.8s_ease-in-out_infinite]" />
+                </div>
+              </div>
+            )}
             {showIndiaClock && (
               <div
                 className="absolute inset-x-3 top-1/2 -translate-y-1/2 z-10 rounded-xl border border-sky-300/70 bg-slate-950 text-sky-100 px-2 py-3 text-center shadow-[0_0_18px_rgba(56,189,248,0.45)] pointer-events-none"
