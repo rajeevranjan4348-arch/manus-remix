@@ -117,6 +117,46 @@ export default async (req: Request) => {
       });
     }
 
+    // Image Generation connector: explicit @image or natural-language image requests.
+    // Gemini credentials remain server-side; generated image bytes are returned as a data URL.
+    const wantsImage = /@image\\b/i.test(latestUserText)
+      || /\\b(generate|create|make|draw|design)\\s+(me\\s+)?(an?\\s+)?(image|picture|illustration|wallpaper|poster|logo|artwork)\\b/i.test(latestUserText)
+      || /\\b(image|picture|illustration|wallpaper|poster|logo|artwork)\\s+(generation|generator)\\b/i.test(latestUserText);
+    if (wantsImage) {
+      if (!ai) {
+        return jsonResponse({
+          error: 'Image Generation requires GEMINI_API_KEY. Add it to Netlify Site configuration → Environment variables, then redeploy.',
+          code: 'IMAGE_GENERATION_CREDENTIALS_REQUIRED',
+        }, 503);
+      }
+      const imagePrompt = latestUserText.replace(/@image\\b/gi, '').trim();
+      if (!imagePrompt || imagePrompt.length > 4000) {
+        return createTextStreamResponse('Please describe the image you want me to generate (maximum 4,000 characters).');
+      }
+      try {
+        const generated = await ai.models.generateContent({
+          model: 'gemini-2.5-flash-image',
+          contents: imagePrompt,
+          config: { responseModalities: ['TEXT', 'IMAGE'] },
+        });
+        const parts = generated.candidates?.[0]?.content?.parts || [];
+        const imagePart = parts.find((part: any) => part?.inlineData?.data && part?.inlineData?.mimeType);
+        const caption = parts.find((part: any) => typeof part?.text === 'string')?.text || 'Generated with Manus Image Generation.';
+        if (!imagePart) {
+          return createTextStreamResponse('The image provider did not return an image. Please try a more specific prompt.');
+        }
+        const mimeType = String(imagePart.inlineData.mimeType).replace(/[^a-zA-Z0-9/+.-]/g, '');
+        const markdown = `${caption}\\n\\n![Generated image](data:${mimeType};base64,${imagePart.inlineData.data})`;
+        return createTextStreamResponse(markdown);
+      } catch (imageError: any) {
+        console.error('[Image Generation] Provider request failed:', imageError?.message || imageError);
+        return jsonResponse({
+          error: 'Image generation failed. Check that the Gemini API key is valid and that the image model is available to your project.',
+          code: 'IMAGE_GENERATION_FAILED',
+        }, 502);
+      }
+    }
+
     function normalizeModel(modelName?: string): string {
       if (!modelName || typeof modelName !== 'string') return 'gemini-3.8-flash';
       // Sanitize model string: allow only alphanumeric, dashes, dots, underscores, slashes
