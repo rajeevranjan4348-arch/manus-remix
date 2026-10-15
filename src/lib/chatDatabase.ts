@@ -552,6 +552,32 @@ export async function updateMessage(id: string, updates: Partial<StoredMessage>)
 }
 
 /**
+ * Retrieve all stored messages across all conversations (used for full-text search)
+ */
+export async function getAllMessages(): Promise<StoredMessage[]> {
+  let list: StoredMessage[] = [];
+  try {
+    const db = await openDatabase();
+    list = await new Promise<StoredMessage[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_MESSAGES, 'readonly');
+      const store = tx.objectStore(STORE_MESSAGES);
+      const req = store.getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (err) {
+    console.warn('[ChatDB] IndexedDB getAllMessages error, using fallback:', err);
+    list = getFallbackMessages();
+  }
+
+  if (list.length === 0) {
+    list = getFallbackMessages();
+  }
+
+  return list;
+}
+
+/**
  * Full conversation & messages backup export
  */
 export async function exportAllChatHistory(): Promise<string> {

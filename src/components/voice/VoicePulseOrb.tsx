@@ -2,18 +2,40 @@ import React from 'react';
 
 type VoicePulseOrbProps = {
   callStatus: 'listening' | 'speaking' | 'thinking' | 'paused';
+  audioLevel?: number;
   className?: string;
 };
 
 /**
  * Soft, organic voice-call orb inspired by the supplied reference clip.
- * Pure CSS: no canvas/WebGL, external assets, or additional dependencies.
+ * Dynamic CSS variables sync scale, aura expansion, glow and morphing speed with live audio input levels.
  */
-export function VoicePulseOrb({ callStatus, className = '' }: VoicePulseOrbProps) {
+export function VoicePulseOrb({ callStatus, audioLevel = 0, className = '' }: VoicePulseOrbProps) {
+  // Normalize and scale audio input level for smooth visual responsiveness
+  const effectiveLevel = callStatus === 'speaking' 
+    ? Math.max(audioLevel, 0.45) 
+    : callStatus === 'thinking'
+      ? 0.2
+      : Math.min(1.0, Math.max(0, audioLevel));
+
+  const orbScale = 1 + effectiveLevel * 0.35;
+  const auraScale = 1.1 + effectiveLevel * 0.55;
+  const auraOpacity = 0.5 + effectiveLevel * 0.45;
+  const glowSize = 18 + effectiveLevel * 38;
+  const morphDuration = Math.max(1.0, 4.8 - effectiveLevel * 3.2);
+
   return (
     <div
       className={`voice-pulse-orb-stage relative flex items-center justify-center select-none ${className}`}
       data-status={callStatus}
+      style={{
+        '--audio-level': effectiveLevel,
+        '--orb-scale': orbScale,
+        '--aura-scale': auraScale,
+        '--aura-opacity': auraOpacity,
+        '--glow-size': `${glowSize}px`,
+        '--morph-duration': `${morphDuration}s`,
+      } as React.CSSProperties}
       role="img"
       aria-label={callStatus === 'speaking' ? 'Assistant speaking' : callStatus === 'thinking' ? 'Assistant thinking' : callStatus === 'paused' ? 'Voice call paused' : 'Listening'}
     >
@@ -23,8 +45,12 @@ export function VoicePulseOrb({ callStatus, className = '' }: VoicePulseOrbProps
           content: ""; position: absolute; inset: 9%; border-radius: 50%; pointer-events: none;
         }
         .voice-pulse-orb-stage::before {
-          background: radial-gradient(circle, rgba(236,72,153,.15) 0%, rgba(168,85,247,.09) 35%, transparent 72%);
-          filter: blur(25px); transform: scale(1.25); animation: voice-orb-aura 3.2s ease-in-out infinite;
+          background: radial-gradient(circle, rgba(236,72,153,.28) 0%, rgba(168,85,247,.16) 35%, transparent 72%);
+          filter: blur(25px);
+          transform: scale(var(--aura-scale, 1.25));
+          opacity: var(--aura-opacity, 0.55);
+          transition: transform 0.08s ease-out, opacity 0.08s ease-out;
+          animation: voice-orb-aura 3.2s ease-in-out infinite;
         }
         .voice-pulse-orb-stage::after {
           inset: 4%; border: 1px solid rgba(255,255,255,.055);
@@ -34,16 +60,17 @@ export function VoicePulseOrb({ callStatus, className = '' }: VoicePulseOrbProps
           position: relative; width: 31%; aspect-ratio: 1; z-index: 1; border-radius: 50%;
           display: grid; place-items: center;
           background: radial-gradient(circle at 35% 25%, rgba(255,255,255,.28), transparent 38%);
-          box-shadow: 0 0 18px rgba(236,72,153,.35), 0 0 45px rgba(168,85,247,.24), inset 0 0 12px rgba(255,255,255,.15);
+          box-shadow: 0 0 var(--glow-size, 18px) rgba(236,72,153,.45), 0 0 45px rgba(168,85,247,.28), inset 0 0 12px rgba(255,255,255,.18);
+          transform: scale(var(--orb-scale, 1));
+          transition: transform 0.08s cubic-bezier(0.1, 0.9, 0.2, 1), box-shadow 0.1s ease-out;
           animation: voice-orb-float 3s ease-in-out infinite;
-          transition: opacity .35s ease, filter .35s ease;
         }
         .voice-pulse-orb-core {
           position: absolute; inset: 9%; border-radius: 42% 58% 55% 45% / 46% 42% 58% 54%;
           background: radial-gradient(ellipse at 34% 25%, #ffb7a3 0%, #ff718e 24%, #ed4eaa 52%, #a83ce1 78%, #6539bd 100%);
-          box-shadow: inset 2px 3px 9px rgba(255,255,255,.36), inset -7px -10px 16px rgba(73,20,119,.38), 0 0 22px rgba(236,72,153,.48);
-          filter: saturate(1.08);
-          animation: voice-orb-morph 4.8s ease-in-out infinite, voice-orb-color 9s linear infinite;
+          box-shadow: inset 2px 3px 9px rgba(255,255,255,.36), inset -7px -10px 16px rgba(73,20,119,.38), 0 0 var(--glow-size, 22px) rgba(236,72,153,.58);
+          filter: saturate(calc(1.08 + var(--audio-level, 0) * 0.6));
+          animation: voice-orb-morph var(--morph-duration, 4.8s) ease-in-out infinite, voice-orb-color 9s linear infinite;
         }
         .voice-pulse-orb-highlight {
           position: absolute; width: 35%; height: 22%; top: 16%; left: 19%; border-radius: 50%;
@@ -66,7 +93,7 @@ export function VoicePulseOrb({ callStatus, className = '' }: VoicePulseOrbProps
           66% { filter: hue-rotate(-28deg) saturate(1.15); }
         }
         @keyframes voice-orb-float { 0%,100% { transform: translateY(0) scale(.98); } 50% { transform: translateY(-5px) scale(1.04); } }
-        @keyframes voice-orb-aura { 0%,100% { opacity: .55; transform: scale(1.1); } 50% { opacity: 1; transform: scale(1.35); } }
+        @keyframes voice-orb-aura { 0%,100% { opacity: var(--aura-opacity, .55); transform: scale(var(--aura-scale, 1.1)); } 50% { opacity: calc(var(--aura-opacity, .55) * 1.25); transform: scale(calc(var(--aura-scale, 1.1) * 1.15)); } }
         @media (prefers-reduced-motion: reduce) {
           .voice-pulse-orb-stage::before, .voice-pulse-orb-shell, .voice-pulse-orb-core { animation-duration: 12s !important; }
         }

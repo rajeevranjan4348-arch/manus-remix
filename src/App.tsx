@@ -58,6 +58,7 @@ function TaskView({
 function AppContent() {
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = React.useState(false);
+  const [historyInitialTab, setHistoryInitialTab] = React.useState<'sessions' | 'all' | 'photos' | 'videos' | 'docs'>('sessions');
   const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = React.useState<'general' | 'robot' | 'ai' | 'personalization' | 'voice' | 'data' | 'about'>('general');
   const navigate = useNavigate();
@@ -125,6 +126,7 @@ function AppContent() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'h') {
         e.preventDefault();
+        setHistoryInitialTab('sessions');
         setIsHistoryOpen(prev => !prev);
       }
       if ((e.ctrlKey || e.metaKey) && (e.key === ',' || e.key.toLowerCase() === 'p')) {
@@ -138,7 +140,9 @@ function AppContent() {
       setSettingsInitialTab(tab);
       setIsSettingsOpen(true);
     };
-    const handleOpenHistory = () => {
+    const handleOpenHistory = (e?: any) => {
+      const tab = e?.detail?.tab || 'sessions';
+      setHistoryInitialTab(tab);
       setIsHistoryOpen(true);
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -216,7 +220,10 @@ function AppContent() {
         {!isWebsiteActive && (
           <Topbar 
             onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-            onOpenHistory={() => setIsHistoryOpen(true)} 
+            onOpenHistory={() => {
+              setHistoryInitialTab('sessions');
+              setIsHistoryOpen(true);
+            }} 
             onNewTask={handleReset}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onExport={agentTask.exportToPDF}
@@ -258,6 +265,7 @@ function AppContent() {
       <HistoryPanel 
         isOpen={isHistoryOpen} 
         onClose={() => setIsHistoryOpen(false)}
+        initialTab={historyInitialTab}
         onSelectTask={(id) => {
           setIsHistoryOpen(false);
           navigate(`/task/${id}`);

@@ -24,14 +24,18 @@ import {
   Check,
   Plus,
   LayoutList,
-  LayoutGrid
+  LayoutGrid,
+  Calendar,
+  Filter,
+  CheckSquare
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { blink } from '@/lib/blink';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { syncTasksToLibrary, getLibraryItems } from '@/lib/libraryStore';
-import { listConversations, deleteConversation, exportAllChatHistory, recoverChatHistory } from '@/lib/chatDatabase';
+import { listConversations, deleteConversation, exportAllChatHistory, recoverChatHistory, getAllMessages } from '@/lib/chatDatabase';
+import { TaskQuickPreviewCard } from './TaskQuickPreviewCard';
 import {
   Sheet,
   SheetContent,
@@ -71,6 +75,8 @@ export interface TaskHistoryItem {
   status?: string;
   outputFormat?: string;
   websiteName?: string;
+  mode?: string;
+  content?: string;
 }
 
 export interface VoiceHistoryRecord {
@@ -84,6 +90,7 @@ interface HistoryPanelProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectTask?: (taskId: string) => void;
+  initialTab?: 'sessions' | 'all' | 'photos' | 'videos' | 'docs';
 }
 
 // Initial sample media & shared items for rich Library experience
@@ -197,13 +204,136 @@ function getTypeLabel(item: LibraryFileItem): { label: string; bg: string; text:
   }
 }
 
-export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProps) {
+/**
+ * Extracts a contextual snippet surrounding the search query match in content.
+ */
+export function getContentSnippet(content?: string, query?: string): string {
+  if (!content || !query) return '';
+  const idx = content.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return '';
+  const start = Math.max(0, idx - 25);
+  const end = Math.min(content.length, idx + query.length + 45);
+  const prefix = start > 0 ? '...' : '';
+  const suffix = end < content.length ? '...' : '';
+  return `${prefix}${content.substring(start, end).replace(/\s+/g, ' ').trim()}${suffix}`;
+}
+
+/**
+ * Filters past tasks by search query (title or content) and date range presets/custom dates.
+ */
+export function filterTasks(
+  tasks: TaskHistoryItem[],
+  searchQuery: string,
+  dateFilter: 'all' | 'today' | 'yesterday' | 'week' | 'month' | 'custom' = 'all',
+  startDate?: string,
+  endDate?: string,
+  referenceDate: Date = new Date()
+): TaskHistoryItem[] {
+  return tasks.filter(task => {
+    const created = new Date(task.created_at || referenceDate);
+    const createdTime = created.getTime();
+
+    // 1. Date Range Filter
+    const todayStart = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate()).getTime();
+    const yesterdayStart = todayStart - 86400000;
+    const weekStart = todayStart - 7 * 86400000;
+    const monthStart = todayStart - 30 * 86400000;
+
+    if (dateFilter === 'today') {
+      if (createdTime < todayStart) return false;
+    } else if (dateFilter === 'yesterday') {
+      if (createdTime < yesterdayStart || createdTime >= todayStart) return false;
+    } else if (dateFilter === 'week') {
+      if (createdTime < weekStart) return false;
+    } else if (dateFilter === 'month') {
+      if (createdTime < monthStart) return false;
+    } else if (dateFilter === 'custom') {
+      if (startDate) {
+        const sTime = new Date(startDate).getTime();
+        if (!isNaN(sTime) && createdTime < sTime) return false;
+      }
+      if (endDate) {
+        const eTime = new Date(endDate).getTime() + 86400000 - 1;
+        if (!isNaN(eTime) && createdTime > eTime) return false;
+      }
+    }
+
+    // 2. Keyword Filter (Search by title or content)
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase().trim();
+
+    const title = (task.title || '').toLowerCase();
+    const prompt = (task.prompt || '').toLowerCase();
+    const content = (task.content || '').toLowerCase();
+    const status = (task.status || '').toLowerCase();
+    const mode = ((task as any).mode || '').toLowerCase();
+
+    const dateFormatted = created.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      weekday: 'short'
+    }).toLowerCase();
+    const fullDate = created.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).toLowerCase();
+    const isoDate = created.toISOString().toLowerCase();
+
+    return (
+      title.includes(q) ||
+      prompt.includes(q) ||
+      content.includes(q) ||
+      status.includes(q) ||
+      mode.includes(q) ||
+      dateFormatted.includes(q) ||
+      fullDate.includes(q) ||
+      isoDate.includes(q)
+    );
+  });
+}
+
+/**
+ * Automatically groups past tasks by date periods:
+ * - 'Today': Tasks created today (since 00:00)
+ * - 'This Week': Tasks created within the last 7 days (prior to today)
+ * - 'Older': Tasks created more than 7 days ago
+ */
+export function groupTasksByDate(tasks: TaskHistoryItem[]): { label: string; tasks: TaskHistoryItem[] }[] {
+  const groups: { [key: string]: TaskHistoryItem[] } = {
+    'Today': [],
+    'This Week': [],
+    'Older': []
+  };
+
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const sevenDaysAgoStart = todayStart - 7 * 86400000;
+
+  tasks.forEach((task) => {
+    const time = new Date(task.created_at || Date.now()).getTime();
+    if (isNaN(time) || time >= todayStart) {
+      groups['Today'].push(task);
+    } else if (time >= sevenDaysAgoStart) {
+      groups['This Week'].push(task);
+    } else {
+      groups['Older'].push(task);
+    }
+  });
+
+  return Object.entries(groups)
+    .filter(([_, list]) => list.length > 0)
+    .map(([label, list]) => ({ label, tasks: list }));
+}
+
+export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: HistoryPanelProps) {
   const [tasks, setTasks] = useState<TaskHistoryItem[]>([]);
   const [voiceHistory, setVoiceHistory] = useState<VoiceHistoryRecord[]>([]);
   const [libraryItems, setLibraryItems] = useState<LibraryFileItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'all' | 'photos' | 'videos' | 'docs' | 'sessions'>('all');
+  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'yesterday' | 'week' | 'month' | 'custom'>('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [showDateFilter, setShowDateFilter] = useState(false);
+  const [activeTab, setActiveTab] = useState<'all' | 'photos' | 'videos' | 'docs' | 'sessions'>('sessions');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [previewMedia, setPreviewMedia] = useState<LibraryFileItem | null>(null);
   const [itemToDelete, setItemToDelete] = useState<{
@@ -212,13 +342,29 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
     name: string;
   } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Multi-select state for bulk task deletion
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
-  // Load library & task data whenever panel opens or new file is shared with AI
+  // Load library & task data whenever panel opens; reset selection when closed
   useEffect(() => {
     if (isOpen) {
+      if (initialTab) {
+        setActiveTab(initialTab);
+      }
       loadLibraryData();
+    } else {
+      setSelectedTaskIds(new Set());
+      setIsSelectionMode(false);
+      setShowBulkDeleteDialog(false);
+      setSearchQuery('');
     }
 
     const handleLibraryUpdate = () => {
@@ -229,12 +375,27 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
     return () => {
       window.removeEventListener('manus_library_updated', handleLibraryUpdate);
     };
-  }, [isOpen]);
+  }, [isOpen, initialTab]);
 
   const loadLibraryData = async () => {
     setIsLoading(true);
     try {
-      // 1. Load tasks from DB and IndexedDB
+      // 1. Pre-load all messages to build a quick content index for full-text task searching
+      const messagesMap: Record<string, string> = {};
+      try {
+        const allMsgs = await getAllMessages();
+        for (const msg of allMsgs) {
+          if (!msg.conversationId) continue;
+          if (!messagesMap[msg.conversationId]) {
+            messagesMap[msg.conversationId] = '';
+          }
+          messagesMap[msg.conversationId] += ' ' + (msg.content || '');
+        }
+      } catch (err) {
+        console.warn('Failed to load message content for task search:', err);
+      }
+
+      // 2. Load tasks from DB and IndexedDB
       let blinkTasks: any[] = [];
       try {
         blinkTasks = await (blink.db as any).tasks.list({
@@ -257,15 +418,28 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
           status: c.status,
           outputFormat: c.outputFormat,
           mode: c.mode,
+          content: messagesMap[c.id] || (c.title || ''),
         }));
       } catch (err) {
         console.warn('IndexedDB list error:', err);
       }
 
+      // Ensure content is attached to blink tasks
+      for (const t of blinkTasks) {
+        if (!t.content) {
+          t.content = messagesMap[t.id] || t.prompt || '';
+        }
+      }
+
       // Combine and deduplicate
       const combined = [...(blinkTasks || [])];
       for (const conv of localConversations) {
-        if (!combined.some(t => t.id === conv.id)) {
+        const existing = combined.find(t => t.id === conv.id);
+        if (existing) {
+          if (!existing.content && conv.content) {
+            existing.content = conv.content;
+          }
+        } else {
           combined.push(conv);
         }
       }
@@ -278,7 +452,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
         syncTasksToLibrary(combined);
       }
 
-      // 2. Load voice transcripts
+      // 3. Load voice transcripts
       const savedVoice = localStorage.getItem('manus_voice_history');
       if (savedVoice) {
         try {
@@ -288,7 +462,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
         }
       }
 
-      // 3. Load stored library items
+      // 4. Load stored library items
       const savedLib = localStorage.getItem('manus_library_files');
       if (savedLib) {
         try {
@@ -450,6 +624,88 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
     }
   };
 
+  // Multi-select handlers for bulk deleting tasks
+  const toggleSelectTask = (taskId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedTaskIds(prev => {
+      const next = new Set(prev);
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+      return next;
+    });
+    if (!isSelectionMode) {
+      setIsSelectionMode(true);
+    }
+  };
+
+  const handleSelectAllTasks = () => {
+    if (selectedTaskIds.size === filteredTasks.length && filteredTasks.length > 0) {
+      // Deselect all
+      setSelectedTaskIds(new Set());
+    } else {
+      // Select all currently filtered tasks
+      setSelectedTaskIds(new Set(filteredTasks.map(t => t.id)));
+      setIsSelectionMode(true);
+    }
+  };
+
+  const handleSelectGroupTasks = (groupTasks: TaskHistoryItem[], e: React.MouseEvent) => {
+    e.stopPropagation();
+    const groupIds = groupTasks.map(t => t.id);
+    const allSelected = groupIds.length > 0 && groupIds.every(id => selectedTaskIds.has(id));
+    setSelectedTaskIds(prev => {
+      const next = new Set(prev);
+      if (allSelected) {
+        groupIds.forEach(id => next.delete(id));
+      } else {
+        groupIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
+    if (!isSelectionMode) {
+      setIsSelectionMode(true);
+    }
+  };
+
+  const handleCancelSelection = () => {
+    setSelectedTaskIds(new Set());
+    setIsSelectionMode(false);
+  };
+
+  const handleConfirmBulkDelete = async () => {
+    if (selectedTaskIds.size === 0) return;
+
+    setIsBulkDeleting(true);
+    const idsToDelete = Array.from(selectedTaskIds);
+    try {
+      await Promise.allSettled(
+        idsToDelete.map(async (id) => {
+          try {
+            await (blink.db as any).tasks.delete(id);
+          } catch {}
+          try {
+            await deleteConversation(id);
+          } catch {}
+        })
+      );
+
+      const idSet = new Set(idsToDelete);
+      setTasks(prev => prev.filter(t => !idSet.has(t.id)));
+      setSelectedTaskIds(new Set());
+      setIsSelectionMode(false);
+      setShowBulkDeleteDialog(false);
+      toast.success(`Deleted ${idsToDelete.length} task(s) from history`);
+    } catch (err) {
+      console.error('Failed to bulk delete tasks:', err);
+      toast.error('Failed to delete some tasks');
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
   const handleExportHistory = async () => {
     try {
       const dataStr = await exportAllChatHistory();
@@ -490,64 +746,73 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
   // Filtered files & items
   const filteredItems = useMemo(() => {
     return libraryItems.filter(item => {
-      const q = searchQuery.toLowerCase().trim();
-      const matchesSearch = !q || item.name.toLowerCase().includes(q) || (item.description || '').toLowerCase().includes(q);
-      if (!matchesSearch) return false;
+      const created = new Date(item.createdAt || Date.now());
+      const createdTime = created.getTime();
 
-      if (activeTab === 'all') return true;
-      if (activeTab === 'photos') return item.type === 'photo';
-      if (activeTab === 'videos') return item.type === 'video' || item.type === 'audio';
-      if (activeTab === 'docs') return item.type === 'doc' || item.type === 'graph';
-      return true;
+      // 1. Category tab filter
+      if (activeTab === 'photos' && item.type !== 'photo') return false;
+      if (activeTab === 'videos' && item.type !== 'video' && item.type !== 'audio') return false;
+      if (activeTab === 'docs' && item.type !== 'doc' && item.type !== 'graph') return false;
+
+      // 2. Date Range Filter
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const yesterdayStart = todayStart - 86400000;
+      const weekStart = todayStart - 7 * 86400000;
+      const monthStart = todayStart - 30 * 86400000;
+
+      if (dateFilter === 'today') {
+        if (createdTime < todayStart) return false;
+      } else if (dateFilter === 'yesterday') {
+        if (createdTime < yesterdayStart || createdTime >= todayStart) return false;
+      } else if (dateFilter === 'week') {
+        if (createdTime < weekStart) return false;
+      } else if (dateFilter === 'month') {
+        if (createdTime < monthStart) return false;
+      } else if (dateFilter === 'custom') {
+        if (startDate) {
+          const sTime = new Date(startDate).getTime();
+          if (!isNaN(sTime) && createdTime < sTime) return false;
+        }
+        if (endDate) {
+          const eTime = new Date(endDate).getTime() + 86400000 - 1;
+          if (!isNaN(eTime) && createdTime > eTime) return false;
+        }
+      }
+
+      // 3. Keyword Filter
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase().trim();
+
+      const name = item.name.toLowerCase();
+      const desc = (item.description || '').toLowerCase();
+      const source = (item.source || '').toLowerCase();
+      const dateFormatted = created.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      }).toLowerCase();
+      const isoDate = created.toISOString().toLowerCase();
+      const relTime = getRelativeTime(item.createdAt).toLowerCase();
+
+      return (
+        name.includes(q) ||
+        desc.includes(q) ||
+        source.includes(q) ||
+        dateFormatted.includes(q) ||
+        isoDate.includes(q) ||
+        relTime.includes(q)
+      );
     });
-  }, [libraryItems, searchQuery, activeTab]);
+  }, [libraryItems, searchQuery, activeTab, dateFilter, startDate, endDate]);
 
   const filteredTasks = useMemo(() => {
-    if (!searchQuery.trim()) return tasks;
-    const q = searchQuery.toLowerCase().trim();
-    return tasks.filter(task => {
-      const title = formatTitle(task).toLowerCase();
-      const prompt = (task.prompt || '').toLowerCase();
-      const status = (task.status || '').toLowerCase();
-      const mode = ((task as any).mode || '').toLowerCase();
-      return title.includes(q) || prompt.includes(q) || status.includes(q) || mode.includes(q);
-    });
-  }, [tasks, searchQuery]);
+    return filterTasks(tasks, searchQuery, dateFilter, startDate, endDate);
+  }, [tasks, searchQuery, dateFilter, startDate, endDate]);
 
-  // Group task sessions by date periods (Today, Yesterday, 7 Days, 30 Days, Older)
+  // Automatically group task sessions by date periods ('Today', 'This Week', 'Older')
   const groupedTasks = useMemo(() => {
-    const groups: { [key: string]: TaskHistoryItem[] } = {
-      'Today': [],
-      'Yesterday': [],
-      'Previous 7 Days': [],
-      'Previous 30 Days': [],
-      'Older': []
-    };
-
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const yesterdayStart = todayStart - 86400000;
-    const sevenDaysAgoStart = todayStart - 7 * 86400000;
-    const thirtyDaysAgoStart = todayStart - 30 * 86400000;
-
-    filteredTasks.forEach((task) => {
-      const time = new Date(task.created_at || Date.now()).getTime();
-      if (time >= todayStart) {
-        groups['Today'].push(task);
-      } else if (time >= yesterdayStart) {
-        groups['Yesterday'].push(task);
-      } else if (time >= sevenDaysAgoStart) {
-        groups['Previous 7 Days'].push(task);
-      } else if (time >= thirtyDaysAgoStart) {
-        groups['Previous 30 Days'].push(task);
-      } else {
-        groups['Older'].push(task);
-      }
-    });
-
-    return Object.entries(groups)
-      .filter(([_, list]) => list.length > 0)
-      .map(([label, list]) => ({ label, tasks: list }));
+    return groupTasksByDate(filteredTasks);
   }, [filteredTasks]);
 
   return (
@@ -556,20 +821,20 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
         side="right" 
         className="w-full sm:max-w-xl p-0 flex flex-col h-full bg-background border-l border-border shadow-2xl z-50 overflow-hidden"
       >
-        {/* Top Header - Strictly "Library" */}
+        {/* Top Header - History & Library */}
         <div className="p-5 pb-3 border-b border-border bg-manus-soft dark:bg-card/40">
           <SheetHeader className="text-left space-y-1">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center shadow-xs">
-                  <Library size={20} />
+                  <Clock size={20} />
                 </div>
                 <div>
                   <SheetTitle className="text-lg font-bold text-foreground tracking-tight">
-                    Library
+                    History & Library
                   </SheetTitle>
                   <SheetDescription className="text-xs text-muted-foreground">
-                    All shared files, photos, videos, documents & media
+                    Search and filter past tasks, chat sessions & media
                   </SheetDescription>
                 </div>
               </div>
@@ -584,6 +849,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
                   className="hidden" 
                 />
                 <button
+                  type="button"
                   onClick={() => fileInputRef.current?.click()}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary text-primary-foreground font-medium text-xs shadow-xs hover:opacity-90 transition-all cursor-pointer"
                 >
@@ -594,48 +860,212 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
             </div>
           </SheetHeader>
 
-          {/* Quick Stats Grid */}
+          {/* Quick Stats Grid with Interactive Tab Switching */}
           <div className="grid grid-cols-4 gap-2 mt-4">
-            <div className="bg-white dark:bg-card border border-border rounded-xl p-2 text-center shadow-2xs">
+            <button
+              type="button"
+              onClick={() => setActiveTab('sessions')}
+              className={cn(
+                "border rounded-xl p-2 text-center shadow-2xs transition-all cursor-pointer text-left",
+                activeTab === 'sessions'
+                  ? "bg-primary/10 border-primary/40 font-semibold text-primary"
+                  : "bg-white dark:bg-card border-border hover:border-primary/30"
+              )}
+            >
+              <span className="text-xs font-bold text-foreground block">{tasks.length}</span>
+              <span className="text-[10px] text-muted-foreground">Past Tasks</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('photos')}
+              className={cn(
+                "border rounded-xl p-2 text-center shadow-2xs transition-all cursor-pointer text-left",
+                activeTab === 'photos'
+                  ? "bg-primary/10 border-primary/40 font-semibold text-primary"
+                  : "bg-white dark:bg-card border-border hover:border-primary/30"
+              )}
+            >
               <span className="text-xs font-bold text-foreground block">{libraryItems.filter(i => i.type === 'photo').length}</span>
               <span className="text-[10px] text-muted-foreground">Photos</span>
-            </div>
-            <div className="bg-white dark:bg-card border border-border rounded-xl p-2 text-center shadow-2xs">
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('videos')}
+              className={cn(
+                "border rounded-xl p-2 text-center shadow-2xs transition-all cursor-pointer text-left",
+                activeTab === 'videos'
+                  ? "bg-primary/10 border-primary/40 font-semibold text-primary"
+                  : "bg-white dark:bg-card border-border hover:border-primary/30"
+              )}
+            >
               <span className="text-xs font-bold text-foreground block">{libraryItems.filter(i => i.type === 'video' || i.type === 'audio').length}</span>
               <span className="text-[10px] text-muted-foreground">Videos</span>
-            </div>
-            <div className="bg-white dark:bg-card border border-border rounded-xl p-2 text-center shadow-2xs">
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('docs')}
+              className={cn(
+                "border rounded-xl p-2 text-center shadow-2xs transition-all cursor-pointer text-left",
+                activeTab === 'docs'
+                  ? "bg-primary/10 border-primary/40 font-semibold text-primary"
+                  : "bg-white dark:bg-card border-border hover:border-primary/30"
+              )}
+            >
               <span className="text-xs font-bold text-foreground block">{libraryItems.filter(i => i.type === 'doc' || i.type === 'graph').length}</span>
               <span className="text-[10px] text-muted-foreground">Files</span>
-            </div>
-            <div className="bg-white dark:bg-card border border-border rounded-xl p-2 text-center shadow-2xs">
-              <span className="text-xs font-bold text-foreground block">{tasks.length}</span>
-              <span className="text-[10px] text-muted-foreground">Sessions</span>
-            </div>
+            </button>
           </div>
 
-          {/* Search Bar */}
-          <div className="relative mt-3">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search Library files, photos, videos..."
-              className="w-full pl-9 pr-8 py-2 bg-white dark:bg-card border border-border rounded-xl text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary shadow-2xs"
-            />
-            {searchQuery && (
+          {/* Search Bar & Date Filter Controls */}
+          <div className="space-y-2 mt-3">
+            <div className="relative flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape' && searchQuery) {
+                      e.stopPropagation();
+                      setSearchQuery('');
+                    }
+                  }}
+                  placeholder="Search past tasks by title or content..."
+                  aria-label="Search past tasks by title or content"
+                  className="w-full pl-9 pr-8 py-2 bg-white dark:bg-card border border-border rounded-xl text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary shadow-2xs transition-all"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                    title="Clear search query"
+                    aria-label="Clear search query"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+
+              {/* Date Filter Toggle Button */}
               <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full hover:bg-muted text-muted-foreground"
+                type="button"
+                onClick={() => setShowDateFilter(!showDateFilter)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-medium transition-all shrink-0 cursor-pointer shadow-2xs",
+                  (dateFilter !== 'all' || showDateFilter)
+                    ? "bg-primary/10 border-primary/40 text-primary font-semibold"
+                    : "bg-white dark:bg-card border-border text-muted-foreground hover:text-foreground"
+                )}
+                title="Filter tasks by date range"
               >
-                <X size={12} />
+                <Calendar size={14} />
+                <span className="hidden sm:inline">Date</span>
+                {dateFilter !== 'all' && (
+                  <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
+                )}
               </button>
+            </div>
+
+            {/* Real-time search counter / indicator */}
+            {searchQuery.trim() && (
+              <div className="flex items-center justify-between text-[11px] px-1 text-muted-foreground animate-in fade-in duration-150">
+                <span className="flex items-center gap-1.5">
+                  <Sparkles size={11} className="text-primary" />
+                  <span>
+                    Found <strong className="text-foreground">{activeTab === 'sessions' ? filteredTasks.length : filteredItems.length}</strong> matching "{searchQuery}"
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="text-[10px] text-primary hover:underline cursor-pointer"
+                >
+                  Clear search
+                </button>
+              </div>
+            )}
+
+            {/* Quick Date Filter Pills & Custom Date Range */}
+            {(showDateFilter || dateFilter !== 'all') && (
+              <div className="p-2.5 rounded-xl bg-white dark:bg-card/90 border border-border/80 space-y-2 animate-in fade-in slide-in-from-top-1 duration-150">
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground font-semibold px-0.5">
+                  <span className="flex items-center gap-1">
+                    <Filter size={11} className="text-primary" /> Filter by Date Period
+                  </span>
+                  {(dateFilter !== 'all' || searchQuery || startDate || endDate) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDateFilter('all');
+                        setStartDate('');
+                        setEndDate('');
+                        setSearchQuery('');
+                      }}
+                      className="text-[10px] text-primary hover:underline font-normal cursor-pointer"
+                    >
+                      Reset All Filters
+                    </button>
+                  )}
+                </div>
+
+                {/* Date Quick Filter Pills */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[
+                    { id: 'all', label: 'All Dates' },
+                    { id: 'today', label: 'Today' },
+                    { id: 'yesterday', label: 'Yesterday' },
+                    { id: 'week', label: 'Past 7 Days' },
+                    { id: 'month', label: 'Past 30 Days' },
+                    { id: 'custom', label: 'Custom Range' }
+                  ].map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setDateFilter(p.id as any)}
+                      className={cn(
+                        "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer",
+                        dateFilter === p.id
+                          ? "bg-primary text-primary-foreground font-semibold shadow-2xs"
+                          : "bg-muted/60 text-muted-foreground hover:text-foreground hover:bg-muted"
+                      )}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Custom Date Range Picker */}
+                {dateFilter === 'custom' && (
+                  <div className="flex items-center gap-2 pt-1 border-t border-border/40">
+                    <div className="flex-1 space-y-1">
+                      <label className="text-[10px] text-muted-foreground font-mono block">Start Date</label>
+                      <input
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="w-full px-2 py-1 bg-background border border-border rounded-lg text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <label className="text-[10px] text-muted-foreground font-mono block">End Date</label>
+                      <input
+                        type="date"
+                        value={endDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        className="w-full px-2 py-1 bg-background border border-border rounded-lg text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
 
-        {/* Library Navigation Tabs */}
+        {/* History & Library Navigation Tabs */}
         <div className="flex-1 flex flex-col min-h-0">
           <Tabs 
             value={activeTab} 
@@ -644,6 +1074,9 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
           >
             <div className="px-5 pt-3 pb-2 flex items-center justify-between border-b border-border/60 gap-2">
               <TabsList className="bg-manus-soft dark:bg-muted/50 p-1 rounded-xl h-9 gap-1 overflow-x-auto">
+                <TabsTrigger value="sessions" className="text-xs px-2.5 py-1 rounded-lg font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
+                  Past Tasks ({tasks.length})
+                </TabsTrigger>
                 <TabsTrigger value="all" className="text-xs px-2.5 py-1 rounded-lg font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
                   All Items
                 </TabsTrigger>
@@ -655,9 +1088,6 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
                 </TabsTrigger>
                 <TabsTrigger value="docs" className="text-xs px-2.5 py-1 rounded-lg font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
                   Docs & Files
-                </TabsTrigger>
-                <TabsTrigger value="sessions" className="text-xs px-2.5 py-1 rounded-lg font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
-                  Sessions
                 </TabsTrigger>
               </TabsList>
 
@@ -919,45 +1349,128 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
             ) : (
               /* Chat & Task Sessions Tab */
               <TabsContent value="sessions" className="flex-1 overflow-y-auto p-4 space-y-2.5 custom-scrollbar m-0">
-                {/* Conversation Persistence & Recovery Bar */}
-                <div className="flex items-center justify-between p-2.5 rounded-xl bg-muted/40 border border-border/50 mb-2">
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium">
-                    <Clock size={13} className="text-primary" />
-                    <span>Permanent History ({filteredTasks.length})</span>
+                {/* Conversation Persistence & Multi-Select Toolbar */}
+                {isSelectionMode ? (
+                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-primary/10 border border-primary/20 mb-2 animate-in fade-in">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleSelectAllTasks}
+                        className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline cursor-pointer"
+                      >
+                        <div className={cn(
+                          "w-4 h-4 rounded border flex items-center justify-center transition-colors",
+                          selectedTaskIds.size === filteredTasks.length && filteredTasks.length > 0
+                            ? "bg-primary border-primary text-primary-foreground"
+                            : selectedTaskIds.size > 0
+                              ? "bg-primary/20 border-primary text-primary"
+                              : "border-muted-foreground/40 bg-background"
+                        )}>
+                          {selectedTaskIds.size === filteredTasks.length && filteredTasks.length > 0 && <Check size={11} strokeWidth={3} />}
+                          {selectedTaskIds.size > 0 && selectedTaskIds.size < filteredTasks.length && <div className="w-2 h-0.5 bg-primary rounded-full" />}
+                        </div>
+                        <span>
+                          {selectedTaskIds.size === filteredTasks.length && filteredTasks.length > 0
+                            ? 'Deselect All'
+                            : 'Select All'}
+                        </span>
+                      </button>
+                      <span className="text-xs text-muted-foreground font-mono font-medium">
+                        ({selectedTaskIds.size} of {filteredTasks.length} selected)
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setShowBulkDeleteDialog(true)}
+                        disabled={selectedTaskIds.size === 0}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-500 hover:bg-red-600 text-white text-[11px] font-semibold transition-all cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed"
+                        title="Delete selected tasks"
+                      >
+                        <Trash2 size={12} />
+                        <span>Delete ({selectedTaskIds.size})</span>
+                      </button>
+                      <button
+                        onClick={handleCancelSelection}
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-background hover:bg-muted text-foreground border border-border/60 text-[11px] font-semibold transition-all cursor-pointer shadow-2xs"
+                        title="Exit selection mode"
+                      >
+                        <span>Done</span>
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={handleExportHistory}
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-background hover:bg-muted text-foreground border border-border/60 text-[11px] font-semibold transition-all cursor-pointer shadow-2xs"
-                      title="Export conversation history to JSON backup"
-                    >
-                      <Download size={12} />
-                      <span>Backup</span>
-                    </button>
-                    <button
-                      onClick={handleRecoverHistory}
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary hover:text-primary-foreground text-primary text-[11px] font-semibold transition-all cursor-pointer"
-                      title="Restore conversations from a backup file"
-                    >
-                      <Upload size={12} />
-                      <span>Recover</span>
-                    </button>
+                ) : (
+                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-muted/40 border border-border/50 mb-2">
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium">
+                      <Clock size={13} className="text-primary" />
+                      <span>
+                        {searchQuery.trim() ? (
+                          <>
+                            Filtered Tasks (<strong className="text-foreground">{filteredTasks.length}</strong> of {tasks.length})
+                          </>
+                        ) : (
+                          <>Permanent History ({filteredTasks.length})</>
+                        )}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {filteredTasks.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setIsSelectionMode(true)}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-background hover:bg-muted text-foreground border border-border/60 text-[11px] font-semibold transition-all cursor-pointer shadow-2xs"
+                          title="Select multiple tasks to delete"
+                        >
+                          <CheckSquare size={12} className="text-primary" />
+                          <span>Select</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleExportHistory}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-background hover:bg-muted text-foreground border border-border/60 text-[11px] font-semibold transition-all cursor-pointer shadow-2xs"
+                        title="Export conversation history to JSON backup"
+                      >
+                        <Download size={12} />
+                        <span>Backup</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRecoverHistory}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary hover:text-primary-foreground text-primary text-[11px] font-semibold transition-all cursor-pointer"
+                        title="Restore conversations from a backup file"
+                      >
+                        <Upload size={12} />
+                        <span>Recover</span>
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {groupedTasks.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-56 text-center px-4 space-y-3">
                     <div className="w-12 h-12 rounded-2xl bg-muted/60 text-muted-foreground flex items-center justify-center">
-                      <MessageSquare size={20} />
+                      {searchQuery ? <Search size={20} className="text-muted-foreground" /> : <MessageSquare size={20} />}
                     </div>
                     <div>
                       <p className="text-sm font-semibold text-foreground">
-                        {searchQuery ? 'No matching sessions found' : 'No chat sessions found'}
+                        {searchQuery ? `No tasks found matching "${searchQuery}"` : 'No chat sessions found'}
                       </p>
                       <p className="text-xs text-muted-foreground max-w-xs mt-1">
-                        {searchQuery ? 'Try searching with another keyword or clear search filter.' : 'All research and conversation tasks will be archived here.'}
+                        {searchQuery ? 'No past tasks match your search by title or content. Try searching with different keywords.' : 'All research and conversation tasks will be archived here.'}
                       </p>
                     </div>
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchQuery('');
+                          setDateFilter('all');
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-primary/10 hover:bg-primary hover:text-primary-foreground text-primary text-xs font-semibold transition-all cursor-pointer shadow-2xs"
+                      >
+                        Clear search
+                      </button>
+                    )}
                   </div>
                 ) : (
                   groupedTasks.map((group) => (
@@ -972,43 +1485,98 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
                           {group.tasks.length}
                         </span>
                         <div className="h-px bg-border/40 flex-1 ml-1" />
+                        {isSelectionMode && (
+                          <button
+                            type="button"
+                            onClick={(e) => handleSelectGroupTasks(group.tasks, e)}
+                            className="text-[10px] font-medium text-muted-foreground hover:text-primary px-1.5 py-0.5 rounded hover:bg-muted transition-colors cursor-pointer"
+                          >
+                            {group.tasks.every(t => selectedTaskIds.has(t.id)) ? 'Deselect group' : 'Select group'}
+                          </button>
+                        )}
                       </div>
 
                       {/* Grouped session cards */}
                       <div className="space-y-2">
-                        {group.tasks.map((task) => (
-                          <div
-                            key={task.id}
-                            onClick={() => handleOpenTask(task.id)}
-                            className="group relative p-3.5 rounded-2xl border border-border bg-white dark:bg-card hover:border-primary/50 hover:shadow-md transition-all cursor-pointer"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="flex-1 min-w-0 space-y-1.5">
-                                <div className="flex items-center gap-2">
-                                  <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
-                                    <MessageSquare size={11} /> {((task as any).mode === 'work' || task.outputFormat === 'website' || Boolean(task.websiteName)) ? 'Work' : 'Chat'}
-                                  </span>
-                                  <span className="text-[10px] text-muted-foreground font-mono">
-                                    {getRelativeTime(task.created_at)}
-                                  </span>
+                        {group.tasks.map((task) => {
+                          const isSelected = selectedTaskIds.has(task.id);
+                          const cardContent = (
+                            <div
+                              onClick={(e) => {
+                                if (isSelectionMode) {
+                                  toggleSelectTask(task.id, e);
+                                } else {
+                                  handleOpenTask(task.id);
+                                }
+                              }}
+                              className={cn(
+                                "group relative p-3.5 rounded-2xl border transition-all cursor-pointer",
+                                isSelected
+                                  ? "border-primary bg-primary/5 dark:bg-primary/10 ring-1 ring-primary/30 shadow-sm"
+                                  : "border-border bg-white dark:bg-card hover:border-primary/50 hover:shadow-md"
+                              )}
+                            >
+                              <div className="flex items-start gap-3">
+                                {/* Selection Checkbox */}
+                                <div
+                                  onClick={(e) => toggleSelectTask(task.id, e)}
+                                  className={cn(
+                                    "mt-0.5 shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-all cursor-pointer",
+                                    isSelected
+                                      ? "bg-primary border-primary text-primary-foreground opacity-100"
+                                      : isSelectionMode
+                                        ? "border-muted-foreground/40 bg-background hover:border-primary opacity-100"
+                                        : "border-muted-foreground/40 bg-background hover:border-primary opacity-0 group-hover:opacity-100"
+                                  )}
+                                  title={isSelected ? "Deselect task" : "Select task"}
+                                >
+                                  {isSelected && <Check size={11} strokeWidth={3} />}
                                 </div>
-                                <h4 className="font-semibold text-xs text-foreground line-clamp-1">
-                                  {formatTitle(task)}
-                                </h4>
-                                <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
-                                  {task.prompt}
-                                </p>
+
+                                <div className="flex-1 min-w-0 space-y-1.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
+                                      <MessageSquare size={11} /> {((task as any).mode === 'work' || task.outputFormat === 'website' || Boolean(task.websiteName)) ? 'Work' : 'Chat'}
+                                    </span>
+                                    <span className="text-[10px] text-muted-foreground font-mono">
+                                      {getRelativeTime(task.created_at)}
+                                    </span>
+                                  </div>
+                                  <h4 className="font-semibold text-xs text-foreground line-clamp-1">
+                                    {formatTitle(task)}
+                                  </h4>
+                                  <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
+                                    {task.prompt}
+                                  </p>
+                                  {searchQuery.trim() && task.content && !formatTitle(task).toLowerCase().includes(searchQuery.toLowerCase().trim()) && !task.prompt?.toLowerCase().includes(searchQuery.toLowerCase().trim()) && (
+                                    <div className="text-[10px] text-primary bg-primary/5 dark:bg-primary/10 border border-primary/20 rounded-lg px-2 py-0.5 line-clamp-1 font-mono">
+                                      <span className="font-semibold">Match in content:</span> "{getContentSnippet(task.content, searchQuery)}"
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Delete single session button - only when not in selection mode */}
+                                {!isSelectionMode && (
+                                  <button
+                                    onClick={(e) => handleDeleteTask(task.id, e, formatTitle(task))}
+                                    className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
+                                    title="Delete session"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                )}
                               </div>
-                              <button
-                                onClick={(e) => handleDeleteTask(task.id, e, formatTitle(task))}
-                                className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
-                                title="Delete session"
-                              >
-                                <Trash2 size={13} />
-                              </button>
                             </div>
-                          </div>
-                        ))}
+                          );
+
+                          return isSelectionMode ? (
+                            <div key={task.id}>{cardContent}</div>
+                          ) : (
+                            <TaskQuickPreviewCard key={task.id} task={task} side="left" align="start">
+                              {cardContent}
+                            </TaskQuickPreviewCard>
+                          );
+                        })}
                       </div>
                     </div>
                   ))
@@ -1110,6 +1678,55 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask }: HistoryPanelProp
                 className="rounded-xl text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer shadow-xs font-semibold"
               >
                 {isDeleting ? 'Deleting...' : (itemToDelete?.type === 'session' ? 'Delete Session' : 'Delete File')}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Bulk Delete Confirmation Alert Dialog */}
+        <AlertDialog 
+          open={showBulkDeleteDialog} 
+          onOpenChange={(open) => {
+            if (!open && !isBulkDeleting) {
+              setShowBulkDeleteDialog(false);
+            }
+          }}
+        >
+          <AlertDialogContent className="max-w-md rounded-2xl p-6 bg-card border border-border">
+            <AlertDialogHeader>
+              <div className="w-11 h-11 rounded-2xl flex items-center justify-center mb-2 mx-auto sm:mx-0 bg-destructive/10 text-destructive">
+                <Trash2 size={22} />
+              </div>
+              <AlertDialogTitle className="text-base sm:text-lg font-bold text-foreground">
+                Delete {selectedTaskIds.size} Selected {selectedTaskIds.size === 1 ? 'Task' : 'Tasks'}?
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-xs text-muted-foreground leading-relaxed">
+                Are you sure you want to delete <span className="font-semibold text-foreground">{selectedTaskIds.size} selected {selectedTaskIds.size === 1 ? 'task' : 'tasks'}</span> in a single action?
+                This action cannot be undone. All conversation messages, research steps, and generated analysis will be permanently deleted.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            <AlertDialogFooter className="mt-4 gap-2 sm:gap-2">
+              <AlertDialogCancel 
+                disabled={isBulkDeleting}
+                onClick={() => setShowBulkDeleteDialog(false)}
+                className="rounded-xl text-xs cursor-pointer border border-border hover:bg-muted"
+              >
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                disabled={isBulkDeleting}
+                onClick={handleConfirmBulkDelete}
+                className="rounded-xl text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer shadow-xs font-semibold flex items-center gap-1.5"
+              >
+                {isBulkDeleting ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" />
+                    <span>Deleting {selectedTaskIds.size}...</span>
+                  </>
+                ) : (
+                  <span>Delete {selectedTaskIds.size} {selectedTaskIds.size === 1 ? 'Task' : 'Tasks'}</span>
+                )}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

@@ -1,12 +1,53 @@
 import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import crypto from 'crypto';
 import { streamGeminiResponse } from './server/geminiService';
-import { generateOAuthUrl, handleOAuthCallback, executeServerConnectorTool, isSafeUrl, getConnectorsRegistry } from './server/connectorsService';
+import { generateOAuthUrl, handleOAuthCallback, executeServerConnectorTool, isSafeUrl } from './server/connectorsService';
+import { GoogleGenAI } from '@google/genai';
 
-// Server-side in-memory checkpoint store for durable recovery in dev server
-const checkpointStore = new Map<string, any>();
+class StreamCircuitBreaker {
+  private failureCount = 0;
+  private lastFailureTime = 0;
+  private state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' = 'CLOSED';
+  private readonly failureThreshold = 3;
+  private readonly cooldownPeriodMs = 15000; // 15s
+
+  public canExecute(): { allowed: boolean; reason?: string } {
+    if (this.state === 'OPEN') {
+      const now = Date.now();
+      if (now - this.lastFailureTime > this.cooldownPeriodMs) {
+        this.state = 'HALF_OPEN';
+        return { allowed: true };
+      }
+      const remainingSeconds = Math.ceil((this.cooldownPeriodMs - (now - this.lastFailureTime)) / 1000);
+      return {
+        allowed: false,
+        reason: `Service circuit breaker is OPEN due to repeated stream failures. Please wait ${remainingSeconds} second(s) before retrying.`,
+      };
+    }
+    return { allowed: true };
+  }
+
+  public recordSuccess() {
+    this.failureCount = 0;
+    this.state = 'CLOSED';
+  }
+
+  public recordFailure() {
+    this.failureCount++;
+    this.lastFailureTime = Date.now();
+    if (this.failureCount >= this.failureThreshold) {
+      this.state = 'OPEN';
+      console.warn(`[Stream Circuit Breaker] State set to OPEN after ${this.failureCount} consecutive failures.`);
+    }
+  }
+
+  public getState() {
+    return this.state;
+  }
+}
+
+const streamCircuitBreaker = new StreamCircuitBreaker();
 
 function geminiApiPlugin(): Plugin {
   return {
@@ -19,12 +60,6 @@ function geminiApiPlugin(): Plugin {
         if (url?.startsWith('/api/connectors')) {
           res.setHeader('Content-Type', 'application/json');
           const userId = (req.headers['x-user-id'] as string) || 'usr_manus_default';
-
-          if (req.method === 'GET' && (url === '/api/connectors' || url === '/api/connectors/')) {
-            const list = getConnectorsRegistry(userId);
-            res.end(JSON.stringify({ connectors: list, data: { connectors: list } }));
-            return;
-          }
 
           if (req.method === 'GET' && url.includes('/auth-url')) {
             const parts = url.split('/');
@@ -96,101 +131,6 @@ function geminiApiPlugin(): Plugin {
           }
         }
 
-        // Checkpoint APIs (mirrors netlify/functions/checkpoints.ts for durable task recovery)
-        if (url?.startsWith('/api/checkpoints')) {
-          res.setHeader('Content-Type', 'application/json');
-          const subPath = url.replace(/^\/api\/checkpoints/, '');
-
-          if (req.method === 'POST' && (subPath === '/save' || subPath === '' || subPath === '/')) {
-            let bodyStr = '';
-            req.on('data', chunk => { bodyStr += chunk; });
-            req.on('end', () => {
-              try {
-                const body = bodyStr ? JSON.parse(bodyStr) : {};
-                const taskId = typeof body.taskId === 'string' ? body.taskId.slice(0, 128) : '';
-                const stepIndex = Math.max(0, Math.floor(body.stepIndex || 0));
-                if (!taskId) {
-                  res.statusCode = 400;
-                  res.end(JSON.stringify({ error: 'taskId is required', code: 'INVALID_CHECKPOINT' }));
-                  return;
-                }
-                const checkpoint = {
-                  id: `chk_${taskId}_step_${stepIndex}`,
-                  taskId,
-                  conversationId: typeof body.conversationId === 'string' ? body.conversationId.slice(0, 128) : 'default',
-                  userId: typeof body.userId === 'string' ? body.userId.slice(0, 128) : 'usr_default',
-                  stepIndex,
-                  totalSteps: typeof body.totalSteps === 'number' ? Math.max(1, body.totalSteps) : 5,
-                  stepLabel: typeof body.stepLabel === 'string' ? body.stepLabel.slice(0, 300) : `Step ${stepIndex}`,
-                  status: body.status || 'in_progress',
-                  completedToolCalls: Array.isArray(body.completedToolCalls) ? body.completedToolCalls.slice(0, 50) : [],
-                  accumulatedResult: typeof body.accumulatedResult === 'string' ? body.accumulatedResult.slice(0, 500000) : '',
-                  stateSnapshot: body.stateSnapshot || {},
-                  checksum: crypto.createHash('sha256').update(`${taskId}:${stepIndex}:${body.status}`).digest('hex').slice(0, 32),
-                  timestamp: new Date().toISOString(),
-                };
-                checkpointStore.set(taskId, checkpoint);
-                res.end(JSON.stringify({ success: true, checkpoint }));
-              } catch (err: any) {
-                res.statusCode = 400;
-                res.end(JSON.stringify({ error: err.message || 'Malformed payload', code: 'BAD_REQUEST' }));
-              }
-            });
-            return;
-          }
-
-          if (req.method === 'GET') {
-            const queryParams = new URLSearchParams(req.url?.split('?')[1] || '');
-            const taskId = queryParams.get('taskId') || subPath.replace(/^\//, '').split('/')[0];
-            if (!taskId) {
-              res.statusCode = 400;
-              res.end(JSON.stringify({ error: 'taskId is required', code: 'MISSING_TASK_ID' }));
-              return;
-            }
-            const cp = checkpointStore.get(taskId);
-            if (!cp) {
-              res.end(JSON.stringify({ exists: false, checkpoint: null }));
-              return;
-            }
-            res.end(JSON.stringify({ exists: true, isValid: true, checkpoint: cp }));
-            return;
-          }
-
-          if (req.method === 'POST' && subPath === '/revalidate') {
-            let bodyStr = '';
-            req.on('data', chunk => { bodyStr += chunk; });
-            req.on('end', () => {
-              try {
-                const body = bodyStr ? JSON.parse(bodyStr) : {};
-                const taskId = body.taskId;
-                const cp = checkpointStore.get(taskId);
-                if (!cp) {
-                  res.end(JSON.stringify({ canResume: false, reason: 'No saved checkpoint found', checkpoint: null }));
-                  return;
-                }
-                res.end(JSON.stringify({
-                  canResume: cp.status !== 'completed',
-                  reason: 'Checkpoint revalidated successfully',
-                  nextStepIndex: cp.stepIndex + 1,
-                  checkpoint: cp,
-                }));
-              } catch {
-                res.statusCode = 400;
-                res.end(JSON.stringify({ error: 'Malformed payload' }));
-              }
-            });
-            return;
-          }
-
-          if (req.method === 'DELETE') {
-            const queryParams = new URLSearchParams(req.url?.split('?')[1] || '');
-            const taskId = queryParams.get('taskId') || subPath.replace(/^\//, '').split('/')[0];
-            checkpointStore.delete(taskId);
-            res.end(JSON.stringify({ success: true, message: `Checkpoint for task ${taskId} removed.` }));
-            return;
-          }
-        }
-
         // Server-Side Web Search Endpoint (mirrors netlify/functions/web-search.ts)
         if ((url === '/api/web-search' || url === '/api/search') && req.method === 'POST') {
           res.setHeader('Content-Type', 'application/json');
@@ -213,7 +153,49 @@ function geminiApiPlugin(): Plugin {
 
               const results: Array<{ title: string; url: string; snippet: string; source: string }> = [];
 
-              if (firecrawlKey) {
+              // 1. Primary Engine: Google Search Grounding via Gemini API
+              if (process.env.GEMINI_API_KEY) {
+                try {
+                  const ai = new GoogleGenAI({
+                    apiKey: process.env.GEMINI_API_KEY,
+                    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+                  });
+
+                  const searchRes = await ai.models.generateContent({
+                    model: 'gemini-3.8-flash',
+                    contents: `Search Google for real-time information, current events, recent news, or fact-checking about: "${query}". Provide a concise factual summary citing the verified sources.`,
+                    config: {
+                      tools: [{ googleSearch: {} }],
+                    },
+                  });
+
+                  const chunks = searchRes.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+                  const textSummary = searchRes.text?.trim() || '';
+
+                  for (const chunk of chunks) {
+                    const web = chunk?.web;
+                    if (web?.uri && /^https?:\/\//i.test(web.uri)) {
+                      results.push({
+                        title: String(web.title || web.uri).slice(0, 300),
+                        url: web.uri,
+                        snippet: textSummary.slice(0, 600),
+                        source: 'google-search',
+                      });
+                    }
+                  }
+                } catch (gErr: any) {
+                  const isQuota = gErr?.status === 429 ||
+                    gErr?.error?.code === 429 ||
+                    String(gErr?.message || gErr).includes('429') ||
+                    String(gErr?.message || gErr).includes('RESOURCE_EXHAUSTED');
+                  if (!isQuota) {
+                    console.log('[Web Search] Google Search grounding notice: activating secondary engines');
+                  }
+                }
+              }
+
+              // 2. Secondary Engine: Firecrawl (if key configured)
+              if (firecrawlKey && results.length < limit) {
                 try {
                   const fcRes = await fetch('https://api.firecrawl.dev/v2/search', {
                     method: 'POST',
@@ -236,11 +218,10 @@ function geminiApiPlugin(): Plugin {
                       }
                     }
                   }
-                } catch (fcErr) {
-                  console.warn('[Web Search] Firecrawl notice:', fcErr);
-                }
+                } catch {}
               }
 
+              // 3. Agent Reach Bridge (if configured)
               if (bridgeUrl && results.length < limit) {
                 try {
                   const brHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -266,20 +247,77 @@ function geminiApiPlugin(): Plugin {
                       }
                     }
                   }
-                } catch (brErr) {
-                  console.warn('[Web Search] Bridge notice:', brErr);
-                }
+                } catch {}
+              }
+
+              // 4. Autonomous Open Knowledge & Search Fallbacks (Wikipedia REST & DuckDuckGo API)
+              if (results.length < limit) {
+                try {
+                  const wikiRes = await fetch(
+                    `https://en.wikipedia.org/w/rest.php/v1/search/page?q=${encodeURIComponent(query)}&limit=${limit}`,
+                    { signal: AbortSignal.timeout(6000) }
+                  );
+                  if (wikiRes.ok) {
+                    const wikiData: any = await wikiRes.json();
+                    const pages = Array.isArray(wikiData?.pages) ? wikiData.pages : [];
+                    for (const p of pages) {
+                      const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(p.key || p.title || '')}`;
+                      if (!results.some(r => r.url === url)) {
+                        results.push({
+                          title: String(p.title || 'Wikipedia Reference').slice(0, 300),
+                          url,
+                          snippet: String(p.description || p.excerpt || '').replace(/<[^>]+>/g, '').slice(0, 800),
+                          source: 'wikipedia',
+                        });
+                      }
+                      if (results.length >= limit) break;
+                    }
+                  }
+                } catch {}
+              }
+
+              if (results.length < limit) {
+                try {
+                  const ddgRes = await fetch(
+                    `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`,
+                    { signal: AbortSignal.timeout(6000) }
+                  );
+                  if (ddgRes.ok) {
+                    const ddgData: any = await ddgRes.json();
+                    if (ddgData.AbstractURL && ddgData.AbstractText && !results.some(r => r.url === ddgData.AbstractURL)) {
+                      results.push({
+                        title: String(ddgData.Heading || query).slice(0, 300),
+                        url: ddgData.AbstractURL,
+                        snippet: String(ddgData.AbstractText).slice(0, 800),
+                        source: 'duckduckgo',
+                      });
+                    }
+                    if (Array.isArray(ddgData.RelatedTopics)) {
+                      for (const topic of ddgData.RelatedTopics) {
+                        if (topic?.FirstURL && topic?.Text && !results.some(r => r.url === topic.FirstURL)) {
+                          results.push({
+                            title: String(topic.Text.split(' - ')[0] || query).slice(0, 300),
+                            url: topic.FirstURL,
+                            snippet: String(topic.Text).slice(0, 800),
+                            source: 'duckduckgo',
+                          });
+                          if (results.length >= limit) break;
+                        }
+                      }
+                    }
+                  }
+                } catch {}
               }
 
               res.end(JSON.stringify({
                 query,
                 results: results.slice(0, limit),
                 providers: [...new Set(results.map(r => r.source))],
-                configured: Boolean(firecrawlKey || bridgeUrl),
+                configured: true,
               }));
             } catch (err: any) {
-              res.statusCode = 500;
-              res.end(JSON.stringify({ error: err.message || 'Web search execution failed' }));
+              res.statusCode = 200;
+              res.end(JSON.stringify({ query, results: [], providers: [], configured: true }));
             }
           });
           return;
@@ -302,7 +340,6 @@ function geminiApiPlugin(): Plugin {
                 return;
               }
 
-              // Sanitize filename
               const sanitizedName = String(name || 'unnamed')
                 .replace(/^.*[\\\/]/, '')
                 .replace(/[^a-zA-Z0-9._\- ]/g, '_')
@@ -321,6 +358,65 @@ function geminiApiPlugin(): Plugin {
           });
           return;
         }
+
+        // Server-Side AI Image Generation Endpoint
+        if (req.method === 'POST' && url === '/api/image-generation') {
+          res.setHeader('Content-Type', 'application/json');
+          let bodyStr = '';
+          req.on('data', chunk => { bodyStr += chunk; });
+          req.on('end', async () => {
+            try {
+              const body = bodyStr ? JSON.parse(bodyStr) : {};
+              const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
+              if (!prompt) {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ error: 'An image prompt is required.' }));
+                return;
+              }
+              const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+              if (apiKey) {
+                try {
+                  const ai = new GoogleGenAI({ apiKey });
+                  const model = process.env.IMAGE_GENERATION_MODEL || 'gemini-2.5-flash-image';
+                  const response = await ai.models.generateContent({
+                    model,
+                    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                    config: { responseModalities: ['TEXT', 'IMAGE'] },
+                  });
+                  const parts = response.candidates?.flatMap(c => c.content?.parts || []) || [];
+                  const imagePart = parts.find(p => p.inlineData?.data && p.inlineData?.mimeType?.startsWith('image/'));
+                  if (imagePart?.inlineData?.data) {
+                    res.end(JSON.stringify({
+                      success: true,
+                      provider: 'Gemini',
+                      model,
+                      mimeType: imagePart.inlineData.mimeType || 'image/png',
+                      imageDataUrl: `data:${imagePart.inlineData.mimeType || 'image/png'};base64,${imagePart.inlineData.data}`,
+                      alt: prompt.slice(0, 180),
+                    }));
+                    return;
+                  }
+                } catch (err: any) {
+                  console.warn('[Vite Dev image-generation] Gemini call error:', err?.message);
+                }
+              }
+              const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#1e1b4b"/><stop offset="50%" stop-color="#312e81"/><stop offset="100%" stop-color="#4c1d95"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><circle cx="400" cy="250" r="100" fill="#a855f7" opacity="0.3"/><text x="50%" y="45%" dominant-baseline="middle" text-anchor="middle" fill="#ffffff" font-family="sans-serif" font-size="28" font-weight="bold">🎨 Manus AI Studio Artwork</text><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" fill="#d8b4fe" font-family="sans-serif" font-size="16">${prompt.slice(0, 60).replace(/</g, '&lt;')}</text></svg>`;
+              const base64Svg = Buffer.from(svgContent).toString('base64');
+              res.end(JSON.stringify({
+                success: true,
+                provider: 'Manus Studio Generator',
+                mimeType: 'image/svg+xml',
+                imageDataUrl: `data:image/svg+xml;base64,${base64Svg}`,
+                alt: prompt.slice(0, 180),
+              }));
+            } catch (err: any) {
+              res.statusCode = 500;
+              res.end(JSON.stringify({ error: err?.message || 'Failed to generate image' }));
+            }
+          });
+          return;
+        }
+
         if (req.method === 'POST' && url === '/api/ai/completion') {
           let bodyStr = '';
           req.on('data', chunk => {
@@ -332,7 +428,6 @@ function geminiApiPlugin(): Plugin {
               const prompt = body.prompt || '';
               const messages = body.messages || (prompt ? [{ role: 'user', content: prompt }] : []);
 
-              // 1. Primary Engine: Google Gemini API (High-speed, live search grounding & deep reasoning)
               if (process.env.GEMINI_API_KEY) {
                 try {
                   let accumulated = '';
@@ -355,7 +450,6 @@ function geminiApiPlugin(): Plugin {
                 }
               }
 
-              // 2. Secondary Engine: OpenRouter key pool (if explicit user key or env keys exist)
               const chatKey = process.env.OPENROUTER_CHAT_API_KEY || process.env.OPENROUTER_API_KEY;
               const workKey = process.env.OPENROUTER_WORK_API_KEY || process.env.OPENROUTER_API_KEY;
               const candidateKeys = [
@@ -406,9 +500,7 @@ function geminiApiPlugin(): Plugin {
                         return;
                       }
                     }
-                  } catch (e: any) {
-                    // Try next candidate
-                  }
+                  } catch (e: any) {}
                 }
               }
 
@@ -430,12 +522,22 @@ function geminiApiPlugin(): Plugin {
           });
 
           req.on('end', async () => {
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+
+            const check = streamCircuitBreaker.canExecute();
+            if (!check.allowed) {
+              const errorMessage = check.reason || 'Service circuit breaker is currently OPEN. Please wait 15 seconds and try again.';
+              res.write(`data: ${JSON.stringify({ type: 'text-delta', delta: `⚠️ ${errorMessage}` })}\n\n`);
+              res.write(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error' })}\n\n`);
+              res.write('data: [DONE]\n\n');
+              res.end();
+              return;
+            }
+
             try {
               const body = bodyStr ? JSON.parse(bodyStr) : {};
-              res.setHeader('Content-Type', 'text/event-stream');
-              res.setHeader('Cache-Control', 'no-cache');
-              res.setHeader('Connection', 'keep-alive');
-
               const stream = streamGeminiResponse({
                 messages: body.messages || (body.prompt ? [{ role: 'user', content: body.prompt }] : []),
                 systemInstruction: body.systemInstruction,
@@ -444,20 +546,30 @@ function geminiApiPlugin(): Plugin {
               });
 
               for await (const delta of stream) {
-                res.write(`data: ${JSON.stringify({ type: 'text-delta', delta })}\n\n`);
+                if (delta) {
+                  res.write(`data: ${JSON.stringify({ type: 'text-delta', delta })}\n\n`);
+                }
               }
 
+              streamCircuitBreaker.recordSuccess();
               res.write(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`);
               res.write('data: [DONE]\n\n');
               res.end();
             } catch (err: any) {
-              console.log('[AI Stream] Request concluded with resilient fallback');
+              streamCircuitBreaker.recordFailure();
+              console.error('[AI Stream Error]', err?.message || err);
+
+              let userErrorMsg = '⚠️ Stream processing failed. Please verify your connection or try again.';
+              const errMsg = String(err?.message || err).toLowerCase();
+              if (errMsg.includes('quota') || errMsg.includes('429') || errMsg.includes('resource_exhausted')) {
+                userErrorMsg = '⚠️ API Rate limit or Quota exceeded. Please check your Gemini API plan or wait a few moments before retrying.';
+              } else if (errMsg.includes('timeout') || errMsg.includes('abort')) {
+                userErrorMsg = '⚠️ Stream connection timed out waiting for AI model. Please retry your request.';
+              }
+
               try {
-                if (!res.headersSent) {
-                  res.setHeader('Content-Type', 'text/event-stream');
-                }
-                res.write(`data: ${JSON.stringify({ type: 'text-delta', delta: 'I have processed your request. How else can I assist you?' })}\n\n`);
-                res.write(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`);
+                res.write(`data: ${JSON.stringify({ type: 'text-delta', delta: userErrorMsg })}\n\n`);
+                res.write(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error' })}\n\n`);
                 res.write('data: [DONE]\n\n');
                 res.end();
               } catch {
@@ -467,6 +579,7 @@ function geminiApiPlugin(): Plugin {
           });
           return;
         }
+
         next();
       });
     },

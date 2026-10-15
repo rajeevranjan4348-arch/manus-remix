@@ -8,6 +8,7 @@ export type GrokColorTheme = 'electric-blue' | 'cyber-cyan' | 'neon-purple' | 'o
 
 interface Grok3DAvatarProps {
   callStatus: 'listening' | 'speaking' | 'thinking' | 'paused';
+  audioLevel?: number;
   liveTranscript?: string;
   className?: string;
   initialStyle?: GrokAvatarStyle;
@@ -60,6 +61,7 @@ const COLOR_CONFIGS: Record<GrokColorTheme, {
 
 export function Grok3DAvatar({
   callStatus,
+  audioLevel = 0,
   liveTranscript = '',
   className,
   initialStyle = 'geometric',
@@ -93,6 +95,7 @@ export function Grok3DAvatar({
   // References for Three.js state
   const stateRef = useRef({
     callStatus,
+    audioLevel,
     avatarStyle,
     colorTheme,
     isDragging: false,
@@ -112,6 +115,10 @@ export function Grok3DAvatar({
   useEffect(() => {
     stateRef.current.callStatus = callStatus;
   }, [callStatus]);
+
+  useEffect(() => {
+    stateRef.current.audioLevel = audioLevel;
+  }, [audioLevel]);
 
   useEffect(() => {
     stateRef.current.avatarStyle = avatarStyle;
