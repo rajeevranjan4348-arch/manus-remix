@@ -608,8 +608,8 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                 className="pointer-events-none absolute left-[19%] top-[29%] z-[1] flex h-[40%] w-[62%] items-center justify-center rounded-[16%] border border-black/80 bg-[#080b12] shadow-[inset_0_0_8px_rgba(0,0,0,0.9)]"
               >
                 <div className="flex w-full items-center justify-center gap-[19%]">
-                  <span className="block h-[22px] w-[13px] max-h-[34%] rounded-[3px] bg-white shadow-[0_0_9px_rgba(255,255,255,0.95)] animate-[robotEyeGlow_2.8s_ease-in-out_infinite]" />
-                  <span className="block h-[22px] w-[13px] max-h-[34%] rounded-[3px] bg-white shadow-[0_0_9px_rgba(255,255,255,0.95)] animate-[robotEyeGlow_2.8s_ease-in-out_infinite]" />
+                  <span className="block h-[22px] w-[13px] max-h-[34%] rounded-[3px] bg-white shadow-[0_0_9px_rgba(255,255,255,0.95)] animate-pulse" />
+                  <span className="block h-[22px] w-[13px] max-h-[34%] rounded-[3px] bg-white shadow-[0_0_9px_rgba(255,255,255,0.95)] animate-pulse" />
                 </div>
               </div>
             )}
