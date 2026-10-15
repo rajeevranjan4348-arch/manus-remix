@@ -119,9 +119,9 @@ export default async (req: Request) => {
 
     // Image Generation connector: explicit @image or natural-language image requests.
     // Gemini credentials remain server-side; generated image bytes are returned as a data URL.
-    const wantsImage = /@image\\b/i.test(latestUserText)
-      || /\\b(generate|create|make|draw|design)\\s+(me\\s+)?(an?\\s+)?(image|picture|illustration|wallpaper|poster|logo|artwork)\\b/i.test(latestUserText)
-      || /\\b(image|picture|illustration|wallpaper|poster|logo|artwork)\\s+(generation|generator)\\b/i.test(latestUserText);
+    const wantsImage = /@image\b/i.test(latestUserText)
+      || /\b(generate|create|make|draw|design)\s+(me\s+)?(an?\s+)?(image|picture|illustration|wallpaper|poster|logo|artwork)\b/i.test(latestUserText)
+      || /\b(image|picture|illustration|wallpaper|poster|logo|artwork)\s+(generation|generator)\b/i.test(latestUserText);
     if (wantsImage) {
       if (!ai) {
         return jsonResponse({
@@ -129,7 +129,7 @@ export default async (req: Request) => {
           code: 'IMAGE_GENERATION_CREDENTIALS_REQUIRED',
         }, 503);
       }
-      const imagePrompt = latestUserText.replace(/@image\\b/gi, '').trim();
+      const imagePrompt = latestUserText.replace(/@image\b/gi, '').trim();
       if (!imagePrompt || imagePrompt.length > 4000) {
         return createTextStreamResponse('Please describe the image you want me to generate (maximum 4,000 characters).');
       }
@@ -146,7 +146,7 @@ export default async (req: Request) => {
           return createTextStreamResponse('The image provider did not return an image. Please try a more specific prompt.');
         }
         const mimeType = String(imagePart.inlineData.mimeType).replace(/[^a-zA-Z0-9/+.-]/g, '');
-        const markdown = `${caption}\\n\\n![Generated image](data:${mimeType};base64,${imagePart.inlineData.data})`;
+        const markdown = `${caption}\n\n![Generated image](data:${mimeType};base64,${imagePart.inlineData.data})`;
         return createTextStreamResponse(markdown);
       } catch (imageError: any) {
         console.error('[Image Generation] Provider request failed:', imageError?.message || imageError);
