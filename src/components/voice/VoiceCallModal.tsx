@@ -200,14 +200,31 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
               setLiveTranscript(interim);
               setStatusText(`"${interim}"`);
               // Voice Interrupt if AI is speaking
-              if (voiceInterruptEnabled && synthRef.current?.speaking) {
+              if (voiceInterruptEnabled && synthRef.current?.speaking && interim.trim()) {
+                // A detected live utterance interrupts playback immediately; don't wait for a final transcript.
+                stopCleanSpeech();
                 synthRef.current.cancel();
+                isSpeakingRef.current = false;
                 setCallStatus('listening');
+                setStatusText('Interrupted — listening to you…');
               }
             }
 
             if (final.trim()) {
-              handleUserSpoken(final.trim());
+              const spoken = final.trim();
+              const wakeMatch = spoken.match(/^hey[,.! ]+manus[,.! ]*(.*)$/i);
+              if (wakeMatch) {
+                const commandAfterWake = (wakeMatch[1] || '').trim();
+                if (!commandAfterWake) {
+                  setStatusText("I'm here. Go ahead.");
+                  speakText("I'm here. Go ahead.");
+                  setLiveTranscript('');
+                  continue;
+                }
+                handleUserSpoken(commandAfterWake);
+              } else {
+                handleUserSpoken(spoken);
+              }
             }
           };
 
@@ -407,7 +424,9 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
 
   // Handle User Speech
   const handleUserSpoken = (userText: string) => {
-    if (!userText.trim()) return;
+    const normalizedText = userText.trim().replace(/^hey[,.! ]+manus[,.! ]*/i, '').trim();
+    if (!normalizedText) return;
+    userText = normalizedText;
 
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const userMsg: VoiceMessage = {
