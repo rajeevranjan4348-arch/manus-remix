@@ -219,9 +219,9 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
                   setStatusText("I'm here. Go ahead.");
                   speakText("I'm here. Go ahead.");
                   setLiveTranscript('');
-                  continue;
+                } else {
+                  handleUserSpoken(commandAfterWake);
                 }
-                handleUserSpoken(commandAfterWake);
               } else {
                 handleUserSpoken(spoken);
               }
