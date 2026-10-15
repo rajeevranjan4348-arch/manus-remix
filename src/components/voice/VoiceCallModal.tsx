@@ -123,6 +123,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
   const isListeningRef = useRef(false);
   const isRecognitionStartingRef = useRef(false);
   const isSpeakingRef = useRef(false);
+  const speakingTextRef = useRef('');
   const hasMicPermissionRef = useRef(false);
   const isCallPausedRef = useRef(false);
   const restartTimerRef = useRef<number | null>(null);
@@ -138,7 +139,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
   const startRecognitionSafely = () => {
     const recognition = recognitionRef.current;
     if (!recognition || !isOpen || !hasMicPermissionRef.current ||
-        isCallPausedRef.current || isSpeakingRef.current ||
+        isCallPausedRef.current || (isSpeakingRef.current && !voiceInterruptEnabled) ||
         isListeningRef.current || isRecognitionStartingRef.current) return;
     clearRecognitionRestart();
     isRecognitionStartingRef.current = true;
@@ -152,7 +153,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
 
   const scheduleRecognitionRestart = (delay = 500) => {
     clearRecognitionRestart();
-    if (!isOpen || !hasMicPermissionRef.current || isCallPausedRef.current || isSpeakingRef.current) return;
+    if (!isOpen || !hasMicPermissionRef.current || isCallPausedRef.current || (isSpeakingRef.current && !voiceInterruptEnabled)) return;
     restartTimerRef.current = window.setTimeout(() => {
       restartTimerRef.current = null;
       startRecognitionSafely();
@@ -200,14 +201,35 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
               setLiveTranscript(interim);
               setStatusText(`"${interim}"`);
               // Voice Interrupt if AI is speaking
-              if (voiceInterruptEnabled && synthRef.current?.speaking) {
+              const normalizedInterim = interim.trim().toLowerCase().replace(/[^a-z0-9 ]/g, '');
+              const currentSpeech = speakingTextRef.current.toLowerCase().replace(/[^a-z0-9 ]/g, '');
+              const likelyAssistantEcho = normalizedInterim.length > 2 && currentSpeech.includes(normalizedInterim);
+              if (voiceInterruptEnabled && synthRef.current?.speaking && normalizedInterim && !likelyAssistantEcho) {
+                // A new live utterance interrupts playback immediately; ignore transcript fragments matching TTS echo.
+                stopCleanSpeech();
                 synthRef.current.cancel();
+                isSpeakingRef.current = false;
+                speakingTextRef.current = '';
                 setCallStatus('listening');
+                setStatusText('Interrupted — listening to you…');
               }
             }
 
             if (final.trim()) {
-              handleUserSpoken(final.trim());
+              const spoken = final.trim();
+              const wakeMatch = spoken.match(/^hey[,.! ]+manus[,.! ]*(.*)$/i);
+              if (wakeMatch) {
+                const commandAfterWake = (wakeMatch[1] || '').trim();
+                if (!commandAfterWake) {
+                  setStatusText("I'm here. Go ahead.");
+                  speakText("I'm here. Go ahead.");
+                  setLiveTranscript('');
+                } else {
+                  handleUserSpoken(commandAfterWake);
+                }
+              } else {
+                handleUserSpoken(spoken);
+              }
             }
           };
 
@@ -245,8 +267,9 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
             isListeningRef.current = false;
             isRecognitionStartingRef.current = false;
             // TTS playback resumes recognition itself; do not race it here.
-            if (isSpeakingRef.current || isCallPausedRef.current) return;
-            scheduleRecognitionRestart(500);
+            if (isCallPausedRef.current) return;
+            if (isSpeakingRef.current && !voiceInterruptEnabled) return;
+            scheduleRecognitionRestart(isSpeakingRef.current ? 150 : 500);
           };
 
           recognitionRef.current = rec;
@@ -407,7 +430,9 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
 
   // Handle User Speech
   const handleUserSpoken = (userText: string) => {
-    if (!userText.trim()) return;
+    const normalizedText = userText.trim().replace(/^hey[,.! ]+manus[,.! ]*/i, '').trim();
+    if (!normalizedText) return;
+    userText = normalizedText;
 
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const userMsg: VoiceMessage = {
@@ -601,21 +626,24 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
     if (!cleanedText) return;
 
     isSpeakingRef.current = true;
+    speakingTextRef.current = cleanedText;
     setCallStatus('speaking');
     setStatusText('Preparing audio reply…');
 
-    // Release the speech-recognition audio session before TTS playback.
-    try {
-      if (recognitionRef.current && isListeningRef.current) {
-        recognitionRef.current.stop();
+    // Keep recognition active when interruption is enabled so a new spoken turn can cancel TTS.
+    // Some mobile browsers still serialize recognition and synthesis; onend safely restarts recognition.
+    if (!voiceInterruptEnabled) {
+      try {
+        if (recognitionRef.current && isListeningRef.current) recognitionRef.current.stop();
+      } catch (error) {
+        console.warn('[Voice Call] Could not pause recognition for audio playback:', error);
       }
-    } catch (error) {
-      console.warn('[Voice Call] Could not pause recognition for audio playback:', error);
     }
 
     stopCleanSpeech();
     const resumeListening = () => {
       isSpeakingRef.current = false;
+      speakingTextRef.current = '';
       if (!isOpen || !hasMicPermissionRef.current || isCallPausedRef.current) return;
       setCallStatus('listening');
       setStatusText('Listening… speak now');
