@@ -7,6 +7,7 @@ interface GoogleMapWidgetCardProps {
   latitude?: number;
   longitude?: number;
   zoom?: number;
+  autoLocate?: boolean;
   markers?: Array<{
     id: string;
     title: string;
@@ -21,6 +22,7 @@ export function GoogleMapWidgetCard({
   latitude = 1.3521,
   longitude = 103.8198,
   zoom = 12,
+  autoLocate = false,
   markers = []
 }: GoogleMapWidgetCardProps) {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCoOhAP8IKASkSa6jOp4AVe886-arwMzAU';

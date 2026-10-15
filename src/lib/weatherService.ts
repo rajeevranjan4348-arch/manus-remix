@@ -146,7 +146,7 @@ export async function fetchWeatherByCoords(
 /**
  * Checks if a user prompt is asking about weather, and extracts city name if present
  */
-export function extractWeatherQuery(text: string): { isWeather: boolean; city?: string } {
+export function extractWeatherQuery(text: string, context?: any[]): { isWeather: boolean; city?: string } {
   if (!text) return { isWeather: false };
   const lower = text.toLowerCase();
 

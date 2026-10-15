@@ -264,7 +264,7 @@ export function ChatView({
     messages.forEach(async (m, idx) => {
       const msgKey = m.id || m.content;
       if (!weatherMap[msgKey]) {
-        const query = extractWeatherQuery(m.content || '', messages.slice(0, idx));
+        const query = extractWeatherQuery(m.content || '');
         if (query.isWeather && query.city) {
           const data = await fetchWeatherByCity(query.city);
           if (data) {
@@ -785,7 +785,7 @@ export function ChatView({
   });
   const activeRunningStep = steps.find(s => s.status === 'running');
   const latestUserMsg = [...displayMessages].reverse().find((m: any) => m?.role === 'user')?.content || prompt;
-  const weatherQuery = extractWeatherQuery(latestUserMsg, displayMessages);
+  const weatherQuery = extractWeatherQuery(latestUserMsg);
 
   let typingStatus = activeRunningStep?.label;
   if (!typingStatus && isAssistantWorking) {
@@ -953,7 +953,7 @@ export function ChatView({
                     if (mapRequest.kind === 'route') {
                       return <RoutePlannerCard key={`route-${mapRequest.origin}-${mapRequest.destination}`} initialOrigin={mapRequest.origin} initialDestination={mapRequest.destination} autoCalculate />;
                     }
-                    return <GoogleMapWidgetCard key={`location-${mapRequest.location}`} locationName={mapRequest.location} autoLocate zoom={12} />;
+                    return <GoogleMapWidgetCard key={`location-${mapRequest.location}`} locationName={mapRequest.location} zoom={12} />;
                   })()}
 
                   {/* Weather Widget Card Detection */}
