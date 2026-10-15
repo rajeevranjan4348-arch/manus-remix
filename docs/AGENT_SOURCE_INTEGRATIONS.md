@@ -13,6 +13,7 @@ This file tracks the upstream source projects requested for Manus Remix and defi
 | Android environment / agent research | https://github.com/google-deepmind/android_env | Existing submodule: `vendor/android_env`; use as a separate research/runtime dependency, not as a browser feature |
 | Android UI automation | https://github.com/appium/appium | Separate device automation service; require explicit user approval for consequential actions |
 | Multi-agent orchestration | https://github.com/langchain-ai/langgraph | Backend orchestration layer for durable, resumable agent workflows |
+| Ruflo multi-agent harness | https://github.com/ruvnet/ruflo | Pinned Git submodule at `vendor/ruflo` (MIT; upstream commit `1882006a02487590c8c66a7eec8d7504f6af33c3`); run and integrate as a separate Node/MCP service, not as browser-bundled code |
 | Multi-agent framework | https://github.com/crewAIInc/crewAI | Optional alternative; select one primary orchestration framework rather than duplicating both without a reason |
 | Deep research | https://github.com/Alibaba-NLP/DeepResearch | Isolated research worker; audit model/runtime dependencies before enabling |
 | Research workflow | https://github.com/langchain-ai/open_deep_research | Research workflow option; compare with the other research worker before choosing a default |
@@ -40,8 +41,10 @@ This file tracks the upstream source projects requested for Manus Remix and defi
 
 - [x] Confirmed the Manus Remix repository and its `main` branch.
 - [x] Confirmed `vendor/android_env` is already declared in `.gitmodules`.
+- [x] Added `vendor/ruflo` as a pinned Git submodule and recorded its MIT license/upstream commit.
 - [x] Recorded upstream source links and integration boundaries.
 - [ ] Import/pin the remaining upstream repositories as reviewed dependencies or submodules.
+- [ ] Install/build Ruflo in its supported runtime and implement a secure authenticated Manus adapter; the submodule alone does not enable its agents.
 - [ ] Implement and configure backend adapters and worker deployments.
 - [ ] Configure secrets in the deployment environment (never commit secret values).
 - [ ] Run type-check, unit tests, production build, and integration tests.
