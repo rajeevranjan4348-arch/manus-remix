@@ -138,7 +138,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
   const startRecognitionSafely = () => {
     const recognition = recognitionRef.current;
     if (!recognition || !isOpen || !hasMicPermissionRef.current ||
-        isCallPausedRef.current || isSpeakingRef.current ||
+        isCallPausedRef.current || (isSpeakingRef.current && !voiceInterruptEnabled) ||
         isListeningRef.current || isRecognitionStartingRef.current) return;
     clearRecognitionRestart();
     isRecognitionStartingRef.current = true;
@@ -152,7 +152,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
 
   const scheduleRecognitionRestart = (delay = 500) => {
     clearRecognitionRestart();
-    if (!isOpen || !hasMicPermissionRef.current || isCallPausedRef.current || isSpeakingRef.current) return;
+    if (!isOpen || !hasMicPermissionRef.current || isCallPausedRef.current || (isSpeakingRef.current && !voiceInterruptEnabled)) return;
     restartTimerRef.current = window.setTimeout(() => {
       restartTimerRef.current = null;
       startRecognitionSafely();
@@ -262,8 +262,9 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
             isListeningRef.current = false;
             isRecognitionStartingRef.current = false;
             // TTS playback resumes recognition itself; do not race it here.
-            if (isSpeakingRef.current || isCallPausedRef.current) return;
-            scheduleRecognitionRestart(500);
+            if (isCallPausedRef.current) return;
+            if (isSpeakingRef.current && !voiceInterruptEnabled) return;
+            scheduleRecognitionRestart(isSpeakingRef.current ? 150 : 500);
           };
 
           recognitionRef.current = rec;
@@ -623,13 +624,14 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
     setCallStatus('speaking');
     setStatusText('Preparing audio reply…');
 
-    // Release the speech-recognition audio session before TTS playback.
-    try {
-      if (recognitionRef.current && isListeningRef.current) {
-        recognitionRef.current.stop();
+    // Keep recognition active when interruption is enabled so a new spoken turn can cancel TTS.
+    // Some mobile browsers still serialize recognition and synthesis; onend safely restarts recognition.
+    if (!voiceInterruptEnabled) {
+      try {
+        if (recognitionRef.current && isListeningRef.current) recognitionRef.current.stop();
+      } catch (error) {
+        console.warn('[Voice Call] Could not pause recognition for audio playback:', error);
       }
-    } catch (error) {
-      console.warn('[Voice Call] Could not pause recognition for audio playback:', error);
     }
 
     stopCleanSpeech();
