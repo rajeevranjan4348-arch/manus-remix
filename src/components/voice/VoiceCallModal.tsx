@@ -123,6 +123,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
   const isListeningRef = useRef(false);
   const isRecognitionStartingRef = useRef(false);
   const isSpeakingRef = useRef(false);
+  const speakingTextRef = useRef('');
   const hasMicPermissionRef = useRef(false);
   const isCallPausedRef = useRef(false);
   const restartTimerRef = useRef<number | null>(null);
@@ -200,11 +201,15 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
               setLiveTranscript(interim);
               setStatusText(`"${interim}"`);
               // Voice Interrupt if AI is speaking
-              if (voiceInterruptEnabled && synthRef.current?.speaking && interim.trim()) {
-                // A detected live utterance interrupts playback immediately; don't wait for a final transcript.
+              const normalizedInterim = interim.trim().toLowerCase().replace(/[^a-z0-9 ]/g, '');
+              const currentSpeech = speakingTextRef.current.toLowerCase().replace(/[^a-z0-9 ]/g, '');
+              const likelyAssistantEcho = normalizedInterim.length > 2 && currentSpeech.includes(normalizedInterim);
+              if (voiceInterruptEnabled && synthRef.current?.speaking && normalizedInterim && !likelyAssistantEcho) {
+                // A new live utterance interrupts playback immediately; ignore transcript fragments matching TTS echo.
                 stopCleanSpeech();
                 synthRef.current.cancel();
                 isSpeakingRef.current = false;
+                speakingTextRef.current = '';
                 setCallStatus('listening');
                 setStatusText('Interrupted — listening to you…');
               }
@@ -621,6 +626,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
     if (!cleanedText) return;
 
     isSpeakingRef.current = true;
+    speakingTextRef.current = cleanedText;
     setCallStatus('speaking');
     setStatusText('Preparing audio reply…');
 
@@ -637,6 +643,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
     stopCleanSpeech();
     const resumeListening = () => {
       isSpeakingRef.current = false;
+      speakingTextRef.current = '';
       if (!isOpen || !hasMicPermissionRef.current || isCallPausedRef.current) return;
       setCallStatus('listening');
       setStatusText('Listening… speak now');
