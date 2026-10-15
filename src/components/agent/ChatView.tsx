@@ -805,9 +805,9 @@ export function ChatView({
   }
 
   return (
-    <div className="flex flex-col h-full bg-manus-cream dark:bg-background relative">
+    <div className="relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-manus-cream dark:bg-background">
       {/* Chat Area */}
-      <div ref={containerRef} onScroll={handleConversationScroll} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-20 pt-6 pb-40 space-y-8 custom-scrollbar">
+      <div ref={containerRef} onScroll={handleConversationScroll} className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 sm:px-20 pt-6 pb-44 space-y-8 custom-scrollbar">
         
         {/* Render Conversation Messages in Chronological Order */}
         {displayMessages.map((msg, i) => {
@@ -1174,7 +1174,7 @@ export function ChatView({
       )}
 
       {/* Input Area - Floating Bottom */}
-      <div className="absolute bottom-3 left-0 right-0 px-4 flex flex-col items-center gap-2 z-20">
+      <div className="absolute inset-x-0 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-20 box-border flex max-h-[55%] flex-col items-center gap-2 overflow-y-auto overflow-x-hidden px-3 sm:px-4">
         {(attachedFile || isThinkHarder) && (
           <div className="flex items-center gap-2 flex-wrap max-w-3xl w-full px-2">
             {isThinkHarder && (
@@ -1204,7 +1204,7 @@ export function ChatView({
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           className={cn(
-            "w-full max-w-3xl bg-white dark:bg-[#1a1b1e] rounded-[1.75rem] sm:rounded-[2rem] shadow-xl border border-slate-200/80 dark:border-border/60 px-3.5 py-2.5 sm:px-4.5 sm:py-3 flex flex-col gap-1.5 sm:gap-2 transition-[box-shadow,border-color,background-color] duration-200 ease-out focus-within:ring-2 focus-within:ring-primary/20 relative gpu-accelerated",
+            "box-border w-full min-w-0 max-w-3xl shrink-0 bg-white dark:bg-[#1a1b1e] rounded-[1.75rem] sm:rounded-[2rem] shadow-xl border border-slate-200/80 dark:border-border/60 px-3.5 py-2.5 sm:px-4.5 sm:py-3 flex flex-col gap-1.5 sm:gap-2 transition-[box-shadow,border-color,background-color] duration-200 ease-out focus-within:ring-2 focus-within:ring-primary/20 relative",
             isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30",
             isListening && "ring-2 ring-rose-500/40 border-rose-400 dark:border-rose-500/60 shadow-lg shadow-rose-500/10"
           )}
