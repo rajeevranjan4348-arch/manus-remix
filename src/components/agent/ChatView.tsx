@@ -41,6 +41,7 @@ import { AttachmentMenu } from '../chat/AttachmentMenu';
 import { ThoughtProcess } from './ThoughtProcess';
 import { ConversationActionBar } from './ConversationActionBar';
 import { VoiceInputButton } from '../voice/VoiceInputButton';
+import { VoiceCallModal } from '../voice/VoiceCallModal';
 import { SourceCitations, parseSourcesFromMarkdown } from './SourceCitations';
 import { WeatherWidgetCard } from './WeatherWidgetCard';
 import { ToolApprovalCard } from './ToolApprovalCard';
@@ -84,6 +85,7 @@ export function ChatView({
   isLoading 
 }: ChatViewProps) {
   const [input, setInput] = React.useState('');
+  const [isJarvisVoiceOpen, setIsJarvisVoiceOpen] = useState(false);
   const [expandedSteps, setExpandedSteps] = React.useState<Record<string, boolean>>({});
   const [isThinkHarder, setIsThinkHarder] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
@@ -1227,6 +1229,15 @@ export function ChatView({
 
             {/* Right Controls: Mic & Circular Send Button */}
             <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsJarvisVoiceOpen(true)}
+                className="w-8 h-8 sm:w-8.5 sm:h-8.5 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer"
+                title="Start Jarvis voice conversation"
+                aria-label="Start Jarvis voice conversation"
+              >
+                <PhoneCall size={17} />
+              </button>
               <VoiceInputButton
                 onListeningStateChange={(listening) => {
                   if (listening) {
@@ -1308,6 +1319,12 @@ export function ChatView({
         onInsertPrompt={(promptText) => {
           setInput(prev => prev ? `${prev} ${promptText}` : promptText);
         }}
+      />
+
+      <VoiceCallModal
+        isOpen={isJarvisVoiceOpen}
+        onClose={() => setIsJarvisVoiceOpen(false)}
+        onSendMessageToChat={(text) => onSubmit(text)}
       />
     </div>
   );
