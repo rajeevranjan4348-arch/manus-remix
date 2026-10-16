@@ -109,6 +109,8 @@
     "tailwindcss-animate": "^1.0.7",
     "three": "^0.186.1",
     "vaul": "^1.1.2",
-    "zod": "^4.3.4"
+    "zod": "^4.3.4",
+    "@sentry/react": "^9.0.0",
+    "lucide-motion": "^1.0.0"
   }
 }
