@@ -335,7 +335,8 @@ export default async (req: Request) => {
                 model: orModel,
                 messages: [
                   ...(systemInstruction ? [{ role: 'system', content: systemInstruction }] : []),
-                  ...messages.map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })),
+                  ...(messages.length ? messages : [{ role: 'user', content: typeof body.prompt === 'string' ? body.prompt : latestUserText }])
+                    .map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })),
                 ],
                 stream: true,
                 max_tokens: 4096,
@@ -402,7 +403,7 @@ export default async (req: Request) => {
       }
 
       // Resilient fallback streaming response
-      let fallbackText = `I have received your request regarding: "${latestUserText.slice(0, 200)}". All primary AI models are currently reaching quota limits, but your task has been processed. Would you like me to retry or run a specific autonomous sub-task?`;
+      let fallbackText = `I couldn't complete your request because all configured AI providers failed or reached their limits. Your task has not been completed. Please check the provider keys/quotas in Netlify environment variables, then retry.`;
       if (geminiCircuitBreaker.getState() === 'OPEN') {
         fallbackText = geminiCircuitBreaker.formatActionableRecoveryMessage();
       }

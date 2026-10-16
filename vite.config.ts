@@ -1,10 +1,34 @@
 import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import firebaseConfig from './firebase-applet-config.json';
 import { streamGeminiResponse } from './server/geminiService';
-import { generateOAuthUrl, handleOAuthCallback, executeServerConnectorTool, isSafeUrl } from './server/connectorsService';
+import { generateOAuthUrl, handleOAuthCallback, executeServerConnectorTool, disconnectUserToken, getConnectorsRegistry, isSafeUrl } from './server/connectorsService';
 import { fetchServerWeather } from './server/weatherService';
 import { globalStreamingCircuitBreaker, geminiCircuitBreaker } from './server/circuitBreaker';
+
+async function verifyFirebaseUserId(authorizationHeader: unknown): Promise<string | null> {
+  if (typeof authorizationHeader !== 'string') return null;
+  const match = authorizationHeader.match(/^Bearer\s+(.+)$/i);
+  if (!match?.[1]) return null;
+  const apiKey = process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY || firebaseConfig.apiKey;
+  if (!apiKey) return null;
+
+  try {
+    const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(apiKey)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: match[1] }),
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) return null;
+    const payload = await response.json() as { users?: Array<{ localId?: string }> };
+    const uid = payload.users?.[0]?.localId;
+    return typeof uid === 'string' && uid.trim() ? uid : null;
+  } catch {
+    return null;
+  }
+}
 
 function geminiApiPlugin(): Plugin {
   return {
@@ -16,11 +40,37 @@ function geminiApiPlugin(): Plugin {
         // Connector API Endpoints
         if (url?.startsWith('/api/connectors')) {
           res.setHeader('Content-Type', 'application/json');
-          const userId = (req.headers['x-user-id'] as string) || 'usr_manus_default';
+          const isOAuthCallback = req.method === 'GET' && url.endsWith('/oauth/callback');
+          const userId = isOAuthCallback ? '' : await verifyFirebaseUserId(req.headers.authorization);
+
+          if (req.method === 'GET' && (url === '/api/connectors' || url === '/api/connectors/')) {
+            if (!userId) {
+              res.statusCode = 401;
+              res.end(JSON.stringify({ error: 'AUTHENTICATED_USER_REQUIRED', message: 'Sign in before viewing connected accounts.' }));
+              return;
+            }
+            res.end(JSON.stringify({ success: true, connectors: getConnectorsRegistry(userId) }));
+            return;
+          }
 
           if (req.method === 'GET' && url.includes('/auth-url')) {
+            if (!userId) {
+              res.statusCode = 401;
+              res.end(JSON.stringify({ error: 'AUTHENTICATED_USER_REQUIRED', message: 'Sign in before connecting an account.' }));
+              return;
+            }
             const parts = url.split('/');
             const connectorId = parts[3] || 'github';
+            if (connectorId !== 'github') {
+              res.statusCode = 501;
+              res.end(JSON.stringify({ error: 'CONNECTOR_OAUTH_UNAVAILABLE', message: `OAuth is not implemented for ${connectorId} yet.` }));
+              return;
+            }
+            if (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET || !process.env.TOKEN_ENCRYPTION_SECRET) {
+              res.statusCode = 503;
+              res.end(JSON.stringify({ error: 'OAUTH_NOT_CONFIGURED', message: 'Configure GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, and TOKEN_ENCRYPTION_SECRET on the server before connecting GitHub.' }));
+              return;
+            }
             const redirectUri = `${process.env.APP_URL || 'https://manus.im'}/api/connectors/oauth/callback`;
             const authResult = generateOAuthUrl(connectorId, redirectUri, userId);
             res.end(JSON.stringify(authResult));
@@ -29,20 +79,29 @@ function geminiApiPlugin(): Plugin {
 
           if (req.method === 'GET' && url.endsWith('/oauth/callback')) {
             const queryParams = new URLSearchParams(req.url?.split('?')[1] || '');
-            const code = queryParams.get('code') || 'mock_code';
+            const code = queryParams.get('code') || '';
             const state = queryParams.get('state') || '';
-            const callbackRes = await handleOAuthCallback(code, state, userId);
-            res.setHeader('Content-Type', 'text/html');
+            const callbackRes = await handleOAuthCallback(code, state);
+            const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
+              '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[char] || char));
+            const callbackConnectorId = escapeHtml(callbackRes.connectorId || '');
+            const callbackMessage = escapeHtml(callbackRes.success
+              ? `Successfully connected ${callbackRes.connectorId}. Credentials encrypted at rest.`
+              : callbackRes.error || 'Authorization failed.');
+            const callbackEvent = callbackRes.success ? 'MANUS_OAUTH_SUCCESS' : 'MANUS_OAUTH_ERROR';
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-store');
             res.end(`
               <!DOCTYPE html>
               <html>
-                <head><title>Authorization Successful</title></head>
+                <head><title>${callbackRes.success ? 'Authorization Successful' : 'Authorization Failed'}</title></head>
                 <body style="font-family: system-ui; text-align: center; padding: 40px; background: #121316; color: white;">
-                  <h2>${callbackRes.success ? '✅ Account Authorized' : '⚠️ Authorization Notice'}</h2>
-                  <p>${callbackRes.success ? `Successfully connected ${callbackRes.connectorId}. Credentials encrypted at rest.` : callbackRes.error}</p>
+                  <h2>${callbackRes.success ? '✅ Account Authorized' : '⚠️ Authorization Failed'}</h2>
+                  <p>${callbackMessage}</p>
                   <script>
                     if (window.opener) {
-                      window.opener.postMessage({ type: 'MANUS_OAUTH_SUCCESS', connectorId: '${callbackRes.connectorId || ''}' }, '*');
+                      window.opener.postMessage({ type: '${callbackEvent}', connectorId: '${callbackConnectorId}' }, window.location.origin);
                       setTimeout(() => window.close(), 1200);
                     }
                   </script>
@@ -58,8 +117,13 @@ function geminiApiPlugin(): Plugin {
             req.on('end', async () => {
               try {
                 const body = bodyStr ? JSON.parse(bodyStr) : {};
-                const { connectorId, toolName, args, customUrl, userId: bodyUserId } = body;
-                const activeUser = bodyUserId || userId;
+                const { connectorId, toolName, args, customUrl } = body;
+                if (!userId) {
+                  res.statusCode = 401;
+                  res.end(JSON.stringify({ error: 'AUTHENTICATED_USER_REQUIRED', message: 'Sign in before using a connector.' }));
+                  return;
+                }
+                const activeUser = userId;
 
                 if (customUrl && !isSafeUrl(customUrl)) {
                   res.statusCode = 400;
@@ -83,7 +147,22 @@ function geminiApiPlugin(): Plugin {
           }
 
           if (req.method === 'POST' && url.includes('/disconnect')) {
-            res.end(JSON.stringify({ success: true, message: 'Disconnected' }));
+            if (!userId) {
+              res.statusCode = 401;
+              res.end(JSON.stringify({ error: 'AUTHENTICATED_USER_REQUIRED', message: 'Sign in before disconnecting an account.' }));
+              return;
+            }
+            const connectorId = url.split('/')[3] || '';
+            if (!connectorId) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: 'CONNECTOR_ID_REQUIRED', message: 'A connector ID is required to disconnect an account.' }));
+              return;
+            }
+            const disconnected = disconnectUserToken(userId, connectorId);
+            res.statusCode = disconnected ? 200 : 404;
+            res.end(JSON.stringify(disconnected
+              ? { success: true, connectorId, message: `Disconnected ${connectorId}.` }
+              : { success: false, connectorId, error: 'CONNECTOR_NOT_CONNECTED', message: `No active ${connectorId} connection was found for this user.` }));
             return;
           }
         }

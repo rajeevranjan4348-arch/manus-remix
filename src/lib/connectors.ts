@@ -26,6 +26,7 @@ import {
   StickyNote
 } from 'lucide-react';
 import { getAccessToken, googleSignIn, getCurrentUser, logoutWorkspace } from './workspaceAuth';
+import { auth } from './firebase';
 import { 
   searchGoogleDriveFiles, 
   listGoogleDriveFiles,
@@ -75,6 +76,13 @@ import {
 import { handleConnectorError, notifyConnectorError, showConnectorErrorToast, inferConnectorIssueType } from './connectorErrorHandler';
 
 export { handleConnectorError, notifyConnectorError, showConnectorErrorToast, inferConnectorIssueType };
+
+async function getFirebaseConnectorHeaders(headers: Record<string, string> = {}): Promise<Record<string, string>> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sign in to Manus before using connected accounts.');
+  const token = await user.getIdToken();
+  return { ...headers, Authorization: `Bearer ${token}` };
+}
 
 export type ConnectorStatus = 
   | 'not_connected' 
@@ -2051,12 +2059,12 @@ export async function executeConnectorTool(
     // Server API Proxy Execution for other tools
     const serverRes = await fetch('/api/connectors/execute', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await getFirebaseConnectorHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ connectorId, toolName, args })
     });
 
-    if (serverRes.ok) {
-      const serverData = await serverRes.json();
+    const serverData = await serverRes.json().catch(() => ({}));
+    if (serverRes.ok && serverData?.success !== false) {
       return {
         success: true,
         connectorId,
@@ -2066,7 +2074,9 @@ export async function executeConnectorTool(
       };
     }
 
-    const errJson = await serverRes.json().catch(() => ({}));
+    const errJson = serverData && typeof serverData === 'object'
+      ? serverData
+      : {};
     const errorMsg = errJson.error || errJson.message || `Could not execute ${toolName}`;
     handleConnectorError(connectorId, errorMsg, { rawError: errJson });
     return {
@@ -2092,7 +2102,7 @@ export async function executeConnectorTool(
 // OAuth Flow Handler
 export async function startOAuthFlow(connectorId: string): Promise<boolean> {
   const item = CONNECTOR_CATALOG.find(c => c.id === connectorId);
-  
+
   if (item?.isWorkspaceAuth) {
     try {
       updateConnectorState(connectorId, { status: 'connecting' });
@@ -2104,45 +2114,78 @@ export async function startOAuthFlow(connectorId: string): Promise<boolean> {
         });
         return true;
       }
+      updateConnectorState(connectorId, { status: 'not_connected' });
+      return false;
     } catch (e: any) {
+      updateConnectorState(connectorId, { status: 'error', errorMessage: e?.message || 'Google Workspace authentication failed' });
       handleConnectorError(connectorId, e, { issueType: 'connection_failed', customMessage: e?.message || 'Google Workspace authentication failed' });
       return false;
     }
   }
 
   try {
-    updateConnectorState(connectorId, { status: 'connecting' });
-    
-    // Fetch OAuth URL from server endpoint
-    const res = await fetch(`/api/connectors/${connectorId}/auth-url`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.url) {
-        // Open OAuth provider popup
-        const width = 600;
-        const height = 700;
-        const left = window.screen.width / 2 - width / 2;
-        const top = window.screen.height / 2 - height / 2;
-        
-        window.open(data.url, `OAuth_${connectorId}`, `width=${width},height=${height},top=${top},left=${left}`);
-      }
+    updateConnectorState(connectorId, { status: 'connecting', errorMessage: undefined });
+    const res = await fetch(`/api/connectors/${connectorId}/auth-url`, {
+      method: 'GET',
+      credentials: 'include',
+      headers: await getFirebaseConnectorHeaders({ Accept: 'application/json' })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || typeof data?.url !== 'string' || !data.url) {
+      const message = data?.message || data?.error || `Could not start ${connectorId} authorization (HTTP ${res.status}).`;
+      updateConnectorState(connectorId, { status: 'error', errorMessage: String(message) });
+      handleConnectorError(connectorId, message, { issueType: 'connection_failed', customMessage: String(message) });
+      return false;
     }
 
-    // Simulate instant secure authorization connection in container preview
-    await new Promise(r => setTimeout(r, 600));
-    updateConnectorState(connectorId, {
-      status: 'connected',
-      account: {
-        id: `${connectorId}_usr_101`,
-        name: `${item?.name || connectorId} Connected User`,
-        email: `connected.${connectorId}@manus.ai`,
-        connectedAt: new Date().toISOString()
-      }
-    });
+    const width = 600;
+    const height = 700;
+    const left = window.screen.width / 2 - width / 2;
+    const top = window.screen.height / 2 - height / 2;
+    const popup = window.open(data.url, `OAuth_${connectorId}`, `width=${width},height=${height},top=${top},left=${left}`);
+    if (!popup) {
+      const message = 'The authorization popup was blocked. Allow popups for this site and retry.';
+      updateConnectorState(connectorId, { status: 'error', errorMessage: message });
+      handleConnectorError(connectorId, message, { issueType: 'connection_failed', customMessage: message });
+      return false;
+    }
 
-    return true;
+    return await new Promise<boolean>((resolve) => {
+      let settled = false;
+      let timeoutId = 0;
+      const cleanup = () => {
+        window.removeEventListener('message', onMessage);
+        window.clearTimeout(timeoutId);
+      };
+      const finish = (success: boolean, message?: string) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (success) {
+          updateConnectorState(connectorId, { status: 'connected', errorMessage: undefined });
+        } else {
+          const errorMessage = message || 'Authorization was not completed. Please retry.';
+          updateConnectorState(connectorId, { status: 'error', errorMessage });
+          handleConnectorError(connectorId, errorMessage, { issueType: 'connection_failed', customMessage: errorMessage });
+        }
+        resolve(success);
+      };
+      const onMessage = (event: MessageEvent) => {
+        if (event.origin !== window.location.origin || event.source !== popup) return;
+        if (event.data?.type === 'MANUS_OAUTH_SUCCESS' && event.data?.connectorId === connectorId) {
+          finish(true);
+        } else if (event.data?.type === 'MANUS_OAUTH_ERROR' &&
+          (!event.data?.connectorId || event.data.connectorId === connectorId)) {
+          finish(false, typeof event.data?.message === 'string' ? event.data.message : 'The provider rejected authorization.');
+        }
+      };
+      window.addEventListener('message', onMessage);
+      timeoutId = window.setTimeout(() => finish(false, 'Authorization timed out. If you completed the provider login, reconnect and retry.'), 120000);
+    });
   } catch (err: any) {
-    handleConnectorError(connectorId, err, { issueType: 'connection_failed', customMessage: err.message });
+    const message = err?.message || 'Authorization failed.';
+    updateConnectorState(connectorId, { status: 'error', errorMessage: message });
+    handleConnectorError(connectorId, err, { issueType: 'connection_failed', customMessage: message });
     return false;
   }
 }
@@ -2178,22 +2221,22 @@ export async function listRepositories(args: {
   try {
     const res = await fetch('/api/connectors/execute', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await getFirebaseConnectorHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         connectorId: 'github',
         toolName: 'listRepositories',
         args
       })
     });
-    if (res.ok) {
-      const json = await res.json();
+    const json = await res.json().catch(() => ({}));
+    if (res.ok && json?.success !== false && Array.isArray(json?.data)) {
       return {
         success: true,
-        data: json.data || [],
+        data: json.data,
         message: json.message
       };
     }
-    const err = await res.json().catch(() => ({}));
+    const err = json && typeof json === 'object' ? json : {};
     return {
       success: false,
       error: err.error || 'EXECUTION_FAILED',
@@ -2210,20 +2253,38 @@ export async function listRepositories(args: {
 
 export async function disconnectConnector(connectorId: string): Promise<boolean> {
   const item = CONNECTOR_CATALOG.find(c => c.id === connectorId);
-  
+
   if (item?.isWorkspaceAuth) {
-    await logoutWorkspace();
+    try {
+      await logoutWorkspace();
+      updateConnectorState(connectorId, { status: 'not_connected', account: undefined, errorMessage: undefined });
+      return true;
+    } catch (error: any) {
+      const message = error?.message || 'Could not disconnect Google Workspace.';
+      updateConnectorState(connectorId, { status: 'error', errorMessage: message });
+      return false;
+    }
   }
 
-  updateConnectorState(connectorId, {
-    status: 'not_connected',
-    account: undefined,
-    errorMessage: undefined
-  });
-
   try {
-    await fetch(`/api/connectors/${connectorId}/disconnect`, { method: 'POST' });
-  } catch {}
-
-  return true;
+    const response = await fetch(`/api/connectors/${connectorId}/disconnect`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: await getFirebaseConnectorHeaders({ Accept: 'application/json' })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result?.success !== true) {
+      const message = result?.message || result?.error || `Could not disconnect ${connectorId} (HTTP ${response.status}).`;
+      updateConnectorState(connectorId, { status: 'error', errorMessage: String(message) });
+      handleConnectorError(connectorId, message, { issueType: 'connection_failed', customMessage: String(message) });
+      return false;
+    }
+    updateConnectorState(connectorId, { status: 'not_connected', account: undefined, errorMessage: undefined });
+    return true;
+  } catch (error: any) {
+    const message = error?.message || 'Could not disconnect connector.';
+    updateConnectorState(connectorId, { status: 'error', errorMessage: message });
+    handleConnectorError(connectorId, error, { issueType: 'connection_failed', customMessage: message });
+    return false;
+  }
 }
