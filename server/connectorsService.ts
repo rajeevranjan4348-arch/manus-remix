@@ -19,14 +19,21 @@ export interface EncryptedTokenData {
 const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
 const MASTER_KEY = process.env.TOKEN_ENCRYPTION_SECRET
   ? crypto.scryptSync(process.env.TOKEN_ENCRYPTION_SECRET, 'manus_connector_salt_2026', 32)
-  : crypto.scryptSync('manus_secure_default_master_key_2026', 'manus_connector_salt_2026', 32);
+  : null;
+
+function requireMasterKey(): Buffer {
+  if (!MASTER_KEY) {
+    throw new Error('TOKEN_ENCRYPTION_SECRET must be configured before connector tokens can be stored.');
+  }
+  return MASTER_KEY;
+}
 
 /**
  * Encrypt token string at rest using AES-256-GCM
  */
 export function encryptToken(plainText: string): { iv: string; encryptedData: string; authTag: string } {
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, MASTER_KEY, iv);
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, requireMasterKey(), iv);
   let encrypted = cipher.update(plainText, 'utf8', 'hex');
   encrypted += cipher.final('hex');
   const authTag = cipher.getAuthTag().toString('hex');
@@ -39,7 +46,7 @@ export function encryptToken(plainText: string): { iv: string; encryptedData: st
 export function decryptToken(encrypted: { iv: string; encryptedData: string; authTag: string }): string {
   const decipher = crypto.createDecipheriv(
     ENCRYPTION_ALGORITHM,
-    MASTER_KEY,
+    requireMasterKey(),
     Buffer.from(encrypted.iv, 'hex')
   );
   decipher.setAuthTag(Buffer.from(encrypted.authTag, 'hex'));
@@ -77,17 +84,8 @@ export function storeUserToken(
 export function getUserToken(userId: string, connectorId: string): { accessToken: string; user?: any } | null {
   const key = `${userId}:${connectorId}`;
   const stored = userTokenVault.get(key);
-  if (!stored) {
-    // Fallback lookup for default user session
-    const defaultStored = userTokenVault.get(`usr_manus_default:${connectorId}`);
-    if (!defaultStored) return null;
-    try {
-      const accessToken = decryptToken(defaultStored);
-      return { accessToken, user: defaultStored.user };
-    } catch {
-      return null;
-    }
-  }
+  // Never fall back to another user's token. Missing credentials must fail closed.
+  if (!stored) return null;
 
   if (stored.expiresAt && Date.now() > stored.expiresAt) {
     userTokenVault.delete(key);
@@ -151,91 +149,107 @@ export function generateOAuthUrl(connectorId: string, redirectUri: string, userI
  * Verify OAuth Callback Code and CSRF State Token, then encrypt & store access token
  */
 export async function handleOAuthCallback(
-  code: string, 
-  stateToken: string, 
+  code: string,
+  stateToken: string,
   userId?: string
 ): Promise<{ success: boolean; connectorId?: string; error?: string }> {
+  if (!stateToken || !code) {
+    return { success: false, error: 'OAuth callback is missing the authorization code or state token.' };
+  }
+
   const session = oauthStateStore.get(stateToken);
   if (!session) {
     return { success: false, error: 'Invalid or expired CSRF state token' };
   }
 
-  // State token valid for 15 minutes
+  // State tokens are single-use and valid for 15 minutes.
+  oauthStateStore.delete(stateToken);
   if (Date.now() - session.createdAt > 15 * 60 * 1000) {
-    oauthStateStore.delete(stateToken);
     return { success: false, error: 'OAuth authorization request expired' };
   }
 
-  const activeUserId = userId || session.userId || 'usr_manus_default';
+  // The user identity is bound to the original OAuth request, never to callback input.
+  if (userId && session.userId && userId !== session.userId) {
+    return { success: false, error: 'OAuth user does not match the initiating session.' };
+  }
+
+  const activeUserId = session.userId || userId;
+  if (!activeUserId) {
+    return { success: false, error: 'Unable to identify the user who initiated OAuth.' };
+  }
+
   const connectorId = session.connectorId;
-  oauthStateStore.delete(stateToken);
+  if (connectorId !== 'github') {
+    return { success: false, connectorId, error: `OAuth token exchange is not implemented for ${connectorId} yet.` };
+  }
+
+  if (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET) {
+    return { success: false, connectorId, error: 'GitHub OAuth is not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET on the server.' };
+  }
 
   let realAccessToken = '';
-  let userInfo: any = { name: `${connectorId} Account`, email: `user@${connectorId}.com` };
+  let userInfo: any = { name: 'GitHub Account' };
 
-  // If real GitHub OAuth secrets are present, exchange authorization code
-  if (connectorId === 'github' && process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
-    try {
-      const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({
-          client_id: process.env.GITHUB_CLIENT_ID,
-          client_secret: process.env.GITHUB_CLIENT_SECRET,
-          code
-        })
-      });
+  try {
+    const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        client_id: process.env.GITHUB_CLIENT_ID,
+        client_secret: process.env.GITHUB_CLIENT_SECRET,
+        code
+      }),
+      signal: AbortSignal.timeout(15000)
+    });
 
-      if (tokenRes.ok) {
-        const tokenData = await tokenRes.json();
-        if (tokenData.access_token) {
-          realAccessToken = tokenData.access_token;
-          
-          // Fetch GitHub user profile
-          const userRes = await fetch('https://api.github.com/user', {
-            headers: {
-              'Authorization': `Bearer ${realAccessToken}`,
-              'User-Agent': 'Manus-App-Connector',
-              'Accept': 'application/vnd.github.v3+json'
-            }
-          });
-          if (userRes.ok) {
-            const githubProfile = await userRes.json();
-            userInfo = {
-              id: githubProfile.id,
-              name: githubProfile.name || githubProfile.login,
-              login: githubProfile.login,
-              email: githubProfile.email || `${githubProfile.login}@github.user`,
-              avatarUrl: githubProfile.avatar_url
-            };
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('[GitHub OAuth Exchange Exception]', err);
+    if (!tokenRes.ok) {
+      return { success: false, connectorId, error: `GitHub token exchange failed (HTTP ${tokenRes.status}). Please retry authorization.` };
     }
+
+    const tokenData = await tokenRes.json();
+    if (typeof tokenData?.access_token !== 'string' || !tokenData.access_token) {
+      return { success: false, connectorId, error: 'GitHub did not return an access token. Check the OAuth app configuration and callback URL.' };
+    }
+    realAccessToken = tokenData.access_token;
+
+    const userRes = await fetch('https://api.github.com/user', {
+      headers: {
+        'Authorization': `Bearer ${realAccessToken}`,
+        'User-Agent': 'Manus-App-Connector',
+        'Accept': 'application/vnd.github+json'
+      },
+      signal: AbortSignal.timeout(10000)
+    });
+
+    if (!userRes.ok) {
+      return { success: false, connectorId, error: `GitHub returned an access token but profile verification failed (HTTP ${userRes.status}). Please reconnect.` };
+    }
+
+    const githubProfile = await userRes.json();
+    userInfo = {
+      id: githubProfile.id,
+      name: githubProfile.name || githubProfile.login,
+      login: githubProfile.login,
+      email: githubProfile.email || undefined,
+      avatarUrl: githubProfile.avatar_url
+    };
+  } catch (err: any) {
+    return { success: false, connectorId, error: err?.name === 'TimeoutError'
+      ? 'GitHub OAuth timed out. Please retry.'
+      : 'GitHub OAuth could not be completed. Check server connectivity and OAuth settings.' };
   }
 
-  // Fallback to secure encrypted mock token if no live OAuth server key configured
-  if (!realAccessToken) {
-    realAccessToken = `gho_${crypto.randomBytes(20).toString('hex')}`;
-    if (connectorId === 'github') {
-      userInfo = {
-        name: 'GitHub Developer Account',
-        login: 'manus-developer',
-        email: 'developer@manus.ai'
-      };
-    }
+  try {
+    storeUserToken(activeUserId, connectorId, realAccessToken, {
+      expiresAt: Date.now() + 30 * 86400 * 1000,
+      user: userInfo
+    });
+  } catch {
+    return { success: false, connectorId, error: 'Token storage is not configured. Set TOKEN_ENCRYPTION_SECRET on the server.' };
   }
-
-  // Store token encrypted at rest in server vault
-  storeUserToken(activeUserId, connectorId, realAccessToken, {
-    expiresAt: Date.now() + 30 * 86400 * 1000,
-    user: userInfo
-  });
 
   return { success: true, connectorId };
 }
