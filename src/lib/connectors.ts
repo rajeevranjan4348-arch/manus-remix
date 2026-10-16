@@ -26,6 +26,7 @@ import {
   StickyNote
 } from 'lucide-react';
 import { getAccessToken, googleSignIn, getCurrentUser, logoutWorkspace } from './workspaceAuth';
+import { auth } from './firebase';
 import { 
   searchGoogleDriveFiles, 
   listGoogleDriveFiles,
@@ -75,6 +76,13 @@ import {
 import { handleConnectorError, notifyConnectorError, showConnectorErrorToast, inferConnectorIssueType } from './connectorErrorHandler';
 
 export { handleConnectorError, notifyConnectorError, showConnectorErrorToast, inferConnectorIssueType };
+
+async function getFirebaseConnectorHeaders(headers: Record<string, string> = {}): Promise<Record<string, string>> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sign in to Manus before using connected accounts.');
+  const token = await user.getIdToken();
+  return { ...headers, Authorization: `Bearer ${token}` };
+}
 
 export type ConnectorStatus = 
   | 'not_connected' 
@@ -2051,7 +2059,7 @@ export async function executeConnectorTool(
     // Server API Proxy Execution for other tools
     const serverRes = await fetch('/api/connectors/execute', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await getFirebaseConnectorHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ connectorId, toolName, args })
     });
 
@@ -2120,7 +2128,7 @@ export async function startOAuthFlow(connectorId: string): Promise<boolean> {
     const res = await fetch(`/api/connectors/${connectorId}/auth-url`, {
       method: 'GET',
       credentials: 'include',
-      headers: { Accept: 'application/json' }
+      headers: await getFirebaseConnectorHeaders({ Accept: 'application/json' })
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || typeof data?.url !== 'string' || !data.url) {
@@ -2213,7 +2221,7 @@ export async function listRepositories(args: {
   try {
     const res = await fetch('/api/connectors/execute', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await getFirebaseConnectorHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         connectorId: 'github',
         toolName: 'listRepositories',
@@ -2262,7 +2270,7 @@ export async function disconnectConnector(connectorId: string): Promise<boolean>
     const response = await fetch(`/api/connectors/${connectorId}/disconnect`, {
       method: 'POST',
       credentials: 'include',
-      headers: { Accept: 'application/json' }
+      headers: await getFirebaseConnectorHeaders({ Accept: 'application/json' })
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || result?.success !== true) {
