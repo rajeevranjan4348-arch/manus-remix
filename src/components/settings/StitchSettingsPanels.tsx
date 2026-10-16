@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import {
-  ArrowLeft, Check, ChevronRight, CircleHelp, Cloud, Code2, Cpu, Eye, EyeOff,
-  Github, Globe, KeyRound, LockKeyhole, MessageSquare, Puzzle, RefreshCw,
-  ShieldCheck, SlidersHorizontal, Sparkles, Terminal, Timer, Workflow, Zap
+  ArrowLeft, Check, CircleHelp, Cloud, Code2, Cpu, Eye, EyeOff,
+  Github, LockKeyhole, MessageSquare, Puzzle, ShieldCheck, SlidersHorizontal,
+  Terminal, Timer, Workflow, Zap
 } from 'lucide-react';
 import { getSettings, saveSettings } from '@/lib/settingsStore';
 import type { UserSettings } from '@/types/settings';
