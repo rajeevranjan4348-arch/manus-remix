@@ -156,8 +156,8 @@ export function useAgentTask() {
       'gemini-3.8-flash': 'google/gemini-3.8-flash',
       'gemini-3.1-flash-lite': 'google/gemini-3.1-flash-lite',
       'gemini-flash-latest': 'google/gemini-flash-latest',
-      'gemini-2.5-flash': 'google/gemini-3.8-flash',
-      'claude-3.5-sonnet': 'google/gemini-3.8-flash',
+      'gemini-2.5-flash': 'google/gemini-2.5-flash',
+      'claude-3.5-sonnet': 'anthropic/claude-3.5-sonnet',
     };
     const activeModel = modelMap[selectedModelId] || 'google/gemini-3.8-flash';
 
