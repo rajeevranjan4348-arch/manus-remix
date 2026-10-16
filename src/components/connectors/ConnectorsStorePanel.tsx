@@ -15,7 +15,6 @@ import {
   FileText, 
   FileSpreadsheet, 
   Presentation,
-  Check, 
   FileCheck,
   Contact,
   MessageCircle,
