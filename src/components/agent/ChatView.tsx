@@ -59,6 +59,8 @@ import { gsap } from 'gsap';
 import { toast } from 'sonner';
 import { getChatViewDraft, saveChatViewDraft, clearChatViewDraft } from '@/lib/draftStorage';
 import { useAutoSaveChatInput } from '@/hooks/useAutoSaveChatInput';
+import PromptBar from '@/components/ui/PromptBar';
+import { Attachment01Icon, Globe02Icon } from '@hugeicons/core-free-icons';
 
 
 type ManusMapRequest =
@@ -398,9 +400,10 @@ export function ChatView({
     }
   };
 
-  const handleSend = async () => {
-    if (!input.trim() && !attachedFile && activeConnectorTags.length === 0) return;
-    let message = input.trim();
+  const handleSend = async (overrideInput?: string) => {
+    const draftToSend = (overrideInput ?? input).trim();
+    if (!draftToSend && !attachedFile && activeConnectorTags.length === 0) return;
+    let message = draftToSend;
 
     // Check input or active tags for connectors (@calendar, @gmail, @drive, @workspace, @docs, @sheets, @tasks)
     const detectedTags = new Set<string>(activeConnectorTags);
@@ -1298,278 +1301,76 @@ export function ChatView({
         </button>
       )}
 
-      {/* Input Area - Floating Bottom */}
-      <div className="absolute bottom-3 left-0 right-0 px-4 flex flex-col items-center gap-2 z-20">
-        {(attachedFile || isThinkHarder) && (
-          <div className="flex items-center gap-2 flex-wrap max-w-3xl w-full px-2">
-            {isThinkHarder && (
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-600 text-white rounded-full text-xs font-semibold shadow-md animate-in fade-in zoom-in duration-200">
-                <Brain size={14} className="animate-pulse" />
-                <span>Deep reasoning</span>
-                <button onClick={() => setIsThinkHarder(false)} className="p-0.5 hover:bg-white/20 rounded-full ml-1" title="Remove deep reasoning">
-                  <X size={10} />
-                </button>
-              </div>
-            )}
-            {attachedFile && (
-              <div className="inline-flex items-center gap-2 px-3 py-1 bg-white dark:bg-card border border-border rounded-full text-xs font-medium shadow-md animate-in fade-in zoom-in duration-200">
-                <FileText size={13} className="text-primary" />
-                <span className="truncate max-w-[150px] font-semibold">{attachedFile.name}</span>
-                <span className="text-[10px] text-muted-foreground uppercase">({formatFileSize(attachedFile.size)})</span>
-                <button onClick={() => setAttachedFile(null)} className="p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full ml-1" title="Remove attachment">
-                  <X size={10} />
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-        <div 
-          onDragEnter={handleDragEnter}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-          className={cn(
-            "w-full max-w-3xl bg-white dark:bg-[#1a1b1e] rounded-[1.75rem] sm:rounded-[2rem] shadow-xl border border-slate-200/80 dark:border-border/60 px-3.5 py-2.5 sm:px-4.5 sm:py-3 flex flex-col gap-1.5 sm:gap-2 transition-[box-shadow,border-color,background-color] duration-200 ease-out focus-within:ring-2 focus-within:ring-primary/20 relative gpu-accelerated",
-            isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30",
-            isListening && "ring-2 ring-rose-500/40 border-rose-400 dark:border-rose-500/60 shadow-lg shadow-rose-500/10"
-          )}
-        >
-          {showMentionPicker && (
-            <WorkspaceMentionPicker
-              query={mentionQuery}
-              selectedIndex={mentionIndex}
-              onSelect={handleSelectConnectorOption}
-              activeConnectors={activePlugins}
-            />
-          )}
-
-          {isDragging && (
-            <div className="absolute inset-0 bg-slate-100/95 dark:bg-slate-900/95 border-2 border-dashed border-foreground rounded-[1.75rem] sm:rounded-[2rem] flex items-center justify-center gap-3 z-30 backdrop-blur-xs transition-all animate-in fade-in zoom-in duration-200 pointer-events-none">
-              <Upload className="w-5 h-5 text-foreground animate-bounce" />
-              <span className="font-semibold text-sm text-foreground">Drop files, images or datasets here</span>
-            </div>
-          )}
-
-          {/* Connectors & Plugins Popup Menu */}
-          <ConnectorsPopupMenu
-            isOpen={isConnectorsMenuOpen}
-            onOpenChange={setIsConnectorsMenuOpen}
-            activeConnectors={activePlugins}
-            onToggleConnector={handleTogglePlugin}
-            onOpenStore={() => setIsConnectorsStoreOpen(true)}
-            onOpenConfigModal={(id) => setSelectedConfigConnectorId(id)}
-          />
-
-          {/* Visual Indicator for Speech Recognition Listening State */}
-          {isListening && (
-            <div 
-              data-testid="speech-listening-indicator"
-              className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-medium animate-in fade-in slide-in-from-top-1 duration-200 select-none shadow-2xs"
-            >
-              <div className="flex items-center gap-2 min-w-0 flex-1">
-                <span className="relative flex h-2 w-2 shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
-                </span>
-                <span className="font-semibold truncate">
-                  {interimSpeech ? `"${interimSpeech}"` : "Listening... Speak your prompt..."}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                <div className="flex items-center gap-0.5">
-                  <span className="w-0.5 h-2.5 bg-rose-500 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
-                  <span className="w-0.5 h-4 bg-rose-500 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
-                  <span className="w-0.5 h-2 bg-rose-500 rounded-full animate-bounce"></span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => window.dispatchEvent(new CustomEvent('manus_stop_voice_input'))}
-                  className="px-2 py-0.5 rounded-md bg-rose-500/20 hover:bg-rose-500/30 text-rose-600 dark:text-rose-300 text-[10px] font-bold cursor-pointer transition-colors"
-                  title="Finish speech dictation"
-                >
-                  Done
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Top Row: Textarea for typing message */}
-          <div className="w-full flex flex-col min-h-[26px] sm:min-h-[28px]">
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => handleInputChange(e as any)}
-              onKeyDown={(e) => {
-                if (showMentionPicker) {
-                  if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    setMentionIndex(prev => prev + 1);
-                    return;
-                  }
-                  if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    setMentionIndex(prev => Math.max(0, prev - 1));
-                    return;
-                  }
-                  if (e.key === 'Tab' || e.key === 'Enter') {
-                    e.preventDefault();
-                    const searchTerm = mentionQuery.toLowerCase().replace('@', '');
-                    const filteredOptions = WORKSPACE_CONNECTOR_OPTIONS.filter(opt => 
-                      opt.tag.toLowerCase().includes(searchTerm) || 
-                      opt.label.toLowerCase().includes(searchTerm) ||
-                      opt.id.toLowerCase().includes(searchTerm)
-                    );
-                    if (filteredOptions.length > 0) {
-                      const selected = filteredOptions[mentionIndex % filteredOptions.length];
-                      handleSelectConnectorOption(selected);
-                    }
-                    return;
-                  }
-                  if (e.key === 'Escape') {
-                    setShowMentionPicker(false);
-                    return;
-                  }
+      {/* React Bits PromptBar — integrated with the existing task submission flow */}
+      <div className="absolute bottom-3 left-0 right-0 z-20 flex justify-center px-3 sm:px-4">
+        <div className="w-full max-w-3xl">
+          <PromptBar
+            placeholder="Ask anything"
+            sources={[
+              { key: 'files', name: 'Photos & files', description: 'Upload from this device', icon: Attachment01Icon, attach: true },
+              { key: 'web', name: 'Web search', description: 'Live results', icon: Globe02Icon }
+            ]}
+            commands={[
+              { key: 'summarize', name: '/summarize', description: 'Digest the thread so far' },
+              { key: 'compare', name: '/compare', description: 'Compare options side by side' }
+            ]}
+            models={[
+              { key: 'nova-3', name: 'Nova 3', tag: 'Flagship' },
+              { key: 'nova-mini', name: 'Nova Mini', tag: 'Fast' }
+            ]}
+            efforts={['Low', 'Medium', 'High', 'Extra', 'Max']}
+            busy={isLoading || status === 'running'}
+            onSend={(text, detail) => {
+              const selectedText = text.trim();
+              if (!selectedText && !attachedFile) return;
+              void handleSend(selectedText);
+            }}
+            onStop={() => onStop?.()}
+            onAttach={() => new Promise<string | void>((resolve) => {
+              const picker = document.createElement('input');
+              picker.type = 'file';
+              picker.accept = 'image/*,.pdf,.txt,.md,.csv,.json,.doc,.docx,.xlsx';
+              picker.onchange = () => {
+                const file = picker.files?.[0];
+                if (file) {
+                  handleFileSelect(file);
+                  resolve(file.name);
+                } else {
+                  resolve();
                 }
-
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              rows={1}
-              placeholder={
-                isListening 
-                  ? "Listening... speak now to auto-fill prompt..." 
-                  : isThinkHarder 
-                    ? "Ask with deep reasoning..." 
-                    : "Type a message or ask anything..."
+              };
+              picker.click();
+            })}
+            onDictate={() => new Promise<string>((resolve, reject) => {
+              const SpeechRecognitionCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+              if (!SpeechRecognitionCtor) {
+                toast.error('Speech recognition is not supported in this browser.');
+                reject(new Error('Speech recognition unavailable'));
+                return;
               }
-              className="w-full bg-transparent border-none outline-none resize-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-[14px] sm:text-[15px] leading-snug p-0 focus:ring-0 focus:outline-none min-h-[22px] sm:min-h-[24px] max-h-[90px] custom-scrollbar"
-              disabled={isLoading}
-            />
-          </div>
-
-          {/* Bottom Row: Controls */}
-          <div className="flex items-center justify-between gap-2 sm:gap-3 pt-1 border-t border-transparent min-w-0 w-full">
-            {/* Left Controls: Circular + Button & Attached Connector Tags */}
-            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0 flex-1">
-              <AttachmentMenu
-                onFileSelect={handleFileSelect}
-                isThinkHarder={isThinkHarder}
-                onToggleThinkHarder={() => setIsThinkHarder(prev => !prev)}
-                activePlugins={activePlugins}
-                onTogglePlugin={handleTogglePlugin}
-                onSendMessageToChat={(text) => onSubmit(text)}
-                onOpenGoogleDrivePicker={() => setIsDrivePickerOpen(true)}
-                onOpenConnectors={() => setIsConnectorsMenuOpen(true)}
-              >
-                <button 
-                  type="button"
-                  className="w-9 h-9 rounded-full border border-slate-200/90 dark:border-white/15 bg-white dark:bg-[#141518] hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 shadow-2xs cursor-pointer active:scale-95 shrink-0"
-                  title="Add attachments or options"
-                  aria-label="Add attachments or options"
-                >
-                  <Plus size={18} strokeWidth={2.4} className="text-slate-800 dark:text-slate-200 shrink-0" />
-                </button>
-              </AttachmentMenu>
-
-              {/* Selected Connector Tags */}
-              {activeConnectorTags.length > 0 && (
-                <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap">
-                  {activeConnectorTags.map((tagId) => {
-                    const opt = WORKSPACE_CONNECTOR_OPTIONS.find(o => o.id === tagId) || CONNECTOR_CATALOG.find(c => c.id === tagId);
-                    if (!opt) return null;
-                    const IconComp = opt.icon;
-                    const rawName = 'label' in opt ? opt.label : ('name' in opt ? opt.name : tagId);
-                    const cleanName = rawName.replace(/^Google\s+/, '').replace(/^@/, '');
-                    const displayName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
-
-                    return (
-                      <div 
-                        key={tagId} 
-                        onClick={() => setSelectedConfigConnectorId(tagId)}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-800/40 text-[#2563eb] dark:text-[#93c5fd] font-semibold text-xs rounded-full cursor-pointer hover:opacity-80 transition-opacity select-none shrink-0 whitespace-nowrap"
-                        title="Click to view connector parameters or details"
-                      >
-                        <IconComp strokeWidth={2.4} className="w-3.5 h-3.5 shrink-0" />
-                        <span className="shrink-0">{displayName}</span>
-                        <button 
-                          type="button" 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            removeConnectorTag(tagId);
-                          }}
-                          className="p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full text-current/70 hover:text-current ml-0.5 shrink-0"
-                          title="Remove connector"
-                        >
-                          <X size={13} strokeWidth={2.4} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Right Controls: Mic & Circular Send Button */}
-            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto">
-              <VoiceInputButton
-                onListeningStateChange={(listening) => {
-                  setIsListening(listening);
-                  if (listening) {
-                    speechBaseInputRef.current = input.trim();
-                  } else {
-                    setInterimSpeech('');
-                  }
-                }}
-                onInterimChange={(interim) => {
-                  setInterimSpeech(interim);
-                }}
-                onTranscript={(dictatedText) => {
-                  const base = speechBaseInputRef.current;
-                  setInput(formatSpeechAutoFill(base, dictatedText));
-                }}
-                onAutoSubmit={(finalText) => {
-                  if (finalText.trim()) {
-                    onSubmit(finalText.trim());
-                    clearChatViewDraft();
-                    setInput('');
-                    setInterimSpeech('');
-                  }
-                }}
-                className="w-9 h-9 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer shrink-0"
-                size={18}
-              />
-              <button 
-                type="button"
-                onClick={() => {
-                  if (isLoading || status === 'running') {
-                    if (onStop) {
-                      onStop();
-                      toast.info('Response stopped');
-                    }
-                  } else {
-                    handleSend();
-                  }
-                }}
-                disabled={(!isLoading && status !== 'running') && (!input.trim() && !attachedFile && activeConnectorTags.length === 0)}
-                className={cn(
-                  "w-9 h-9 rounded-full flex items-center justify-center transition-all duration-150 shadow-2xs shrink-0 cursor-pointer",
-                  isLoading || status === 'running'
-                    ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md"
-                    : (input.trim() || attachedFile || activeConnectorTags.length > 0)
-                      ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md opacity-100"
-                      : "bg-[#e2e8f0]/80 dark:bg-muted text-slate-400 dark:text-muted-foreground cursor-not-allowed opacity-50"
-                )}
-                title={isLoading || status === 'running' ? "Stop response" : "Send message"}
-                aria-label={isLoading || status === 'running' ? "Stop response" : "Send message"}
-              >
-                {isLoading || status === 'running'
-                  ? <Square size={13} fill="currentColor" strokeWidth={2.5} className="shrink-0" />
-                  : <ArrowUp size={18} strokeWidth={2.6} className="font-bold shrink-0" />}
-              </button>
-            </div>
-          </div>
+              const recognition = new SpeechRecognitionCtor();
+              recognition.lang = navigator.language || 'en-US';
+              recognition.interimResults = false;
+              recognition.maxAlternatives = 1;
+              recognition.onresult = (event: any) => resolve(event.results?.[0]?.[0]?.transcript || '');
+              recognition.onerror = () => reject(new Error('Speech recognition failed'));
+              recognition.onend = () => {};
+              recognition.start();
+            })}
+            background="#27272a"
+            color="#f5f5f5"
+            menuBackground="#323236"
+            sparkColor="#b39dff"
+            sparkBoost={1}
+            width={720}
+            radius={18}
+            maxRows={5}
+            morphDuration={240}
+            squash={0.12}
+            tilt={8}
+            pressScale={0.96}
+            className="w-full"
+          />
         </div>
       </div>
 
