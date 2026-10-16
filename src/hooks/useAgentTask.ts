@@ -845,7 +845,19 @@ Regarding **${promptText}**:
           customMessage: `The ${toolIntent.connectorName} connector is required for "${toolIntent.toolName}" but is not currently authorized.`
         });
         const noticePrompt = `${content}\n\n[CONNECTOR STATUS NOTICE: The ${toolIntent.connectorName} connector is required for this request but is currently NOT connected. Inform the user clearly that ${toolIntent.connectorName} needs to be authorized in Connectors & Plugins, and offer to open Connectors.]`;
-        agentSendMessage(noticePrompt);
+        void (async () => {
+          try {
+            await agentSendMessage(noticePrompt);
+          } catch (error) {
+            console.error('[Manus AI] Connector authorization notice failed:', error);
+            setTaskStatus('error');
+            setPhase('error');
+            setResult({ type: 'chat', content: 'The connector is not authorized, and the AI could not explain the issue. Please open Connectors and retry.', error: true });
+            emitRobotEvent('TASK_FAILED');
+            window.dispatchEvent(new CustomEvent('manus_agent_generating', { detail: { isGenerating: false, mode: 'work' } }));
+            toast.error('Could not complete the connector request. Please retry.');
+          }
+        })();
         return;
       }
 
