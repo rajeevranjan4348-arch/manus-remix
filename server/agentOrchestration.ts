@@ -27,6 +27,7 @@ const CODE_TERMS = /\b(code|coding|repo|repository|github|bug|error|fix|debug|im
 const RESEARCH_TERMS = /\b(research|search|latest|current|sources|cite|citation|compare|investigate|look up|verify)\b|खोज|रिसर्च|ताज़ा|स्रोत/i;
 const ANALYSIS_TERMS = /\b(analy[sz]e|analysis|calculate|data|spreadsheet|report|evaluate|audit|review)\b|विश्लेषण|गणना|रिपोर्ट/i;
 const EMOTION_TERMS = /\b(sad|upset|angry|anxious|worried|scared|lonely|frustrated|overwhelmed|confused|stressed|disappointed|happy|excited|proud|hurt|help me cope)\b|उदास|परेशान|गुस्सा|डर|अकेला|तनाव|निराश|खुश|घबर|दुखी/i;
+const UI_ACTION_TERMS = /\b(change|add|update|fix|build|implement|improve|polish|move|adjust|create)\b|बदल|जोड़|ठीक|बनाओ|सुधार/i;
 const EXPLICIT_UI_REDESIGN = /\b(redesign|rebuild the ui|replace the ui|change the entire ui|new design|change layout|restyle everything|completely change)\b|पूरा डिज़ाइन बदल|पूरा यूआई बदल/i;
 const MULTI_STEP_TERMS = /\b(and then|after that|end to end|all errors|everything|complete|full source|multiple|step by step|integrate|migrate|implement and test|fix and deploy)\b|सभी|पूरा|एक-एक करके|फिर टेस्ट|इंटीग्रेट/i;
 
