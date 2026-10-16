@@ -1,10 +1,34 @@
 import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import firebaseConfig from './firebase-applet-config.json';
 import { streamGeminiResponse } from './server/geminiService';
-import { generateOAuthUrl, handleOAuthCallback, executeServerConnectorTool, disconnectUserToken, isSafeUrl } from './server/connectorsService';
+import { generateOAuthUrl, handleOAuthCallback, executeServerConnectorTool, disconnectUserToken, getConnectorsRegistry, isSafeUrl } from './server/connectorsService';
 import { fetchServerWeather } from './server/weatherService';
 import { globalStreamingCircuitBreaker, geminiCircuitBreaker } from './server/circuitBreaker';
+
+async function verifyFirebaseUserId(authorizationHeader: unknown): Promise<string | null> {
+  if (typeof authorizationHeader !== 'string') return null;
+  const match = authorizationHeader.match(/^Bearer\s+(.+)$/i);
+  if (!match?.[1]) return null;
+  const apiKey = process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY || firebaseConfig.apiKey;
+  if (!apiKey) return null;
+
+  try {
+    const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(apiKey)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: match[1] }),
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) return null;
+    const payload = await response.json() as { users?: Array<{ localId?: string }> };
+    const uid = payload.users?.[0]?.localId;
+    return typeof uid === 'string' && uid.trim() ? uid : null;
+  } catch {
+    return null;
+  }
+}
 
 function geminiApiPlugin(): Plugin {
   return {
@@ -16,7 +40,18 @@ function geminiApiPlugin(): Plugin {
         // Connector API Endpoints
         if (url?.startsWith('/api/connectors')) {
           res.setHeader('Content-Type', 'application/json');
-          const userId = typeof req.headers['x-user-id'] === 'string' ? req.headers['x-user-id'].trim() : '';
+          const isOAuthCallback = req.method === 'GET' && url.endsWith('/oauth/callback');
+          const userId = isOAuthCallback ? '' : await verifyFirebaseUserId(req.headers.authorization);
+
+          if (req.method === 'GET' && (url === '/api/connectors' || url === '/api/connectors/')) {
+            if (!userId) {
+              res.statusCode = 401;
+              res.end(JSON.stringify({ error: 'AUTHENTICATED_USER_REQUIRED', message: 'Sign in before viewing connected accounts.' }));
+              return;
+            }
+            res.end(JSON.stringify({ success: true, connectors: getConnectorsRegistry(userId) }));
+            return;
+          }
 
           if (req.method === 'GET' && url.includes('/auth-url')) {
             if (!userId) {
