@@ -16,9 +16,14 @@ function geminiApiPlugin(): Plugin {
         // Connector API Endpoints
         if (url?.startsWith('/api/connectors')) {
           res.setHeader('Content-Type', 'application/json');
-          const userId = (req.headers['x-user-id'] as string) || 'usr_manus_default';
+          const userId = typeof req.headers['x-user-id'] === 'string' ? req.headers['x-user-id'].trim() : '';
 
           if (req.method === 'GET' && url.includes('/auth-url')) {
+            if (!userId) {
+              res.statusCode = 401;
+              res.end(JSON.stringify({ error: 'AUTHENTICATED_USER_REQUIRED', message: 'Sign in before connecting an account.' }));
+              return;
+            }
             const parts = url.split('/');
             const connectorId = parts[3] || 'github';
             if (connectorId !== 'github') {
@@ -42,17 +47,26 @@ function geminiApiPlugin(): Plugin {
             const code = queryParams.get('code') || '';
             const state = queryParams.get('state') || '';
             const callbackRes = await handleOAuthCallback(code, state);
-            res.setHeader('Content-Type', 'text/html');
+            const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
+              '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[char] || char));
+            const callbackConnectorId = escapeHtml(callbackRes.connectorId || '');
+            const callbackMessage = escapeHtml(callbackRes.success
+              ? `Successfully connected ${callbackRes.connectorId}. Credentials encrypted at rest.`
+              : callbackRes.error || 'Authorization failed.');
+            const callbackEvent = callbackRes.success ? 'MANUS_OAUTH_SUCCESS' : 'MANUS_OAUTH_ERROR';
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-store');
             res.end(`
               <!DOCTYPE html>
               <html>
-                <head><title>Authorization Successful</title></head>
+                <head><title>${callbackRes.success ? 'Authorization Successful' : 'Authorization Failed'}</title></head>
                 <body style="font-family: system-ui; text-align: center; padding: 40px; background: #121316; color: white;">
-                  <h2>${callbackRes.success ? '✅ Account Authorized' : '⚠️ Authorization Notice'}</h2>
-                  <p>${callbackRes.success ? `Successfully connected ${callbackRes.connectorId}. Credentials encrypted at rest.` : callbackRes.error}</p>
+                  <h2>${callbackRes.success ? '✅ Account Authorized' : '⚠️ Authorization Failed'}</h2>
+                  <p>${callbackMessage}</p>
                   <script>
                     if (window.opener) {
-                      window.opener.postMessage({ type: 'MANUS_OAUTH_SUCCESS', connectorId: '${callbackRes.connectorId || ''}' }, window.location.origin);
+                      window.opener.postMessage({ type: '${callbackEvent}', connectorId: '${callbackConnectorId}' }, window.location.origin);
                       setTimeout(() => window.close(), 1200);
                     }
                   </script>
@@ -68,8 +82,13 @@ function geminiApiPlugin(): Plugin {
             req.on('end', async () => {
               try {
                 const body = bodyStr ? JSON.parse(bodyStr) : {};
-                const { connectorId, toolName, args, customUrl, userId: bodyUserId } = body;
-                const activeUser = bodyUserId || userId;
+                const { connectorId, toolName, args, customUrl } = body;
+                if (!userId) {
+                  res.statusCode = 401;
+                  res.end(JSON.stringify({ error: 'AUTHENTICATED_USER_REQUIRED', message: 'Sign in before using a connector.' }));
+                  return;
+                }
+                const activeUser = userId;
 
                 if (customUrl && !isSafeUrl(customUrl)) {
                   res.statusCode = 400;
