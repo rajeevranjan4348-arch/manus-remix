@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useAgent, Agent, webSearch, sandboxTools, fetchUrl, useBlinkAuth } from '@blinkdotnew/react';
 import { blink } from '@/lib/blink';
+import { auth } from '@/lib/firebase';
 import type { Sandbox } from '@blinkdotnew/sdk';
 import { getSettings, playNotificationSound } from '@/lib/settingsStore';
 import { speakCleanHumanVoice } from '@/lib/speechSynthesis';
@@ -44,8 +45,14 @@ function findPromptConnector(prompt: string, connectors: ConnectorRegistryEntry[
   matches.sort((a,b) => (b.term?.length || 0) - (a.term?.length || 0));
   return matches[0]?.connector;
 }
+async function getConnectorAuthHeaders(headers: Record<string, string> = {}): Promise<Record<string, string>> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sign in to Manus before using connected accounts.');
+  return { ...headers, Authorization: `Bearer ${await user.getIdToken()}` };
+}
+
 async function executeMatchingConnector(prompt: string): Promise<{ matched: boolean; connectorName?: string; result?: unknown }> {
-  const registryResponse = await fetch('/api/connectors', { method: 'GET', credentials: 'include', headers: { Accept: 'application/json' } });
+  const registryResponse = await fetch('/api/connectors', { method: 'GET', credentials: 'include', headers: await getConnectorAuthHeaders({ Accept: 'application/json' }) });
   if (!registryResponse.ok) {
     if (registryResponse.status === 404 || registryResponse.status === 405) return { matched: false };
     throw new Error('Could not check connector registry (HTTP ' + registryResponse.status + ').');
@@ -56,7 +63,7 @@ async function executeMatchingConnector(prompt: string): Promise<{ matched: bool
   if (!connector) return { matched: false };
   const connectorId = connector.id || connector.slug || connector.key;
   if (!connectorId) return { matched: false };
-  const response = await fetch('/api/connectors/execute', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ connectorId, prompt, input: { prompt }, action: 'auto' }) });
+  const response = await fetch('/api/connectors/execute', { method: 'POST', credentials: 'include', headers: await getConnectorAuthHeaders({ 'Content-Type': 'application/json', Accept: 'application/json' }), body: JSON.stringify({ connectorId, prompt, input: { prompt }, action: 'auto' }) });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(typeof result?.error === 'string' ? result.error : 'Connector execution failed (HTTP ' + response.status + ').');
   return { matched: true, connectorName: connector.name || connector.slug || connectorId, result };
