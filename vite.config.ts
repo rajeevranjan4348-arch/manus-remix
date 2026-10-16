@@ -2,7 +2,7 @@ import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import { streamGeminiResponse } from './server/geminiService';
-import { generateOAuthUrl, handleOAuthCallback, executeServerConnectorTool, isSafeUrl } from './server/connectorsService';
+import { generateOAuthUrl, handleOAuthCallback, executeServerConnectorTool, disconnectUserToken, isSafeUrl } from './server/connectorsService';
 import { fetchServerWeather } from './server/weatherService';
 import { globalStreamingCircuitBreaker, geminiCircuitBreaker } from './server/circuitBreaker';
 
@@ -112,7 +112,22 @@ function geminiApiPlugin(): Plugin {
           }
 
           if (req.method === 'POST' && url.includes('/disconnect')) {
-            res.end(JSON.stringify({ success: true, message: 'Disconnected' }));
+            if (!userId) {
+              res.statusCode = 401;
+              res.end(JSON.stringify({ error: 'AUTHENTICATED_USER_REQUIRED', message: 'Sign in before disconnecting an account.' }));
+              return;
+            }
+            const connectorId = url.split('/')[3] || '';
+            if (!connectorId) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: 'CONNECTOR_ID_REQUIRED', message: 'A connector ID is required to disconnect an account.' }));
+              return;
+            }
+            const disconnected = disconnectUserToken(userId, connectorId);
+            res.statusCode = disconnected ? 200 : 404;
+            res.end(JSON.stringify(disconnected
+              ? { success: true, connectorId, message: `Disconnected ${connectorId}.` }
+              : { success: false, connectorId, error: 'CONNECTOR_NOT_CONNECTED', message: `No active ${connectorId} connection was found for this user.` }));
             return;
           }
         }
