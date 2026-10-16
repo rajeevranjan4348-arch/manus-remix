@@ -33,6 +33,7 @@ import { AndroidGeneralSettings } from './AndroidGeneralSettings';
 import { AndroidVoiceSettings } from './AndroidVoiceSettings';
 import { AndroidRobotSettings } from './AndroidRobotSettings';
 import { DiagnosticPanel } from './DiagnosticPanel';
+import { StitchSettingsPanels, StitchSettingsView } from './StitchSettingsPanels';
 
 interface AndroidMainSettingsProps {
   onBack?: () => void;
@@ -62,7 +63,8 @@ type ActiveSubView =
   | 'privacy' 
   | 'data_controls' 
   | 'report_bug'
-  | 'edit_avatar';
+  | 'edit_avatar'
+  | StitchSettingsView;
 
 const ACCENT_COLORS = [
   { id: 'white', name: 'Pure White', hex: '#FFFFFF', ring: 'ring-white/30' },
@@ -414,6 +416,27 @@ export function AndroidMainSettings({ onBack }: AndroidMainSettingsProps) {
                     </div>
                     <span className="text-[15px] font-medium text-white truncate">Plugins &amp; Connectors</span>
                   </div>
+                  <span className="material-symbols-outlined text-neutral-500 text-[20px] group-active:translate-x-0.5 transition-transform">chevron_right</span>
+                </button>
+              </div>
+            </div>
+
+            {/* AI, providers and agent execution */}
+            <div className="flex flex-col">
+              <span className="px-3 pb-2 text-[12px] font-semibold uppercase tracking-wider text-neutral-400">AI &amp; Execution</span>
+              <div className="bg-[#1E1F20] border border-[#333537] rounded-28 overflow-hidden flex flex-col shadow-sm">
+                <button onClick={() => setActiveSubView('ai_models')} className="w-full flex items-center justify-between px-4 h-[68px] active:bg-[#252627] transition-all duration-200 text-left group cursor-pointer" type="button">
+                  <div className="flex items-center gap-3.5 min-w-0"><div className="w-9 h-9 rounded-full bg-[#252627] border border-[#333537]/80 flex items-center justify-center shrink-0"><span className="material-symbols-outlined text-neutral-200 text-[20px]">memory</span></div><div className="min-w-0"><span className="block text-[15px] font-medium text-white truncate">AI Models &amp; Providers</span><span className="block text-[11px] text-neutral-500 mt-0.5">Model selection, routing and provider setup</span></div></div>
+                  <span className="material-symbols-outlined text-neutral-500 text-[20px] group-active:translate-x-0.5 transition-transform">chevron_right</span>
+                </button>
+                <div className="h-[1px] bg-[#333537] ml-16 mr-3"></div>
+                <button onClick={() => setActiveSubView('connectors_integrations')} className="w-full flex items-center justify-between px-4 h-[68px] active:bg-[#252627] transition-all duration-200 text-left group cursor-pointer" type="button">
+                  <div className="flex items-center gap-3.5 min-w-0"><div className="w-9 h-9 rounded-full bg-[#252627] border border-[#333537]/80 flex items-center justify-center shrink-0"><span className="material-symbols-outlined text-neutral-200 text-[20px]">extension</span></div><div className="min-w-0"><span className="block text-[15px] font-medium text-white truncate">Connectors &amp; Integrations</span><span className="block text-[11px] text-neutral-500 mt-0.5">Google Workspace, GitHub and tools</span></div></div>
+                  <span className="material-symbols-outlined text-neutral-500 text-[20px] group-active:translate-x-0.5 transition-transform">chevron_right</span>
+                </button>
+                <div className="h-[1px] bg-[#333537] ml-16 mr-3"></div>
+                <button onClick={() => setActiveSubView('work_execution')} className="w-full flex items-center justify-between px-4 h-[68px] active:bg-[#252627] transition-all duration-200 text-left group cursor-pointer" type="button">
+                  <div className="flex items-center gap-3.5 min-w-0"><div className="w-9 h-9 rounded-full bg-[#252627] border border-[#333537]/80 flex items-center justify-center shrink-0"><span className="material-symbols-outlined text-neutral-200 text-[20px]">terminal</span></div><div className="min-w-0"><span className="block text-[15px] font-medium text-white truncate">Work Mode Execution</span><span className="block text-[11px] text-neutral-500 mt-0.5">Autonomy, checkpoints and sandbox settings</span></div></div>
                   <span className="material-symbols-outlined text-neutral-500 text-[20px] group-active:translate-x-0.5 transition-transform">chevron_right</span>
                 </button>
               </div>
@@ -1098,6 +1121,11 @@ export function AndroidMainSettings({ onBack }: AndroidMainSettingsProps) {
       {/* 8b. Robot Avatar Sub-panel (Spherical Chassis & Neural Visualizer) */}
       {activeSubView === 'robot' && (
         <AndroidRobotSettings onBack={() => setActiveSubView(null)} />
+      )}
+
+      {/* Stitch-inspired detailed provider, connector and execution panels */}
+      {(activeSubView === 'ai_models' || activeSubView === 'connectors_integrations' || activeSubView === 'work_execution') && (
+        <StitchSettingsPanels view={activeSubView} onBack={() => setActiveSubView(null)} />
       )}
 
       {/* 9. Data Controls Sub-panel */}
