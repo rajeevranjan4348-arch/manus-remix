@@ -595,6 +595,7 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                       { key: 'robotInteractive' as const, label: 'Pointer / Click Interaction', desc: 'Allow the robot to react to pointer and click input' },
                       { key: 'robotAntenna' as const, label: 'Show Antenna', desc: 'Display the robot antenna' },
                       { key: 'robotFloorShadow' as const, label: 'Floor Shadow', desc: 'Show a shadow beneath the robot' },
+                      { key: 'robotCloudSync' as const, label: 'Cloud-Sync Personality & Themes', desc: 'Enables cloud-syncing of custom robot personalities and visual themes across different devices' },
                     ].map((item) => (
                       <div key={item.key} className="flex items-center justify-between gap-4">
                         <div><p className="text-xs font-medium text-foreground">{item.label}</p><p className="text-[11px] text-muted-foreground">{item.desc}</p></div>

@@ -1124,4 +1124,31 @@ svg.lucide {
   animation: ripple 1.6s cubic-bezier(0, 0.2, 0.8, 1) infinite;
 }
 
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.75; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.04); }
+}
+.animate-ambient-glow {
+  animation: pulseGlow 4s ease-in-out infinite;
+}
+
+/* Custom range slider styling for tactile mobile controls */
+input[type=range].tactile-slider {
+  -webkit-appearance: none;
+  background: #3A3B3D;
+  height: 6px;
+  border-radius: 9999px;
+}
+input[type=range].tactile-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 18px;
+  width: 18px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  box-shadow: 0 0 10px rgba(167, 139, 250, 0.5);
+  cursor: pointer;
+  border: 2px solid #A78BFA;
+}
+
+
 

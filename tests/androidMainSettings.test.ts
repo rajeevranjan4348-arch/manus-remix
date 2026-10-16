@@ -165,4 +165,93 @@ describe('Android 15 Edge-to-Edge Main Settings Integration Suite', () => {
     expect(current.autoPlayAudio).toBe(false);
     expect(current.enableAudioFilter).toBe(false);
   });
+
+  it('11. Robot Settings: Spherical chassis parameters & animation configuration', () => {
+    saveSettings({
+      robotShape: 'sphere',
+      robotSpeed: 1.5,
+      robotInteractive: true,
+      robotAntenna: true,
+      robotFloorShadow: true
+    });
+
+    const current = getSettings();
+    expect(current.robotShape).toBe('sphere');
+    expect(current.robotSpeed).toBe(1.5);
+    expect(current.robotInteractive).toBe(true);
+    expect(current.robotAntenna).toBe(true);
+  });
+
+  it('12. Robot Settings: Hardware pause and reset lifecycle', () => {
+    saveSettings({
+      robotPaused: true,
+      robotSpeed: 0.5
+    });
+
+    let current = getSettings();
+    expect(current.robotPaused).toBe(true);
+    expect(current.robotSpeed).toBe(0.5);
+
+    saveSettings({
+      robotPaused: false,
+      robotSpeed: 1.0
+    });
+    current = getSettings();
+    expect(current.robotPaused).toBe(false);
+    expect(current.robotSpeed).toBe(1.0);
+  });
+
+  it('13. Robot Appearance: Cloud-syncing toggle of custom robot personalities and visual themes', () => {
+    // Initial state is false
+    let current = getSettings();
+    expect(current.robotCloudSync).toBe(false);
+
+    // Toggle ON cloud-syncing across different devices
+    saveSettings({
+      robotCloudSync: true,
+      robotPersonality: 'autonomous',
+      robotEyeColor: 'lavender',
+      robotAccentHardware: 'cyan'
+    });
+
+    current = getSettings();
+    expect(current.robotCloudSync).toBe(true);
+    expect(current.robotPersonality).toBe('autonomous');
+    expect(current.robotEyeColor).toBe('lavender');
+    expect(current.robotAccentHardware).toBe('cyan');
+
+    // Toggle OFF cloud-syncing to keep settings local
+    saveSettings({
+      robotCloudSync: false
+    });
+    current = getSettings();
+    expect(current.robotCloudSync).toBe(false);
+    expect(current.robotPersonality).toBe('autonomous'); // attributes preserved
+  });
+
+  it('14. Robot Appearance: Multi-device sync payload consistency', () => {
+    const multiDevicePayload = {
+      robotCloudSync: true,
+      robotPersonality: 'analytical',
+      robotEyeColor: 'emerald',
+      robotAccentHardware: 'graphite',
+      robotName: 'Nexus Core',
+      robotSize: 110,
+      robotSpeed: 1.4,
+      robotShape: 'sphere',
+      robotTheme: 2
+    };
+
+    saveSettings(multiDevicePayload);
+    const settings = getSettings();
+
+    expect(settings.robotCloudSync).toBe(true);
+    expect(settings.robotPersonality).toBe('analytical');
+    expect(settings.robotEyeColor).toBe('emerald');
+    expect(settings.robotAccentHardware).toBe('graphite');
+    expect(settings.robotName).toBe('Nexus Core');
+    expect(settings.robotSize).toBe(110);
+    expect(settings.robotSpeed).toBe(1.4);
+    expect(settings.robotShape).toBe('sphere');
+  });
 });

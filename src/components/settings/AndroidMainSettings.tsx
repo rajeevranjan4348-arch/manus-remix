@@ -31,6 +31,7 @@ import { GitHubRepositoryBrowser } from './GitHubRepositoryBrowser';
 import { WorkspaceConnectButton } from '../workspace/WorkspaceConnectButton';
 import { AndroidGeneralSettings } from './AndroidGeneralSettings';
 import { AndroidVoiceSettings } from './AndroidVoiceSettings';
+import { AndroidRobotSettings } from './AndroidRobotSettings';
 
 interface AndroidMainSettingsProps {
   onBack?: () => void;
@@ -43,6 +44,7 @@ type ActiveSubView =
   | 'memory' 
   | 'plugins' 
   | 'workspace' 
+  | 'robot' 
   | 'plan' 
   | 'usage' 
   | 'account_info' 
@@ -608,6 +610,25 @@ export function AndroidMainSettings({ onBack }: AndroidMainSettingsProps) {
                 </button>
                 <div className="h-[1px] bg-[#333537] ml-16 mr-3"></div>
 
+                {/* Robot Avatar Settings */}
+                <button 
+                  onClick={() => setActiveSubView('robot')}
+                  className="w-full flex items-center justify-between px-4 h-[68px] active:bg-[#252627] transition-colors text-left cursor-pointer" 
+                  type="button"
+                >
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <div className="w-9 h-9 rounded-full bg-[#252627] border border-[#333537]/80 flex items-center justify-center shrink-0">
+                      <span className="material-symbols-outlined text-neutral-200 text-[20px]">smart_toy</span>
+                    </div>
+                    <span className="text-[15px] font-medium text-white truncate">Robot Settings</span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[14px] text-neutral-400">Sphere v2.4</span>
+                    <span className="material-symbols-outlined text-neutral-500 text-[20px]">chevron_right</span>
+                  </div>
+                </button>
+                <div className="h-[1px] bg-[#333537] ml-16 mr-3"></div>
+
                 {/* Safety & Wellbeing */}
                 <button 
                   onClick={() => setActiveSubView('safety')}
@@ -1067,6 +1088,11 @@ export function AndroidMainSettings({ onBack }: AndroidMainSettingsProps) {
       {/* 8. Voice Sub-panel (Acoustic Studio & Voice Engine) */}
       {activeSubView === 'voice' && (
         <AndroidVoiceSettings onBack={() => setActiveSubView(null)} />
+      )}
+
+      {/* 8b. Robot Avatar Sub-panel (Spherical Chassis & Neural Visualizer) */}
+      {activeSubView === 'robot' && (
+        <AndroidRobotSettings onBack={() => setActiveSubView(null)} />
       )}
 
       {/* 9. Data Controls Sub-panel */}

@@ -9,6 +9,8 @@ import { HistoryPanel } from './components/history/HistoryPanel';
 import { SettingsModal } from './components/settings/SettingsModal';
 import { AndroidMainSettings } from './components/settings/AndroidMainSettings';
 import { AndroidGeneralSettings } from './components/settings/AndroidGeneralSettings';
+import { AndroidRobotSettings } from './components/settings/AndroidRobotSettings';
+import { AndroidVoiceSettings } from './components/settings/AndroidVoiceSettings';
 import { useAgentTask } from './hooks/useAgentTask';
 import { useWebsiteBuilder } from './hooks/useWebsiteBuilder';
 import { BlinkProvider, BlinkAuthProvider, useBlinkAuth } from '@blinkdotnew/react';
@@ -267,6 +269,18 @@ function AppContent() {
                   path="/settings/general" 
                   element={
                     <AndroidGeneralSettings onBack={() => navigate('/settings')} />
+                  } 
+                />
+                <Route 
+                  path="/settings/robot" 
+                  element={
+                    <AndroidRobotSettings onBack={() => navigate('/settings')} />
+                  } 
+                />
+                <Route 
+                  path="/settings/voice" 
+                  element={
+                    <AndroidVoiceSettings onBack={() => navigate('/settings')} />
                   } 
                 />
               </Routes>
