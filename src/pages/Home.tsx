@@ -41,6 +41,7 @@ import { WorkspaceMentionPicker, WORKSPACE_CONNECTOR_OPTIONS, WorkspaceConnector
 import { GoogleDriveFileItem } from '@/lib/workspaceTools';
 import { getSettings } from '@/lib/settingsStore';
 import { getDraftPrompt, saveDraftPrompt, clearDraftPrompt } from '@/lib/draftStorage';
+import { useAutoSaveChatInput } from '@/hooks/useAutoSaveChatInput';
 
 export type PersonalityMode = 'chat' | 'work';
 
@@ -250,10 +251,12 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
     }
   }, [prompt, isExpanded]);
 
-  // Local storage persistence: save draft prompt so navigating away or refreshing restores it
-  React.useEffect(() => {
-    saveDraftPrompt(prompt);
-  }, [prompt]);
+  // Local storage persistence: auto-save draft prompt whenever the user pauses typing for > 500ms
+  useAutoSaveChatInput({
+    value: prompt,
+    onSave: saveDraftPrompt,
+    delay: 500,
+  });
 
   const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;

@@ -137,4 +137,45 @@ describe('Chat Input Local Storage Persistence Suite', () => {
       expect(getDraftPrompt()).toBe('');
     });
   });
+
+  describe('4. 500ms Debounced Auto-Save Mechanism', () => {
+    it('debounces saving until typing pauses for 500ms', async () => {
+      vi.useFakeTimers();
+
+      let savedText = '';
+      const onSave = (text: string) => {
+        savedText = text;
+        saveDraftPrompt(text);
+      };
+
+      // Simulate typing 'M'
+      let currentInput = 'M';
+      let timer: any = setTimeout(() => onSave(currentInput), 500);
+
+      // Advance 200ms (typing 'Ma' before 500ms pause)
+      vi.advanceTimersByTime(200);
+      clearTimeout(timer);
+      currentInput = 'Ma';
+      timer = setTimeout(() => onSave(currentInput), 500);
+
+      // Advance 200ms (typing 'Man' before 500ms pause)
+      vi.advanceTimersByTime(200);
+      clearTimeout(timer);
+      currentInput = 'Manus AI';
+      timer = setTimeout(() => onSave(currentInput), 500);
+
+      // Up to this point (400ms total elapsed), save has not fired yet
+      expect(savedText).toBe('');
+      expect(getDraftPrompt()).toBe('');
+
+      // Now pause typing for 500ms
+      vi.advanceTimersByTime(500);
+
+      // Auto-save triggers after 500ms pause
+      expect(savedText).toBe('Manus AI');
+      expect(getDraftPrompt()).toBe('Manus AI');
+
+      vi.useRealTimers();
+    });
+  });
 });

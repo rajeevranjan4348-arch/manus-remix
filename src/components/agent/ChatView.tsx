@@ -57,6 +57,7 @@ import { Step } from '@/hooks/useAgentTask';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
 import { getChatViewDraft, saveChatViewDraft, clearChatViewDraft } from '@/lib/draftStorage';
+import { useAutoSaveChatInput } from '@/hooks/useAutoSaveChatInput';
 
 
 type ManusMapRequest =
@@ -132,10 +133,12 @@ export function ChatView({
 }: ChatViewProps) {
   const [input, setInput] = React.useState<string>(() => getChatViewDraft());
 
-  // Local storage persistence: save ChatView draft prompt automatically
-  React.useEffect(() => {
-    saveChatViewDraft(input);
-  }, [input]);
+  // Local storage persistence: auto-save ChatView draft prompt whenever the user pauses typing for > 500ms
+  useAutoSaveChatInput({
+    value: input,
+    onSave: saveChatViewDraft,
+    delay: 500,
+  });
   const [expandedSteps, setExpandedSteps] = React.useState<Record<string, boolean>>({});
   const [isThinkHarder, setIsThinkHarder] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
