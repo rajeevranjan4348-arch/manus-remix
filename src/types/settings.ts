@@ -59,6 +59,15 @@ export interface UserSettings {
   toolApprovalPolicy?: 'ask_all' | 'ask_sensitive' | 'auto_approve';
   enableBackgroundNotifications?: boolean;
   enablePhoneCommands?: boolean;
+  // Provider, connector and Work execution preferences
+  providerFallbackEnabled?: boolean;
+  connectorEnabled?: Record<string, boolean>;
+  autonomyLevel?: 'low' | 'medium' | 'high';
+  reasoningSteps?: number;
+  humanCheckpoints?: boolean;
+  sandboxExecution?: boolean;
+  terminalExecution?: boolean;
+  taskTimeoutSeconds?: number;
 
   // System / Updated
   lastUpdated?: string;
