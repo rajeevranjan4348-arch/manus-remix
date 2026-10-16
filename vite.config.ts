@@ -29,9 +29,9 @@ function geminiApiPlugin(): Plugin {
 
           if (req.method === 'GET' && url.endsWith('/oauth/callback')) {
             const queryParams = new URLSearchParams(req.url?.split('?')[1] || '');
-            const code = queryParams.get('code') || 'mock_code';
+            const code = queryParams.get('code') || '';
             const state = queryParams.get('state') || '';
-            const callbackRes = await handleOAuthCallback(code, state, userId);
+            const callbackRes = await handleOAuthCallback(code, state);
             res.setHeader('Content-Type', 'text/html');
             res.end(`
               <!DOCTYPE html>
@@ -42,7 +42,7 @@ function geminiApiPlugin(): Plugin {
                   <p>${callbackRes.success ? `Successfully connected ${callbackRes.connectorId}. Credentials encrypted at rest.` : callbackRes.error}</p>
                   <script>
                     if (window.opener) {
-                      window.opener.postMessage({ type: 'MANUS_OAUTH_SUCCESS', connectorId: '${callbackRes.connectorId || ''}' }, '*');
+                      window.opener.postMessage({ type: 'MANUS_OAUTH_SUCCESS', connectorId: '${callbackRes.connectorId || ''}' }, window.location.origin);
                       setTimeout(() => window.close(), 1200);
                     }
                   </script>
