@@ -1,6 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { extractWeatherQuery, fetchServerWeather, formatWeatherResponse } from '../../server/weatherService';
 import { geminiCircuitBreaker } from '../../server/circuitBreaker';
+import { buildAgentOrchestrationInstruction } from '../../server/agentOrchestration';
 
 const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -181,6 +182,9 @@ export default async (req: Request) => {
     if (body.thinkHarder) {
       systemInstruction += `\n\n[EXTENDED REASONING MODE ACTIVE]\nReason carefully internally, then provide a concise answer without revealing private chain-of-thought.`;
     }
+
+    // Add lightweight, task-aware planning and verification guidance without changing the UI/API contract.
+    systemInstruction += '\n\n' + buildAgentOrchestrationInstruction(latestUserText, Boolean(body.thinkHarder));
 
     // Keep greetings and ordinary conversation on the fast, non-search path.
     // Enable Google Search grounding for queries related to current events, recent news, or fact-checking.
