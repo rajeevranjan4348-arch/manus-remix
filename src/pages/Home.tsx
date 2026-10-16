@@ -572,8 +572,8 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   };
 
   return (
-    <div ref={containerRef} className="box-border w-full min-h-full min-h-[100dvh] overflow-x-hidden overflow-y-auto flex flex-col items-center px-4 py-6 sm:p-6 md:py-10 bg-manus-cream dark:bg-background">
-      <div className="box-border w-full max-w-4xl min-w-0 space-y-6 sm:space-y-8 my-auto">
+    <div ref={containerRef} className="w-full h-full overflow-y-auto flex flex-col items-center p-6 md:py-10 bg-manus-cream dark:bg-background">
+      <div className="w-full max-w-4xl space-y-6 sm:space-y-8 my-auto">
         <div className="flex flex-col items-center animate-on-load" aria-label="Manus AI robot assistant">
           <div
             className="relative shrink-0 cursor-pointer select-none"
@@ -604,18 +604,6 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
               aria-label={`Manus AI robot assistant, ${isHappyExpression ? 'happy' : robotState}`}
               className={`shrink-0 transform transition-transform ${showIndiaClock ? 'opacity-20' : ''}`}
             />
-            {/* Fallback visor: masks merged eye pixels from robot-heads and restores distinct eyes on the rectangular shell. */}
-            {robotShape === 'rectangle' && !showIndiaClock && (
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute left-[19%] top-[29%] z-[1] flex h-[40%] w-[62%] items-center justify-center rounded-[16%] border border-black/80 bg-[#080b12] shadow-[inset_0_0_8px_rgba(0,0,0,0.9)]"
-              >
-                <div className="flex w-full items-center justify-center gap-[19%]">
-                  <span className="block h-[22px] w-[13px] max-h-[34%] rounded-[3px] bg-white shadow-[0_0_9px_rgba(255,255,255,0.95)] animate-pulse" />
-                  <span className="block h-[22px] w-[13px] max-h-[34%] rounded-[3px] bg-white shadow-[0_0_9px_rgba(255,255,255,0.95)] animate-pulse" />
-                </div>
-              </div>
-            )}
             {showIndiaClock && (
               <div
                 className="absolute inset-x-3 top-1/2 -translate-y-1/2 z-10 rounded-xl border border-sky-300/70 bg-slate-950 text-sky-100 px-2 py-3 text-center shadow-[0_0_18px_rgba(56,189,248,0.45)] pointer-events-none"
@@ -654,7 +642,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             className={cn(
-              "box-border w-full min-w-0 shrink-0 bg-white dark:bg-[#1a1b1e] rounded-[1.75rem] shadow-lg border border-slate-200/80 dark:border-border/60 px-3.5 py-2.5 sm:px-4.5 sm:py-3 flex flex-col gap-1.5 sm:gap-2 transition-[box-shadow,border-color,background-color] duration-200 ease-out focus-within:ring-2 focus-within:ring-primary/20 relative z-[2]",
+              "w-full bg-white dark:bg-[#1a1b1e] rounded-[1.75rem] shadow-lg border border-slate-200/80 dark:border-border/60 px-3.5 py-2.5 sm:px-4.5 sm:py-3 flex flex-col gap-1.5 sm:gap-2 transition-[box-shadow,border-color,background-color] duration-200 ease-out focus-within:ring-2 focus-within:ring-primary/20 relative z-[2] gpu-accelerated",
               isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30",
               isListening && "ring-2 ring-rose-500/40 border-rose-400 dark:border-rose-500/60 shadow-lg shadow-rose-500/10"
             )}

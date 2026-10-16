@@ -167,15 +167,6 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
     isWorkspaceAuth: true,
   },
   {
-    id: 'image_generation',
-    name: 'Image Generation',
-    desc: 'Generate original images from prompts with Gemini image models. Use @image or ask Manus to generate an image.',
-    category: 'agent',
-    icon: Sparkles,
-    iconBg: 'bg-fuchsia-500/10 text-fuchsia-500',
-    defaultEnabled: true,
-  },
-  {
     id: 'web_search',
     name: 'Web Search',
     desc: 'Real-time live internet search & fact verification',
@@ -228,7 +219,7 @@ export function ConnectorsStorePanel({
     if (saved) {
       try { return JSON.parse(saved); } catch {}
     }
-    return propActiveConnectors || ['web_search', 'code_sandbox', 'charts', 'image_generation', 'gmail', 'calendar', 'drive'];
+    return propActiveConnectors || ['web_search', 'code_sandbox', 'charts', 'gmail', 'calendar', 'drive'];
   });
 
   useEffect(() => {
