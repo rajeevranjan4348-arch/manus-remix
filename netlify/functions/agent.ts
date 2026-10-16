@@ -38,10 +38,10 @@ export default async (req: Request) => {
     return jsonResponse({ error: 'Method not allowed. Use POST.', code: 'METHOD_NOT_ALLOWED' }, 405);
   }
 
-  // Request size limit check: enforce max 2MB payload
+  // Request size limit check: enforce max 10MB payload to support massive 2M context requests
   const contentLength = req.headers.get('content-length');
-  if (contentLength && parseInt(contentLength, 10) > 2 * 1024 * 1024) {
-    return jsonResponse({ error: 'Payload exceeds maximum allowed size (2MB).', code: 'PAYLOAD_TOO_LARGE' }, 413);
+  if (contentLength && parseInt(contentLength, 10) > 10 * 1024 * 1024) {
+    return jsonResponse({ error: 'Payload exceeds maximum allowed size (10MB).', code: 'PAYLOAD_TOO_LARGE' }, 413);
   }
 
   let body: any;
@@ -55,18 +55,18 @@ export default async (req: Request) => {
     return jsonResponse({ error: 'Invalid request body format. Expected JSON object.', code: 'INVALID_PAYLOAD' }, 400);
   }
 
-  // Validate prompt / messages input bounds
-  if (body.prompt !== undefined && (typeof body.prompt !== 'string' || body.prompt.length > 50000)) {
-    return jsonResponse({ error: 'Prompt must be a string under 50,000 characters.', code: 'INVALID_PROMPT' }, 400);
+  // Validate prompt / messages input bounds - supports 2 Million token context window
+  if (body.prompt !== undefined && (typeof body.prompt !== 'string' || body.prompt.length > 2000000)) {
+    return jsonResponse({ error: 'Prompt must be a string under 2,000,000 characters.', code: 'INVALID_PROMPT' }, 400);
   }
 
   if (body.messages !== undefined) {
-    if (!Array.isArray(body.messages) || body.messages.length > 200) {
-      return jsonResponse({ error: 'Messages must be an array of at most 200 messages.', code: 'INVALID_MESSAGES' }, 400);
+    if (!Array.isArray(body.messages) || body.messages.length > 1000) {
+      return jsonResponse({ error: 'Messages must be an array of at most 1,000 messages.', code: 'INVALID_MESSAGES' }, 400);
     }
     for (const m of body.messages) {
-      if (!m || typeof m !== 'object' || !['user', 'assistant', 'system'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 50000) {
-        return jsonResponse({ error: 'Each message must have role (user|assistant|system) and content under 50,000 characters.', code: 'INVALID_MESSAGE_ITEM' }, 400);
+      if (!m || typeof m !== 'object' || !['user', 'assistant', 'system'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 2000000) {
+        return jsonResponse({ error: 'Each message must have role (user|assistant|system) and content under 2,000,000 characters.', code: 'INVALID_MESSAGE_ITEM' }, 400);
       }
     }
   }
@@ -163,6 +163,16 @@ export default async (req: Request) => {
       // Sanitize model string: allow only alphanumeric, dashes, dots, underscores, slashes
       const sanitized = modelName.slice(0, 100).replace(/[^a-zA-Z0-9_\-./:]/g, '');
       const clean = sanitized.replace(/^google\//, '').trim();
+      if (
+        clean === 'manus-1.6-max' ||
+        clean === 'gemini-3.1-pro' ||
+        clean === 'gemini-3.1-pro-preview' ||
+        clean === 'gemini-2m' ||
+        clean === 'manus-2m' ||
+        clean === 'gemini-2m-context'
+      ) {
+        return 'gemini-3.1-pro-preview';
+      }
       if (clean === 'gemini-2.5-flash' || clean === 'gemini-3-flash' || clean === 'gemini-3.0-flash') {
         return 'gemini-3.8-flash';
       }
@@ -171,9 +181,9 @@ export default async (req: Request) => {
 
     const candidateModels = Array.from(new Set([
       normalizeModel(body.model),
+      'gemini-3.1-pro-preview',
       'gemini-3.8-flash',
       'gemini-3.1-flash-lite',
-      'gemini-3.1-pro-preview'
     ]));
 
     let systemInstruction = body.systemInstruction ||

@@ -132,17 +132,18 @@ export async function readFileForAI(file: File): Promise<{
     });
   }
 
-  // 2. Text, Code, CSV, JSON: Read text content up to safe boundary
+  // 2. Text, Code, CSV, JSON: Read text content up to 2 Million token context window boundary (~2M characters)
   if (val.isText) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (e) => {
         const fullText = (e.target?.result as string) || '';
-        const previewText = fullText.slice(0, 30000); // 30k char context limit
-        const truncatedNotice = fullText.length > 30000 ? `\n... [Truncated ${fullText.length - 30000} additional characters]` : '';
+        const maxContextChars = 2000000; // 2M context window support
+        const previewText = fullText.slice(0, maxContextChars);
+        const truncatedNotice = fullText.length > maxContextChars ? `\n... [Truncated ${fullText.length - maxContextChars} characters exceeding 2M context]` : '';
         resolve({
           textContent: fullText,
-          summary: `[Attached File: ${val.sanitizedName} (${val.sizeFormatted})]\n\`\`\`\n${previewText}${truncatedNotice}\n\`\`\``
+          summary: `[Attached File: ${val.sanitizedName} (${val.sizeFormatted}) - 2M Context Window Enabled]\n\`\`\`\n${previewText}${truncatedNotice}\n\`\`\``
         });
       };
       reader.onerror = () => reject(new Error('Failed to read text file.'));
@@ -150,17 +151,17 @@ export async function readFileForAI(file: File): Promise<{
     });
   }
 
-  // 3. PDF and Binary Documents: Read text or provide metadata
+  // 3. PDF and Binary Documents: Read text or provide metadata (up to 500k chars for 2M context)
   if (val.isPdf) {
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = (e) => {
         const text = (e.target?.result as string) || '';
         // Extract basic ASCII printable text from PDF stream if available
-        const cleanAscii = text.replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s{3,}/g, ' ').slice(0, 15000);
+        const cleanAscii = text.replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s{3,}/g, ' ').slice(0, 500000);
         resolve({
           textContent: cleanAscii,
-          summary: `[Attached PDF Document: ${val.sanitizedName} (${val.sizeFormatted})]\n${cleanAscii ? `\`\`\`\n${cleanAscii}\n\`\`\`` : 'PDF document ready for analysis.'}`
+          summary: `[Attached PDF Document: ${val.sanitizedName} (${val.sizeFormatted}) - 2M Context Window]\n${cleanAscii ? `\`\`\`\n${cleanAscii}\n\`\`\`` : 'PDF document ready for analysis.'}`
         });
       };
       reader.onerror = () => {

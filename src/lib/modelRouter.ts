@@ -29,6 +29,24 @@ export interface ModelProfile {
 
 export const SUPPORTED_MODELS: ModelProfile[] = [
   {
+    id: 'gemini-3.1-pro-preview',
+    name: 'Gemini 3.1 Pro (2M Context Window)',
+    provider: 'google',
+    contextWindow: 2097152,
+    strengths: ['coding', 'data_analysis', 'reasoning'],
+    isAvailable: true,
+    averageLatencyMs: 950,
+  },
+  {
+    id: 'manus-1.6-max',
+    name: 'Manus 1.6 Max (2M Context)',
+    provider: 'google',
+    contextWindow: 2097152,
+    strengths: ['coding', 'data_analysis', 'reasoning'],
+    isAvailable: true,
+    averageLatencyMs: 950,
+  },
+  {
     id: 'gemini-3.8-flash',
     name: 'Gemini 3.8 Flash (Manus Default)',
     provider: 'google',
@@ -45,15 +63,6 @@ export const SUPPORTED_MODELS: ModelProfile[] = [
     strengths: ['fast_chat'],
     isAvailable: true,
     averageLatencyMs: 250,
-  },
-  {
-    id: 'gemini-3.1-pro-preview',
-    name: 'Gemini 3.1 Pro Preview',
-    provider: 'google',
-    contextWindow: 2097152,
-    strengths: ['coding', 'data_analysis', 'reasoning'],
-    isAvailable: true,
-    averageLatencyMs: 950,
   },
   {
     id: 'deepseek/deepseek-chat',
@@ -112,6 +121,10 @@ class ModelRouterService {
     if (userPreference && SUPPORTED_MODELS.some(m => m.id === userPreference)) {
       selectedModel = userPreference;
       reason = `Selected by user setting (${userPreference})`;
+    } else if (prompt.length > 25000 || /\b(2\s*m(illion)?\s*context|massive\s*context|long\s*context|large\s*document|huge\s*codebase)\b/i.test(prompt)) {
+      selectedModel = 'gemini-3.1-pro-preview';
+      reason = 'Massive 2,000,000 token context window for comprehensive document and codebase ingestion';
+      temperature = 0.3;
     } else {
       switch (taskType) {
         case 'coding':

@@ -32,6 +32,7 @@ import { WorkspaceConnectButton } from '../workspace/WorkspaceConnectButton';
 import { AndroidGeneralSettings } from './AndroidGeneralSettings';
 import { AndroidVoiceSettings } from './AndroidVoiceSettings';
 import { AndroidRobotSettings } from './AndroidRobotSettings';
+import { DiagnosticPanel } from './DiagnosticPanel';
 
 interface AndroidMainSettingsProps {
   onBack?: () => void;
@@ -1034,6 +1035,10 @@ export function AndroidMainSettings({ onBack }: AndroidMainSettingsProps) {
                 <div className="bg-blue-500 h-full w-[21%] rounded-full"></div>
               </div>
               <p className="text-xs text-neutral-400">Unlimited high-definition neural voice calls active.</p>
+            </div>
+
+            <div className="bg-[#1E1F20] border border-[#333537] rounded-28 p-5">
+              <DiagnosticPanel />
             </div>
           </div>
         </div>

@@ -26,9 +26,11 @@ import {
   Cloud,
   Flame,
   Database as DatabaseIcon,
-  Smartphone
+  Smartphone,
+  Activity
 } from 'lucide-react';
 import { AndroidMainSettings } from './AndroidMainSettings';
+import { DiagnosticPanel } from './DiagnosticPanel';
 import { useFirebase } from '@/context/FirebaseContext';
 import { GitHubRepositoryBrowser } from './GitHubRepositoryBrowser';
 import { 
@@ -93,11 +95,19 @@ interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialTab?: SettingsTab;
+  activeTaskInfo?: {
+    taskId?: string | null;
+    prompt?: string;
+    taskStatus?: 'idle' | 'running' | 'completed' | 'error';
+    messages?: any[];
+    steps?: any[];
+    result?: any;
+  };
 }
 
-type SettingsTab = 'general' | 'robot' | 'ai' | 'personalization' | 'voice' | 'data' | 'connectors' | 'about';
+type SettingsTab = 'general' | 'robot' | 'ai' | 'diagnostics' | 'personalization' | 'voice' | 'data' | 'connectors' | 'about';
 
-export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProps) {
+export function SettingsModal({ isOpen, onClose, initialTab, activeTaskInfo }: SettingsModalProps) {
   const { theme, setTheme } = useTheme();
   const { user: fbUser, signInWithGoogle, signOut: fbSignOut } = useFirebase();
   const [settings, setSettings] = useState<UserSettings>(getSettings());
@@ -231,6 +241,7 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
     { id: 'connectors', label: 'GitHub & Repos', icon: Github },
     { id: 'robot', label: 'Robot', icon: Bot },
     { id: 'ai', label: 'AI & Models', icon: Brain },
+    { id: 'diagnostics', label: 'Diagnostics', icon: Activity },
     { id: 'personalization', label: 'Personalization', icon: User },
     { id: 'voice', label: 'Voice & Audio', icon: Volume2 },
     { id: 'data', label: 'Data & Privacy', icon: Shield },
@@ -619,9 +630,10 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                   
                   <div className="space-y-1.5">
                     {[
-                      { id: 'manus-1.6-lite', name: 'Manus 1.6 Lite', desc: 'Fast execution for quick chats and requests', tag: 'Fast' },
-                      { id: 'manus-1.6-max', name: 'Manus 1.6 Max', desc: 'Deep reasoning and complex autonomous flows', tag: 'Pro' },
-                      { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', desc: 'Multimodal vision and rapid document analysis', tag: 'Vision' },
+                      { id: 'manus-1.6-lite', name: 'Manus 1.6 Lite', desc: 'Fast execution for quick chats and requests (1M context)', tag: 'Fast' },
+                      { id: 'manus-1.6-max', name: 'Manus 1.6 Max (2M)', desc: 'Deep reasoning with massive 2 Million token context window', tag: '2M Pro' },
+                      { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (2M Context)', desc: '2,000,000 token context window for huge codebases, books, and documents', tag: '2M Context' },
+                      { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', desc: 'Multimodal vision and rapid document analysis (1M context)', tag: 'Vision' },
                       { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', desc: 'High precision code and structured engineering', tag: 'Code' },
                     ].map((m) => {
                       const isSelected = settings.defaultModel === m.id;
@@ -741,6 +753,18 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                     </button>
                   </div>
                 </div>
+
+                {/* Active Task Diagnostics in AI Tab */}
+                <div className="pt-4 border-t border-border/50">
+                  <DiagnosticPanel activeTaskInfo={activeTaskInfo} />
+                </div>
+              </div>
+            )}
+
+            {/* DIAGNOSTICS TAB */}
+            {activeTab === 'diagnostics' && (
+              <div className="space-y-6 animate-in fade-in duration-100">
+                <DiagnosticPanel activeTaskInfo={activeTaskInfo} />
               </div>
             )}
 

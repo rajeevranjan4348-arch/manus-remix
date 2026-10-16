@@ -140,7 +140,8 @@ export function useAgentTask() {
     const selectedModelId = localStorage.getItem('selected_manus_model') || 'gemini-3.8-flash';
     const modelMap: Record<string, string> = {
       'manus-1.6-lite': 'google/gemini-3.1-flash-lite',
-      'manus-1.6-max': 'google/gemini-3.8-flash',
+      'manus-1.6-max': 'google/gemini-3.1-pro-preview',
+      'gemini-3.1-pro-preview': 'google/gemini-3.1-pro-preview',
       'gemini-3.8-flash': 'google/gemini-3.8-flash',
       'gemini-3.1-flash-lite': 'google/gemini-3.1-flash-lite',
       'gemini-flash-latest': 'google/gemini-flash-latest',
@@ -437,6 +438,7 @@ export function useAgentTask() {
               messages: messages.map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })),
               model: (() => {
                 const sel = localStorage.getItem('selected_manus_model');
+                if (sel === 'manus-1.6-max' || sel === 'gemini-3.1-pro-preview') return 'gemini-3.1-pro-preview';
                 if (!sel || sel.includes('gemini-2.0') || sel.includes('gemini-2.5')) return 'gemini-3.8-flash';
                 return sel;
               })(),

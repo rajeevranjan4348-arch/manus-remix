@@ -305,6 +305,14 @@ function AppContent() {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         initialTab={settingsInitialTab}
+        activeTaskInfo={{
+          taskId: agentTask.taskId,
+          prompt: agentTask.currentTask?.prompt,
+          taskStatus: agentTask.taskStatus,
+          messages: agentTask.messages,
+          steps: agentTask.steps,
+          result: agentTask.result,
+        }}
       />
 
       <Toaster />
