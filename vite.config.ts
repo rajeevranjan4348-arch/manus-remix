@@ -21,6 +21,16 @@ function geminiApiPlugin(): Plugin {
           if (req.method === 'GET' && url.includes('/auth-url')) {
             const parts = url.split('/');
             const connectorId = parts[3] || 'github';
+            if (connectorId !== 'github') {
+              res.statusCode = 501;
+              res.end(JSON.stringify({ error: 'CONNECTOR_OAUTH_UNAVAILABLE', message: `OAuth is not implemented for ${connectorId} yet.` }));
+              return;
+            }
+            if (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET || !process.env.TOKEN_ENCRYPTION_SECRET) {
+              res.statusCode = 503;
+              res.end(JSON.stringify({ error: 'OAUTH_NOT_CONFIGURED', message: 'Configure GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, and TOKEN_ENCRYPTION_SECRET on the server before connecting GitHub.' }));
+              return;
+            }
             const redirectUri = `${process.env.APP_URL || 'https://manus.im'}/api/connectors/oauth/callback`;
             const authResult = generateOAuthUrl(connectorId, redirectUri, userId);
             res.end(JSON.stringify(authResult));
