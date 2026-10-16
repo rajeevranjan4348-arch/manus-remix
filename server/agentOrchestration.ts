@@ -37,7 +37,7 @@ export function classifyAgentIntent(prompt: string): AgentIntent {
   if (EMOTION_TERMS.test(text) && !CODE_TERMS.test(text) && !UI_TERMS.test(text)) {
     return 'emotional-support';
   }
-  if (UI_TERMS.test(text) && (CODE_TERMS.test(text) || EXPLICIT_UI_REDESIGN.test(text))) {
+  if (UI_TERMS.test(text) && (CODE_TERMS.test(text) || UI_ACTION_TERMS.test(text) || EXPLICIT_UI_REDESIGN.test(text))) {
     return 'ui-change';
   }
   if (CODE_TERMS.test(text)) return 'coding';
