@@ -857,10 +857,10 @@ Regarding **${promptText}**:
       void executeConnectorTool(toolIntent.toolName, toolIntent.args).then(async res => {
         setSteps(prev => prev.map(s => s.label === toolIntent.suggestedAction ? { ...s, status: 'completed' } : s));
         if (res.success) {
-          const augmentedPrompt = `${content}\n\n[EXECUTED CONNECTED TOOL: `${toolIntent.connectorName} (`${toolIntent.toolName})]\n[RESULT DATA]:\n`${JSON.stringify(res.data, null, 2)}\n\n[INSTRUCTION: Synthesize a clear, verified answer based on the retrieved data above. Highlight key documents/messages/events and provide links where applicable.]`;
+          const augmentedPrompt = \`${content}\\n\\n[EXECUTED CONNECTED TOOL: \`${toolIntent.connectorName} (\`${toolIntent.toolName})]\\n[RESULT DATA]:\\n\`${JSON.stringify(res.data, null, 2)}\\n\\n[INSTRUCTION: Synthesize a clear, verified answer based on the retrieved data above. Highlight key documents/messages/events and provide links where applicable.]\`;
           await agentSendMessage(augmentedPrompt);
         } else {
-          const errorPrompt = `${content}\n\n[CONNECTOR TOOL ERROR: `${res.error || 'Execution failed'}]\n`${res.message}\nProvide a helpful explanation of the failure.`;
+          const errorPrompt = \`${content}\\n\\n[CONNECTOR TOOL ERROR: \`${res.error || 'Execution failed'}]\\n\`${res.message}\\nProvide a helpful explanation of the failure.\`;
           await agentSendMessage(errorPrompt);
         }
       }).catch(error => {
