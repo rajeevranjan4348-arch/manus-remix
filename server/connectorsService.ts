@@ -105,42 +105,28 @@ export function getUserToken(userId: string, connectorId: string): { accessToken
  * Generate CSRF protected OAuth Auth URL
  */
 export function generateOAuthUrl(connectorId: string, redirectUri: string, userId?: string): { url: string; stateToken: string } {
+  if (!userId || !userId.trim()) {
+    throw new Error('An authenticated user ID is required to start connector OAuth.');
+  }
+  if (connectorId !== 'github') {
+    throw new Error(`OAuth is not implemented for ${connectorId} yet.`);
+  }
+  if (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET) {
+    throw new Error('GitHub OAuth is not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET on the server.');
+  }
+
   const stateToken = crypto.randomBytes(24).toString('hex');
   oauthStateStore.set(stateToken, {
     stateToken,
     connectorId,
-    userId: userId || 'usr_manus_default',
+    userId: userId.trim(),
     createdAt: Date.now()
   });
 
   const appUrl = process.env.APP_URL || 'https://manus.im';
   const finalRedirect = redirectUri || `${appUrl}/api/connectors/oauth/callback`;
 
-  let authUrl = '';
-  switch (connectorId) {
-    case 'github':
-      authUrl = `https://github.com/login/oauth/authorize?client_id=${process.env.GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(finalRedirect)}&state=${stateToken}&scope=repo,user,read:org,notifications`;
-      break;
-    case 'slack':
-      authUrl = `https://slack.com/oauth/v2/authorize?client_id=${process.env.SLACK_CLIENT_ID}&redirect_uri=${encodeURIComponent(finalRedirect)}&state=${stateToken}&scope=channels:read,chat:write,search:read`;
-      break;
-    case 'notion':
-      authUrl = `https://api.notion.com/v1/oauth/authorize?client_id=${process.env.NOTION_CLIENT_ID}&redirect_uri=${encodeURIComponent(finalRedirect)}&response_type=code&owner=user&state=${stateToken}`;
-      break;
-    case 'linear':
-      authUrl = `https://linear.app/oauth/authorize?client_id=${process.env.LINEAR_CLIENT_ID}&redirect_uri=${encodeURIComponent(finalRedirect)}&response_type=code&state=${stateToken}&scope=read,write`;
-      break;
-    case 'dropbox':
-      authUrl = `https://www.dropbox.com/oauth2/authorize?client_id=${process.env.DROPBOX_CLIENT_ID}&redirect_uri=${encodeURIComponent(finalRedirect)}&response_type=code&state=${stateToken}`;
-      break;
-    case 'onedrive':
-    case 'outlook':
-      authUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=${process.env.MICROSOFT_CLIENT_ID}&redirect_uri=${encodeURIComponent(finalRedirect)}&response_type=code&state=${stateToken}&scope=files.read.all,mail.read,calendars.read`;
-      break;
-    default:
-      authUrl = `${appUrl}/api/connectors/oauth/mock?connector=${connectorId}&state=${stateToken}`;
-      break;
-  }
+  const authUrl = `https://github.com/login/oauth/authorize?client_id=${process.env.GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(finalRedirect)}&state=${stateToken}&scope=repo,user,read:org,notifications`;
 
   return { url: authUrl, stateToken };
 }
@@ -309,8 +295,6 @@ async function executeGitHubApiTool(
   };
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
-  } else if (process.env.GITHUB_TOKEN) {
-    headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
   }
 
   try {
@@ -320,7 +304,7 @@ async function executeGitHubApiTool(
       const sort = args.sort || 'updated';
       const perPage = args.perPage || 10;
 
-      if (token || process.env.GITHUB_TOKEN) {
+      if (token) {
         const url = `https://api.github.com/user/repos?visibility=${visibility}&sort=${sort}&per_page=${perPage}`;
         const res = await fetch(url, { headers });
         if (res.ok) {
@@ -352,6 +336,7 @@ async function executeGitHubApiTool(
         error: 'GITHUB_AUTH_REQUIRED',
         message: 'GitHub repository access failed. Connect your own GitHub account and retry; no sample repository data was returned.'
       };
+    }
 
     // 2. github_create_issue
     if (toolName === 'github_create_issue') {
@@ -501,13 +486,6 @@ export async function executeServerConnectorTool(
     return { success: false, error: 'AUTHENTICATED_USER_REQUIRED', message: 'Sign in before using a connector. A shared default user is not permitted.' };
   }
   const activeUserId = userId.trim();
-  const query = args.query || args.search || args.topic || 'latest updates';
-
-  if (connectorId === 'github' || toolName.startsWith('github_')) {
-    const userTokenObj = getUserToken(activeUserId, 'github');
-    const token = userTokenObj?.accessToken || null;
-    return executeGitHubApiTool(toolName, args, token);
-  }
 
   if (connectorId === 'github' || toolName.startsWith('github_')) {
     const userTokenObj = getUserToken(activeUserId, 'github');
