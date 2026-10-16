@@ -102,6 +102,15 @@ export function getUserToken(userId: string, connectorId: string): { accessToken
 }
 
 /**
+ * Disconnect a provider for the specified user.
+ * Returns false when there was no stored credential to remove.
+ */
+export function disconnectUserToken(userId: string, connectorId: string): boolean {
+  if (!userId?.trim() || !connectorId?.trim()) return false;
+  return userTokenVault.delete(`${userId.trim()}:${connectorId.trim()}`);
+}
+
+/**
  * Generate CSRF protected OAuth Auth URL
  */
 export function generateOAuthUrl(connectorId: string, redirectUri: string, userId?: string): { url: string; stateToken: string } {
