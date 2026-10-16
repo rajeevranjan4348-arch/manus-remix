@@ -494,6 +494,7 @@ export function ChatView({
 
   // Determine if the agent is actively streaming a response
   const isStreamingResponse = React.useMemo(() => {
+    if (status === 'error') return false;
     if (isLoading || status === 'running') return true;
     const hasRunningStep = steps.some(s => s.status === 'running');
     if (hasRunningStep) return true;
@@ -889,7 +890,7 @@ export function ChatView({
     );
   };
 
-  const isAssistantWorking = isLoading || status === 'running';
+  const isAssistantWorking = (isLoading || status === 'running') && status !== 'error';
   const hasVisibleAssistantMessage = displayMessages.some((m: any) => {
     if (m?.role !== 'assistant') return false;
     const raw = m.content || '';

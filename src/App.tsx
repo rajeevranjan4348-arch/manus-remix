@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, useNavigate, useParams, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useNavigate, useParams, useLocation, Navigate } from 'react-router-dom';
 import { Sidebar } from './components/layout/Sidebar';
 import { Topbar } from './components/layout/Topbar';
 import { Home } from './pages/Home';
@@ -25,7 +25,86 @@ import { configureHighQualityTTS } from './lib/audioPipeline';
 const PROJECT_ID = (import.meta as any).env?.VITE_BLINK_PROJECT_ID || 'manus-agent-clone-tkzhogvs';
 const PUBLISHABLE_KEY = (import.meta as any).env?.VITE_BLINK_PUBLISHABLE_KEY || '';
 
-// Wrapper for ChatView to handle params
+/**
+ * Route loading fallback UI rendered during route transitions or module loading
+ */
+function RouteLoadingFallback() {
+  return (
+    <div className="flex h-full w-full items-center justify-center p-8 bg-background text-foreground">
+      <div className="flex flex-col items-center gap-3 text-muted-foreground animate-in fade-in duration-200">
+        <span className="material-symbols-outlined animate-spin text-2xl text-primary">progress_activity</span>
+        <span className="text-xs font-medium">Loading view...</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Error boundary component to safely catch and isolate route rendering exceptions
+ */
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error?: Error;
+}
+
+class RouteErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('[RouteErrorBoundary] Caught route transition error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full w-full p-6 text-center bg-background text-foreground animate-in fade-in duration-200">
+          <div className="max-w-md space-y-4 p-6 rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+            <div className="w-12 h-12 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mx-auto">
+              <span className="material-symbols-outlined text-2xl">warning</span>
+            </div>
+            <h3 className="text-base font-semibold">Route Navigation Exception</h3>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              A temporary issue occurred while transitioning routes. You can return home or retry.
+            </p>
+            <div className="flex justify-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  this.setState({ hasError: false });
+                  window.location.href = '/';
+                }}
+                className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-semibold hover:opacity-90 transition-opacity cursor-pointer"
+              >
+                Return to Home
+              </button>
+              <button
+                type="button"
+                onClick={() => this.setState({ hasError: false })}
+                className="px-4 py-2 rounded-xl bg-muted text-foreground text-xs font-semibold hover:bg-muted/80 transition-colors cursor-pointer"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// Wrapper for ChatView to handle params safely without returning null
 function TaskView({ 
   useAgentTaskResult, 
   onReset 
@@ -40,9 +119,36 @@ function TaskView({
     if (taskId) {
       loadTask(taskId);
     }
-  }, [taskId]); // Remove loadTask dependency to avoid infinite loop if it's not stable, but it is useCallback
+  }, [taskId]);
 
-  if (!currentTask && !taskId) return null;
+  if (!taskId) {
+    return (
+      <div className="flex h-full w-full items-center justify-center p-8 bg-background text-foreground">
+        <div className="flex flex-col items-center gap-3 text-muted-foreground animate-in fade-in duration-200">
+          <p className="text-sm font-medium">No task session specified.</p>
+          <button 
+            type="button"
+            onClick={onReset} 
+            className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-semibold hover:opacity-90 transition-opacity cursor-pointer"
+          >
+            Return to Home
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Display a smooth loader while initial task content is fetching instead of returning null
+  if (!currentTask && isLoading) {
+    return (
+      <div className="flex h-full w-full items-center justify-center p-8 bg-background text-foreground">
+        <div className="flex flex-col items-center gap-3 text-muted-foreground animate-in fade-in duration-200">
+          <span className="material-symbols-outlined animate-spin text-2xl text-primary">progress_activity</span>
+          <p className="text-xs font-medium">Loading session context...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <ChatView
@@ -131,7 +237,6 @@ function AppContent() {
     };
   }, []);
 
-
   // Global keyboard shortcuts (Ctrl+H: History, Ctrl+, : Settings)
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -180,13 +285,8 @@ function AppContent() {
 
   const handleStartTask = async (prompt: string, options: any) => {
     if (options.format === 'website') {
-      // Extract website name from prompt or use default
       const websiteName = options.websiteName || prompt.split(' ').slice(0, 3).join(' ') + ' Website';
-      // setTaskType('website'); // logic moved to route
       startBuilding(prompt, websiteName);
-      // Website builder doesn't have persistence yet in this refactor, keeping it as overlay or separate route
-      // For now, let's keep website builder as a state-based view overlaying everything or separate route
-      // navigating to /website?
     } else {
       const newTaskId = await startTask(prompt, options);
       if (newTaskId) {
@@ -205,7 +305,13 @@ function AppContent() {
   const isHomePage = location.pathname === '/';
   const hasSentMessage = !isHomePage || isWebsiteActive || Boolean(agentTask.currentTask) || agentTask.messages.length > 0 || agentTask.isLoading;
 
-
+  const handleSettingsBack = () => {
+    if (window.history.length > 2) {
+      navigate(-1);
+    } else {
+      navigate('/');
+    }
+  };
 
   return (
     <div className="flex h-screen w-full max-w-full bg-background overflow-hidden">
@@ -245,60 +351,77 @@ function AppContent() {
             </div>
           ) : (
             <div key={location.pathname} className="w-full h-full animate-in fade-in-0 slide-in-from-bottom-2 duration-350 ease-out">
-              <Routes>
-                <Route path="/" element={<Home onStartTask={handleStartTask} />} />
-                <Route 
-                  path="/task/:taskId" 
-                  element={
-                    <TaskView 
-                      useAgentTaskResult={agentTask} 
-                      onReset={handleReset} 
+              <RouteErrorBoundary>
+                <React.Suspense fallback={<RouteLoadingFallback />}>
+                  <Routes>
+                    <Route path="/" element={<Home onStartTask={handleStartTask} />} />
+                    <Route 
+                      path="/task/:taskId" 
+                      element={
+                        <TaskView 
+                          useAgentTaskResult={agentTask} 
+                          onReset={handleReset} 
+                        />
+                      } 
                     />
-                  } 
-                />
-                <Route 
-                  path="/settings" 
-                  element={
-                    <AndroidMainSettings onBack={() => navigate('/')} />
-                  } 
-                />
-                <Route 
-                  path="/settings/general" 
-                  element={
-                    <AndroidGeneralSettings onBack={() => navigate('/settings')} />
-                  } 
-                />
-                <Route 
-                  path="/settings/robot" 
-                  element={
-                    <AndroidRobotSettings onBack={() => navigate('/settings')} />
-                  } 
-                />
-                <Route 
-                  path="/settings/voice" 
-                  element={
-                    <AndroidVoiceSettings onBack={() => navigate('/settings')} />
-                  } 
-                />
-                <Route 
-                  path="/settings/connectors" 
-                  element={
-                    <AndroidConnectorsSettings onBack={() => navigate('/settings')} />
-                  } 
-                />
-                <Route 
-                  path="/chat" 
-                  element={
-                    <MyAIChat onBack={() => navigate('/')} />
-                  } 
-                />
-                <Route 
-                  path="/my-ai" 
-                  element={
-                    <MyAIChat onBack={() => navigate('/')} />
-                  } 
-                />
-              </Routes>
+                    
+                    {/* Settings Navigation Routes */}
+                    <Route 
+                      path="/settings" 
+                      element={
+                        <AndroidMainSettings onBack={handleSettingsBack} />
+                      } 
+                    />
+                    <Route 
+                      path="/settings/general" 
+                      element={
+                        <AndroidGeneralSettings onBack={() => navigate('/settings')} />
+                      } 
+                    />
+                    <Route 
+                      path="/settings/robot" 
+                      element={
+                        <AndroidRobotSettings onBack={() => navigate('/settings')} />
+                      } 
+                    />
+                    <Route 
+                      path="/settings/voice" 
+                      element={
+                        <AndroidVoiceSettings onBack={() => navigate('/settings')} />
+                      } 
+                    />
+                    <Route 
+                      path="/settings/connectors" 
+                      element={
+                        <AndroidConnectorsSettings onBack={() => navigate('/settings')} />
+                      } 
+                    />
+                    <Route 
+                      path="/settings/*" 
+                      element={
+                        <AndroidMainSettings onBack={handleSettingsBack} />
+                      } 
+                    />
+
+                    {/* Chat Routes */}
+                    <Route 
+                      path="/chat" 
+                      element={
+                        <MyAIChat onBack={() => navigate('/')} />
+                      } 
+                    />
+                    <Route 
+                      path="/my-ai" 
+                      element={
+                        <MyAIChat onBack={() => navigate('/')} />
+                      } 
+                    />
+
+                    {/* Catch-all Fallback Route to prevent null component blank screens */}
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                  </Routes>
+                </React.Suspense>
+              </RouteErrorBoundary>
             </div>
           )}
         </main>
