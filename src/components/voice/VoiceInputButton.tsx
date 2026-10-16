@@ -218,8 +218,7 @@ export function VoiceInputButton({
 
     // Check secure context
     if (!window.isSecureContext) {
-      setShowPermissionModal(true);
-      toast.error('Microphone access requires HTTPS or localhost. Open Manus through its secure site.');
+      toast.error('Microphone access requires HTTPS or localhost.');
       return;
     }
 
@@ -227,15 +226,7 @@ export function VoiceInputButton({
     try {
       const permState = await checkMicrophonePermissionState();
       if (permState === 'denied') {
-        setShowPermissionModal(true);
-        toast.error('Microphone permission was blocked.', {
-          description: 'Allow Microphone for this site in browser settings, then try again.',
-          action: {
-            label: 'Unblock Guide 🎙️',
-            onClick: () => setShowPermissionModal(true),
-          },
-          duration: 7000,
-        });
+        toast.error('Microphone permission is blocked in browser settings.');
         return;
       }
     } catch {}
@@ -244,7 +235,6 @@ export function VoiceInputButton({
     if (!SpeechRecognition) {
       // If SpeechRecognition is missing, test getUserMedia or inform user
       if (!navigator.mediaDevices?.getUserMedia) {
-        setShowPermissionModal(true);
         toast.error('Voice recognition is not supported in this browser. Please use Chrome, Edge, or Safari.');
         return;
       }
@@ -255,14 +245,7 @@ export function VoiceInputButton({
         stream.getTracks().forEach((t) => t.stop());
         toast.info('Audio recording is supported. For live speech dictation, Chrome or Edge is recommended.');
       } catch (e: any) {
-        setShowPermissionModal(true);
-        toast.error('Microphone permission was blocked.', {
-          description: 'Allow Microphone in browser settings to dictate prompts.',
-          action: {
-            label: 'How to Fix 🎙️',
-            onClick: () => setShowPermissionModal(true),
-          },
-        });
+        toast.error('Microphone permission is blocked in browser settings.');
       }
       return;
     }
@@ -381,27 +364,12 @@ export function VoiceInputButton({
       recognition.onerror = (event: any) => {
         if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
           console.warn('[Voice Recognition] Permission blocked:', event.error);
-          setShowPermissionModal(true);
-          toast.error('Microphone permission was blocked.', {
-            description: 'Allow Microphone for this site in browser settings, then try again.',
-            action: {
-              label: 'Unblock Guide 🎙️',
-              onClick: () => setShowPermissionModal(true),
-            },
-            duration: 8000,
-          });
+          toast.error('Microphone permission is blocked in browser settings.');
           emitRobotEvent('TASK_FAILED');
           window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'error' }));
         } else if (event.error === 'audio-capture') {
           console.warn('[Voice Recognition] Audio capture error:', event.error);
-          setShowPermissionModal(true);
-          toast.error('No microphone found or another app is using it.', {
-            action: {
-              label: 'Troubleshoot',
-              onClick: () => setShowPermissionModal(true),
-            },
-            duration: 6000,
-          });
+          toast.error('No microphone found or another app is using it.');
           emitRobotEvent('TASK_FAILED');
           window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'error' }));
         } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
@@ -440,15 +408,7 @@ export function VoiceInputButton({
     } catch (err: any) {
       console.error('Speech recognition error:', err);
       if (err?.name === 'NotAllowedError' || err?.message?.includes('denied') || err?.message?.includes('not-allowed')) {
-        setShowPermissionModal(true);
-        toast.error('Microphone permission was blocked.', {
-          description: 'Allow Microphone in browser settings to speak to Manus.',
-          action: {
-            label: 'Unblock Guide 🎙️',
-            onClick: () => setShowPermissionModal(true),
-          },
-          duration: 8000,
-        });
+        toast.error('Microphone permission is blocked in browser settings.');
       } else {
         toast.error('Could not start microphone');
       }
@@ -490,17 +450,6 @@ export function VoiceInputButton({
           <Mic size={size} className="shrink-0 relative z-10" />
         )}
       </button>
-
-      <MicrophonePermissionModal 
-        isOpen={showPermissionModal}
-        onClose={() => setShowPermissionModal(false)}
-        onPermissionGranted={() => {
-          setShowPermissionModal(false);
-          setTimeout(() => {
-            toggleListening();
-          }, 300);
-        }}
-      />
     </>
   );
 }

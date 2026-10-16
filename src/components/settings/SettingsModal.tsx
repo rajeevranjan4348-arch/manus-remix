@@ -1446,16 +1446,7 @@ export function SettingsModal({ isOpen, onClose, initialTab, activeTaskInfo }: S
           </button>
         </div>
       </div>
-
-        <MicrophonePermissionModal
-          isOpen={showMicHelpModal}
-          onClose={() => setShowMicHelpModal(false)}
-          onPermissionGranted={async () => {
-            setShowMicHelpModal(false);
-            await checkMediaPermissions();
-          }}
-        />
-      </div>
-    </>
-  );
+    </div>
+  </>
+);
 }

@@ -59,7 +59,6 @@ import { gsap } from 'gsap';
 import { toast } from 'sonner';
 import { getChatViewDraft, saveChatViewDraft, clearChatViewDraft } from '@/lib/draftStorage';
 import { useAutoSaveChatInput } from '@/hooks/useAutoSaveChatInput';
-import { getSettings } from '@/lib/settingsStore';
 
 
 type ManusMapRequest =
@@ -106,78 +105,7 @@ function extractManusMapRequest(rawPrompt: string): ManusMapRequest | null {
   return null;
 }
 
-/**
- * Smoothly centers a target element vertically within its scrolling container.
- */
-export function centerElementInContainer(
-  container: HTMLElement,
-  target: HTMLElement,
-  behavior: ScrollBehavior = 'smooth'
-): number {
-  if (!container || !target) return 0;
-  const containerRect = container.getBoundingClientRect();
-  const targetRect = target.getBoundingClientRect();
-
-  // Target's top relative to the container scroll coordinate space
-  const relativeTargetTop = (targetRect.top - containerRect.top) + container.scrollTop;
-
-  // Compute scroll offset to vertically center the target inside the container viewport
-  const centeredTop = relativeTargetTop - (container.clientHeight / 2) + (targetRect.height / 2);
-  const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight);
-  const finalTop = Math.max(0, Math.min(centeredTop, maxScroll));
-
-  if (typeof container.scrollTo === 'function') {
-    container.scrollTo({ top: finalTop, behavior });
-  } else {
-    container.scrollTop = finalTop;
-  }
-
-  return finalTop;
-}
-
-/**
- * Locates the primary search content element in the view.
- * Prioritizes verified source citations, search visual cards, search trace pills, or search assistant messages.
- */
-export function findSearchContentElement(container: HTMLElement): HTMLElement | null {
-  if (!container) return null;
-
-  // 1. Prioritize verified search source citations
-  const citations = container.querySelectorAll<HTMLElement>(
-    '[data-testid="search-citations"], .search-content-result, [data-search-citations="true"]'
-  );
-  if (citations.length > 0) {
-    return citations[citations.length - 1];
-  }
-
-  // 2. Search result visual cards (charts/files/data visualizations)
-  const resultCards = container.querySelectorAll<HTMLElement>(
-    '[data-testid="task-result-content"], [data-result-card="true"]'
-  );
-  if (resultCards.length > 0) {
-    return resultCards[resultCards.length - 1];
-  }
-
-  // 3. Search step / trace badges
-  const searchTraces = container.querySelectorAll<HTMLElement>(
-    '[data-search-content="true"], [data-search-step="true"], [data-search-trace="true"]'
-  );
-  if (searchTraces.length > 0) {
-    return searchTraces[searchTraces.length - 1];
-  }
-
-  // 4. Any assistant message that answered a search query
-  const searchMessages = container.querySelectorAll<HTMLElement>(
-    '[data-search-message="true"]'
-  );
-  if (searchMessages.length > 0) {
-    return searchMessages[searchMessages.length - 1];
-  }
-
-  return null;
-}
-
-export interface ChatViewProps {
+interface ChatViewProps {
   prompt: string;
   messages: any[];
   steps: Step[];
@@ -190,7 +118,6 @@ export interface ChatViewProps {
   onSubmit: (prompt: string) => void;
   onStop?: () => void;
   isLoading: boolean;
-  autoScrollToResults?: boolean;
 }
 
 export function ChatView({ 
@@ -205,8 +132,7 @@ export function ChatView({
   onExport, 
   onSubmit,
   onStop,
-  isLoading,
-  autoScrollToResults,
+  isLoading 
 }: ChatViewProps) {
   const [input, setInput] = React.useState<string>(() => getChatViewDraft());
 
@@ -607,8 +533,7 @@ export function ChatView({
     setShowScrollToBottom(!isAtBottom);
   }, []);
 
-  // When a streaming response begins, reset auto-scroll lock to true and align to bottom.
-  // When the stream finishes, automatically center the search content in the view.
+  // When a streaming response begins, reset auto-scroll lock to true and align to bottom
   const prevStreamingRef = useRef(false);
   useEffect(() => {
     if (isStreamingResponse && !prevStreamingRef.current) {
@@ -617,24 +542,9 @@ export function ChatView({
       if (containerRef.current) {
         containerRef.current.scrollTop = containerRef.current.scrollHeight;
       }
-    } else if (!isStreamingResponse && prevStreamingRef.current) {
-      // The stream just finished! Trigger Auto-scroll to results if enabled
-      const userSettings = getSettings();
-      const shouldAutoScrollToResults = autoScrollToResults ?? (userSettings.autoScrollToResults !== false);
-      if (shouldAutoScrollToResults) {
-        const timer = setTimeout(() => {
-          if (containerRef.current) {
-            const searchTarget = findSearchContentElement(containerRef.current);
-            if (searchTarget) {
-              centerElementInContainer(containerRef.current, searchTarget, 'smooth');
-            }
-          }
-        }, 120);
-        return () => clearTimeout(timer);
-      }
     }
     prevStreamingRef.current = isStreamingResponse;
-  }, [isStreamingResponse, autoScrollToResults]);
+  }, [isStreamingResponse]);
 
   // Keep scroll position at the bottom during active streaming token/step updates
   useEffect(() => {
@@ -820,14 +730,11 @@ export function ChatView({
     const isExpanded = expandedSteps[step.id] || isRunning;
     const isDragging = draggedStepIndex === index;
     const isDragOver = dragOverStepIndex === index && draggedStepIndex !== index;
-    const isSearchStep = /search|research|query|google|web/i.test(step.label || '') || Boolean(step.trace?.some(t => /search/i.test(t)));
 
     return (
       <div 
         key={step.id} 
         draggable={true}
-        data-search-step={isSearchStep ? "true" : undefined}
-        data-search-content={isSearchStep ? "true" : undefined}
         onDragStart={(e) => {
           e.dataTransfer.setData('text/plain', String(index));
           setDraggedStepIndex(index);
@@ -961,12 +868,7 @@ export function ChatView({
               }
 
               return (
-                <div 
-                  key={idx} 
-                  data-search-content={type === 'search' ? "true" : undefined}
-                  data-search-trace={type === 'search' ? "true" : undefined}
-                  className="flex items-center gap-2"
-                >
+                <div key={idx} className="flex items-center gap-2">
                   <div className={cn(
                     "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border max-w-full truncate",
                     type === 'search' ? "bg-slate-100 dark:bg-white/10 text-slate-900 dark:text-white border-slate-200 dark:border-white/10" :
@@ -1048,19 +950,8 @@ export function ChatView({
             const isLatestAssistant = i === displayMessages.length - 1 || (i === displayMessages.length - 2 && displayMessages[displayMessages.length - 1]?.role !== 'assistant');
             const shouldAnimate = !isCompleted && isLatestAssistant;
 
-            const prevUserMsg = i > 0 ? displayMessages[i - 1] : null;
-            const hasSources = parsedSources.sources.length > 0;
-            const isSearchRelated = hasSources || 
-              Boolean(prevUserMsg && /(search|google|news|latest|breaking|find|who is|what is|verify|weather)/i.test(prevUserMsg.content || '')) ||
-              /(search results|sources|citations|found from web)/i.test(cleanedContent || '');
-
             return (
-              <div 
-                key={msg.id || i} 
-                data-search-content={isSearchRelated ? "true" : undefined}
-                data-search-message={isSearchRelated ? "true" : undefined}
-                className="flex gap-4 max-w-3xl mx-auto my-3 chat-message-enter"
-              >
+              <div key={msg.id || i} className="flex gap-4 max-w-3xl mx-auto my-3 chat-message-enter">
                 <div className="flex-1 space-y-3 min-w-0">
                   <div className="flex items-center gap-3">
                     <ManusLogo showBadge={true} />
@@ -1288,11 +1179,7 @@ export function ChatView({
           if (!result || (!hasChart && !hasFiles)) return null;
 
           return (
-            <div 
-              data-search-content="true"
-              data-testid="task-result-content"
-              className="flex gap-4 max-w-3xl mx-auto my-4 animate-in fade-in slide-in-from-bottom-3 duration-500"
-            >
+            <div className="flex gap-4 max-w-3xl mx-auto my-4 animate-in fade-in slide-in-from-bottom-3 duration-500">
               <div className="w-8 shrink-0" />
               <div className="flex-1 min-w-0">
                 <div className="border border-border/60 rounded-2xl bg-white dark:bg-card overflow-hidden shadow-sm hover:shadow-md transition-all p-5">
@@ -1397,41 +1284,18 @@ export function ChatView({
         <div ref={bottomRef} className="h-36 shrink-0" /> {/* Spacer for bottom input */}
       </div>
 
-      {/* Floating Scroll-to-bottom and Center Search Results buttons when user scrolled up */}
+      {/* Floating Scroll-to-bottom button when user scrolled up */}
       {showScrollToBottom && (
-        <div className="absolute bottom-44 right-4 sm:right-12 z-30 flex items-center gap-2">
-          {(() => {
-            const hasSearch = containerRef.current && findSearchContentElement(containerRef.current);
-            if (!hasSearch) return null;
-            return (
-              <button
-                type="button"
-                onClick={() => {
-                  if (containerRef.current) {
-                    const el = findSearchContentElement(containerRef.current);
-                    if (el) centerElementInContainer(containerRef.current, el, 'smooth');
-                  }
-                }}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white dark:bg-card border border-border/80 text-foreground shadow-md hover:shadow-lg hover:border-primary/50 hover:scale-105 active:scale-95 transition-all text-xs font-semibold cursor-pointer animate-in fade-in slide-in-from-bottom-2 duration-200"
-                title="Center search results in view"
-                aria-label="Center search results in view"
-              >
-                <Search size={13} className="text-primary" />
-                <span>Center search results</span>
-              </button>
-            );
-          })()}
-          <button
-            type="button"
-            onClick={() => scrollToBottom('smooth')}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-full bg-primary text-primary-foreground shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 transition-all text-xs font-semibold cursor-pointer animate-in fade-in slide-in-from-bottom-2 duration-200"
-            title="Scroll to latest message"
-            aria-label="Scroll to latest message"
-          >
-            <ArrowDown size={14} className="animate-bounce" />
-            <span>Latest message</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => scrollToBottom('smooth')}
+          className="absolute bottom-44 right-4 sm:right-12 z-30 flex items-center gap-2 px-3.5 py-2 rounded-full bg-primary text-primary-foreground shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 transition-all text-xs font-semibold cursor-pointer animate-in fade-in slide-in-from-bottom-2 duration-200"
+          title="Scroll to latest message"
+          aria-label="Scroll to latest message"
+        >
+          <ArrowDown size={14} className="animate-bounce" />
+          <span>Latest message</span>
+        </button>
       )}
 
       {/* Input Area - Floating Bottom */}

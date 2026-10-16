@@ -61,16 +61,6 @@ export const DEFAULT_SETTINGS: UserSettings = {
   enableBackgroundNotifications: true,
   enablePhoneCommands: true,
 
-  // Provider, connector and Work execution preferences
-  providerFallbackEnabled: true,
-  connectorEnabled: { google: true, github: true, notion: false, slack: false, mcp: false },
-  autonomyLevel: 'medium',
-  reasoningSteps: 6,
-  humanCheckpoints: true,
-  sandboxExecution: true,
-  terminalExecution: false,
-  taskTimeoutSeconds: 300,
-
   lastUpdated: new Date().toISOString(),
 };
 

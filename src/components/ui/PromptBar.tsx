@@ -211,7 +211,7 @@ function SendGlyph({ busy, morphDuration, squash, tilt }: SendGlyphProps) {
   );
 }
 
-const PromptBar: React.FC<PromptBarProps> = ({
+export const PromptBar: React.FC<PromptBarProps> = ({
   placeholder = 'Ask anything',
   sources = DEFAULT_SOURCES,
   commands = DEFAULT_COMMANDS,
@@ -230,7 +230,7 @@ const PromptBar: React.FC<PromptBarProps> = ({
   menuBackground = '#323236',
   sparkColor = '#b39dff',
   sparkBoost = 1,
-  width = 400,
+  width = 540,
   radius = 16,
   maxRows = 5,
   morphDuration = 240,
@@ -255,7 +255,7 @@ const PromptBar: React.FC<PromptBarProps> = ({
 
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState<string[]>([]);
-  const [modelKey, setModelKey] = useState(defaultModel);
+  const [modelKey, setModelKey] = useState(defaultModel || (models[0]?.key ?? ''));
   const [plusOpen, setPlusOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [effortOpen, setEffortOpen] = useState(false);
@@ -310,6 +310,7 @@ const PromptBar: React.FC<PromptBarProps> = ({
       glow.style.transition = '';
     }
   }, [open, cursor, list]);
+
   useEffect(() => {
     if (!open) lastOpen.current = null;
   }, [open]);
@@ -442,11 +443,13 @@ const PromptBar: React.FC<PromptBarProps> = ({
     setEffortIndex(next);
     latest.current.onEffortChange?.(efforts[next]);
   };
+
   const effortFromPointer = (e: PointerEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const k = (e.clientX - rect.left - EDGE) / Math.max(1, rect.width - 2 * EDGE);
     setEffort(Math.round(k * (efforts.length - 1)));
   };
+
   const onEffortKey = (e: KeyboardEvent<HTMLDivElement>) => {
     const step =
       e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 0;
@@ -464,6 +467,7 @@ const PromptBar: React.FC<PromptBarProps> = ({
       focusInput();
     }
   };
+
   const stepAt = (i: number) => `calc(${EDGE}px + (100% - ${EDGE * 2}px) * ${i / Math.max(1, efforts.length - 1)})`;
   const fillAt = (i: number) => (i === efforts.length - 1 ? '100%' : `calc(${stepAt(i)} + 7px)`);
 
@@ -492,7 +496,11 @@ const PromptBar: React.FC<PromptBarProps> = ({
   };
 
   const send = () => {
-    if (!canSend || busy) return;
+    if (busy) {
+      latest.current.onStop?.();
+      return;
+    }
+    if (!canSend) return;
     latest.current.onSend?.(draft.trim(), { attachments, model, effort: level });
     setDraft('');
     setAttachments([]);
@@ -573,6 +581,10 @@ const PromptBar: React.FC<PromptBarProps> = ({
         } as CSSProperties
       }
     >
+      {/* Canvas Sparks Animation when effort is Max */}
+      {maxed && <canvas ref={sparkRef} className="prompt-bar__spark" aria-hidden="true" />}
+
+      {/* Popup Menu */}
       {open ? (
         <div
           className="prompt-bar__menu"
@@ -624,12 +636,12 @@ const PromptBar: React.FC<PromptBarProps> = ({
                 {efforts.map((label, i) => (
                   <i key={label} className="prompt-bar__effort-dot" style={{ left: stepAt(i) }} />
                 ))}
-                <span className="prompt-bar__effort-thumb" />
+                <span className="prompt-bar__effort-knob" style={{ left: stepAt(effortIndex) }} />
               </div>
             </>
           ) : (
             <>
-              <span ref={glowRef} className="prompt-bar__glow" aria-hidden="true" />
+              <span ref={glowRef} className="prompt-bar__glow" />
               {list.map((row, i) => (
                 <button
                   key={row.key}
@@ -637,176 +649,145 @@ const PromptBar: React.FC<PromptBarProps> = ({
                     rowRefs.current[i] = el;
                   }}
                   type="button"
-                  role="option"
-                  aria-selected={i === cursor}
                   className="prompt-bar__row"
-                  onMouseDown={e => e.preventDefault()}
-                  onPointerEnter={() => setActive(i)}
+                  data-active={i === cursor}
                   onClick={() => pick(row)}
                 >
-                  {open === 'at' ? <span className="prompt-bar__row-icon">{renderIcon(row.icon, 15)}</span> : null}
-                  <span className="prompt-bar__row-name">{row.name}</span>
-                  {row.description ? <span className="prompt-bar__row-desc">{row.description}</span> : null}
-                  {open === 'model' ? (
-                    <>
-                      <span className="prompt-bar__row-tag">{row.tag}</span>
-                      <span className="prompt-bar__row-check" data-on={row.key === model?.key ? '' : undefined}>
-                        <HugeiconsIcon icon={Tick02Icon} size={13} strokeWidth={2.5} />
-                      </span>
-                    </>
-                  ) : null}
+                  {row.icon && <span className="prompt-bar__row-icon">{renderIcon(row.icon, 16)}</span>}
+                  <div className="prompt-bar__row-text">
+                    <span className="prompt-bar__row-name">{row.name}</span>
+                    {row.description && <span className="prompt-bar__row-desc">{row.description}</span>}
+                  </div>
+                  {row.tag && <span className="prompt-bar__row-tag">{row.tag}</span>}
+                  {open === 'model' && row.key === modelKey && (
+                    <span className="prompt-bar__row-tick">
+                      <HugeiconsIcon icon={Tick02Icon} size={16} strokeWidth={2} />
+                    </span>
+                  )}
                 </button>
               ))}
-              {list.length === 0 ? <div className="prompt-bar__empty">No matches for “{query}”</div> : null}
             </>
           )}
         </div>
       ) : null}
 
-      <div
-        className="prompt-bar__field"
-        role="presentation"
-        data-max={maxed ? '' : undefined}
-        onPointerDown={e => {
-          if (e.target === e.currentTarget || e.target === inputRef.current) closeMenus();
-        }}
-        onClick={focusInput}
-      >
-        <canvas ref={sparkRef} className="prompt-bar__sparks" aria-hidden="true" />
-        {attachments.length > 0 ? (
-          <div className="prompt-bar__chips">
-            {attachments.map((file, i) => (
-              <span key={`${file}-${i}`} className="prompt-bar__chip">
-                <HugeiconsIcon icon={File02Icon} size={12} strokeWidth={2} />
-                <span className="prompt-bar__chip-name">{file}</span>
-                <button
-                  type="button"
-                  className="prompt-bar__chip-x"
-                  aria-label={`Remove ${file}`}
-                  onClick={() => setAttachments(a => a.filter((_, j) => j !== i))}
-                >
-                  <HugeiconsIcon icon={Cancel01Icon} size={10} strokeWidth={2.5} />
-                </button>
-              </span>
-            ))}
-          </div>
-        ) : null}
+      {/* Attachments Chips */}
+      {attachments.length > 0 && (
+        <div className="prompt-bar__attachments">
+          {attachments.map((file, idx) => (
+            <div key={idx} className="prompt-bar__chip">
+              <HugeiconsIcon icon={File02Icon} size={12} />
+              <span>{file}</span>
+              <button
+                type="button"
+                className="prompt-bar__chip-remove"
+                aria-label="Remove attachment"
+                onClick={() => setAttachments(a => a.filter((_, i) => i !== idx))}
+              >
+                <HugeiconsIcon icon={Cancel01Icon} size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
-        <textarea
-          ref={inputRef}
-          className="prompt-bar__input"
-          rows={1}
-          value={draft}
-          placeholder={listening ? 'Listening…' : placeholder}
-          aria-label="Prompt"
-          onChange={e => {
-            setDraft(e.target.value);
-            typing.current.energy = Math.min(1.6, typing.current.energy + 0.22);
-            typing.current.strokes = Math.min(4, typing.current.strokes + 1);
-            setDismissed(false);
-            closeMenus();
-            setActive(0);
-          }}
-          onFocus={closeMenus}
-          onKeyDown={onKeyDown}
-        />
-
-        <div className="prompt-bar__bar">
+      {/* Main Bar Input Box */}
+      <div className="prompt-bar__box">
+        {/* Left Side Controls */}
+        <div className="prompt-bar__controls-left">
+          {/* Plus / Attach Button */}
           <button
             type="button"
-            className="prompt-bar__tool"
-            aria-label="Add files and sources"
-            aria-expanded={plusOpen}
-            data-on={plusOpen ? '' : undefined}
-            onMouseDown={e => e.preventDefault()}
+            className="prompt-bar__btn"
+            data-open={plusOpen}
+            aria-label="Sources and attachments"
             onClick={() => {
               setModelOpen(false);
               setEffortOpen(false);
-              setActive(0);
-              setPlusOpen(v => !v);
-              focusInput();
+              setPlusOpen(p => !p);
             }}
           >
-            <HugeiconsIcon icon={PlusSignIcon} size={16} strokeWidth={2} />
+            <HugeiconsIcon icon={PlusSignIcon} size={18} strokeWidth={2} />
           </button>
-          {models.length > 0 ? (
+
+          {/* Model Selector Button */}
+          {models.length > 0 && (
             <button
               type="button"
-              className="prompt-bar__pick"
-              aria-label="Choose model"
-              aria-expanded={modelOpen}
-              data-on={modelOpen ? '' : undefined}
-              onMouseDown={e => e.preventDefault()}
+              className="prompt-bar__model-btn"
+              data-open={modelOpen}
               onClick={() => {
                 setPlusOpen(false);
                 setEffortOpen(false);
-                setActive(Math.max(0, models.indexOf(model)));
-                setModelOpen(v => !v);
-                focusInput();
+                setModelOpen(m => !m);
               }}
             >
-              <span>{model.name}</span>
-              <HugeiconsIcon icon={ArrowDown01Icon} size={12} strokeWidth={2.4} />
+              <span>{model?.name ?? 'Model'}</span>
+              <HugeiconsIcon icon={ArrowDown01Icon} size={14} strokeWidth={2} />
             </button>
-          ) : null}
-          {efforts.length > 0 ? (
+          )}
+
+          {/* Effort Indicator Button */}
+          {efforts.length > 0 && (
             <button
               type="button"
-              className="prompt-bar__pick"
-              aria-label="Choose effort"
-              aria-expanded={effortOpen}
-              data-on={effortOpen ? '' : undefined}
-              data-max={maxed ? '' : undefined}
-              onMouseDown={e => e.preventDefault()}
+              className="prompt-bar__effort-btn"
+              data-open={effortOpen}
+              data-max={maxed}
               onClick={() => {
                 setPlusOpen(false);
                 setModelOpen(false);
-                setEffortOpen(v => !v);
-                focusInput();
+                setEffortOpen(e => !e);
               }}
             >
-              <HugeiconsIcon icon={SparklesIcon} size={13} strokeWidth={2} />
+              <HugeiconsIcon icon={SparklesIcon} size={14} strokeWidth={2} />
               <span>{level}</span>
+              <HugeiconsIcon icon={ArrowDown01Icon} size={14} strokeWidth={2} />
             </button>
-          ) : null}
-          <span className="prompt-bar__spacer" />
-          {onDictate ? (
-            <button
-              type="button"
-              className="prompt-bar__tool"
-              aria-label={listening ? 'Stop dictation' : 'Dictate'}
-              aria-pressed={listening}
-              data-on={listening ? '' : undefined}
-              onMouseDown={e => e.preventDefault()}
-              onClick={toggleListen}
-            >
-              {listening ? (
-                <span className="prompt-bar__eq" aria-hidden="true">
-                  <i />
-                  <i />
-                  <i />
-                </span>
-              ) : (
-                <HugeiconsIcon icon={Mic01Icon} size={15} strokeWidth={2} />
-              )}
-            </button>
-          ) : null}
+          )}
+        </div>
+
+        {/* Text Input Area */}
+        <textarea
+          ref={inputRef}
+          className="prompt-bar__input"
+          value={draft}
+          placeholder={placeholder}
+          rows={1}
+          onChange={e => {
+            const val = e.target.value;
+            setDraft(val);
+            setDismissed(false);
+            typing.current.strokes += 1;
+            typing.current.energy = Math.min(1, typing.current.energy + 0.35);
+          }}
+          onKeyDown={onKeyDown}
+        />
+
+        {/* Right Side Controls */}
+        <div className="prompt-bar__controls-right">
+          {/* Microphone Dictation Button */}
           <button
             type="button"
-            className="prompt-bar__send"
+            className="prompt-bar__btn prompt-bar__mic-btn"
+            data-listening={listening}
+            aria-label={listening ? 'Stop listening' : 'Start voice dictation'}
+            onClick={toggleListen}
+          >
+            <HugeiconsIcon icon={Mic01Icon} size={18} strokeWidth={2} />
+          </button>
+
+          {/* Send / Stop Action Button */}
+          <button
+            type="button"
+            className="prompt-bar__action"
+            data-busy={busy}
             disabled={!armed}
-            aria-label={busy ? 'Stop' : 'Send'}
-            data-armed={armed ? '' : undefined}
-            data-pressed={pressed ? '' : undefined}
-            onMouseDown={e => e.preventDefault()}
+            aria-label={busy ? 'Stop generating' : 'Send message'}
+            onClick={send}
             onPointerDown={down}
             onPointerUp={up}
-            onPointerCancel={up}
             onPointerLeave={up}
-            onClick={() => {
-              if (busy) latest.current.onStop?.();
-              else send();
-            }}
           >
             <SendGlyph busy={busy} morphDuration={morphDuration} squash={squash} tilt={tilt} />
           </button>

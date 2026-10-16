@@ -358,20 +358,12 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
           setCallStatus('paused');
           isCallPausedRef.current = true;
           setStatusText('Allow microphone access to start voice chat');
-          setShowPermissionModal(true);
           if (!window.isSecureContext) {
-            toast.error('Microphone access requires HTTPS. Open Manus using its secure https:// address.');
+            toast.error('Microphone access requires HTTPS.');
           } else if (!navigator.mediaDevices?.getUserMedia) {
-            toast.error('This browser or embedded preview does not support microphone access. Open Manus directly in Chrome.');
+            toast.error('This browser or embedded preview does not support microphone access.');
           } else {
-            toast.error('Microphone access was blocked.', {
-              description: 'In Chrome, open Site settings → Microphone → Allow, then try again.',
-              action: {
-                label: 'Unblock Guide 🎙️',
-                onClick: () => setShowPermissionModal(true),
-              },
-              duration: 8000,
-            });
+            toast.error('Microphone access is blocked in browser settings.');
           }
           return;
         }
@@ -1302,19 +1294,6 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
           </div>
         </div>
       )}
-
-      <MicrophonePermissionModal
-        isOpen={showPermissionModal}
-        onClose={() => setShowPermissionModal(false)}
-        onPermissionGranted={() => {
-          setShowPermissionModal(false);
-          isCallPausedRef.current = false;
-          hasMicPermissionRef.current = true;
-          setCallStatus('listening');
-          setStatusText('Listening... speak now');
-          startRecognitionSafely();
-        }}
-      />
     </div>
   );
 

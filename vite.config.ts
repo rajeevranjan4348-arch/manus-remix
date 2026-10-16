@@ -589,9 +589,10 @@ function geminiApiPlugin(): Plugin {
 export default defineConfig({
   plugins: [react(), geminiApiPlugin()],
   resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-    },
+    alias: [
+      { find: '@', replacement: path.resolve(__dirname, './src') },
+      { find: /^lucide-react$/, replacement: path.resolve(__dirname, './src/lib/lucideBridge.ts') },
+    ],
   },
   server: {
     port: 3000,
