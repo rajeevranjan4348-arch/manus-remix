@@ -34,6 +34,7 @@ const MULTI_STEP_TERMS = /\b(and then|after that|end to end|all errors|everythin
 export function classifyAgentIntent(prompt: string): AgentIntent {
   const text = String(prompt || '').trim();
   if (!text) return 'conversation';
+  if (/^(hi|hello|hey|hiya|good morning|good afternoon|good evening|how are you|what's up)[!?.\\s]*$/i.test(text)) return 'conversation';
 
   if (EMOTION_TERMS.test(text) && !CODE_TERMS.test(text) && !UI_TERMS.test(text)) {
     return 'emotional-support';
