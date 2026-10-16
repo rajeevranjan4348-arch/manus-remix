@@ -391,20 +391,10 @@ async function executeGitHubApiTool(
         }
       }
 
-      // Structured confirmation fallback
-      const mockIssueNumber = Math.floor(100 + Math.random() * 900);
       return {
-        success: true,
-        data: {
-          issueNumber: mockIssueNumber,
-          title,
-          state: 'open',
-          url: `https://github.com/${owner}/${repoName}/issues/${mockIssueNumber}`,
-          createdAt: new Date().toISOString(),
-          labels,
-          author: 'manus-agent'
-        },
-        message: `Successfully created GitHub Issue #${mockIssueNumber} "${title}" in ${owner}/${repoName}`
+        success: false,
+        error: 'GITHUB_ISSUE_CREATE_FAILED',
+        message: 'GitHub did not confirm issue creation. Check account connection and repository permissions; no fake issue was reported.'
       };
     }
 
