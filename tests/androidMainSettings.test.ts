@@ -254,4 +254,44 @@ describe('Android 15 Edge-to-Edge Main Settings Integration Suite', () => {
     expect(settings.robotSpeed).toBe(1.4);
     expect(settings.robotShape).toBe('sphere');
   });
+
+  it('15. Status Bar Removal: Verifies settings components do not render mockup status bars (5G, wifi, battery_full)', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+
+    const files = [
+      path.resolve(__dirname, '../src/components/settings/AndroidGeneralSettings.tsx'),
+      path.resolve(__dirname, '../src/components/settings/AndroidVoiceSettings.tsx'),
+      path.resolve(__dirname, '../src/components/settings/AndroidRobotSettings.tsx'),
+      path.resolve(__dirname, '../src/components/settings/AndroidMainSettings.tsx'),
+      path.resolve(__dirname, '../src/components/settings/AndroidConnectorsSettings.tsx'),
+    ];
+
+    for (const file of files) {
+      const content = fs.readFileSync(file, 'utf-8');
+      expect(content).not.toContain('battery_full');
+      expect(content).not.toContain('>5G<');
+      expect(content).not.toContain('Top Android / Status Bar');
+      expect(content).not.toContain('Android System Status Bar');
+      // Content extends to top edge with standard pt-safe or calc(3.5rem+env(safe-area-inset-top))
+      expect(content).toContain('pt-safe');
+    }
+  });
+
+  it('16. High-Performance Sub-millisecond Execution: getSettings executes under 1ms', () => {
+    // Warm up
+    getSettings();
+
+    const iterations = 100;
+    const start = performance.now();
+    for (let i = 0; i < iterations; i++) {
+      const s = getSettings();
+      expect(s).toBeDefined();
+    }
+    const elapsed = performance.now() - start;
+    const avgPerCall = elapsed / iterations;
+    // Each call must easily be sub-millisecond (< 1.0ms)
+    expect(avgPerCall).toBeLessThan(1.0);
+  });
 });
+

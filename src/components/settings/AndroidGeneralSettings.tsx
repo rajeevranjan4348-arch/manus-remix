@@ -94,7 +94,6 @@ const SPEECH_INPUT_OPTIONS = [
 export function AndroidGeneralSettings({ onBack }: AndroidGeneralSettingsProps) {
   const { theme, setTheme } = useTheme();
   const [settings, setSettings] = useState<UserSettings>(getSettings());
-  const [currentTime, setCurrentTime] = useState('9:41');
 
   // Interactive UI state
   const [showHelpBanner, setShowHelpBanner] = useState(false);
@@ -108,21 +107,6 @@ export function AndroidGeneralSettings({ onBack }: AndroidGeneralSettingsProps) 
   const [selectedAccent, setSelectedAccent] = useState<AccentOption>(ACCENT_OPTIONS[0]);
   const [animationEnabled, setAnimationEnabled] = useState(!settings.reducedMotion);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
-
-  // Sync clock
-  useEffect(() => {
-    const updateTime = () => {
-      const now = new Date();
-      const hours = now.getHours();
-      const minutes = now.getMinutes().toString().padStart(2, '0');
-      setCurrentTime(`${hours % 12 || 12}:${minutes}`);
-    };
-    updateTime();
-    const interval = setInterval(updateTime, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Sync initial settings
   useEffect(() => {
     const current = getSettings();
     setSettings(current);
@@ -214,21 +198,9 @@ export function AndroidGeneralSettings({ onBack }: AndroidGeneralSettingsProps) 
   return (
     <div className="fixed inset-0 z-50 bg-black text-[#F1F2F4] antialiased flex flex-col min-h-screen selection:bg-[#343538] selection:text-white font-sans overflow-hidden">
       
-      {/* Top Android / Status Bar */}
-      <div className="fixed top-0 inset-x-0 h-12 z-50 flex items-center justify-between px-6 bg-black/90 backdrop-blur-xl text-white select-none pt-safe">
-        <div className="flex items-center space-x-1">
-          <span className="text-[13px] font-semibold tracking-tight text-white">{currentTime}</span>
-        </div>
-        <div className="flex items-center space-x-2 text-white">
-          <span className="text-[11px] font-bold tracking-wider text-neutral-400">5G</span>
-          <span className="material-symbols-outlined text-[17px] text-white">wifi</span>
-          <span className="material-symbols-outlined text-[19px] text-white">battery_full</span>
-        </div>
-      </div>
-
       {/* Sticky Header */}
       <header className="fixed top-0 inset-x-0 z-40 bg-black/85 backdrop-blur-xl border-b border-[#1F2124] pt-safe shadow-[0_2px_12px_rgba(0,0,0,0.8)]">
-        <div className="h-16 pt-3 px-4 flex items-center justify-between">
+        <div className="h-14 px-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <button 
               aria-label="Go back" 
@@ -257,7 +229,7 @@ export function AndroidGeneralSettings({ onBack }: AndroidGeneralSettingsProps) 
       </header>
 
       {/* Main Settings Canvas */}
-      <main className="flex flex-col relative w-full px-4 pt-24 pb-16 bg-black flex-1 overflow-y-auto overscroll-contain custom-scrollbar">
+      <main className="flex flex-col relative w-full px-4 pt-[calc(3.5rem+env(safe-area-inset-top,0px))] pb-16 bg-black flex-1 overflow-y-auto overscroll-contain custom-scrollbar">
         <div className="flex flex-col w-full pb-8 space-y-6 max-w-md mx-auto">
           
           {/* Micro Section Header */}

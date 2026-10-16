@@ -1029,6 +1029,35 @@ export function SettingsModal({ isOpen, onClose, initialTab, activeTaskInfo }: S
                       </p>
                     </label>
                   </div>
+
+                  {/* Auto-Submit Speech After 7s Silence */}
+                  <div className="flex items-start gap-3 p-3 mt-2.5 rounded-xl border border-border/60 bg-card/40 hover:bg-card/70 transition-colors">
+                    <Checkbox
+                      id="enable-auto-submit-silence"
+                      checked={settings.autoSubmitVoiceAfterSilence ?? true}
+                      onCheckedChange={(checked) => {
+                        const isChecked = checked === true;
+                        updateSetting('autoSubmitVoiceAfterSilence', isChecked);
+                        if (isChecked) {
+                          toast.success('Auto-submit after 7s silence enabled');
+                        } else {
+                          toast.info('Auto-submit after 7s silence disabled');
+                        }
+                      }}
+                      className="mt-0.5"
+                    />
+                    <label htmlFor="enable-auto-submit-silence" className="cursor-pointer select-none space-y-0.5">
+                      <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                        Auto-Submit Speech After 7s Silence
+                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.2 rounded font-semibold bg-primary/10 text-primary">
+                          7 Seconds
+                        </span>
+                      </p>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Automatically sends the transcribed prompt to the AI assistant if you remain silent for more than 7 seconds after speaking.
+                      </p>
+                    </label>
+                  </div>
                 </div>
 
                 {/* Microphone & Camera Permission Check */}

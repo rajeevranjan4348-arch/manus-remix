@@ -32,6 +32,7 @@ import { WorkspaceConnectButton } from '../workspace/WorkspaceConnectButton';
 import { AndroidGeneralSettings } from './AndroidGeneralSettings';
 import { AndroidVoiceSettings } from './AndroidVoiceSettings';
 import { AndroidRobotSettings } from './AndroidRobotSettings';
+import { AndroidConnectorsSettings } from './AndroidConnectorsSettings';
 import { DiagnosticPanel } from './DiagnosticPanel';
 import { StitchSettingsPanels } from './StitchSettingsPanels';
 import type { StitchSettingsView } from './StitchSettingsPanels';
@@ -96,7 +97,6 @@ export function AndroidMainSettings({ onBack }: AndroidMainSettingsProps) {
   
   const [settings, setSettings] = useState<UserSettings>(getSettings());
   const [activeSubView, setActiveSubView] = useState<ActiveSubView>(null);
-  const [currentTime, setCurrentTime] = useState('9:41');
   const [selectedAccent, setSelectedAccent] = useState('white');
   const [isPlayingVoice, setIsPlayingVoice] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -124,21 +124,6 @@ export function AndroidMainSettings({ onBack }: AndroidMainSettingsProps) {
     'Working on Manus Remix autonomous agent application with voice integration.'
   ]);
   const [newMemory, setNewMemory] = useState('');
-
-  // Clock sync
-  useEffect(() => {
-    const updateClock = () => {
-      const now = new Date();
-      const hours = now.getHours();
-      const minutes = now.getMinutes().toString().padStart(2, '0');
-      // Format as 12-hour or standard
-      const formatted = `${hours % 12 || 12}:${minutes}`;
-      setCurrentTime(formatted);
-    };
-    updateClock();
-    const interval = setInterval(updateClock, 30000);
-    return () => clearInterval(interval);
-  }, []);
 
   // Update profile from auth or stored settings
   useEffect(() => {
@@ -287,21 +272,9 @@ export function AndroidMainSettings({ onBack }: AndroidMainSettingsProps) {
   return (
     <div className="fixed inset-0 z-50 bg-[#000000] font-sans text-neutral-200 antialiased flex flex-col min-h-screen selection:bg-[#333537] selection:text-white overflow-hidden">
       
-      {/* Android 15 Edge-to-Edge Status Bar */}
-      <div className="fixed top-0 inset-x-0 h-11 z-50 flex items-center justify-between px-6 bg-[#000000]/90 backdrop-blur-md text-white select-none pt-safe">
-        <div className="flex items-center">
-          <span className="text-[14px] font-semibold tracking-tight text-white/95">{currentTime}</span>
-        </div>
-        <div className="flex items-center space-x-2 text-white/90">
-          <span className="text-[12px] font-bold tracking-wider text-neutral-400">5G</span>
-          <span className="material-symbols-outlined text-[18px]">wifi</span>
-          <span className="material-symbols-outlined text-[19px]">battery_full</span>
-        </div>
-      </div>
-
       {/* Android Native App Bar Header */}
       <header className="fixed top-0 inset-x-0 z-40 bg-[#000000]/95 backdrop-blur-md pt-safe border-b border-[#333537]/20">
-        <div className="h-16 pt-3 px-4 flex items-center justify-between">
+        <div className="h-14 px-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <button 
               aria-label="Go back" 
@@ -331,7 +304,7 @@ export function AndroidMainSettings({ onBack }: AndroidMainSettingsProps) {
       </header>
 
       {/* Main Scrollable Content */}
-      <main className="flex flex-col relative w-full px-4 pt-24 pb-14 bg-[#000000] flex-1 overflow-y-auto overscroll-contain custom-scrollbar">
+      <main className="flex flex-col relative w-full px-4 pt-[calc(3.5rem+env(safe-area-inset-top,0px))] pb-14 bg-[#000000] flex-1 overflow-y-auto overscroll-contain custom-scrollbar">
         <div className="flex flex-col w-full select-none max-w-md mx-auto">
           
           {/* Profile Header Hero */}
@@ -956,35 +929,7 @@ export function AndroidMainSettings({ onBack }: AndroidMainSettingsProps) {
 
       {/* 3. Plugins & Connectors Sub-panel */}
       {activeSubView === 'plugins' && (
-        <div className="fixed inset-0 z-50 bg-[#000000] flex flex-col animate-in slide-in-from-right duration-200">
-          <header className="h-16 pt-safe px-4 border-b border-[#333537]/40 flex items-center justify-between bg-[#1E1F20]">
-            <div className="flex items-center gap-2">
-              <button onClick={() => setActiveSubView(null)} className="w-10 h-10 rounded-full flex items-center justify-center text-white">
-                <span className="material-symbols-outlined text-[24px]">arrow_back</span>
-              </button>
-              <h2 className="text-lg font-semibold text-white">Plugins &amp; Connectors</h2>
-            </div>
-          </header>
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 max-w-md mx-auto w-full custom-scrollbar">
-            <div className="bg-[#1E1F20] border border-[#333537] rounded-28 p-5 space-y-4">
-              <h3 className="text-sm font-semibold text-white">Google Workspace Integration</h3>
-              <p className="text-xs text-neutral-400 leading-relaxed">
-                Connect your Google Drive, Docs, Sheets, Gmail, and Calendar for live context injection into agent reasoning.
-              </p>
-              <div className="pt-2">
-                <WorkspaceConnectButton />
-              </div>
-            </div>
-
-            <div className="bg-[#1E1F20] border border-[#333537] rounded-28 p-5 space-y-4">
-              <h3 className="text-sm font-semibold text-white">GitHub Integration</h3>
-              <p className="text-xs text-neutral-400 leading-relaxed">
-                Browse, search, and clone GitHub repositories directly inside your Manus agent workspace.
-              </p>
-              <GitHubRepositoryBrowser />
-            </div>
-          </div>
-        </div>
+        <AndroidConnectorsSettings onBack={() => setActiveSubView(null)} />
       )}
 
       {/* 4. Plan & Subscription Sub-panel */}

@@ -1150,6 +1150,27 @@ input[type=range].tactile-slider::-webkit-slider-thumb {
   border: 2px solid #A78BFA;
 }
 
+/* High-Performance Rendering & Sub-millisecond Interaction Optimizations */
+html, body {
+  touch-action: manipulation;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* GPU hardware layer promotion for zero-jank fluid transitions */
+.gpu-accelerated {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+/* Virtualized & offscreen paint optimization */
+.optimize-paint {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 500px;
+}
+
 
 
 

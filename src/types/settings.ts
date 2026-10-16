@@ -54,6 +54,8 @@ export interface UserSettings {
   enableAudioFilter: boolean; // audio processing filter for noise reduction & clarity
   autoPlayAudio: boolean; // Auto-play audio playback on Gemini responses
   enableHandsFreeVoice?: boolean; // Mic input immediately sends to Gemini and plays audio
+  autoSubmitVoiceAfterSilence?: boolean; // Automatically submit speech to AI if user remains silent for > 7s
+  autoSubmitSilenceDelay?: number; // Inactivity delay in seconds (default: 7)
 
   // Security, Authorization & Permissions
   toolApprovalPolicy?: 'ask_all' | 'ask_sensitive' | 'auto_approve';

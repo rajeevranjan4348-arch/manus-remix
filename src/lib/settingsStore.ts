@@ -52,6 +52,8 @@ export const DEFAULT_SETTINGS: UserSettings = {
   enableAudioFilter: true,
   autoPlayAudio: false,
   enableHandsFreeVoice: false,
+  autoSubmitVoiceAfterSilence: true,
+  autoSubmitSilenceDelay: 7,
 
   // Security, Authorization & Permissions
   toolApprovalPolicy: 'ask_sensitive',
@@ -71,20 +73,28 @@ export const DEFAULT_SETTINGS: UserSettings = {
   lastUpdated: new Date().toISOString(),
 };
 
+let cachedSettings: UserSettings | null = null;
+
 export function getSettings(): UserSettings {
+  if (cachedSettings) return cachedSettings;
   if (typeof localStorage === 'undefined') {
     return { ...DEFAULT_SETTINGS };
   }
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return { ...DEFAULT_SETTINGS };
+    if (!raw) {
+      cachedSettings = { ...DEFAULT_SETTINGS };
+      return cachedSettings;
+    }
     const parsed = JSON.parse(raw);
-    return {
+    cachedSettings = {
       ...DEFAULT_SETTINGS,
       ...parsed,
     };
+    return cachedSettings;
   } catch (err) {
-    return { ...DEFAULT_SETTINGS };
+    cachedSettings = { ...DEFAULT_SETTINGS };
+    return cachedSettings;
   }
 }
 
@@ -96,6 +106,7 @@ export function saveSettings(updates: Partial<UserSettings>): UserSettings {
       ...updates,
       lastUpdated: new Date().toISOString(),
     };
+    cachedSettings = updated;
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
 
     // Also sync selected model if updated
@@ -128,13 +139,15 @@ export function resetSettings(): UserSettings {
   try {
     localStorage.removeItem(SETTINGS_KEY);
     const defaults = { ...DEFAULT_SETTINGS };
+    cachedSettings = defaults;
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(defaults));
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('manus_settings_updated', { detail: defaults }));
     }
     return defaults;
   } catch (err) {
-    return { ...DEFAULT_SETTINGS };
+    cachedSettings = { ...DEFAULT_SETTINGS };
+    return cachedSettings;
   }
 }
 

@@ -80,7 +80,6 @@ const SPEED_OPTIONS = [
 
 export function AndroidVoiceSettings({ onBack }: AndroidVoiceSettingsProps) {
   const [settings, setSettings] = useState<UserSettings>(getSettings());
-  const [currentTime, setCurrentTime] = useState('9:41');
 
   // Selected persona state
   const initialPersona = VOICE_PERSONAS.find(p => p.personaKey === settings.voicePersona) || VOICE_PERSONAS[0];
@@ -92,25 +91,13 @@ export function AndroidVoiceSettings({ onBack }: AndroidVoiceSettingsProps) {
   const [readAloud, setReadAloud] = useState(settings.autoPlayAudio ?? true);
   const [bargeIn, setBargeIn] = useState(true);
   const [wakeWord, setWakeWord] = useState(true);
+  const [autoSubmitSilence, setAutoSubmitSilence] = useState(settings.autoSubmitVoiceAfterSilence ?? true);
 
   // Hardware permissions
   const [micState, setMicState] = useState<PermissionState>('prompt');
   const [audioFilter, setAudioFilter] = useState(settings.enableAudioFilter ?? true);
 
   const animRef = useRef<number | null>(null);
-
-  // Sync clock
-  useEffect(() => {
-    const updateTime = () => {
-      const now = new Date();
-      const hours = now.getHours();
-      const minutes = now.getMinutes().toString().padStart(2, '0');
-      setCurrentTime(`${hours % 12 || 12}:${minutes}`);
-    };
-    updateTime();
-    const interval = setInterval(updateTime, 30000);
-    return () => clearInterval(interval);
-  }, []);
 
   // Check microphone permissions
   useEffect(() => {
@@ -214,6 +201,13 @@ export function AndroidVoiceSettings({ onBack }: AndroidVoiceSettingsProps) {
     });
   };
 
+  const handleToggleAutoSubmitSilence = () => {
+    const nextVal = !autoSubmitSilence;
+    setAutoSubmitSilence(nextVal);
+    handleUpdate('autoSubmitVoiceAfterSilence', nextVal);
+    toast.success(nextVal ? 'Auto-submit speech after 7s silence enabled' : 'Auto-submit on silence disabled');
+  };
+
   const handleToggleAudioFilter = () => {
     const nextVal = !audioFilter;
     setAudioFilter(nextVal);
@@ -245,21 +239,9 @@ export function AndroidVoiceSettings({ onBack }: AndroidVoiceSettingsProps) {
   return (
     <div className="fixed inset-0 z-50 bg-black font-sans text-[#F0F0F2] antialiased flex flex-col min-h-screen selection:bg-[#33363A] selection:text-white overflow-hidden">
       
-      {/* Top Android / Status Bar */}
-      <div className="fixed top-0 inset-x-0 h-12 z-50 flex items-center justify-between px-6 bg-black/90 backdrop-blur-xl text-[#F0F0F2] select-none pt-safe">
-        <div className="flex items-center space-x-1">
-          <span className="text-[12px] font-semibold text-[#F0F0F2]">{currentTime}</span>
-        </div>
-        <div className="flex items-center space-x-2 text-[#F0F0F2]">
-          <span className="text-[11px] font-semibold tracking-wider text-[#92959C]">5G</span>
-          <span className="material-symbols-outlined text-[18px]">wifi</span>
-          <span className="material-symbols-outlined text-[20px]">battery_full</span>
-        </div>
-      </div>
-
       {/* Sticky Header */}
       <header className="fixed top-0 inset-x-0 z-40 bg-black/85 backdrop-blur-xl pt-safe border-b border-[#2C2E32]/40">
-        <div className="h-28 pt-12 px-5 flex items-center justify-between">
+        <div className="h-14 px-5 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button 
               aria-label="Go back" 
@@ -281,7 +263,7 @@ export function AndroidVoiceSettings({ onBack }: AndroidVoiceSettingsProps) {
       </header>
 
       {/* Main Settings Canvas */}
-      <main className="flex flex-col relative w-full px-4 pt-28 pb-12 bg-black flex-1 overflow-y-auto overscroll-contain custom-scrollbar">
+      <main className="flex flex-col relative w-full px-4 pt-[calc(3.5rem+env(safe-area-inset-top,0px))] pb-12 bg-black flex-1 overflow-y-auto overscroll-contain custom-scrollbar">
         <div className="flex flex-col w-full pb-8 space-y-6 max-w-md mx-auto">
           
           {/* Acoustic Studio Top Audio Card */}
@@ -495,6 +477,34 @@ export function AndroidVoiceSettings({ onBack }: AndroidVoiceSettingsProps) {
                   <span 
                     className={`toggle-thumb absolute top-0.5 w-6 h-6 rounded-full transition-transform ${
                       bargeIn ? 'right-0.5 bg-black' : 'left-0.5 bg-[#92959C]'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Auto-submit on 7s silence */}
+              <div className="p-3.5 flex items-center justify-between gap-3">
+                <div className="flex items-start space-x-3.5 min-w-0 flex-1">
+                  <div className="w-8 h-8 rounded-xl bg-[#202225] flex items-center justify-center text-white shrink-0 mt-0.5">
+                    <span className="material-symbols-outlined text-[20px]">timer</span>
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-[16px] text-white font-medium">Auto-submit speech after 7s silence</span>
+                    <span className="text-[13px] text-[#92959C]">Automatically sends transcribed prompt if silent for over 7 seconds</span>
+                  </div>
+                </div>
+                <button 
+                  aria-checked={autoSubmitSilence} 
+                  onClick={handleToggleAutoSubmitSilence}
+                  className={`toggle-switch relative w-12 h-7 rounded-full transition-colors cursor-pointer shrink-0 ${
+                    autoSubmitSilence ? 'bg-white' : 'bg-[#202225]'
+                  }`} 
+                  role="switch" 
+                  type="button"
+                >
+                  <span 
+                    className={`toggle-thumb absolute top-0.5 w-6 h-6 rounded-full transition-transform ${
+                      autoSubmitSilence ? 'right-0.5 bg-black' : 'left-0.5 bg-[#92959C]'
                     }`}
                   />
                 </button>

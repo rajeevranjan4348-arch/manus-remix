@@ -336,6 +336,12 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
   const navItems = [
     { id: 'new', label: 'New Chat', icon: MessageSquarePlus, action: onNewTask },
     { 
+      id: 'my-ai', 
+      label: 'My AI Chat', 
+      icon: MessageSquare, 
+      action: () => navigate('/chat') 
+    },
+    { 
       id: 'connectors', 
       label: 'Connectors & Plugins', 
       icon: Plug, 

@@ -85,7 +85,6 @@ export const PERSONALITY_OPTIONS = [
 export function AndroidRobotSettings({ onBack }: AndroidRobotSettingsProps) {
   const { user: fbUser } = useFirebase();
   const [settings, setSettings] = useState<UserSettings>(getSettings());
-  const [currentTime, setCurrentTime] = useState('9:41');
 
   // Robot preview states
   const [activeMode, setActiveMode] = useState<RobotMode>('idle');
@@ -214,18 +213,7 @@ export function AndroidRobotSettings({ onBack }: AndroidRobotSettingsProps) {
     }
   };
 
-  // Sync clock
-  useEffect(() => {
-    const updateTime = () => {
-      const now = new Date();
-      const hours = now.getHours();
-      const minutes = now.getMinutes().toString().padStart(2, '0');
-      setCurrentTime(`${hours % 12 || 12}:${minutes}`);
-    };
-    updateTime();
-    const interval = setInterval(updateTime, 30000);
-    return () => clearInterval(interval);
-  }, []);
+
 
   const handleUpdate = <K extends keyof UserSettings>(key: K, value: UserSettings[K]) => {
     const updated = saveSettings({ [key]: value });
@@ -272,17 +260,6 @@ export function AndroidRobotSettings({ onBack }: AndroidRobotSettingsProps) {
   return (
     <div className="fixed inset-0 z-50 bg-black font-sans text-[#F3F4F6] antialiased flex flex-col min-h-screen selection:bg-[#A78BFA] selection:text-black overflow-hidden">
       
-      {/* Android System Status Bar */}
-      <div className="fixed top-0 inset-x-0 h-11 z-50 flex items-center justify-between px-6 bg-black/90 backdrop-blur-md text-white select-none pt-safe">
-        <span className="text-[14px] font-semibold tracking-tight">{currentTime}</span>
-        <div className="flex items-center space-x-2 text-white">
-          <span className="text-[11px] font-bold tracking-widest text-neutral-400">5G</span>
-          <span className="material-symbols-outlined text-[17px]">network_cell</span>
-          <span className="material-symbols-outlined text-[17px]">wifi</span>
-          <span className="material-symbols-outlined text-[19px]">battery_full</span>
-        </div>
-      </div>
-
       {/* Compact Top App Bar */}
       <header className="fixed top-0 inset-x-0 z-40 bg-black/85 backdrop-blur-xl border-b border-[#2A2B2D] pt-safe">
         <div className="h-14 px-4 flex items-center justify-between">
@@ -310,7 +287,7 @@ export function AndroidRobotSettings({ onBack }: AndroidRobotSettingsProps) {
       </header>
 
       {/* Main Content Scroll Area */}
-      <main className="flex-1 px-4 pt-24 pb-12 w-full max-w-md mx-auto space-y-4 overflow-y-auto overscroll-contain custom-scrollbar">
+      <main className="flex-1 px-4 pt-[calc(3.5rem+env(safe-area-inset-top,0px))] pb-12 w-full max-w-md mx-auto space-y-4 overflow-y-auto overscroll-contain custom-scrollbar">
         
         {/* 1. Hero Robot Preview Card */}
         <div className="bg-[#1E1F20] border border-[#2F2F2F] rounded-[28px] p-5 relative overflow-hidden shadow-2xl">

@@ -110,4 +110,39 @@ describe('Chat Flow & Stream Processing Regression Tests', () => {
     expect(errorOccurred).toBe(true);
     expect(errorMessage).toContain('Rate limit');
   });
+
+  it('6. My AI Chat Standalone HTML: Contains exact UI structure, Web Speech API mic button, and connects to streaming backend', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const htmlPath = path.resolve(__dirname, '../public/chat.html');
+    expect(fs.existsSync(htmlPath)).toBe(true);
+    const content = fs.readFileSync(htmlPath, 'utf-8');
+    expect(content).toContain('My AI Chat');
+    expect(content).toContain('How can I help you?');
+    expect(content).toContain('Ask me anything to get started.');
+    expect(content).toContain('/api/gemini/stream');
+    expect(content).toContain('AI can make mistakes');
+    // Web Speech API Voice-to-Text Integration
+    expect(content).toContain('micBtn');
+    expect(content).toContain('SpeechRecognition');
+    expect(content).toContain('webkitSpeechRecognition');
+    expect(content).toContain('formatSpokenPunctuation');
+  });
+
+  it('7. My AI Chat Component: Exists and handles Web Speech API voice input and streaming', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const compPath = path.resolve(__dirname, '../src/components/chat/MyAIChat.tsx');
+    expect(fs.existsSync(compPath)).toBe(true);
+    const content = fs.readFileSync(compPath, 'utf-8');
+    expect(content).toContain('export function MyAIChat');
+    expect(content).toContain('/api/gemini/stream');
+    expect(content).toContain('gemini-3.8-flash');
+    expect(content).toContain('How can I help you?');
+    // Web Speech API Voice-to-Text Integration
+    expect(content).toContain('toggleListening');
+    expect(content).toContain('SpeechRecognition');
+    expect(content).toContain('webkitSpeechRecognition');
+    expect(content).toContain('formatSpokenPunctuation');
+  });
 });

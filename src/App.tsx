@@ -11,6 +11,8 @@ import { AndroidMainSettings } from './components/settings/AndroidMainSettings';
 import { AndroidGeneralSettings } from './components/settings/AndroidGeneralSettings';
 import { AndroidRobotSettings } from './components/settings/AndroidRobotSettings';
 import { AndroidVoiceSettings } from './components/settings/AndroidVoiceSettings';
+import { AndroidConnectorsSettings } from './components/settings/AndroidConnectorsSettings';
+import { MyAIChat } from './components/chat/MyAIChat';
 import { useAgentTask } from './hooks/useAgentTask';
 import { useWebsiteBuilder } from './hooks/useWebsiteBuilder';
 import { BlinkProvider, BlinkAuthProvider, useBlinkAuth } from '@blinkdotnew/react';
@@ -74,9 +76,13 @@ function AppContent() {
   const agentTask = useAgentTask();
   const { startTask, resetTask } = agentTask;
 
-  // Initialize Web Speech API & audio processing clarity pipeline
+  // Non-blocking initialization of Web Speech API & audio pipeline
   React.useEffect(() => {
-    configureHighQualityTTS();
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      (window as any).requestIdleCallback(() => configureHighQualityTTS());
+    } else {
+      setTimeout(() => configureHighQualityTTS(), 150);
+    }
   }, []);
 
   // Adaptive rendering: preserve the current UI while reducing unnecessary work on low battery.
@@ -199,17 +205,7 @@ function AppContent() {
   const isHomePage = location.pathname === '/';
   const hasSentMessage = !isHomePage || isWebsiteActive || Boolean(agentTask.currentTask) || agentTask.messages.length > 0 || agentTask.isLoading;
 
-  // Wait for Blink to restore the persisted session before rendering app routes.
-  if (isAuthLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background" role="status" aria-live="polite">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted border-t-foreground" />
-          <p className="text-sm text-muted-foreground">Restoring your session…</p>
-        </div>
-      </div>
-    );
-  }
+
 
   return (
     <div className="flex h-screen w-full max-w-full bg-background overflow-hidden">
@@ -282,6 +278,24 @@ function AppContent() {
                   path="/settings/voice" 
                   element={
                     <AndroidVoiceSettings onBack={() => navigate('/settings')} />
+                  } 
+                />
+                <Route 
+                  path="/settings/connectors" 
+                  element={
+                    <AndroidConnectorsSettings onBack={() => navigate('/settings')} />
+                  } 
+                />
+                <Route 
+                  path="/chat" 
+                  element={
+                    <MyAIChat onBack={() => navigate('/')} />
+                  } 
+                />
+                <Route 
+                  path="/my-ai" 
+                  element={
+                    <MyAIChat onBack={() => navigate('/')} />
                   } 
                 />
               </Routes>

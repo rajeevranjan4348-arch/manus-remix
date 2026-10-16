@@ -109,56 +109,43 @@ interface HomeProps {
 }
 
 export function Home({ onStartTask, personality, onPersonalityChange }: HomeProps) {
+  const initialSettings = getSettings();
   const [prompt, setPrompt] = useState<string>(() => getDraftPrompt());
-  const [robotState, setRobotState] = useState<RobotHeadState>(() => (getSettings().robotState as RobotHeadState) || 'idle');
-  const [robotShape, setRobotShape] = useState<RobotHeadShape>(() => (getSettings().robotShape as RobotHeadShape) || 'rectangle');
-  const [robotTheme, setRobotTheme] = useState(() => getSettings().robotTheme ?? 0);
-  const [robotSpeed, setRobotSpeed] = useState(() => getSettings().robotSpeed ?? 1);
-  const [robotPaused, setRobotPaused] = useState(() => getSettings().robotPaused ?? false);
-  const [robotInteractive, setRobotInteractive] = useState(() => getSettings().robotInteractive ?? true);
-  const [robotAntenna, setRobotAntenna] = useState(() => getSettings().robotAntenna ?? true);
-  const [robotFloorShadow, setRobotFloorShadow] = useState(() => getSettings().robotFloorShadow ?? true);
-  const [robotSeed, setRobotSeed] = useState(() => getSettings().robotSeed ?? 0.3);
+  const [robotState, setRobotState] = useState<RobotHeadState>(() => (initialSettings.robotState as RobotHeadState) || 'idle');
+  const [robotShape, setRobotShape] = useState<RobotHeadShape>(() => (initialSettings.robotShape as RobotHeadShape) || 'rectangle');
+  const [robotTheme, setRobotTheme] = useState(() => initialSettings.robotTheme ?? 0);
+  const [robotSpeed, setRobotSpeed] = useState(() => initialSettings.robotSpeed ?? 1);
+  const [robotPaused, setRobotPaused] = useState(() => initialSettings.robotPaused ?? false);
+  const [robotInteractive, setRobotInteractive] = useState(() => initialSettings.robotInteractive ?? true);
+  const [robotAntenna, setRobotAntenna] = useState(() => initialSettings.robotAntenna ?? true);
+  const [robotFloorShadow, setRobotFloorShadow] = useState(() => initialSettings.robotFloorShadow ?? true);
+  const [robotSeed, setRobotSeed] = useState(() => initialSettings.robotSeed ?? 0.3);
   const [isHappyExpression, setIsHappyExpression] = useState(false);
   const [showIndiaClock, setShowIndiaClock] = useState(false);
-  const [indiaClockTime, setIndiaClockTime] = useState(() =>
-    new Intl.DateTimeFormat('en-IN', {
+  const [indiaClockTime, setIndiaClockTime] = useState('');
+  const [indiaClockDate, setIndiaClockDate] = useState('');
+  const robotTapCountRef = useRef(0);
+
+  React.useEffect(() => {
+    if (!showIndiaClock) return;
+    const timeFormatter = new Intl.DateTimeFormat('en-IN', {
       timeZone: 'Asia/Kolkata',
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
       hour12: false,
-    }).format(new Date())
-  );
-  const [indiaClockDate, setIndiaClockDate] = useState(() =>
-    new Intl.DateTimeFormat('en-IN', {
+    });
+    const dateFormatter = new Intl.DateTimeFormat('en-IN', {
       timeZone: 'Asia/Kolkata',
       weekday: 'short',
       day: '2-digit',
       month: 'short',
       year: 'numeric',
-    }).format(new Date())
-  );
-  const robotTapCountRef = useRef(0);
-
-  React.useEffect(() => {
-    if (!showIndiaClock) return;
+    });
     const updateIndiaClock = () => {
       const now = new Date();
-      setIndiaClockTime(new Intl.DateTimeFormat('en-IN', {
-        timeZone: 'Asia/Kolkata',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-      }).format(now));
-      setIndiaClockDate(new Intl.DateTimeFormat('en-IN', {
-        timeZone: 'Asia/Kolkata',
-        weekday: 'short',
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-      }).format(now));
+      setIndiaClockTime(timeFormatter.format(now));
+      setIndiaClockDate(dateFormatter.format(now));
     };
     updateIndiaClock();
     const intervalId = window.setInterval(updateIndiaClock, 1000);

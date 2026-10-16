@@ -104,8 +104,18 @@ export function VoiceInputButton({
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const silenceTimerRef = useRef<any>(null);
+  const lastTranscriptRef = useRef<string>('');
+
+  const clearSilenceTimer = () => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+  };
 
   const stopAudioMeter = () => {
+    clearSilenceTimer();
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
@@ -336,7 +346,34 @@ export function VoiceInputButton({
 
           const shouldAutoSubmit = autoSubmitOnSpeech || currentSettings.enableHandsFreeVoice;
           if (shouldAutoSubmit && onAutoSubmit) {
+            clearSilenceTimer();
             onAutoSubmit(transcript);
+            return;
+          }
+
+          // If auto-submit on silence is enabled, start 7-second timer
+          const autoSubmitAfterSilence = currentSettings.autoSubmitVoiceAfterSilence ?? true;
+          const silenceDelayMs = (currentSettings.autoSubmitSilenceDelay ?? 7) * 1000;
+          lastTranscriptRef.current = transcript;
+
+          if (autoSubmitAfterSilence && onAutoSubmit && lastTranscriptRef.current.trim()) {
+            clearSilenceTimer();
+            silenceTimerRef.current = setTimeout(() => {
+              const textToSend = lastTranscriptRef.current.trim();
+              if (textToSend) {
+                toast.info('Auto-submitted prompt after 7s of silence');
+                if (recognitionRef.current) {
+                  isExplicitStopRef.current = true;
+                  try {
+                    recognitionRef.current.stop();
+                  } catch {}
+                }
+                stopAudioMeter();
+                setIsListening(false);
+                onListeningStateChange?.(false);
+                onAutoSubmit(textToSend);
+              }
+            }, silenceDelayMs);
           }
         }
       };
