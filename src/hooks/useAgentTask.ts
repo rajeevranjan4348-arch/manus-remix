@@ -417,7 +417,6 @@ export function useAgentTask() {
       // Provider failures must be visible and retryable. Never convert a failed request
       // into a fabricated success or synthetic chart.
       console.error('[Manus AI] Generation failed:', err);
-      const promptText = currentTask?.prompt || 'Request';
       const message = err instanceof Error && err.message
         ? err.message
         : 'The selected AI provider could not complete this request.';
