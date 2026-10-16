@@ -25,8 +25,10 @@ import {
   Github,
   Cloud,
   Flame,
-  Database as DatabaseIcon
+  Database as DatabaseIcon,
+  Smartphone
 } from 'lucide-react';
+import { AndroidMainSettings } from './AndroidMainSettings';
 import { useFirebase } from '@/context/FirebaseContext';
 import { GitHubRepositoryBrowser } from './GitHubRepositoryBrowser';
 import { 
@@ -102,6 +104,7 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab || 'general');
   const [isExporting, setIsExporting] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showAndroidView, setShowAndroidView] = useState(false);
   const [micStatus, setMicStatus] = useState<PermissionState>('prompt');
   const [cameraStatus, setCameraStatus] = useState<PermissionState>('prompt');
   const [showMicHelpModal, setShowMicHelpModal] = useState(false);
@@ -234,34 +237,55 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
     { id: 'about', label: 'About', icon: Info },
   ];
 
+  if (showAndroidView) {
+    return <AndroidMainSettings onBack={() => setShowAndroidView(false)} isOpen={isOpen} />;
+  }
+
   return (
-    <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-150"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
+    <>
+      {/* Mobile Android 15 Edge-to-Edge Main Settings */}
+      <div className="sm:hidden fixed inset-0 z-50">
+        <AndroidMainSettings onBack={onClose} isOpen={isOpen} />
+      </div>
+
+      {/* Desktop Responsive Settings Dialog */}
       <div 
-        className="w-full max-w-2xl h-[560px] max-h-[90vh] bg-background border border-border/70 rounded-2xl shadow-xl flex flex-col overflow-hidden text-foreground animate-in zoom-in-98 duration-150"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="settings-dialog-title"
+        className="hidden sm:flex fixed inset-0 z-50 items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-150"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
       >
-        {/* Minimal Header */}
-        <div className="px-5 py-3.5 border-b border-border/50 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <h2 id="settings-dialog-title" className="text-sm font-semibold tracking-tight text-foreground">
-              Settings
-            </h2>
+        <div 
+          className="w-full max-w-2xl h-[560px] max-h-[90vh] bg-background border border-border/70 rounded-2xl shadow-xl flex flex-col overflow-hidden text-foreground animate-in zoom-in-98 duration-150"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="settings-dialog-title"
+        >
+          {/* Minimal Header */}
+          <div className="px-5 py-3.5 border-b border-border/50 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2">
+              <h2 id="settings-dialog-title" className="text-sm font-semibold tracking-tight text-foreground">
+                Settings
+              </h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowAndroidView(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer"
+                title="Switch to Android 15 Edge-to-Edge Settings View"
+              >
+                <Smartphone size={14} />
+                <span>Android 15 View</span>
+              </button>
+              <button 
+                onClick={onClose}
+                className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer"
+                aria-label="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
           </div>
-          <button 
-            onClick={onClose}
-            className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer"
-            aria-label="Close"
-          >
-            <X size={16} />
-          </button>
-        </div>
 
         {/* Content Layout */}
         <div className="flex-1 flex flex-col sm:flex-row overflow-hidden">
@@ -1344,14 +1368,15 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
         </div>
       </div>
 
-      <MicrophonePermissionModal
-        isOpen={showMicHelpModal}
-        onClose={() => setShowMicHelpModal(false)}
-        onPermissionGranted={async () => {
-          setShowMicHelpModal(false);
-          await checkMediaPermissions();
-        }}
-      />
-    </div>
+        <MicrophonePermissionModal
+          isOpen={showMicHelpModal}
+          onClose={() => setShowMicHelpModal(false)}
+          onPermissionGranted={async () => {
+            setShowMicHelpModal(false);
+            await checkMediaPermissions();
+          }}
+        />
+      </div>
+    </>
   );
 }

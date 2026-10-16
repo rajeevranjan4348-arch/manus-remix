@@ -7,6 +7,8 @@ import { ChatView } from './components/agent/ChatView';
 import { WebsiteBuilderView } from './components/agent/WebsiteBuilderView';
 import { HistoryPanel } from './components/history/HistoryPanel';
 import { SettingsModal } from './components/settings/SettingsModal';
+import { AndroidMainSettings } from './components/settings/AndroidMainSettings';
+import { AndroidGeneralSettings } from './components/settings/AndroidGeneralSettings';
 import { useAgentTask } from './hooks/useAgentTask';
 import { useWebsiteBuilder } from './hooks/useWebsiteBuilder';
 import { BlinkProvider, BlinkAuthProvider, useBlinkAuth } from '@blinkdotnew/react';
@@ -253,6 +255,18 @@ function AppContent() {
                       useAgentTaskResult={agentTask} 
                       onReset={handleReset} 
                     />
+                  } 
+                />
+                <Route 
+                  path="/settings" 
+                  element={
+                    <AndroidMainSettings onBack={() => navigate('/')} />
+                  } 
+                />
+                <Route 
+                  path="/settings/general" 
+                  element={
+                    <AndroidGeneralSettings onBack={() => navigate('/settings')} />
                   } 
                 />
               </Routes>
