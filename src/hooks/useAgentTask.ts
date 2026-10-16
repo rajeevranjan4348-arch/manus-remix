@@ -854,15 +854,24 @@ Regarding **${promptText}**:
         { id: String(prev.length + 1), label: toolIntent.suggestedAction, status: 'running', trace: [`Executing ${toolIntent.toolName}...`] }
       ]);
 
-      executeConnectorTool(toolIntent.toolName, toolIntent.args).then(res => {
+      void executeConnectorTool(toolIntent.toolName, toolIntent.args).then(async res => {
         setSteps(prev => prev.map(s => s.label === toolIntent.suggestedAction ? { ...s, status: 'completed' } : s));
         if (res.success) {
-          const augmentedPrompt = `${content}\n\n[EXECUTED CONNECTED TOOL: ${toolIntent.connectorName} (${toolIntent.toolName})]\n[RESULT DATA]:\n${JSON.stringify(res.data, null, 2)}\n\n[INSTRUCTION: Synthesize a clear, verified answer based on the retrieved data above. Highlight key documents/messages/events and provide links where applicable.]`;
-          agentSendMessage(augmentedPrompt);
+          const augmentedPrompt = `${content}\n\n[EXECUTED CONNECTED TOOL: `${toolIntent.connectorName} (`${toolIntent.toolName})]\n[RESULT DATA]:\n`${JSON.stringify(res.data, null, 2)}\n\n[INSTRUCTION: Synthesize a clear, verified answer based on the retrieved data above. Highlight key documents/messages/events and provide links where applicable.]`;
+          await agentSendMessage(augmentedPrompt);
         } else {
-          const errorPrompt = `${content}\n\n[CONNECTOR TOOL ERROR: ${res.error || 'Execution failed'}]\n${res.message}\nProvide a helpful explanation of the failure.`;
-          agentSendMessage(errorPrompt);
+          const errorPrompt = `${content}\n\n[CONNECTOR TOOL ERROR: `${res.error || 'Execution failed'}]\n`${res.message}\nProvide a helpful explanation of the failure.`;
+          await agentSendMessage(errorPrompt);
         }
+      }).catch(error => {
+        console.error('[Manus AI] Connector request failed:', error);
+        setTaskStatus('error');
+        setPhase('error');
+        setResult({ type: 'chat', content: 'The connected app request failed. Please check its authorization and retry.', error: true });
+        setSteps(prev => prev.map(step => step.status === 'running' ? { ...step, status: 'error' as const } : step));
+        emitRobotEvent('TASK_FAILED');
+        window.dispatchEvent(new CustomEvent('manus_agent_generating', { detail: { isGenerating: false, mode: 'work' } }));
+        toast.error('Connected app request failed. Please retry.');
       });
       return;
     }
@@ -871,7 +880,21 @@ Regarding **${promptText}**:
     const lower = content.toLowerCase();
     if (lower.includes('graph') || lower.includes('chart') || lower.includes('plot') || lower.includes('diagram') || lower.includes('bar') || lower.includes('pie') || lower.includes('line')) {
       const chartPrompt = `${content}\n\n[INSTRUCTION: Format your chart data as a JSON code block using the format below so it renders as an interactive chart]\n\`\`\`json\n{\n  "graph": {\n    "type": "bar",\n    "labels": ["Category A", "Category B", "Category C", "Category D"],\n    "datasets": [{\n      "label": "Metric",\n      "data": [45, 72, 88, 95]\n    }]\n  }\n}\n\`\`\``;
-      void (async () => { agentSendMessage(await preparePromptWithConnectors(chartPrompt)); })();
+      void (async () => {
+        try {
+          const preparedPrompt = await preparePromptWithConnectors(chartPrompt);
+          await agentSendMessage(preparedPrompt);
+        } catch (error) {
+          console.error('[Manus AI] Chart request failed:', error);
+          setTaskStatus('error');
+          setPhase('error');
+          setResult({ type: 'chat', content: "I couldn't complete that chart request. Please retry.", error: true });
+          setSteps(prev => prev.map(step => step.status === 'running' ? { ...step, status: 'error' as const } : step));
+          emitRobotEvent('TASK_FAILED');
+          window.dispatchEvent(new CustomEvent('manus_agent_generating', { detail: { isGenerating: false, mode: 'work' } }));
+          toast.error('Chart request failed. Please retry.');
+        }
+      })();
     } else {
       void (async () => {
         try {
