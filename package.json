@@ -106,6 +106,8 @@
     "@capacitor/device": "^7.0.2",
     "@capacitor/filesystem": "^7.1.4",
     "@capacitor/geolocation": "^7.1.5",
-    "@capacitor/haptics": "^7.0.2"
+    "@capacitor/haptics": "^7.0.2",
+    "lucide-motion": "^1.0.0",
+    "motion": "^12.26.2"
   }
 }
