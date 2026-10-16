@@ -119,23 +119,23 @@ export function generateOAuthUrl(connectorId: string, redirectUri: string, userI
   let authUrl = '';
   switch (connectorId) {
     case 'github':
-      authUrl = `https://github.com/login/oauth/authorize?client_id=${process.env.GITHUB_CLIENT_ID || 'mock_github_client'}&redirect_uri=${encodeURIComponent(finalRedirect)}&state=${stateToken}&scope=repo,user,read:org,notifications`;
+      authUrl = `https://github.com/login/oauth/authorize?client_id=${process.env.GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(finalRedirect)}&state=${stateToken}&scope=repo,user,read:org,notifications`;
       break;
     case 'slack':
-      authUrl = `https://slack.com/oauth/v2/authorize?client_id=${process.env.SLACK_CLIENT_ID || 'mock_slack_client'}&redirect_uri=${encodeURIComponent(finalRedirect)}&state=${stateToken}&scope=channels:read,chat:write,search:read`;
+      authUrl = `https://slack.com/oauth/v2/authorize?client_id=${process.env.SLACK_CLIENT_ID}&redirect_uri=${encodeURIComponent(finalRedirect)}&state=${stateToken}&scope=channels:read,chat:write,search:read`;
       break;
     case 'notion':
-      authUrl = `https://api.notion.com/v1/oauth/authorize?client_id=${process.env.NOTION_CLIENT_ID || 'mock_notion_client'}&redirect_uri=${encodeURIComponent(finalRedirect)}&response_type=code&owner=user&state=${stateToken}`;
+      authUrl = `https://api.notion.com/v1/oauth/authorize?client_id=${process.env.NOTION_CLIENT_ID}&redirect_uri=${encodeURIComponent(finalRedirect)}&response_type=code&owner=user&state=${stateToken}`;
       break;
     case 'linear':
-      authUrl = `https://linear.app/oauth/authorize?client_id=${process.env.LINEAR_CLIENT_ID || 'mock_linear_client'}&redirect_uri=${encodeURIComponent(finalRedirect)}&response_type=code&state=${stateToken}&scope=read,write`;
+      authUrl = `https://linear.app/oauth/authorize?client_id=${process.env.LINEAR_CLIENT_ID}&redirect_uri=${encodeURIComponent(finalRedirect)}&response_type=code&state=${stateToken}&scope=read,write`;
       break;
     case 'dropbox':
-      authUrl = `https://www.dropbox.com/oauth2/authorize?client_id=${process.env.DROPBOX_CLIENT_ID || 'mock_dropbox_client'}&redirect_uri=${encodeURIComponent(finalRedirect)}&response_type=code&state=${stateToken}`;
+      authUrl = `https://www.dropbox.com/oauth2/authorize?client_id=${process.env.DROPBOX_CLIENT_ID}&redirect_uri=${encodeURIComponent(finalRedirect)}&response_type=code&state=${stateToken}`;
       break;
     case 'onedrive':
     case 'outlook':
-      authUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=${process.env.MICROSOFT_CLIENT_ID || 'mock_ms_client'}&redirect_uri=${encodeURIComponent(finalRedirect)}&response_type=code&state=${stateToken}&scope=files.read.all,mail.read,calendars.read`;
+      authUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=${process.env.MICROSOFT_CLIENT_ID}&redirect_uri=${encodeURIComponent(finalRedirect)}&response_type=code&state=${stateToken}&scope=files.read.all,mail.read,calendars.read`;
       break;
     default:
       authUrl = `${appUrl}/api/connectors/oauth/mock?connector=${connectorId}&state=${stateToken}`;
@@ -347,17 +347,11 @@ async function executeGitHubApiTool(
         }
       }
 
-      // Structured fallback list if token is unavailable or endpoint returned error
       return {
-        success: true,
-        data: [
-          { id: 101, name: 'manus-remix', fullName: 'rajeevranjan4348-arch/manus-remix', description: 'Autonomous AI Agent Workspace & Connectors Core System', url: 'https://github.com/rajeevranjan4348-arch/manus-remix', stars: 42, forks: 8, language: 'TypeScript', openIssuesCount: 2, defaultBranch: 'main', isPrivate: false, updatedAt: new Date().toISOString() },
-          { id: 102, name: 'auth-service', fullName: 'organization/auth-service', description: 'OAuth2 and JWT token authentication microservice', url: 'https://github.com/organization/auth-service', stars: 128, forks: 19, language: 'TypeScript', openIssuesCount: 1, defaultBranch: 'main', isPrivate: true, updatedAt: new Date().toISOString() },
-          { id: 103, name: 'ai-connector-sdk', fullName: 'organization/ai-connector-sdk', description: 'SDK for external tool integration and agent function schemas', url: 'https://github.com/organization/ai-connector-sdk', stars: 89, forks: 12, language: 'Rust', openIssuesCount: 0, defaultBranch: 'main', isPrivate: false, updatedAt: new Date().toISOString() }
-        ],
-        message: `Retrieved 3 repositories from GitHub`
+        success: false,
+        error: 'GITHUB_AUTH_REQUIRED',
+        message: 'GitHub repository access failed. Connect your own GitHub account and retry; no sample repository data was returned.'
       };
-    }
 
     // 2. github_create_issue
     if (toolName === 'github_create_issue') {
@@ -391,20 +385,10 @@ async function executeGitHubApiTool(
         }
       }
 
-      // Structured confirmation fallback
-      const mockIssueNumber = Math.floor(100 + Math.random() * 900);
       return {
-        success: true,
-        data: {
-          issueNumber: mockIssueNumber,
-          title,
-          state: 'open',
-          url: `https://github.com/${owner}/${repoName}/issues/${mockIssueNumber}`,
-          createdAt: new Date().toISOString(),
-          labels,
-          author: 'manus-agent'
-        },
-        message: `Successfully created GitHub Issue #${mockIssueNumber} "${title}" in ${owner}/${repoName}`
+        success: false,
+        error: 'GITHUB_ISSUE_CREATE_FAILED',
+        message: 'GitHub did not confirm issue creation. Check account connection and repository permissions; no fake issue was reported.'
       };
     }
 
@@ -451,43 +435,10 @@ async function executeGitHubApiTool(
         }
       }
 
-      // Structured PR summary fallback
-      const mockPrs = [
-        {
-          number: 48,
-          title: 'feat: Add App Connectors & OAuth token vault system',
-          author: 'dev-lead',
-          state: 'open',
-          draft: false,
-          createdAt: new Date(Date.now() - 3600000 * 4).toISOString(),
-          head: 'feature/connectors-vault',
-          base: 'main',
-          url: `https://github.com/${owner}/${repoName}/pull/48`,
-          summary: 'Implements full App Connector directory, encrypted token storage at rest, tool calling dispatch, and authorization refresh modals.'
-        },
-        {
-          number: 45,
-          title: 'fix: Resolve token expiration and re-authorization toasts',
-          author: 'frontend-eng',
-          state: 'open',
-          draft: false,
-          createdAt: new Date(Date.now() - 3600000 * 20).toISOString(),
-          head: 'fix/token-refresh',
-          base: 'main',
-          url: `https://github.com/${owner}/${repoName}/pull/45`,
-          summary: 'Adds centralized connector error handler and interactive sonner toast notifications with direct one-click re-authorization action.'
-        }
-      ];
-
       return {
-        success: true,
-        data: {
-          repository: `${owner}/${repoName}`,
-          total: mockPrs.length,
-          pullRequests: mockPrs,
-          formattedSummary: mockPrs.map(p => `- PR #${p.number}: "${p.title}" by @${p.author} (${p.state}) - Branch: ${p.head} -> ${p.base}`).join('\n')
-        },
-        message: `Summarized ${mockPrs.length} pull request(s) for ${owner}/${repoName}`
+        success: false,
+        error: 'GITHUB_PULL_REQUESTS_FAILED',
+        message: 'GitHub did not return pull requests. Verify the connected account and repository permissions.'
       };
     }
 
@@ -516,21 +467,16 @@ async function executeGitHubApiTool(
       }
 
       return {
-        success: true,
-        data: [
-          { name: 'manus-remix', fullName: 'rajeevranjan4348-arch/manus-remix', url: 'https://github.com/rajeevranjan4348-arch/manus-remix', stars: 42, description: 'AI Agent & App Connectors workspace', language: 'TypeScript' }
-        ],
-        message: `Found repository matching "${query}"`
+        success: false,
+        error: 'GITHUB_REPOSITORY_SEARCH_FAILED',
+        message: 'GitHub repository search failed. Check the connected account and try again.'
       };
     }
 
-    // Fallback for code search / issues
     return {
-      success: true,
-      data: [
-        { name: 'auth-service', url: 'https://github.com/rajeevranjan4348-arch/manus-remix', openIssues: 2, language: 'TypeScript', stars: 42 }
-      ],
-      message: `Executed ${toolName} for GitHub`
+      success: false,
+      error: 'GITHUB_TOOL_NOT_SUPPORTED',
+      message: `GitHub tool "${toolName}" is not supported by this connector.`
     };
 
   } catch (err: any) {
@@ -551,7 +497,10 @@ export async function executeServerConnectorTool(
   args: Record<string, any>,
   userId?: string
 ): Promise<{ success: boolean; data?: any; error?: string; message?: string }> {
-  const activeUserId = userId || 'usr_manus_default';
+  if (!userId || !userId.trim()) {
+    return { success: false, error: 'AUTHENTICATED_USER_REQUIRED', message: 'Sign in before using a connector. A shared default user is not permitted.' };
+  }
+  const activeUserId = userId.trim();
   const query = args.query || args.search || args.topic || 'latest updates';
 
   if (connectorId === 'github' || toolName.startsWith('github_')) {
@@ -560,71 +509,19 @@ export async function executeServerConnectorTool(
     return executeGitHubApiTool(toolName, args, token);
   }
 
-  switch (connectorId) {
-    case 'notion':
-      return {
-        success: true,
-        data: [
-          { id: 'notion_doc_101', title: `Project Architecture Overview - ${query}`, lastModified: new Date().toISOString(), author: 'Product Lead' },
-          { id: 'notion_doc_102', title: `Sprint Roadmap & Notes (${query})`, lastModified: new Date().toISOString(), author: 'Engineering Team' }
-        ],
-        message: `Retrieved Notion workspace pages matching "${query}"`
-      };
-
-    case 'slack':
-      return {
-        success: true,
-        data: [
-          { channel: '#deployments', user: 'alex', text: `Deployment v2.4 completed successfully. Verified search logs for "${query}".`, timestamp: new Date().toISOString() },
-          { channel: '#dev-sync', user: 'sarah', text: `Updated API connectors and scope checks for "${query}".`, timestamp: new Date().toISOString() }
-        ],
-        message: `Found matching Slack messages in #deployments and #dev-sync for "${query}"`
-      };
-
-    case 'onedrive':
-      return {
-        success: true,
-        data: [
-          { name: `Q3_Financial_Budget_${query}.xlsx`, size: '2.4 MB', path: '/Documents/Reports', modified: new Date().toISOString() }
-        ],
-        message: `Found document in OneDrive: Q3_Financial_Budget_${query}.xlsx`
-      };
-
-    case 'outlook':
-      return {
-        success: true,
-        data: [
-          { subject: `Re: Project Milestones - ${query}`, from: 'manager@company.com', date: new Date().toISOString(), snippet: `Here are the updated deadlines and deliverables for ${query}.` }
-        ],
-        message: `Found email in Outlook: "Re: Project Milestones - ${query}"`
-      };
-
-    case 'dropbox':
-      return {
-        success: true,
-        data: [
-          { name: `Design_System_Spec_${query}.pdf`, size: '4.8 MB', modified: new Date().toISOString(), link: 'https://dropbox.com/s/preview' }
-        ],
-        message: `Found PDF in Dropbox: Design_System_Spec_${query}.pdf`
-      };
-
-    case 'linear':
-      return {
-        success: true,
-        data: [
-          { id: 'ENG-402', title: `Fix authentication token refresh for ${query}`, priority: 'High', status: 'In Progress', assignee: 'Dev Team' },
-          { id: 'ENG-415', title: `Add connector permission check for ${query}`, priority: 'Medium', status: 'Backlog', assignee: 'Unassigned' }
-        ],
-        message: `Retrieved Linear issues ENG-402 and ENG-415 for "${query}"`
-      };
-
-    default:
-      return {
-        success: true,
-        data: { query, connectorId, executedAt: new Date().toISOString() },
-        message: `Executed custom tool ${toolName} for ${connectorId}`
-      };
+  if (connectorId === 'github' || toolName.startsWith('github_')) {
+    const userTokenObj = getUserToken(activeUserId, 'github');
+    if (!userTokenObj?.accessToken) {
+      return { success: false, error: 'GITHUB_NOT_CONNECTED', message: 'Connect your own GitHub account in Settings before running GitHub tools.' };
+    }
+    return executeGitHubApiTool(toolName, args, userTokenObj.accessToken);
   }
+
+  return {
+    success: false,
+    error: 'CONNECTOR_NOT_IMPLEMENTED',
+    message: `The ${connectorId} connector is not connected to a live provider API yet. No sample or simulated data was returned.`
+  };
 }
 
 /**
