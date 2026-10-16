@@ -60,6 +60,7 @@ import { toast } from 'sonner';
 import { getChatViewDraft, saveChatViewDraft, clearChatViewDraft } from '@/lib/draftStorage';
 import { useAutoSaveChatInput } from '@/hooks/useAutoSaveChatInput';
 import PromptBar from '@/components/ui/PromptBar';
+import Orb from '@/components/Orb';
 import { Attachment01Icon, Globe02Icon } from '@hugeicons/core-free-icons';
 
 
@@ -926,6 +927,22 @@ export function ChatView({
       {/* Chat Area */}
       <div ref={containerRef} onScroll={handleConversationScroll} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-20 pt-6 pb-40 space-y-8 custom-scrollbar">
         
+        {displayMessages.length === 0 && !isAssistantWorking && !result && !chartData && (
+          <div className="flex min-h-[340px] flex-col items-center justify-center -mt-2 mb-4 animate-in fade-in duration-500" aria-label="Welcome orb">
+            <div className="relative h-[280px] w-full max-w-[420px]">
+              <Orb
+                colors={['#9c43fe', '#4cc2e9', '#101499']}
+                hoverIntensity={1}
+                trail={1}
+                rotateOnHover
+                followCursor
+                style={{ width: '100%', height: '100%' }}
+              />
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">What would you like to explore today?</p>
+          </div>
+        )}
+
         {/* Render Conversation Messages in Chronological Order */}
         {displayMessages.map((msg, i) => {
           if (msg.role === 'user') {
