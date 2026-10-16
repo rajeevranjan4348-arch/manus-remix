@@ -21,6 +21,7 @@ import { ConversationActionBar } from './ConversationActionBar';
 interface AgentViewProps {
   prompt: string;
   steps: Step[];
+  onReorderSteps?: (newSteps: Step[]) => void;
   result?: any;
   status: 'running' | 'completed' | 'error';
   onReset: () => void;
@@ -29,7 +30,7 @@ interface AgentViewProps {
   chartData?: any;
 }
 
-export function AgentView({ prompt, steps, result, status, onReset, onExport, options, chartData }: AgentViewProps) {
+export function AgentView({ prompt, steps, onReorderSteps, result, status, onReset, onExport, options, chartData }: AgentViewProps) {
   const [showSettings, setShowSettings] = React.useState(false);
   const [isRefining, setIsRefining] = React.useState(false);
   const resultRef = React.useRef<HTMLDivElement>(null);
@@ -113,7 +114,7 @@ export function AgentView({ prompt, steps, result, status, onReset, onExport, op
                 </h3>
               </div>
               
-              <Timeline steps={steps} />
+              <Timeline steps={steps} onReorderSteps={onReorderSteps} />
               
               {status === 'running' && (
                 <div className="p-6 rounded-2xl bg-white border border-border/50 shadow-sm animate-pulse flex flex-col items-center gap-3 text-center">

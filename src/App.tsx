@@ -32,7 +32,7 @@ function TaskView({
   onReset: () => void 
 }) {
   const { taskId } = useParams();
-  const { loadTask, resetTask, stopTask, currentTask, messages, steps, result, chartData, taskStatus, exportToPDF, sendMessage, isLoading } = useAgentTaskResult;
+  const { loadTask, resetTask, stopTask, currentTask, messages, steps, reorderSteps, result, chartData, taskStatus, exportToPDF, sendMessage, isLoading } = useAgentTaskResult;
 
   useEffect(() => {
     if (taskId) {
@@ -47,6 +47,7 @@ function TaskView({
       prompt={currentTask?.prompt || ''}
       messages={messages}
       steps={steps}
+      onReorderSteps={reorderSteps}
       result={result}
       chartData={chartData}
       status={taskStatus === 'idle' ? 'running' : taskStatus as any}

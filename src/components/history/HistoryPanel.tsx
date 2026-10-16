@@ -36,6 +36,7 @@ import { cn } from '@/lib/utils';
 import { syncTasksToLibrary, getLibraryItems } from '@/lib/libraryStore';
 import { listConversations, deleteConversation, exportAllChatHistory, recoverChatHistory, getAllMessages } from '@/lib/chatDatabase';
 import { TaskQuickPreviewCard } from './TaskQuickPreviewCard';
+import { SwipeableHistoryItem } from './SwipeableHistoryItem';
 import {
   Sheet,
   SheetContent,
@@ -520,8 +521,8 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
     }
   };
 
-  const handleDeleteLibraryItem = (id: string, e: React.MouseEvent, name?: string) => {
-    e.stopPropagation();
+  const handleDeleteLibraryItem = (id: string, e?: React.MouseEvent, name?: string) => {
+    if (e) e.stopPropagation();
     const targetItem = libraryItems.find(item => item.id === id);
     setItemToDelete({
       type: 'library',
@@ -585,8 +586,8 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
     onClose();
   };
 
-  const handleDeleteTask = (taskId: string, e: React.MouseEvent, title?: string) => {
-    e.stopPropagation();
+  const handleDeleteTask = (taskId: string, e?: React.MouseEvent, title?: string) => {
+    if (e) e.stopPropagation();
     const targetTask = tasks.find(t => t.id === taskId);
     setItemToDelete({
       type: 'session',
@@ -1146,75 +1147,79 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                       const typeBadge = getTypeLabel(item);
                       const TypeIcon = typeBadge.icon;
                       return (
-                        <div
+                        <SwipeableHistoryItem
                           key={item.id}
-                          className="group relative flex items-center justify-between p-3 rounded-2xl border border-border bg-white dark:bg-card hover:border-primary/50 hover:shadow-sm transition-all gap-3"
+                          id={item.id}
+                          deleteLabel="Remove"
+                          onDelete={() => handleDeleteLibraryItem(item.id, undefined, item.name)}
                         >
-                          {/* File Icon & Main Details */}
-                          <div className="flex items-center gap-3 min-w-0 flex-1">
-                            <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0 font-medium shadow-2xs", typeBadge.bg, typeBadge.text)}>
-                              <TypeIcon size={18} />
-                            </div>
+                          <div className="group relative flex items-center justify-between p-3 rounded-2xl border border-border bg-white dark:bg-card hover:border-primary/50 hover:shadow-sm transition-all gap-3">
+                            {/* File Icon & Main Details */}
+                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                              <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0 font-medium shadow-2xs", typeBadge.bg, typeBadge.text)}>
+                                <TypeIcon size={18} />
+                              </div>
 
-                            <div className="min-w-0 flex-1 space-y-0.5">
-                              <div className="flex items-center gap-2">
-                                <h4 className="font-semibold text-xs text-foreground truncate" title={item.name}>
-                                  {item.name}
-                                </h4>
-                                {item.source && (
-                                  <span className="text-[10px] px-2 py-0.5 rounded-md bg-muted text-muted-foreground font-medium shrink-0 hidden sm:inline-block">
-                                    {item.source}
+                              <div className="min-w-0 flex-1 space-y-0.5">
+                                <div className="flex items-center gap-2">
+                                  <h4 className="font-semibold text-xs text-foreground truncate" title={item.name}>
+                                    {item.name}
+                                  </h4>
+                                  {item.source && (
+                                    <span className="text-[10px] px-2 py-0.5 rounded-md bg-muted text-muted-foreground font-medium shrink-0 hidden sm:inline-block">
+                                      {item.source}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center gap-2 text-[11px] text-muted-foreground flex-wrap">
+                                  {/* Type Label Badge */}
+                                  <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase", typeBadge.bg, typeBadge.text)}>
+                                    {typeBadge.label}
                                   </span>
-                                )}
-                              </div>
-
-                              <div className="flex items-center gap-2 text-[11px] text-muted-foreground flex-wrap">
-                                {/* Type Label Badge */}
-                                <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase", typeBadge.bg, typeBadge.text)}>
-                                  {typeBadge.label}
-                                </span>
-                                <span>•</span>
-                                {/* File Size Label */}
-                                <span className="font-mono text-[10px] font-semibold text-foreground/80 bg-slate-100 dark:bg-muted/80 px-1.5 py-0.5 rounded">
-                                  {item.size || 'Shared File'}
-                                </span>
-                                <span>•</span>
-                                {/* Timestamp */}
-                                <span className="text-[10px] font-mono">{getRelativeTime(item.createdAt)}</span>
+                                  <span>•</span>
+                                  {/* File Size Label */}
+                                  <span className="font-mono text-[10px] font-semibold text-foreground/80 bg-slate-100 dark:bg-muted/80 px-1.5 py-0.5 rounded">
+                                    {item.size || 'Shared File'}
+                                  </span>
+                                  <span>•</span>
+                                  {/* Timestamp */}
+                                  <span className="text-[10px] font-mono">{getRelativeTime(item.createdAt)}</span>
+                                </div>
                               </div>
                             </div>
-                          </div>
 
-                          {/* Action Buttons */}
-                          <div className="flex items-center gap-1 shrink-0">
-                            {(item.type === 'photo' || item.type === 'video' || item.type === 'audio') && (
+                            {/* Action Buttons */}
+                            <div className="flex items-center gap-1 shrink-0">
+                              {(item.type === 'photo' || item.type === 'video' || item.type === 'audio') && (
+                                <button
+                                  onClick={() => setPreviewMedia(item)}
+                                  className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                                  title={item.type === 'photo' ? 'View Photo' : 'Play Media'}
+                                >
+                                  {item.type === 'photo' ? <Eye size={15} /> : <Play size={15} />}
+                                </button>
+                              )}
+
                               <button
-                                onClick={() => setPreviewMedia(item)}
-                                className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                                title={item.type === 'photo' ? 'View Photo' : 'Play Media'}
+                                onClick={(e) => handleDownloadFile(item, e)}
+                                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-primary/10 hover:bg-primary hover:text-primary-foreground text-primary font-semibold transition-all text-xs cursor-pointer shadow-2xs"
+                                title={`Download ${item.name}`}
                               >
-                                {item.type === 'photo' ? <Eye size={15} /> : <Play size={15} />}
+                                <Download size={13} />
+                                <span className="hidden sm:inline">Download</span>
                               </button>
-                            )}
 
-                            <button
-                              onClick={(e) => handleDownloadFile(item, e)}
-                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-primary/10 hover:bg-primary hover:text-primary-foreground text-primary font-semibold transition-all text-xs cursor-pointer shadow-2xs"
-                              title={`Download ${item.name}`}
-                            >
-                              <Download size={13} />
-                              <span className="hidden sm:inline">Download</span>
-                            </button>
-
-                            <button
-                              onClick={(e) => handleDeleteLibraryItem(item.id, e, item.name)}
-                              className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors cursor-pointer"
-                              title="Delete from Library"
-                            >
-                              <Trash2 size={14} />
-                            </button>
+                              <button
+                                onClick={(e) => handleDeleteLibraryItem(item.id, e, item.name)}
+                                className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors cursor-pointer"
+                                title="Delete from Library"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
                           </div>
-                        </div>
+                        </SwipeableHistoryItem>
                       );
                     })}
                   </div>
@@ -1225,10 +1230,15 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                       const typeBadge = getTypeLabel(item);
                       const TypeIcon = typeBadge.icon;
                       return (
-                        <div
+                        <SwipeableHistoryItem
                           key={item.id}
-                          className="group relative rounded-2xl border border-border bg-white dark:bg-card p-3 hover:border-primary/50 hover:shadow-md transition-all flex flex-col justify-between"
+                          id={item.id}
+                          deleteLabel="Remove"
+                          onDelete={() => handleDeleteLibraryItem(item.id, undefined, item.name)}
                         >
+                          <div
+                            className="group relative rounded-2xl border border-border bg-white dark:bg-card p-3 hover:border-primary/50 hover:shadow-md transition-all flex flex-col justify-between h-full"
+                          >
                           {/* Media Preview or Icon Header */}
                           <div>
                             {item.type === 'photo' && item.url ? (
@@ -1341,7 +1351,8 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                             </div>
                           </div>
                         </div>
-                      );
+                      </SwipeableHistoryItem>
+                    );
                     })}
                   </div>
                 )}
@@ -1443,6 +1454,18 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                         <span>Recover</span>
                       </button>
                     </div>
+                  </div>
+                )}
+
+                {!isSelectionMode && filteredTasks.length > 0 && (
+                  <div className="flex items-center justify-between px-1.5 py-0.5 text-[10px] text-muted-foreground/70 select-none">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block shrink-0" />
+                      <span>Swipe left on any session to delete</span>
+                    </span>
+                    <span className="hidden sm:inline font-mono text-[9px] text-muted-foreground/50">
+                      Drag / Swipe gesture enabled
+                    </span>
                   </div>
                 )}
 
@@ -1569,12 +1592,24 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                             </div>
                           );
 
-                          return isSelectionMode ? (
-                            <div key={task.id}>{cardContent}</div>
+                          const wrappedCard = isSelectionMode ? (
+                            cardContent
                           ) : (
-                            <TaskQuickPreviewCard key={task.id} task={task} side="left" align="start">
+                            <TaskQuickPreviewCard task={task} side="left" align="start">
                               {cardContent}
                             </TaskQuickPreviewCard>
+                          );
+
+                          return (
+                            <SwipeableHistoryItem
+                              key={task.id}
+                              id={task.id}
+                              disabled={isSelectionMode}
+                              deleteLabel="Delete"
+                              onDelete={() => handleDeleteTask(task.id, undefined, formatTitle(task))}
+                            >
+                              {wrappedCard}
+                            </SwipeableHistoryItem>
                           );
                         })}
                       </div>

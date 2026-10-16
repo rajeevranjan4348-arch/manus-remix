@@ -10,7 +10,8 @@ import {
   Globe,
   FileCode,
   Search,
-  ExternalLink
+  ExternalLink,
+  GripVertical
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -24,38 +25,98 @@ export interface Step {
 interface TimelineProps {
   steps: Step[];
   activeStepId?: string;
+  onReorderSteps?: (newSteps: Step[]) => void;
 }
 
-export function Timeline({ steps }: TimelineProps) {
+export function Timeline({ steps, onReorderSteps }: TimelineProps) {
   const [expandedTrace, setExpandedTrace] = React.useState<string | null>(null);
+  const [localSteps, setLocalSteps] = React.useState<Step[]>(steps);
+  const [draggedIndex, setDraggedIndex] = React.useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = React.useState<number | null>(null);
+
+  React.useEffect(() => {
+    setLocalSteps(steps);
+  }, [steps]);
+
+  const handleMove = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= localSteps.length || toIndex >= localSteps.length) return;
+    const reordered = [...localSteps];
+    const [moved] = reordered.splice(fromIndex, 1);
+    reordered.splice(toIndex, 0, moved);
+    setLocalSteps(reordered);
+    if (onReorderSteps) {
+      onReorderSteps(reordered);
+    }
+  };
 
   return (
     <div className="space-y-0 relative pl-4 border-l border-border/40 ml-3">
-      {steps.map((step, index) => (
-        <div key={step.id} className="relative py-4 first:pt-0 last:pb-0">
-          <div className={cn(
-            "absolute -left-[21px] top-4 w-3 h-3 rounded-full border-2 transition-all bg-manus-cream z-10",
-            step.status === 'completed' ? "border-primary bg-primary" : 
-            step.status === 'running' ? "border-primary animate-pulse" : "border-muted-foreground/30"
-          )}>
-            {step.status === 'completed' && <CheckCircle2 size={12} className="text-white opacity-0" />} 
-          </div>
-          
-          <div className="flex flex-col gap-3">
-            <div className="flex items-start justify-between group">
-              <div className="space-y-1">
-                <h4 className={cn(
-                  "text-sm font-medium transition-colors leading-none",
-                  step.status === 'running' ? "text-primary" : 
-                  step.status === 'completed' ? "text-foreground" : "text-muted-foreground"
-                )}>
-                  {step.label}
-                </h4>
-                {step.status === 'running' && (
-                  <span className="text-[10px] text-primary/70 animate-pulse font-medium uppercase tracking-wide">In Progress</span>
-                )}
-              </div>
+      {localSteps.map((step, index) => {
+        const isDragging = draggedIndex === index;
+        const isOver = dragOverIndex === index && draggedIndex !== index;
+
+        return (
+          <div 
+            key={step.id} 
+            draggable={true}
+            onDragStart={(e) => {
+              e.dataTransfer.setData('text/plain', String(index));
+              setDraggedIndex(index);
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              if (dragOverIndex !== index) setDragOverIndex(index);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (draggedIndex !== null) {
+                handleMove(draggedIndex, index);
+                setDraggedIndex(null);
+                setDragOverIndex(null);
+              }
+            }}
+            onDragEnd={() => {
+              setDraggedIndex(null);
+              setDragOverIndex(null);
+            }}
+            className={cn(
+              "relative py-4 first:pt-0 last:pb-0 transition-all group",
+              isDragging && "opacity-40",
+              isOver && "border-t-2 border-primary -mt-0.5"
+            )}
+          >
+            <div className={cn(
+              "absolute -left-[21px] top-4 w-3 h-3 rounded-full border-2 transition-all bg-manus-cream z-10",
+              step.status === 'completed' ? "border-primary bg-primary" : 
+              step.status === 'running' ? "border-primary animate-pulse" : "border-muted-foreground/30"
+            )}>
+              {step.status === 'completed' && <CheckCircle2 size={12} className="text-white opacity-0" />} 
             </div>
+            
+            <div className="flex flex-col gap-3">
+              <div className="flex items-start justify-between group">
+                <div className="flex items-center gap-2">
+                  <div 
+                    className="cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-foreground p-0.5 rounded transition-colors touch-none"
+                    title="Drag to reorder step"
+                  >
+                    <GripVertical size={13} />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className={cn(
+                      "text-sm font-medium transition-colors leading-none",
+                      step.status === 'running' ? "text-primary" : 
+                      step.status === 'completed' ? "text-foreground" : "text-muted-foreground"
+                    )}>
+                      {step.label}
+                    </h4>
+                    {step.status === 'running' && (
+                      <span className="text-[10px] text-primary/70 animate-pulse font-medium uppercase tracking-wide">In Progress</span>
+                    )}
+                  </div>
+                </div>
+              </div>
 
             {/* Trace / Tool Output Display */}
             {step.trace && step.trace.length > 0 && (
@@ -129,7 +190,8 @@ export function Timeline({ steps }: TimelineProps) {
             )}
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
