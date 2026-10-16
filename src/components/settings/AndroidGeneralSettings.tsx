@@ -225,18 +225,6 @@ export function AndroidGeneralSettings({ onBack }: AndroidGeneralSettingsProps) 
   return (
     <div className="fixed inset-0 z-50 bg-black text-[#F1F2F4] antialiased flex flex-col min-h-screen selection:bg-[#343538] selection:text-white font-sans overflow-hidden">
       
-      {/* Top Android / Status Bar */}
-      <div className="fixed top-0 inset-x-0 h-12 z-50 flex items-center justify-between px-6 bg-black/90 backdrop-blur-xl text-white select-none pt-safe">
-        <div className="flex items-center space-x-1">
-          <span className="text-[13px] font-semibold tracking-tight text-white">{currentTime}</span>
-        </div>
-        <div className="flex items-center space-x-2 text-white">
-          <span className="text-[11px] font-bold tracking-wider text-neutral-400">5G</span>
-          <span className="material-symbols-outlined text-[17px] text-white">wifi</span>
-          <span className="material-symbols-outlined text-[19px] text-white">battery_full</span>
-        </div>
-      </div>
-
       {/* Sticky Header */}
       <header className="fixed top-0 inset-x-0 z-40 bg-black/85 backdrop-blur-xl border-b border-[#1F2124] pt-safe shadow-[0_2px_12px_rgba(0,0,0,0.8)]">
         <div className="h-16 pt-3 px-4 flex items-center justify-between">

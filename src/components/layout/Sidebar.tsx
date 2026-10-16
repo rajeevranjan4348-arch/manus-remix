@@ -19,7 +19,7 @@ import {
   Sparkles,
   Code,
   Globe,
-  BarChart3,
+  ChartBar as BarChart3,
   Database,
   Brain,
   Box,

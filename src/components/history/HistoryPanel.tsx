@@ -12,7 +12,7 @@ import {
   X, 
   Loader2, 
   Globe, 
-  BarChart3, 
+  ChartBar as BarChart3, 
   FileText, 
   Image as ImageIcon,
   Film,

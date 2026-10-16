@@ -16,7 +16,7 @@ import {
   CheckSquare, 
   Globe, 
   Terminal, 
-  BarChart2, 
+  ChartBar as BarChart2, 
   Sparkles, 
   Github, 
   Activity, 

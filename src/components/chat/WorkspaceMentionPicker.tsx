@@ -15,7 +15,7 @@ import {
   Sparkles, 
   Globe, 
   Terminal, 
-  BarChart2, 
+  ChartBar as BarChart2, 
   Plug,
   Check,
   Layers

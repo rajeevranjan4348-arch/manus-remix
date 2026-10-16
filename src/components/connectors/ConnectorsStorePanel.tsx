@@ -22,7 +22,7 @@ import {
   StickyNote,
   Globe, 
   Terminal, 
-  BarChart2, 
+  ChartBar as BarChart2, 
   Sparkles, 
   Brain, 
   Check, 

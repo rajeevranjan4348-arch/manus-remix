@@ -5,7 +5,7 @@ import {
   ArrowLeft,
   Settings2,
   FileText,
-  BarChart3,
+  ChartBar as BarChart3,
   Check,
   X,
   RefreshCw,

@@ -591,8 +591,6 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      // Drop-in animated replacement for the existing Lucide React imports.
-      'lucide-react': 'lucide-motion',
     },
   },
   server: {
