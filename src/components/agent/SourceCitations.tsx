@@ -66,7 +66,11 @@ export function SourceCitations({ sources, className }: SourceCitationsProps) {
   if (!sources || sources.length === 0) return null;
 
   return (
-    <div className={cn("pt-3 mt-2 border-t border-border/40", className)}>
+    <div 
+      data-search-content="true"
+      data-testid="search-citations"
+      className={cn("pt-3 mt-2 border-t border-border/40 search-content-result", className)}
+    >
       <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground mb-2">
         <CheckCircle2 size={13} className="text-emerald-500" />
         <span>Verified Sources & Citations ({sources.length})</span>

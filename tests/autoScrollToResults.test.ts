@@ -1,0 +1,362 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// Polyfill window & localStorage in test environment
+const store = new Map<string, string>();
+if (typeof globalThis.localStorage === 'undefined') {
+  (globalThis as any).localStorage = {
+    getItem: (key: string) => store.get(key) || null,
+    setItem: (key: string, value: string) => store.set(key, value),
+    removeItem: (key: string) => store.delete(key),
+    clear: () => store.clear(),
+  };
+}
+
+if (typeof globalThis.window === 'undefined') {
+  (globalThis as any).window = {
+    dispatchEvent: () => true,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  };
+}
+
+// Lightweight mock element constructor if document is undefined
+class MockElement {
+  attributes = new Map<string, string>();
+  className = '';
+  textContent = '';
+  children: MockElement[] = [];
+  parentElement: MockElement | null = null;
+  scrollTop = 0;
+  clientHeight = 500;
+  scrollHeight = 1000;
+  scrollTo = vi.fn();
+  _rect = { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => {} };
+
+  setAttribute(name: string, value: string) {
+    this.attributes.set(name, value);
+  }
+
+  getAttribute(name: string) {
+    return this.attributes.get(name) || null;
+  }
+
+  appendChild(child: MockElement) {
+    child.parentElement = this;
+    this.children.push(child);
+  }
+
+  getBoundingClientRect() {
+    return this._rect;
+  }
+
+  querySelectorAll<T = MockElement>(selector: string): T[] {
+    const results: MockElement[] = [];
+    const selectors = selector.split(',').map(s => s.trim());
+
+    const traverse = (el: MockElement) => {
+      for (const sel of selectors) {
+        if (sel.startsWith('[') && sel.endsWith(']')) {
+          const match = sel.slice(1, -1).split('=');
+          const attr = match[0];
+          const val = match[1] ? match[1].replace(/["']/g, '') : null;
+          if (val === null ? el.attributes.has(attr) : el.attributes.get(attr) === val) {
+            if (!results.includes(el)) results.push(el);
+          }
+        } else if (sel.startsWith('.')) {
+          const cls = sel.slice(1);
+          if (el.className.split(/\s+/).includes(cls)) {
+            if (!results.includes(el)) results.push(el);
+          }
+        }
+      }
+      for (const child of el.children) {
+        traverse(child);
+      }
+    };
+
+    for (const child of this.children) {
+      traverse(child);
+    }
+    return results as unknown as T[];
+  }
+}
+
+if (typeof globalThis.document === 'undefined') {
+  (globalThis as any).document = {
+    createElement: () => new MockElement(),
+  };
+}
+
+import { centerElementInContainer, findSearchContentElement } from '@/components/agent/ChatView';
+import { getSettings, saveSettings, DEFAULT_SETTINGS, resetSettings } from '@/lib/settingsStore';
+
+describe('Auto-scroll to Results Feature', () => {
+  beforeEach(() => {
+    store.clear();
+    resetSettings();
+  });
+
+  describe('centerElementInContainer Helper', () => {
+    it('calculates the vertically centered position of a search element in a scrollable container', () => {
+      // Mock container element: height 600px, scrollHeight 2000px, current scrollTop 100px
+      const container = document.createElement('div');
+      Object.defineProperty(container, 'clientHeight', { value: 600, configurable: true });
+      Object.defineProperty(container, 'scrollHeight', { value: 2000, configurable: true });
+      container.scrollTop = 100;
+
+      container.getBoundingClientRect = () => ({
+        top: 50,
+        bottom: 650,
+        left: 0,
+        right: 800,
+        width: 800,
+        height: 600,
+        x: 0,
+        y: 50,
+        toJSON: () => {},
+      });
+
+      // Mock target search content: height 120px, located at y=400 on screen
+      const target = document.createElement('div');
+      target.getBoundingClientRect = () => ({
+        top: 400,
+        bottom: 520,
+        left: 50,
+        right: 750,
+        width: 700,
+        height: 120,
+        x: 50,
+        y: 400,
+        toJSON: () => {},
+      });
+
+      container.appendChild(target);
+
+      const scrollToMock = vi.fn();
+      container.scrollTo = scrollToMock;
+
+      // Relative top: (400 - 50) + 100 = 450
+      // Centered top: 450 - (600 / 2) + (120 / 2) = 450 - 300 + 60 = 210
+      const finalTop = centerElementInContainer(container, target, 'smooth');
+
+      expect(finalTop).toBe(210);
+      expect(scrollToMock).toHaveBeenCalledWith({
+        top: 210,
+        behavior: 'smooth',
+      });
+    });
+
+    it('clamps the centered scroll position to container top (0) if target is near top', () => {
+      const container = document.createElement('div');
+      Object.defineProperty(container, 'clientHeight', { value: 500, configurable: true });
+      Object.defineProperty(container, 'scrollHeight', { value: 1500, configurable: true });
+      container.scrollTop = 0;
+
+      container.getBoundingClientRect = () => ({
+        top: 0,
+        bottom: 500,
+        left: 0,
+        right: 500,
+        width: 500,
+        height: 500,
+        x: 0,
+        y: 0,
+        toJSON: () => {},
+      });
+
+      const target = document.createElement('div');
+      target.getBoundingClientRect = () => ({
+        top: 20,
+        bottom: 60,
+        left: 10,
+        right: 490,
+        width: 480,
+        height: 40,
+        x: 10,
+        y: 20,
+        toJSON: () => {},
+      });
+
+      container.appendChild(target);
+      const scrollToMock = vi.fn();
+      container.scrollTo = scrollToMock;
+
+      const finalTop = centerElementInContainer(container, target, 'smooth');
+      expect(finalTop).toBe(0);
+      expect(scrollToMock).toHaveBeenCalledWith({
+        top: 0,
+        behavior: 'smooth',
+      });
+    });
+
+    it('clamps the centered scroll position to maximum scroll offset', () => {
+      const container = document.createElement('div');
+      Object.defineProperty(container, 'clientHeight', { value: 400, configurable: true });
+      Object.defineProperty(container, 'scrollHeight', { value: 1000, configurable: true });
+      container.scrollTop = 500;
+
+      container.getBoundingClientRect = () => ({
+        top: 0,
+        bottom: 400,
+        left: 0,
+        right: 400,
+        width: 400,
+        height: 400,
+        x: 0,
+        y: 0,
+        toJSON: () => {},
+      });
+
+      // Target at deep bottom
+      const target = document.createElement('div');
+      target.getBoundingClientRect = () => ({
+        top: 950,
+        bottom: 1000,
+        left: 10,
+        right: 390,
+        width: 380,
+        height: 50,
+        x: 10,
+        y: 950,
+        toJSON: () => {},
+      });
+
+      container.appendChild(target);
+      const scrollToMock = vi.fn();
+      container.scrollTo = scrollToMock;
+
+      // Max scroll: 1000 - 400 = 600
+      const finalTop = centerElementInContainer(container, target, 'smooth');
+      expect(finalTop).toBe(600);
+      expect(scrollToMock).toHaveBeenCalledWith({
+        top: 600,
+        behavior: 'smooth',
+      });
+    });
+
+    it('falls back to scrollTop assignment when scrollTo is not available', () => {
+      const container = document.createElement('div');
+      Object.defineProperty(container, 'clientHeight', { value: 400, configurable: true });
+      Object.defineProperty(container, 'scrollHeight', { value: 1000, configurable: true });
+      container.scrollTop = 0;
+      delete (container as any).scrollTo;
+
+      container.getBoundingClientRect = () => ({
+        top: 0,
+        bottom: 400,
+        left: 0,
+        right: 400,
+        width: 400,
+        height: 400,
+        x: 0,
+        y: 0,
+        toJSON: () => {},
+      });
+
+      const target = document.createElement('div');
+      target.getBoundingClientRect = () => ({
+        top: 300,
+        bottom: 400,
+        left: 0,
+        right: 400,
+        width: 400,
+        height: 100,
+        x: 0,
+        y: 300,
+        toJSON: () => {},
+      });
+
+      const finalTop = centerElementInContainer(container, target);
+      // relativeTargetTop: 300 + 0 = 300. centeredTop: 300 - 200 + 50 = 150.
+      expect(finalTop).toBe(150);
+      expect(container.scrollTop).toBe(150);
+    });
+  });
+
+  describe('findSearchContentElement Detection Priority', () => {
+    it('prioritizes search source citations when present', () => {
+      const container = document.createElement('div');
+      
+      const stepTrace = document.createElement('div');
+      stepTrace.setAttribute('data-search-content', 'true');
+      stepTrace.setAttribute('data-search-trace', 'true');
+      container.appendChild(stepTrace);
+
+      const citations = document.createElement('div');
+      citations.setAttribute('data-testid', 'search-citations');
+      citations.className = 'search-content-result';
+      container.appendChild(citations);
+
+      const found = findSearchContentElement(container);
+      expect(found).toBe(citations);
+    });
+
+    it('finds search result visual card if citations are absent', () => {
+      const container = document.createElement('div');
+
+      const searchStep = document.createElement('div');
+      searchStep.setAttribute('data-search-step', 'true');
+      container.appendChild(searchStep);
+
+      const resultCard = document.createElement('div');
+      resultCard.setAttribute('data-testid', 'task-result-content');
+      container.appendChild(resultCard);
+
+      const found = findSearchContentElement(container);
+      expect(found).toBe(resultCard);
+    });
+
+    it('finds search step or trace items when no card or citations exist', () => {
+      const container = document.createElement('div');
+
+      const regularMsg = document.createElement('div');
+      container.appendChild(regularMsg);
+
+      const searchTrace = document.createElement('div');
+      searchTrace.setAttribute('data-search-trace', 'true');
+      searchTrace.setAttribute('data-search-content', 'true');
+      container.appendChild(searchTrace);
+
+      const found = findSearchContentElement(container);
+      expect(found).toBe(searchTrace);
+    });
+
+    it('finds assistant search message when tagged', () => {
+      const container = document.createElement('div');
+
+      const searchMsg = document.createElement('div');
+      searchMsg.setAttribute('data-search-message', 'true');
+      searchMsg.textContent = 'Found the latest information from web sources...';
+      container.appendChild(searchMsg);
+
+      const found = findSearchContentElement(container);
+      expect(found).toBe(searchMsg);
+    });
+
+    it('returns null if no search elements exist in container', () => {
+      const container = document.createElement('div');
+      const plainDiv = document.createElement('div');
+      plainDiv.textContent = 'Hello world';
+      container.appendChild(plainDiv);
+
+      const found = findSearchContentElement(container);
+      expect(found).toBeNull();
+    });
+  });
+
+  describe('Settings Integration for autoScrollToResults', () => {
+    it('defaults autoScrollToResults to true in DEFAULT_SETTINGS and getSettings()', () => {
+      expect(DEFAULT_SETTINGS.autoScrollToResults).toBe(true);
+      const settings = getSettings();
+      expect(settings.autoScrollToResults).toBe(true);
+    });
+
+    it('persists changes to autoScrollToResults', () => {
+      saveSettings({ autoScrollToResults: false });
+      expect(getSettings().autoScrollToResults).toBe(false);
+
+      saveSettings({ autoScrollToResults: true });
+      expect(getSettings().autoScrollToResults).toBe(true);
+    });
+  });
+});

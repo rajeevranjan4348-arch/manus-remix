@@ -11,6 +11,7 @@ export interface UserSettings {
   language: AppLanguage;
   soundEffects: boolean;
   reducedMotion: boolean;
+  autoScrollToResults?: boolean;
 
   // Robot appearance and animation
   robotState: string;

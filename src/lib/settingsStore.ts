@@ -9,6 +9,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   language: 'en',
   soundEffects: true,
   reducedMotion: false,
+  autoScrollToResults: true,
 
   // Robot appearance and animation
   robotState: 'idle',

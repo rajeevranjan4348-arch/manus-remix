@@ -479,6 +479,31 @@ export function SettingsModal({ isOpen, onClose, initialTab, activeTaskInfo }: S
                   </button>
                 </div>
 
+                {/* Auto-scroll to results */}
+                <div className="pt-4 border-t border-border/50 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-foreground">Auto-scroll to Results</p>
+                    <p className="text-[11px] text-muted-foreground">Automatically center search content in view once stream finishes</p>
+                  </div>
+                  <button
+                    onClick={() => updateSetting('autoScrollToResults', settings.autoScrollToResults === false ? true : false)}
+                    role="switch"
+                    aria-checked={settings.autoScrollToResults !== false}
+                    aria-label="Toggle auto-scroll to results"
+                    className={cn(
+                      "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                      settings.autoScrollToResults !== false ? "bg-foreground" : "bg-muted"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-xs transform transition duration-200 ease-in-out",
+                        settings.autoScrollToResults !== false ? "translate-x-4" : "translate-x-0"
+                      )}
+                    />
+                  </button>
+                </div>
+
                 {/* Google Workspace Account */}
                 <div className="pt-4 border-t border-border/50 flex items-center justify-between">
                   <div>

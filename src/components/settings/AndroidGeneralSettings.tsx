@@ -94,6 +94,7 @@ const SPEECH_INPUT_OPTIONS = [
 export function AndroidGeneralSettings({ onBack }: AndroidGeneralSettingsProps) {
   const { theme, setTheme } = useTheme();
   const [settings, setSettings] = useState<UserSettings>(getSettings());
+  const [currentTime, setCurrentTime] = useState('9:41');
 
   // Interactive UI state
   const [showHelpBanner, setShowHelpBanner] = useState(false);
@@ -107,10 +108,27 @@ export function AndroidGeneralSettings({ onBack }: AndroidGeneralSettingsProps) 
   const [selectedAccent, setSelectedAccent] = useState<AccentOption>(ACCENT_OPTIONS[0]);
   const [animationEnabled, setAnimationEnabled] = useState(!settings.reducedMotion);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+  const [autoScrollToResultsEnabled, setAutoScrollToResultsEnabled] = useState(settings.autoScrollToResults !== false);
+
+  // Sync clock
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      const hours = now.getHours();
+      const minutes = now.getMinutes().toString().padStart(2, '0');
+      setCurrentTime(`${hours % 12 || 12}:${minutes}`);
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Sync initial settings
   useEffect(() => {
     const current = getSettings();
     setSettings(current);
     setAnimationEnabled(!current.reducedMotion);
+    setAutoScrollToResultsEnabled(current.autoScrollToResults !== false);
   }, []);
 
   const handleUpdate = <K extends keyof UserSettings>(key: K, value: UserSettings[K]) => {
@@ -142,6 +160,15 @@ export function AndroidGeneralSettings({ onBack }: AndroidGeneralSettingsProps) 
     setAutoScrollEnabled(prev => {
       const next = !prev;
       toast.success(next ? 'Auto-scroll enabled' : 'Auto-scroll disabled');
+      return next;
+    });
+  };
+
+  const handleToggleAutoScrollToResults = () => {
+    setAutoScrollToResultsEnabled(prev => {
+      const next = !prev;
+      handleUpdate('autoScrollToResults', next);
+      toast.success(next ? 'Auto-scroll to results enabled' : 'Auto-scroll to results disabled');
       return next;
     });
   };
@@ -198,9 +225,21 @@ export function AndroidGeneralSettings({ onBack }: AndroidGeneralSettingsProps) 
   return (
     <div className="fixed inset-0 z-50 bg-black text-[#F1F2F4] antialiased flex flex-col min-h-screen selection:bg-[#343538] selection:text-white font-sans overflow-hidden">
       
+      {/* Top Android / Status Bar */}
+      <div className="fixed top-0 inset-x-0 h-12 z-50 flex items-center justify-between px-6 bg-black/90 backdrop-blur-xl text-white select-none pt-safe">
+        <div className="flex items-center space-x-1">
+          <span className="text-[13px] font-semibold tracking-tight text-white">{currentTime}</span>
+        </div>
+        <div className="flex items-center space-x-2 text-white">
+          <span className="text-[11px] font-bold tracking-wider text-neutral-400">5G</span>
+          <span className="material-symbols-outlined text-[17px] text-white">wifi</span>
+          <span className="material-symbols-outlined text-[19px] text-white">battery_full</span>
+        </div>
+      </div>
+
       {/* Sticky Header */}
       <header className="fixed top-0 inset-x-0 z-40 bg-black/85 backdrop-blur-xl border-b border-[#1F2124] pt-safe shadow-[0_2px_12px_rgba(0,0,0,0.8)]">
-        <div className="h-14 px-4 flex items-center justify-between">
+        <div className="h-16 pt-3 px-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <button 
               aria-label="Go back" 
@@ -229,7 +268,7 @@ export function AndroidGeneralSettings({ onBack }: AndroidGeneralSettingsProps) 
       </header>
 
       {/* Main Settings Canvas */}
-      <main className="flex flex-col relative w-full px-4 pt-[calc(3.5rem+env(safe-area-inset-top,0px))] pb-16 bg-black flex-1 overflow-y-auto overscroll-contain custom-scrollbar">
+      <main className="flex flex-col relative w-full px-4 pt-24 pb-16 bg-black flex-1 overflow-y-auto overscroll-contain custom-scrollbar">
         <div className="flex flex-col w-full pb-8 space-y-6 max-w-md mx-auto">
           
           {/* Micro Section Header */}
@@ -492,6 +531,37 @@ export function AndroidGeneralSettings({ onBack }: AndroidGeneralSettingsProps) 
                   <span 
                     className={`switch-thumb w-6 h-6 rounded-full shadow-md transition-transform duration-200 ${
                       autoScrollEnabled ? 'bg-black translate-x-5' : 'bg-[#9CA3AF] translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="h-[1px] bg-[#282A2E] mx-4" />
+
+              {/* Auto-scroll to results Toggle */}
+              <div className="p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3 min-w-0 pr-2">
+                  <div className="w-9 h-9 rounded-xl bg-[#25272A] border border-[#31343A] flex items-center justify-center shrink-0 text-white">
+                    <span className="material-symbols-outlined text-[19px]">center_focus_strong</span>
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-[14px] text-white font-medium tracking-tight">Auto-scroll to results</span>
+                    <span className="text-[12px] text-[#8E939D] truncate">Center search content in view when stream finishes</span>
+                  </div>
+                </div>
+                <button 
+                  aria-checked={autoScrollToResultsEnabled} 
+                  aria-label="Toggle auto-scroll to results"
+                  className={`switch-btn relative w-12 h-7 rounded-full transition-all duration-200 flex items-center p-0.5 shrink-0 shadow-inner focus:outline-none cursor-pointer ${
+                    autoScrollToResultsEnabled ? 'bg-white' : 'bg-[#25272A]'
+                  }`} 
+                  onClick={handleToggleAutoScrollToResults} 
+                  role="switch" 
+                  type="button"
+                >
+                  <span 
+                    className={`switch-thumb w-6 h-6 rounded-full shadow-md transition-transform duration-200 ${
+                      autoScrollToResultsEnabled ? 'bg-black translate-x-5' : 'bg-[#9CA3AF] translate-x-0'
                     }`}
                   />
                 </button>

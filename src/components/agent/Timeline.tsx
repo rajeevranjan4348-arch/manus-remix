@@ -146,7 +146,12 @@ export function Timeline({ steps, onReorderSteps }: TimelineProps) {
 
                       if (isSearch) {
                         return (
-                          <div key={i} className="flex items-center gap-2 p-2 bg-white rounded-lg border border-border/50 shadow-sm">
+                          <div 
+                            key={i} 
+                            data-search-content="true"
+                            data-search-trace="true"
+                            className="flex items-center gap-2 p-2 bg-white rounded-lg border border-border/50 shadow-sm"
+                          >
                             <div className="p-1 bg-slate-100 dark:bg-white/10 text-slate-800 dark:text-white rounded">
                               <Search size={12} />
                             </div>
