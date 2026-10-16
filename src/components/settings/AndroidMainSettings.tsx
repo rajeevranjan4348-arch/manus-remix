@@ -33,7 +33,8 @@ import { AndroidGeneralSettings } from './AndroidGeneralSettings';
 import { AndroidVoiceSettings } from './AndroidVoiceSettings';
 import { AndroidRobotSettings } from './AndroidRobotSettings';
 import { DiagnosticPanel } from './DiagnosticPanel';
-import { StitchSettingsPanels, StitchSettingsView } from './StitchSettingsPanels';
+import { StitchSettingsPanels } from './StitchSettingsPanels';
+import type { StitchSettingsView } from './StitchSettingsPanels';
 
 interface AndroidMainSettingsProps {
   onBack?: () => void;
