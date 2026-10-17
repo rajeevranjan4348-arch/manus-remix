@@ -515,8 +515,29 @@ export function useAgentTask() {
           }).catch(() => {});
         }
       }
-      setTaskStatus('completed');
-      setPhase('completed');
+      // A stream can close without an onFinish callback (network drop, proxy timeout,
+      // or SDK-level disconnect). Only treat it as success when an assistant answer
+      // actually exists; otherwise expose a retryable error instead of silently
+      // dismissing the loader and leaving the user without a reply.
+      if (liveAssistant?.content?.trim()) {
+        setTaskStatus('completed');
+        setPhase('completed');
+      } else {
+        const failureText = 'The AI connection ended before a response was received. Please retry.';
+        setResult({
+          type: 'chat',
+          content: failureText,
+          error: true,
+          retryable: true,
+        });
+        setTaskStatus('error');
+        setPhase('error');
+        setSteps(prev => prev.map(step => step.status === 'running'
+          ? { ...step, status: 'error' as const }
+          : step));
+        toast.error(failureText);
+      }
+      isSubmittingRef.current = false;
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
         detail: { isGenerating: false, mode: 'work' }
       }));
