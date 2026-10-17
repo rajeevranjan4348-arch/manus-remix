@@ -5,3 +5,7 @@
 [submodule "vendor/openui"]
 	path = vendor/openui
 	url = https://github.com/rajeevranjan4348-arch/openui.git
+
+[submodule "vendor/autogen"]
+	path = vendor/autogen
+	url = https://github.com/microsoft/autogen.git
