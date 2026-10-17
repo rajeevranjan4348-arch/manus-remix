@@ -327,7 +327,6 @@ export function useAgentTask() {
       };
       
       setResult(finalResult);
-      isSubmittingRef.current = false;
       setTaskStatus('completed');
       setPhase('completed');
       emitRobotEvent('TASK_SUCCEEDED');
@@ -516,29 +515,8 @@ export function useAgentTask() {
           }).catch(() => {});
         }
       }
-      // A stream can close without an onFinish callback (network drop, proxy timeout,
-      // or SDK-level disconnect). Only treat it as success when an assistant answer
-      // actually exists; otherwise expose a retryable error instead of silently
-      // dismissing the loader and leaving the user without a reply.
-      if (liveAssistant?.content?.trim()) {
-        setTaskStatus('completed');
-        setPhase('completed');
-      } else {
-        const failureText = 'The AI connection ended before a response was received. Please retry.';
-        setResult({
-          type: 'chat',
-          content: failureText,
-          error: true,
-          retryable: true,
-        });
-        setTaskStatus('error');
-        setPhase('error');
-        setSteps(prev => prev.map(step => step.status === 'running'
-          ? { ...step, status: 'error' as const }
-          : step));
-        toast.error(failureText);
-      }
-      isSubmittingRef.current = false;
+      setTaskStatus('completed');
+      setPhase('completed');
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
         detail: { isGenerating: false, mode: 'work' }
       }));
@@ -699,20 +677,12 @@ export function useAgentTask() {
 
   const sendMessage = useCallback((content: string) => {
     if (!content || !content.trim()) return;
-    // The SDK hook owns a single active stream. Do not start overlapping requests
-    // that would share its loading/messages state; allow the next turn after the
-    // previous stream reaches any terminal state.
-    if (isSubmittingRef.current) {
-      console.warn('[Manus Agent] Ignored submission while a request is still active.');
-      return;
-    }
     const now = Date.now();
     if (lastSubmitRef.current.prompt === content.trim() && now - lastSubmitRef.current.timestamp < 1200) {
       console.warn('[Manus Agent] Suppressed duplicate rapid submission:', content);
       return;
     }
     lastSubmitRef.current = { prompt: content.trim(), timestamp: now };
-    isSubmittingRef.current = true;
 
     setTaskStatus('running');
     setPhase('tool-calling');

@@ -15,11 +15,12 @@ interface TopbarProps {
   showNewTask?: boolean;
 }
 
-const MODELS = [
-  { id: 'manus-1.6-lite', name: 'Manus 1.6 Lite', badge: 'Fast', desc: 'Optimized for speed and quick tasks', icon: Zap },
-  { id: 'manus-1.6-max', name: 'Manus 1.6 Max', badge: 'Pro', desc: 'Complex reasoning & autonomous workflows', icon: Brain },
-  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', badge: 'Multimodal', desc: 'Ultra-fast vision & text processing', icon: Sparkles },
-  { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', badge: 'Code', desc: 'Advanced coding & data synthesis', icon: Cpu },
+export const MODELS = [
+  { id: 'manus-1.6-lite', name: 'Manus 1.6 Lite', badge: 'Fast', desc: 'Optimized for speed and quick tasks (1M context)', icon: Zap, contextWindow: '1M' },
+  { id: 'manus-1.6-max', name: 'Manus 1.6 Max (2M)', badge: '2M Context', desc: 'Complex reasoning with 2,000,000 token context window', icon: Brain, contextWindow: '2M' },
+  { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (2M)', badge: '2M Context', desc: 'Massive 2M context window for huge codebases & documents', icon: Sparkles, contextWindow: '2M' },
+  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', badge: 'Multimodal', desc: 'Ultra-fast vision & text processing (1M context)', icon: Sparkles, contextWindow: '1M' },
+  { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', badge: 'Code', desc: 'Advanced coding & data synthesis', icon: Cpu, contextWindow: '200K' },
 ];
 
 export function Topbar({ onToggleSidebar, onOpenHistory, onNewTask, onOpenSettings, onExport, showNewTask }: TopbarProps) {
@@ -162,6 +163,11 @@ export function Topbar({ onToggleSidebar, onOpenHistory, onNewTask, onOpenSettin
           >
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
             <span className="text-sm font-semibold tracking-tight">{currentModel.name}</span>
+            {currentModel.contextWindow === '2M' && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shrink-0">
+                2M Context
+              </span>
+            )}
             <ChevronDown size={16} strokeWidth={2.4} className={`text-muted-foreground transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
           </button>
 
@@ -182,8 +188,9 @@ export function Topbar({ onToggleSidebar, onOpenHistory, onNewTask, onOpenSettin
           {/* Dropdown Menu */}
           {isOpen && (
             <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-72 sm:w-80 bg-white dark:bg-[#18191c] border border-border rounded-2xl shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-              <div className="px-3 py-2 border-b border-border/60 mb-1">
+              <div className="px-3 py-2 border-b border-border/60 mb-1 flex items-center justify-between">
                 <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Select Intelligence Model</p>
+                <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full">Up to 2M Context</span>
               </div>
 
               <div className="space-y-1">
@@ -206,9 +213,16 @@ export function Topbar({ onToggleSidebar, onOpenHistory, onNewTask, onOpenSettin
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-1">
                           <span className="text-xs font-semibold text-foreground truncate">{model.name}</span>
-                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
-                            {model.badge}
-                          </span>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {model.contextWindow === '2M' && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                                2M
+                              </span>
+                            )}
+                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
+                              {model.badge}
+                            </span>
+                          </div>
                         </div>
                         <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">{model.desc}</p>
                       </div>

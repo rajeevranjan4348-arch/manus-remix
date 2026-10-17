@@ -24,7 +24,8 @@ import {
   Settings,
   Zap,
   AlertCircle,
-  RotateCw
+  RotateCw,
+  GripVertical
 } from 'lucide-react';
 import { ConnectorsPopupMenu } from '../chat/ConnectorsPopupMenu';
 import { ConnectorsStorePanel, CONNECTOR_CATALOG } from '../connectors/ConnectorsStorePanel';
@@ -57,6 +58,7 @@ import { Step } from '@/hooks/useAgentTask';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
 import { getChatViewDraft, saveChatViewDraft, clearChatViewDraft } from '@/lib/draftStorage';
+import { useAutoSaveChatInput } from '@/hooks/useAutoSaveChatInput';
 
 
 type ManusMapRequest =
@@ -107,6 +109,7 @@ interface ChatViewProps {
   prompt: string;
   messages: any[];
   steps: Step[];
+  onReorderSteps?: (newSteps: Step[]) => void;
   result: any;
   chartData?: any;
   status: 'idle' | 'running' | 'completed' | 'error';
@@ -159,6 +162,7 @@ export function ChatView({
   prompt, 
   messages, 
   steps, 
+  onReorderSteps,
   result, 
   chartData,
   status, 
@@ -170,10 +174,32 @@ export function ChatView({
 }: ChatViewProps) {
   const [input, setInput] = React.useState<string>(() => getChatViewDraft());
 
-  // Local storage persistence: save ChatView draft prompt automatically
+  // Local storage persistence: auto-save ChatView draft prompt whenever the user pauses typing for > 500ms
+  useAutoSaveChatInput({
+    value: input,
+    onSave: saveChatViewDraft,
+    delay: 500,
+  });
+  const [localSteps, setLocalSteps] = React.useState<Step[]>(steps);
+  const [draggedStepIndex, setDraggedStepIndex] = React.useState<number | null>(null);
+  const [dragOverStepIndex, setDragOverStepIndex] = React.useState<number | null>(null);
+
   React.useEffect(() => {
-    saveChatViewDraft(input);
-  }, [input]);
+    setLocalSteps(steps);
+  }, [steps]);
+
+  const handleReorderStep = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= localSteps.length || toIndex >= localSteps.length) return;
+    const updated = [...localSteps];
+    const [movedItem] = updated.splice(fromIndex, 1);
+    updated.splice(toIndex, 0, movedItem);
+    setLocalSteps(updated);
+    if (onReorderSteps) {
+      onReorderSteps(updated);
+    }
+    toast.success(`Moved step "${movedItem.label}" to #${toIndex + 1}`);
+  };
+
   const [expandedSteps, setExpandedSteps] = React.useState<Record<string, boolean>>({});
   const [isThinkHarder, setIsThinkHarder] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
@@ -181,8 +207,6 @@ export function ChatView({
   const [isDragging, setIsDragging] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<VoiceCommandResult | null>(null);
   const [weatherMap, setWeatherMap] = useState<Record<string, WeatherData>>({});
-  // Prevent duplicate weather requests when streaming updates re-render the message list.
-  const weatherRequestsRef = useRef<Set<string>>(new Set());
   const [completedTypewriters, setCompletedTypewriters] = useState<Record<string, boolean>>({});
 
   // Granular robot reaction sync with task status and active execution step
@@ -299,30 +323,23 @@ export function ChatView({
     toast.success(`Sent "${driveFile.name}" as context to AI Agent`);
   };
 
-  // Check new messages for live weather data without duplicating in-flight requests.
+  // Check user queries for live weather data
   useEffect(() => {
-    messages.forEach(async (m) => {
-      const msgKey = String(m.id || m.content || '');
-      if (!msgKey || weatherRequestsRef.current.has(msgKey)) return;
-
-      const query = extractWeatherQuery(m.content || '');
-      if (!query.isWeather || !query.city) return;
-
-      weatherRequestsRef.current.add(msgKey);
-      try {
-        const data = await fetchWeatherByCity(query.city);
-        if (data) {
-          setWeatherMap(prev => prev[msgKey] ? prev : ({
-            ...prev,
-            [msgKey]: data,
-            [query.city!.toLowerCase()]: data,
-            [data.locationName.toLowerCase()]: data,
-          }));
-        } else {
-          weatherRequestsRef.current.delete(msgKey);
+    messages.forEach(async (m, idx) => {
+      const msgKey = m.id || m.content;
+      if (!weatherMap[msgKey]) {
+        const query = extractWeatherQuery(m.content || '');
+        if (query.isWeather && query.city) {
+          const data = await fetchWeatherByCity(query.city);
+          if (data) {
+            setWeatherMap(prev => ({
+              ...prev,
+              [msgKey]: data,
+              [query.city!.toLowerCase()]: data,
+              [data.locationName.toLowerCase()]: data,
+            }));
+          }
         }
-      } catch {
-        weatherRequestsRef.current.delete(msgKey);
       }
     });
   }, [messages]);
@@ -723,34 +740,122 @@ export function ChatView({
   };
 
   // Render a single step (Task Progress Item)
-  const renderStep = (step: Step) => {
+  const renderStep = (step: Step, index: number) => {
     const isCompleted = step.status === 'completed';
     const isRunning = step.status === 'running';
     const isExpanded = expandedSteps[step.id] || isRunning;
+    const isDragging = draggedStepIndex === index;
+    const isDragOver = dragOverStepIndex === index && draggedStepIndex !== index;
 
     return (
-      <div key={step.id} className="border border-border/40 rounded-xl bg-card/60 dark:bg-card/60 backdrop-blur-xs overflow-hidden my-2 animate-in fade-in slide-in-from-bottom-2">
-        <button 
-          onClick={() => toggleStep(step.id)}
-          className="w-full flex items-center justify-between p-3 hover:bg-manus-soft/50 transition-colors text-left"
-        >
-          <div className="flex items-center gap-3">
-            <div className={cn(
-              "flex items-center justify-center w-5 h-5 rounded-full border",
-              isCompleted ? "bg-green-500 border-green-500 text-white" : 
-              isRunning ? "border-primary border-t-transparent animate-spin" : "border-muted-foreground/30 text-muted-foreground/30"
-            )}>
-              {isCompleted && <Check size={12} />}
-            </div>
-            <span className={cn(
-              "text-sm font-medium",
-              isCompleted || isRunning ? "text-foreground" : "text-muted-foreground"
-            )}>
-              {step.label}
-            </span>
+      <div 
+        key={step.id} 
+        draggable={true}
+        onDragStart={(e) => {
+          e.dataTransfer.setData('text/plain', String(index));
+          setDraggedStepIndex(index);
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          if (dragOverStepIndex !== index) {
+            setDragOverStepIndex(index);
+          }
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          if (draggedStepIndex !== null) {
+            handleReorderStep(draggedStepIndex, index);
+            setDraggedStepIndex(null);
+            setDragOverStepIndex(null);
+          }
+        }}
+        onDragEnd={() => {
+          setDraggedStepIndex(null);
+          setDragOverStepIndex(null);
+        }}
+        className={cn(
+          "relative border border-border/40 rounded-xl bg-card/60 dark:bg-card/60 backdrop-blur-xs overflow-hidden my-2 transition-all group",
+          isDragging && "opacity-40 ring-2 ring-primary/40 border-dashed scale-[0.99]",
+          isDragOver && "border-primary ring-1 ring-primary/30 shadow-md",
+          "animate-in fade-in slide-in-from-bottom-2"
+        )}
+      >
+        {isDragOver && (
+          <div className="absolute top-0 inset-x-0 h-1 bg-primary rounded-full z-20 shadow-xs" />
+        )}
+
+        <div className="flex items-center">
+          {/* Drag Handle */}
+          <div 
+            className="pl-2.5 pr-1 py-3 cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-foreground transition-colors touch-none select-none"
+            title="Drag to reorder step"
+          >
+            <GripVertical size={14} />
           </div>
-          {isExpanded ? <ChevronUp size={16} className="text-muted-foreground" /> : <ChevronDown size={16} className="text-muted-foreground" />}
-        </button>
+
+          <button 
+            type="button"
+            onClick={() => toggleStep(step.id)}
+            className="flex-1 flex items-center justify-between p-3 pl-1 hover:bg-manus-soft/50 transition-colors text-left"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="text-[10px] font-mono text-muted-foreground/60 px-1.5 py-0.5 rounded bg-muted/40 font-semibold shrink-0">
+                #{index + 1}
+              </span>
+              <div className={cn(
+                "flex items-center justify-center w-5 h-5 rounded-full border shrink-0",
+                isCompleted ? "bg-green-500 border-green-500 text-white" : 
+                isRunning ? "border-primary border-t-transparent animate-spin" : "border-muted-foreground/30 text-muted-foreground/30"
+              )}>
+                {isCompleted && <Check size={12} />}
+              </div>
+              <span className={cn(
+                "text-sm font-medium truncate",
+                isCompleted || isRunning ? "text-foreground" : "text-muted-foreground"
+              )}>
+                {step.label}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0">
+              {/* Quick accessible move buttons for touch & keyboard */}
+              <div 
+                className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity mr-1"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  disabled={index === 0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleReorderStep(index, index - 1);
+                  }}
+                  className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-20 disabled:pointer-events-none transition-colors"
+                  title="Move step up"
+                  aria-label="Move step up"
+                >
+                  <ChevronUp size={13} />
+                </button>
+                <button
+                  type="button"
+                  disabled={index === localSteps.length - 1}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleReorderStep(index, index + 1);
+                  }}
+                  className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-20 disabled:pointer-events-none transition-colors"
+                  title="Move step down"
+                  aria-label="Move step down"
+                >
+                  <ChevronDown size={13} />
+                </button>
+              </div>
+
+              {isExpanded ? <ChevronUp size={16} className="text-muted-foreground" /> : <ChevronDown size={16} className="text-muted-foreground" />}
+            </div>
+          </button>
+        </div>
 
         {isExpanded && step.trace && step.trace.length > 0 && (
           <div className="bg-manus-soft/30 p-3 pt-0 space-y-2 border-t border-border/30">
@@ -1059,11 +1164,22 @@ export function ChatView({
         )}
 
         {/* Steps / Task Progress */}
-        {steps.length > 0 && (
+        {localSteps.length > 0 && (
           <div className="flex gap-4 max-w-3xl mx-auto my-2">
              <div className="w-8 shrink-0" /> {/* Spacer for alignment */}
              <div className="flex-1 min-w-0">
-               {steps.map(renderStep)}
+               <div className="flex items-center justify-between pb-1.5 px-1 text-xs text-muted-foreground font-medium select-none">
+                 <div className="flex items-center gap-1.5">
+                   <Workflow size={13} className="text-primary" />
+                   <span>Execution Steps ({localSteps.length})</span>
+                 </div>
+                 <div className="flex items-center gap-1 text-[11px] text-muted-foreground/70">
+                   <GripVertical size={12} className="text-muted-foreground/50" />
+                   <span className="hidden sm:inline">Drag handle or use arrows to reorder</span>
+                   <span className="sm:hidden">Drag to reorder</span>
+                 </div>
+               </div>
+               {localSteps.map((step, idx) => renderStep(step, idx))}
              </div>
           </div>
         )}

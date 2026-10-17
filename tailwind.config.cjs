@@ -63,8 +63,16 @@ module.exports = {
           soft: "#F8F7F5",
           border: "#EBE9E4",
         },
+        pitch: "#000000",
+        charcoal: {
+          DEFAULT: "#1E1F20",
+          elevated: "#252627",
+          stroke: "#333537",
+          muted: "#171819"
+        },
       },
       borderRadius: {
+        "28": "28px",
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",

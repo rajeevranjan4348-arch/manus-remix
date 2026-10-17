@@ -2,7 +2,6 @@ import React, { useState, memo } from 'react';
 import { Brain, ChevronDown, ChevronUp, Copy, Check, Sparkles, Lightbulb, Workflow, Cpu } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import LatticeLoader from '../ui/LatticeLoader';
 
 interface ThoughtProcessProps {
   thoughtText: string;
@@ -74,21 +73,10 @@ export const ThoughtProcess = memo(function ThoughtProcess({
             </span>
 
             {isLive ? (
-              <LatticeLoader
-                label="Reasoning live"
-                doneLabel="Thought for"
-                status="working"
-                pattern="spiral"
-                grid={3}
-                shape="round"
-                cellSize={4}
-                gap={1.5}
-                fontSize={11}
-                color="#a855f7"
-                glow={true}
-                showTimer={true}
-                className="shrink-0"
-              />
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-400/30 animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-ping" />
+                Reasoning live...
+              </span>
             ) : durationSeconds ? (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300">
                 <Sparkles size={10} />

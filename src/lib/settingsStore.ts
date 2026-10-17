@@ -21,6 +21,12 @@ export const DEFAULT_SETTINGS: UserSettings = {
   robotInteractive: true,
   robotAntenna: true,
   robotFloorShadow: true,
+  robotCloudSync: false,
+  robotPersonality: 'balanced',
+  robotEyeColor: 'cyan',
+  robotAccentHardware: 'lavender',
+  robotName: 'Manus',
+  robotSize: 100,
 
   // AI & Intelligence
   defaultModel: 'manus-1.6-lite',
@@ -106,6 +112,13 @@ export function saveSettings(updates: Partial<UserSettings>): UserSettings {
     // Also sync default mode if updated
     if (updates.defaultMode) {
       localStorage.setItem('manus_chat_work_mode', updates.defaultMode);
+    }
+
+    // Trigger cloud synchronization of robot personality & visual themes if enabled
+    if (updated.robotCloudSync) {
+      import('./firestoreService').then(({ saveRobotSettingsToFirestore }) => {
+        saveRobotSettingsToFirestore(updated).catch(() => {});
+      }).catch(() => {});
     }
 
     // Dispatch global event for components to react in real-time

@@ -17,6 +17,16 @@ function normalizeModel(modelName?: string): string {
   if (!modelName) return 'gemini-3.8-flash';
   const clean = modelName.replace(/^google\//, '').trim();
   if (
+    clean === 'manus-1.6-max' ||
+    clean === 'gemini-3.1-pro' ||
+    clean === 'gemini-3.1-pro-preview' ||
+    clean === 'gemini-2m' ||
+    clean === 'manus-2m' ||
+    clean === 'gemini-2m-context'
+  ) {
+    return 'gemini-3.1-pro-preview';
+  }
+  if (
     clean === 'gemini-2.5-flash' ||
     clean === 'gemini-3-flash' ||
     clean === 'gemini-3.0-flash' ||
@@ -124,6 +134,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
   // Order candidate models prioritizing active high-speed models
   const candidateModels = Array.from(new Set([
     preferredModel,
+    'gemini-3.1-pro-preview',
     'gemini-3.8-flash',
     'gemini-3.1-flash-lite',
     'gemini-flash-latest',

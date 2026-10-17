@@ -51,6 +51,11 @@ service cloud.firestore {
         (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
     }
 
+    // Helper for validation of Robot Settings & Visual Themes
+    function isValidRobotSettings(data) {
+      return (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
     // Helper for validation of Memories
     function isValidMemories(data) {
       return (!('records' in data) || data.records is list) &&
@@ -128,11 +133,13 @@ service cloud.firestore {
         allow list: if isOwner(userId);
         allow create: if isOwner(userId) && isValidId(settingsId) && (
           (settingsId == 'preferences' && isValidSettings(incoming())) ||
+          (settingsId == 'robot' && isValidRobotSettings(incoming())) ||
           (settingsId == 'memories' && isValidMemories(incoming())) ||
           (settingsId == 'schedules' && isValidSchedules(incoming()))
         );
         allow update: if isOwner(userId) && isValidId(settingsId) && (
           (settingsId == 'preferences' && isValidSettings(incoming()) && incoming().userId == existing().userId) ||
+          (settingsId == 'robot' && isValidRobotSettings(incoming())) ||
           (settingsId == 'memories' && isValidMemories(incoming())) ||
           (settingsId == 'schedules' && isValidSchedules(incoming()))
         );
