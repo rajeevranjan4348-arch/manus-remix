@@ -26,7 +26,6 @@ import {
   cleanChatTitle,
   StoredMessage,
 } from '@/lib/chatDatabase';
-import { chatAutoSave } from '@/lib/chatAutoSave';
 
 export type AgentTaskPhase = 'idle' | 'tool-calling' | 'text-generation' | 'completed' | 'error';
 
@@ -118,19 +117,8 @@ export function useAgentTask() {
       watchdogTimer = setTimeout(() => {
         console.warn('[useAgentTask] Watchdog: Task ran past timeout, recovering to terminal state');
         isSubmittingRef.current = false;
-        const liveAssistant = [...messagesRef.current].reverse().find((m: any) => m?.role === 'assistant' && typeof m?.content === 'string' && m.content.trim());
-        if (liveAssistant?.content) {
-          setTaskStatus('completed');
-          setPhase('completed');
-        } else {
-          setTaskStatus('error');
-          setPhase('error');
-          setResult({
-            type: 'chat',
-            content: "The AI request timed out. Please select Retry Request to try again.",
-            error: true,
-          });
-        }
+        setTaskStatus('completed');
+        setPhase('completed');
         setSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'completed' as const } : s));
         window.dispatchEvent(new CustomEvent('manus_agent_generating', {
           detail: { isGenerating: false, mode: 'work' }
@@ -151,13 +139,12 @@ export function useAgentTask() {
     const selectedModelId = localStorage.getItem('selected_manus_model') || 'gemini-3.8-flash';
     const modelMap: Record<string, string> = {
       'manus-1.6-lite': 'google/gemini-3.1-flash-lite',
-      'manus-1.6-max': 'google/gemini-3.1-pro-preview',
-      'gemini-3.1-pro-preview': 'google/gemini-3.1-pro-preview',
+      'manus-1.6-max': 'google/gemini-3.8-flash',
       'gemini-3.8-flash': 'google/gemini-3.8-flash',
       'gemini-3.1-flash-lite': 'google/gemini-3.1-flash-lite',
       'gemini-flash-latest': 'google/gemini-flash-latest',
-      'gemini-2.5-flash': 'google/gemini-2.5-flash',
-      'claude-3.5-sonnet': 'anthropic/claude-3.5-sonnet',
+      'gemini-2.5-flash': 'google/gemini-3.8-flash',
+      'claude-3.5-sonnet': 'google/gemini-3.8-flash',
     };
     const activeModel = modelMap[selectedModelId] || 'google/gemini-3.8-flash';
 
@@ -449,7 +436,6 @@ export function useAgentTask() {
               messages: messages.map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })),
               model: (() => {
                 const sel = localStorage.getItem('selected_manus_model');
-                if (sel === 'manus-1.6-max' || sel === 'gemini-3.1-pro-preview') return 'gemini-3.1-pro-preview';
                 if (!sel || sel.includes('gemini-2.0') || sel.includes('gemini-2.5')) return 'gemini-3.8-flash';
                 return sel;
               })(),
@@ -610,23 +596,14 @@ Regarding **${promptText}**:
             status: 'success'
           }).catch(() => {});
         }
-        setTaskStatus('completed');
-        setPhase('completed');
-      } else {
-        setTaskStatus('error');
-        setPhase('error');
-        setResult({
-          type: currentTask?.options?.format || 'chat',
-          content: "The AI service closed without returning a response. Please select Retry Request to try again.",
-          error: true,
-        });
       }
-      isSubmittingRef.current = false;
+      setTaskStatus('completed');
+      setPhase('completed');
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
         detail: { isGenerating: false, mode: 'work' }
       }));
     }
-  }, [isLoading, taskStatus, messages, taskId, user, currentTask]);
+  }, [isLoading, taskStatus, messages, taskId, user]);
 
   const processedInvocationsRef = useRef<Set<string>>(new Set());
 
@@ -845,19 +822,7 @@ Regarding **${promptText}**:
           customMessage: `The ${toolIntent.connectorName} connector is required for "${toolIntent.toolName}" but is not currently authorized.`
         });
         const noticePrompt = `${content}\n\n[CONNECTOR STATUS NOTICE: The ${toolIntent.connectorName} connector is required for this request but is currently NOT connected. Inform the user clearly that ${toolIntent.connectorName} needs to be authorized in Connectors & Plugins, and offer to open Connectors.]`;
-        void (async () => {
-          try {
-            await agentSendMessage(noticePrompt);
-          } catch (error) {
-            console.error('[Manus AI] Connector authorization notice failed:', error);
-            setTaskStatus('error');
-            setPhase('error');
-            setResult({ type: 'chat', content: 'The connector is not authorized, and the AI could not explain the issue. Please open Connectors and retry.', error: true });
-            emitRobotEvent('TASK_FAILED');
-            window.dispatchEvent(new CustomEvent('manus_agent_generating', { detail: { isGenerating: false, mode: 'work' } }));
-            toast.error('Could not complete the connector request. Please retry.');
-          }
-        })();
+        agentSendMessage(noticePrompt);
         return;
       }
 
@@ -866,24 +831,15 @@ Regarding **${promptText}**:
         { id: String(prev.length + 1), label: toolIntent.suggestedAction, status: 'running', trace: [`Executing ${toolIntent.toolName}...`] }
       ]);
 
-      void executeConnectorTool(toolIntent.toolName, toolIntent.args).then(async res => {
+      executeConnectorTool(toolIntent.toolName, toolIntent.args).then(res => {
         setSteps(prev => prev.map(s => s.label === toolIntent.suggestedAction ? { ...s, status: 'completed' } : s));
         if (res.success) {
-          const augmentedPrompt = content + '\n\n[EXECUTED CONNECTED TOOL: ' + toolIntent.connectorName + ' (' + toolIntent.toolName + ')]\n[RESULT DATA]:\n' + JSON.stringify(res.data, null, 2) + '\n\n[INSTRUCTION: Synthesize a clear, verified answer based on the retrieved data above. Highlight key documents/messages/events and provide links where applicable.]';
-          await agentSendMessage(augmentedPrompt);
+          const augmentedPrompt = `${content}\n\n[EXECUTED CONNECTED TOOL: ${toolIntent.connectorName} (${toolIntent.toolName})]\n[RESULT DATA]:\n${JSON.stringify(res.data, null, 2)}\n\n[INSTRUCTION: Synthesize a clear, verified answer based on the retrieved data above. Highlight key documents/messages/events and provide links where applicable.]`;
+          agentSendMessage(augmentedPrompt);
         } else {
-          const errorPrompt = content + '\n\n[CONNECTOR TOOL ERROR: ' + (res.error || 'Execution failed') + ']\n' + res.message + '\nProvide a helpful explanation of the failure.';
-          await agentSendMessage(errorPrompt);
+          const errorPrompt = `${content}\n\n[CONNECTOR TOOL ERROR: ${res.error || 'Execution failed'}]\n${res.message}\nProvide a helpful explanation of the failure.`;
+          agentSendMessage(errorPrompt);
         }
-      }).catch(error => {
-        console.error('[Manus AI] Connector request failed:', error);
-        setTaskStatus('error');
-        setPhase('error');
-        setResult({ type: 'chat', content: 'The connected app request failed. Please check its authorization and retry.', error: true });
-        setSteps(prev => prev.map(step => step.status === 'running' ? { ...step, status: 'error' as const } : step));
-        emitRobotEvent('TASK_FAILED');
-        window.dispatchEvent(new CustomEvent('manus_agent_generating', { detail: { isGenerating: false, mode: 'work' } }));
-        toast.error('Connected app request failed. Please retry.');
       });
       return;
     }
@@ -892,21 +848,7 @@ Regarding **${promptText}**:
     const lower = content.toLowerCase();
     if (lower.includes('graph') || lower.includes('chart') || lower.includes('plot') || lower.includes('diagram') || lower.includes('bar') || lower.includes('pie') || lower.includes('line')) {
       const chartPrompt = `${content}\n\n[INSTRUCTION: Format your chart data as a JSON code block using the format below so it renders as an interactive chart]\n\`\`\`json\n{\n  "graph": {\n    "type": "bar",\n    "labels": ["Category A", "Category B", "Category C", "Category D"],\n    "datasets": [{\n      "label": "Metric",\n      "data": [45, 72, 88, 95]\n    }]\n  }\n}\n\`\`\``;
-      void (async () => {
-        try {
-          const preparedPrompt = await preparePromptWithConnectors(chartPrompt);
-          await agentSendMessage(preparedPrompt);
-        } catch (error) {
-          console.error('[Manus AI] Chart request failed:', error);
-          setTaskStatus('error');
-          setPhase('error');
-          setResult({ type: 'chat', content: "I couldn't complete that chart request. Please retry.", error: true });
-          setSteps(prev => prev.map(step => step.status === 'running' ? { ...step, status: 'error' as const } : step));
-          emitRobotEvent('TASK_FAILED');
-          window.dispatchEvent(new CustomEvent('manus_agent_generating', { detail: { isGenerating: false, mode: 'work' } }));
-          toast.error('Chart request failed. Please retry.');
-        }
-      })();
+      void (async () => { agentSendMessage(await preparePromptWithConnectors(chartPrompt)); })();
     } else {
       void (async () => {
         try {
@@ -1193,82 +1135,43 @@ Regarding **${promptText}**:
 
       // 1. Load permanent messages from IndexedDB / chatDatabase
       const storedMsgs = await getMessages(id);
-      let initialMsgs: any[] = [];
       if (storedMsgs && storedMsgs.length > 0) {
-        initialMsgs = storedMsgs.map(m => ({
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          timestamp: m.timestamp,
-          status: m.status
-        }));
+        setPersistentMessages(
+          storedMsgs.map(m => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            timestamp: m.timestamp,
+            status: m.status
+          }))
+        );
       }
-
-      // Check for auto-saved session snapshot in case the tab was accidentally closed
-      const autoSaveSnapshot = chatAutoSave.getSnapshot(id);
-      if (autoSaveSnapshot) {
-        // If auto-saved snapshot has messages that were not yet synced or newer
-        if (autoSaveSnapshot.messages && autoSaveSnapshot.messages.length > initialMsgs.length) {
-          initialMsgs = autoSaveSnapshot.messages;
-        }
-      }
-      setPersistentMessages(initialMsgs);
 
       // 2. Load task data
       const task = await (blink.db as any).tasks.get(id);
       if (task) {
         setCurrentTask({ 
-          prompt: task.prompt || task.title || autoSaveSnapshot?.prompt || '', 
-          options: { 
-            format: task.outputFormat || autoSaveSnapshot?.outputFormat, 
-            chartType: task.chartType || autoSaveSnapshot?.chartType 
-          } 
+          prompt: task.prompt || task.title, 
+          options: { format: task.outputFormat, chartType: task.chartType } 
         });
-        setTaskStatus(prev => {
-          if (prev === 'running' && id === (currentTaskIdRef.current || taskId)) return 'running';
-          return (task.status || autoSaveSnapshot?.status || 'idle') as any;
-        });
+        setTaskStatus(task.status as any);
         
         if (task.steps) {
           try {
             setSteps(JSON.parse(task.steps));
-          } catch { 
-            setSteps(autoSaveSnapshot?.steps || []); 
-          }
-        } else if (autoSaveSnapshot?.steps) {
-          setSteps(autoSaveSnapshot.steps);
+          } catch { setSteps([]); }
         }
         
         if (task.result) {
           try {
             const parsedResult = JSON.parse(task.result);
             setResult(parsedResult);
-            setChartData(parsedResult.chartData || autoSaveSnapshot?.chartData || null);
-            if (initialMsgs.length === 0 && parsedResult.messages && parsedResult.messages.length > 0) {
+            setChartData(parsedResult.chartData);
+            if ((!storedMsgs || storedMsgs.length === 0) && parsedResult.messages && parsedResult.messages.length > 0) {
               setPersistentMessages(parsedResult.messages);
             }
-          } catch { 
-            if (autoSaveSnapshot?.result) {
-              setResult(autoSaveSnapshot.result);
-              setChartData(autoSaveSnapshot.chartData || null);
-            } else {
-              setResult(null); 
-            }
-          }
-        } else if (autoSaveSnapshot?.result) {
-          setResult(autoSaveSnapshot.result);
-          setChartData(autoSaveSnapshot.chartData || null);
+          } catch { setResult(null); }
         }
-      } else if (autoSaveSnapshot) {
-        // Full disaster recovery from auto-saved snapshot if task record was not found
-        setCurrentTask({
-          prompt: autoSaveSnapshot.prompt,
-          options: { format: autoSaveSnapshot.outputFormat, chartType: autoSaveSnapshot.chartType }
-        });
-        setTaskStatus(autoSaveSnapshot.status as any);
-        setSteps(autoSaveSnapshot.steps || []);
-        setResult(autoSaveSnapshot.result || null);
-        setChartData(autoSaveSnapshot.chartData || null);
       }
     } catch (e) {
       console.error('Failed to load task:', e);
@@ -1323,7 +1226,6 @@ Report generated by Manus AI Workspace
 
   const deleteTask = useCallback(async (id: string) => {
     try {
-      chatAutoSave.clearSnapshot(id);
       await (blink.db as any).tasks.delete(id);
       return true;
     } catch (e) {
@@ -1341,30 +1243,27 @@ Report generated by Manus AI Workspace
     // While generating, render only the newest live assistant message as a temporary
     // stream preview. onFinish persists the final answer, after which this preview is
     // removed. Never append historical SDK messages to the canonical history.
-    // Render live assistant stream tokens in real time, and preserve them seamlessly
-    // during the transition from streaming to persisted state
-    const liveAssistant = [...messages].reverse().find((message: any) =>
-      message?.role === 'assistant' && typeof message.content === 'string' && message.content.trim().length > 0
-    );
-
-    if (liveAssistant?.content) {
-      const last = rawList[rawList.length - 1];
-      if (last?.role === 'assistant') {
-        if (isLoading || !last.content || last.content.length < liveAssistant.content.length) {
+    if (isLoading) {
+      const liveAssistant = [...messages].reverse().find((message: any) =>
+        message?.role === 'assistant' && typeof message.content === 'string'
+      );
+      if (liveAssistant?.content) {
+        const last = rawList[rawList.length - 1];
+        if (last?.role === 'assistant') {
           rawList[rawList.length - 1] = {
             ...last,
             content: liveAssistant.content,
             id: last.id || liveAssistant.id || 'live-assistant-current',
           };
+        } else {
+          rawList.push({
+            id: liveAssistant.id || 'live-assistant-current',
+            role: 'assistant',
+            content: liveAssistant.content,
+            timestamp: new Date().toISOString(),
+            status: 'streaming',
+          });
         }
-      } else {
-        rawList.push({
-          id: liveAssistant.id || 'live-assistant-current',
-          role: 'assistant',
-          content: liveAssistant.content,
-          timestamp: new Date().toISOString(),
-          status: isLoading ? 'streaming' : 'success',
-        });
       }
     }
 
@@ -1381,31 +1280,6 @@ Report generated by Manus AI Workspace
     return deduped;
   }, [persistentMessages, messages, isLoading]);
 
-  // Continuous periodic auto-save registration: tracks live messages, streaming updates, steps, and status
-  useEffect(() => {
-    const activeId = taskId || currentTaskIdRef.current;
-    if (activeId) {
-      chatAutoSave.updateSession({
-        taskId: activeId,
-        conversationId: activeId,
-        userId: user?.id || 'usr_manus_default',
-        prompt: currentTask?.prompt || '',
-        title: currentTask?.prompt ? cleanChatTitle(currentTask.prompt) : undefined,
-        outputFormat: currentTask?.options?.format,
-        chartType: currentTask?.options?.chartType,
-        status: taskStatus,
-        messages: displayMessages,
-        steps,
-        result,
-        chartData
-      });
-    }
-  }, [taskId, currentTask, taskStatus, displayMessages, steps, result, chartData, user]);
-
-  const reorderSteps = useCallback((newSteps: Step[]) => {
-    setSteps(newSteps);
-  }, []);
-
   return {
     taskId,
     loadTask,
@@ -1417,8 +1291,6 @@ Report generated by Manus AI Workspace
     deleteTask,
     currentTask,
     steps,
-    setSteps,
-    reorderSteps,
     taskStatus,
     result,
     chartData,

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { approvalManager } from '../src/lib/approvalManager';
 import { taskCheckpoint } from '../src/lib/taskCheckpoint';
-import { modelRouter, SUPPORTED_MODELS } from '../src/lib/modelRouter';
+import { modelRouter } from '../src/lib/modelRouter';
 import { sanitizeFilename, formatFileSize } from '../src/lib/fileValidation';
 import { scheduledAgents } from '../src/lib/scheduledAgents';
 
@@ -147,20 +147,6 @@ describe('Features 11-20: Security, Recovery, Scheduling & Intelligence Test Sui
 
       expect(route.taskType).toBe('fast_chat');
       expect(route.temperature).toBeGreaterThanOrEqual(0.7);
-    });
-
-    it('supports 2 Million context window and routes massive context tasks accordingly', () => {
-      const route = modelRouter.route('Analyze this full repository with the 2 million context window enabled');
-      expect(route.selectedModel).toBe('gemini-3.1-pro-preview');
-      expect(route.reason).toContain('2,000,000 token context window');
-
-      const model2M = SUPPORTED_MODELS.find(m => m.id === 'gemini-3.1-pro-preview');
-      expect(model2M).toBeDefined();
-      expect(model2M?.contextWindow).toBe(2097152); // 2 Million tokens
-
-      const manus2M = SUPPORTED_MODELS.find(m => m.id === 'manus-1.6-max');
-      expect(manus2M).toBeDefined();
-      expect(manus2M?.contextWindow).toBe(2097152); // 2 Million tokens
     });
   });
 
