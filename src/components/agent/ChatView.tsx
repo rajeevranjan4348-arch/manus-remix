@@ -181,6 +181,8 @@ export function ChatView({
   const [isDragging, setIsDragging] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<VoiceCommandResult | null>(null);
   const [weatherMap, setWeatherMap] = useState<Record<string, WeatherData>>({});
+  // Prevent duplicate weather requests when streaming updates re-render the message list.
+  const weatherRequestsRef = useRef<Set<string>>(new Set());
   const [completedTypewriters, setCompletedTypewriters] = useState<Record<string, boolean>>({});
 
   // Granular robot reaction sync with task status and active execution step
@@ -297,23 +299,30 @@ export function ChatView({
     toast.success(`Sent "${driveFile.name}" as context to AI Agent`);
   };
 
-  // Check user queries for live weather data
+  // Check new messages for live weather data without duplicating in-flight requests.
   useEffect(() => {
-    messages.forEach(async (m, idx) => {
-      const msgKey = m.id || m.content;
-      if (!weatherMap[msgKey]) {
-        const query = extractWeatherQuery(m.content || '');
-        if (query.isWeather && query.city) {
-          const data = await fetchWeatherByCity(query.city);
-          if (data) {
-            setWeatherMap(prev => ({
-              ...prev,
-              [msgKey]: data,
-              [query.city!.toLowerCase()]: data,
-              [data.locationName.toLowerCase()]: data,
-            }));
-          }
+    messages.forEach(async (m) => {
+      const msgKey = String(m.id || m.content || '');
+      if (!msgKey || weatherRequestsRef.current.has(msgKey)) return;
+
+      const query = extractWeatherQuery(m.content || '');
+      if (!query.isWeather || !query.city) return;
+
+      weatherRequestsRef.current.add(msgKey);
+      try {
+        const data = await fetchWeatherByCity(query.city);
+        if (data) {
+          setWeatherMap(prev => prev[msgKey] ? prev : ({
+            ...prev,
+            [msgKey]: data,
+            [query.city!.toLowerCase()]: data,
+            [data.locationName.toLowerCase()]: data,
+          }));
+        } else {
+          weatherRequestsRef.current.delete(msgKey);
         }
+      } catch {
+        weatherRequestsRef.current.delete(msgKey);
       }
     });
   }, [messages]);
