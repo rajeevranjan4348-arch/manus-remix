@@ -14,6 +14,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/langchain/*"
+  to = "/.netlify/functions/langchain_agent"
+  status = 200
+
+[[redirects]]
   from = "/api/agent/status"
   to = "/.netlify/functions/agent-status"
   status = 200
@@ -48,4 +53,3 @@
     Permissions-Policy = "camera=(self), microphone=(self), geolocation=(self)"
     Content-Security-Policy = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https: wss:; frame-ancestors 'self' https://*.google.com https://*.run.app;"
     Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
-
