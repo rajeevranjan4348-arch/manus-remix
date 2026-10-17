@@ -55,6 +55,10 @@ export const DEFAULT_SETTINGS: UserSettings = {
   enableBackgroundNotifications: true,
   enablePhoneCommands: true,
 
+  // Performance & Rendering
+  experimentalFrameRateBoost: true,
+  frameRateTarget: 120,
+
   lastUpdated: new Date().toISOString(),
 };
 

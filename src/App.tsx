@@ -7,6 +7,12 @@ import { ChatView } from './components/agent/ChatView';
 import { WebsiteBuilderView } from './components/agent/WebsiteBuilderView';
 import { HistoryPanel } from './components/history/HistoryPanel';
 import { SettingsModal } from './components/settings/SettingsModal';
+import { AndroidMainSettings } from './components/settings/AndroidMainSettings';
+import { AndroidGeneralSettings } from './components/settings/AndroidGeneralSettings';
+import { AndroidRobotSettings } from './components/settings/AndroidRobotSettings';
+import { AndroidVoiceSettings } from './components/settings/AndroidVoiceSettings';
+import { AndroidConnectorsSettings } from './components/settings/AndroidConnectorsSettings';
+import { MyAIChat } from './components/chat/MyAIChat';
 import { useAgentTask } from './hooks/useAgentTask';
 import { useWebsiteBuilder } from './hooks/useWebsiteBuilder';
 import { BlinkProvider, BlinkAuthProvider, useBlinkAuth } from '@blinkdotnew/react';
@@ -15,6 +21,8 @@ import { ThemeProvider } from './context/ThemeContext';
 import { Toaster } from './components/ui/sonner';
 import { blink } from './lib/blink';
 import { configureHighQualityTTS } from './lib/audioPipeline';
+
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 const PROJECT_ID = (import.meta as any).env?.VITE_BLINK_PROJECT_ID || 'manus-agent-clone-tkzhogvs';
 const PUBLISHABLE_KEY = (import.meta as any).env?.VITE_BLINK_PUBLISHABLE_KEY || '';
@@ -28,7 +36,7 @@ function TaskView({
   onReset: () => void 
 }) {
   const { taskId } = useParams();
-  const { loadTask, resetTask, stopTask, currentTask, messages, steps, result, chartData, taskStatus, exportToPDF, sendMessage, isLoading } = useAgentTaskResult;
+  const { loadTask, resetTask, stopTask, currentTask, messages, steps, reorderSteps, result, chartData, taskStatus, exportToPDF, sendMessage, isLoading } = useAgentTaskResult;
 
   useEffect(() => {
     if (taskId) {
@@ -39,19 +47,26 @@ function TaskView({
   if (!currentTask && !taskId) return null;
 
   return (
-    <ChatView
-      prompt={currentTask?.prompt || ''}
-      messages={messages}
-      steps={steps}
-      result={result}
-      chartData={chartData}
-      status={taskStatus === 'idle' ? 'running' : taskStatus as any}
-      onReset={onReset}
-      onExport={exportToPDF}
-      onSubmit={sendMessage}
-      onStop={stopTask}
-      isLoading={isLoading}
-    />
+    <ErrorBoundary
+      title="Error loading task view"
+      description="We encountered a problem loading this chat session. You can try reloading the view or creating a new task."
+      onReset={resetTask}
+    >
+      <ChatView
+        prompt={currentTask?.prompt || ''}
+        messages={messages}
+        steps={steps}
+        onReorderSteps={reorderSteps}
+        result={result}
+        chartData={chartData}
+        status={taskStatus === 'idle' ? 'running' : taskStatus as any}
+        onReset={onReset}
+        onExport={exportToPDF}
+        onSubmit={sendMessage}
+        onStop={stopTask}
+        isLoading={isLoading}
+      />
+    </ErrorBoundary>
   );
 }
 
@@ -69,9 +84,13 @@ function AppContent() {
   const agentTask = useAgentTask();
   const { startTask, resetTask } = agentTask;
 
-  // Initialize Web Speech API & audio processing clarity pipeline
+  // Non-blocking initialization of Web Speech API & audio pipeline
   React.useEffect(() => {
-    configureHighQualityTTS();
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      (window as any).requestIdleCallback(() => configureHighQualityTTS());
+    } else {
+      setTimeout(() => configureHighQualityTTS(), 150);
+    }
   }, []);
 
   // Adaptive rendering: preserve the current UI while reducing unnecessary work on low battery.
@@ -194,17 +213,7 @@ function AppContent() {
   const isHomePage = location.pathname === '/';
   const hasSentMessage = !isHomePage || isWebsiteActive || Boolean(agentTask.currentTask) || agentTask.messages.length > 0 || agentTask.isLoading;
 
-  // Wait for Blink to restore the persisted session before rendering app routes.
-  if (isAuthLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background" role="status" aria-live="polite">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted border-t-foreground" />
-          <p className="text-sm text-muted-foreground">Restoring your session…</p>
-        </div>
-      </div>
-    );
-  }
+
 
   return (
     <div className="flex h-screen w-full max-w-full bg-background overflow-hidden">
@@ -244,18 +253,62 @@ function AppContent() {
             </div>
           ) : (
             <div key={location.pathname} className="w-full h-full animate-in fade-in-0 slide-in-from-bottom-2 duration-350 ease-out">
-              <Routes>
-                <Route path="/" element={<Home onStartTask={handleStartTask} />} />
-                <Route 
-                  path="/task/:taskId" 
-                  element={
-                    <TaskView 
-                      useAgentTaskResult={agentTask} 
-                      onReset={handleReset} 
-                    />
-                  } 
-                />
-              </Routes>
+              <ErrorBoundary>
+                <Routes>
+                  <Route path="/" element={<Home onStartTask={handleStartTask} />} />
+                  <Route 
+                    path="/task/:taskId" 
+                    element={
+                      <TaskView 
+                        useAgentTaskResult={agentTask} 
+                        onReset={handleReset} 
+                      />
+                    } 
+                  />
+                  <Route 
+                    path="/settings" 
+                    element={
+                      <AndroidMainSettings onBack={() => navigate('/')} />
+                    } 
+                  />
+                  <Route 
+                    path="/settings/general" 
+                    element={
+                      <AndroidGeneralSettings onBack={() => navigate('/settings')} />
+                    } 
+                  />
+                  <Route 
+                    path="/settings/robot" 
+                    element={
+                      <AndroidRobotSettings onBack={() => navigate('/settings')} />
+                    } 
+                  />
+                  <Route 
+                    path="/settings/voice" 
+                    element={
+                      <AndroidVoiceSettings onBack={() => navigate('/settings')} />
+                    } 
+                  />
+                  <Route 
+                    path="/settings/connectors" 
+                    element={
+                      <AndroidConnectorsSettings onBack={() => navigate('/settings')} />
+                    } 
+                  />
+                  <Route 
+                    path="/chat" 
+                    element={
+                      <MyAIChat onBack={() => navigate('/')} />
+                    } 
+                  />
+                  <Route 
+                    path="/my-ai" 
+                    element={
+                      <MyAIChat onBack={() => navigate('/')} />
+                    } 
+                  />
+                </Routes>
+              </ErrorBoundary>
             </div>
           )}
         </main>
@@ -277,6 +330,14 @@ function AppContent() {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         initialTab={settingsInitialTab}
+        activeTaskInfo={{
+          taskId: agentTask.taskId,
+          prompt: agentTask.currentTask?.prompt,
+          taskStatus: agentTask.taskStatus,
+          messages: agentTask.messages,
+          steps: agentTask.steps,
+          result: agentTask.result,
+        }}
       />
 
       <Toaster />

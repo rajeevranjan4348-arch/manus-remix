@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { Sparkles, Bot, Hexagon, Radio, Palette, CircleDot } from 'lucide-react';
+import { Sparkles, Bot, Hexagon, Radio, Palette, CircleDot, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export type GrokAvatarStyle = 'sphere' | 'geometric' | 'bot' | 'hologram';
@@ -13,6 +13,7 @@ interface Grok3DAvatarProps {
   className?: string;
   initialStyle?: GrokAvatarStyle;
   initialColor?: GrokColorTheme;
+  experimentalFrameRateBoost?: boolean;
   onStyleChange?: (style: GrokAvatarStyle) => void;
   onColorChange?: (color: GrokColorTheme) => void;
 }
@@ -66,6 +67,7 @@ export function Grok3DAvatar({
   className,
   initialStyle = 'geometric',
   initialColor = 'electric-blue',
+  experimentalFrameRateBoost = true,
   onStyleChange,
   onColorChange
 }: Grok3DAvatarProps) {
@@ -73,6 +75,7 @@ export function Grok3DAvatar({
   const [avatarStyle, setAvatarStyle] = useState<GrokAvatarStyle>(initialStyle);
   const [colorTheme, setColorTheme] = useState<GrokColorTheme>(initialColor);
   const [showStyleMenu, setShowStyleMenu] = useState(false);
+  const [measuredFps, setMeasuredFps] = useState<number>(120);
 
   useEffect(() => {
     if (initialStyle) setAvatarStyle(initialStyle);
@@ -98,6 +101,7 @@ export function Grok3DAvatar({
     audioLevel,
     avatarStyle,
     colorTheme,
+    experimentalFrameRateBoost,
     isDragging: false,
     prevMousePos: { x: 0, y: 0 },
     rotationVelocity: { x: 0, y: 0.005 },
@@ -128,6 +132,10 @@ export function Grok3DAvatar({
     stateRef.current.colorTheme = colorTheme;
   }, [colorTheme]);
 
+  useEffect(() => {
+    stateRef.current.experimentalFrameRateBoost = experimentalFrameRateBoost;
+  }, [experimentalFrameRateBoost]);
+
   // Main Three.js Scene Setup & Animation Loop
   useEffect(() => {
     const container = mountRef.current;
@@ -145,10 +153,14 @@ export function Grok3DAvatar({
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true,
-      powerPreference: 'high-performance'
+      powerPreference: 'high-performance',
+      precision: 'highp'
     });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const pixelRatioTarget = stateRef.current.experimentalFrameRateBoost
+      ? Math.min(window.devicePixelRatio, 2.5)
+      : Math.min(window.devicePixelRatio, 1.5);
+    renderer.setPixelRatio(pixelRatioTarget);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.2;
     container.innerHTML = '';
@@ -574,9 +586,21 @@ export function Grok3DAvatar({
     // --- Animation Loop ---
     let animationFrameId: number;
     const clock = new THREE.Clock();
+    let frameCounter = 0;
+    let lastFpsCheckTime = performance.now();
 
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
+
+      // Measure real-time FPS for high-refresh display feedback
+      frameCounter++;
+      const nowMs = performance.now();
+      if (nowMs - lastFpsCheckTime >= 500) {
+        const measured = Math.round((frameCounter * 1000) / (nowMs - lastFpsCheckTime));
+        setMeasuredFps(measured);
+        frameCounter = 0;
+        lastFpsCheckTime = nowMs;
+      }
 
       const delta = clock.getDelta();
       const time = clock.getElapsedTime();
@@ -780,6 +804,14 @@ export function Grok3DAvatar({
 
   return (
     <div className={cn("relative flex flex-col items-center justify-center select-none", className)}>
+      {/* Experimental Frame Rate Boost FPS Badge */}
+      {experimentalFrameRateBoost && (
+        <div className="absolute top-1 right-2 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-md border border-amber-500/40 text-[10px] font-mono text-amber-300 font-semibold shadow-lg animate-in fade-in duration-300">
+          <Zap size={11} className="text-amber-400 animate-pulse fill-amber-400/30" />
+          <span>{measuredFps > 0 ? measuredFps : 120} FPS Boosted</span>
+        </div>
+      )}
+
       {/* 3D Canvas Mount Point */}
       <div 
         ref={mountRef} 

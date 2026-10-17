@@ -1125,7 +1125,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
 
             {/* Content for Media Tabs (All, Photos, Videos, Docs) */}
             {activeTab !== 'sessions' ? (
-              <div className="flex-1 overflow-y-auto p-4 space-y-2.5 custom-scrollbar">
+              <div className="flex-1 overflow-y-auto p-4 space-y-2.5 custom-scrollbar smooth-scroll overscroll-contain">
                 {filteredItems.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-56 text-center px-4 space-y-3">
                     <div className="w-12 h-12 rounded-2xl bg-muted/60 text-muted-foreground flex items-center justify-center">
@@ -1359,7 +1359,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
               </div>
             ) : (
               /* Chat & Task Sessions Tab */
-              <TabsContent value="sessions" className="flex-1 overflow-y-auto p-4 space-y-2.5 custom-scrollbar m-0">
+              <TabsContent value="sessions" className="flex-1 overflow-y-auto p-4 space-y-2.5 custom-scrollbar smooth-scroll overscroll-contain m-0">
                 {/* Conversation Persistence & Multi-Select Toolbar */}
                 {isSelectionMode ? (
                   <div className="flex items-center justify-between p-2.5 rounded-xl bg-primary/10 border border-primary/20 mb-2 animate-in fade-in">

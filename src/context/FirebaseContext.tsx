@@ -8,6 +8,7 @@ import {
 import { 
   auth, 
   signInWithGoogle, 
+  signInAnonymouslyUser,
   signOutUser 
 } from '@/lib/firebase';
 import { logoutWorkspace } from '@/lib/workspaceAuth';
@@ -33,15 +34,15 @@ function getCachedUserSession(): CachedUserSession | null {
   }
 }
 
-function setCachedUserSession(user: FirebaseUser | null) {
+function setCachedUserSession(user: FirebaseUser | any | null) {
   if (typeof localStorage === 'undefined') return;
   try {
     if (user) {
       const sess: CachedUserSession = {
         uid: user.uid,
-        email: user.email,
-        displayName: user.displayName,
-        photoURL: user.photoURL,
+        email: user.email || null,
+        displayName: user.displayName || null,
+        photoURL: user.photoURL || null,
       };
       localStorage.setItem(AUTH_USER_CACHE_KEY, JSON.stringify(sess));
     } else {
@@ -53,9 +54,10 @@ function setCachedUserSession(user: FirebaseUser | null) {
 }
 
 interface FirebaseContextType {
-  user: FirebaseUser | null;
+  user: FirebaseUser | any | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
+  signInAsGuest: () => Promise<void>;
   signOut: () => Promise<void>;
   getIdToken: (forceRefresh?: boolean) => Promise<string | null>;
 }
@@ -64,12 +66,13 @@ const FirebaseContext = createContext<FirebaseContextType>({
   user: null,
   loading: true,
   signInWithGoogle: async () => {},
+  signInAsGuest: async () => {},
   signOut: async () => {},
   getIdToken: async () => null,
 });
 
 export function FirebaseProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<FirebaseUser | null>(() => auth.currentUser);
+  const [user, setUser] = useState<FirebaseUser | any | null>(() => auth.currentUser || getCachedUserSession());
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
@@ -100,8 +103,14 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
           if (typeof navigator !== 'undefined' && !navigator.onLine && (auth.currentUser || getCachedUserSession())) {
             console.warn('[Firebase Auth] Offline state detected; retaining existing user session');
           } else {
-            setUser(null);
-            setCachedUserSession(null);
+            // Keep guest user if stored locally
+            const cached = getCachedUserSession();
+            if (cached && (cached.uid.startsWith('guest-') || !auth.currentUser)) {
+              setUser(cached as any);
+            } else {
+              setUser(null);
+              setCachedUserSession(null);
+            }
           }
         }
         setLoading(false);
@@ -135,6 +144,31 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const handleSignInAsGuest = async () => {
+    try {
+      const anonUser = await signInAnonymouslyUser();
+      if (anonUser) {
+        setUser(anonUser);
+        setCachedUserSession(anonUser);
+        toast.success('Signed in as Guest');
+      } else {
+        const guestUser: any = {
+          uid: 'guest-' + Date.now(),
+          email: 'guest@app.local',
+          displayName: 'Guest User',
+          photoURL: '',
+          isAnonymous: true,
+          getIdToken: async () => 'guest-token',
+        };
+        setUser(guestUser);
+        setCachedUserSession(guestUser);
+        toast.success('Signed in as Guest');
+      }
+    } catch (e) {
+      toast.error('Failed to sign in as Guest');
+    }
+  };
+
   const handleSignInWithGoogle = async () => {
     try {
       const loggedUser = await signInWithGoogle();
@@ -145,10 +179,47 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (error: any) {
       if (
-        error?.code !== 'auth/popup-closed-by-user' && 
-        error?.code !== 'auth/cancelled-popup-request'
+        error?.code === 'auth/popup-closed-by-user' || 
+        error?.code === 'auth/cancelled-popup-request'
       ) {
-        toast.error('Failed to sign in with Google');
+        return;
+      }
+
+      if (error?.code === 'auth/unauthorized-domain' || error?.message?.includes('unauthorized-domain')) {
+        const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'current domain';
+        console.warn(`[Firebase Auth] Domain "${currentHost}" is not listed in Firebase Auth Authorized Domains.`);
+
+        try {
+          const anonUser = await signInAnonymouslyUser();
+          if (anonUser) {
+            setUser(anonUser);
+            setCachedUserSession(anonUser);
+            toast.success('Signed in as Guest');
+            toast.info(`Domain "${currentHost}" is not in Firebase Auth's Authorized Domains list. Signed in as Guest.`, {
+              duration: 7000,
+            });
+            return;
+          }
+        } catch (anonErr) {
+          console.warn('[Firebase Auth] Anonymous sign in fallback notice:', anonErr);
+        }
+
+        const guestUser: any = {
+          uid: 'guest-' + Date.now(),
+          email: 'guest@app.local',
+          displayName: 'Guest User',
+          photoURL: '',
+          isAnonymous: true,
+          getIdToken: async () => 'guest-token',
+        };
+        setUser(guestUser);
+        setCachedUserSession(guestUser);
+        toast.success('Signed in as Guest');
+        toast.info(`Domain "${currentHost}" is not in Firebase Auth's Authorized Domains list. Signed in as Guest.`, {
+          duration: 7000,
+        });
+      } else {
+        toast.error(error?.message || 'Failed to sign in with Google');
       }
     }
   };
@@ -181,6 +252,7 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
         user,
         loading,
         signInWithGoogle: handleSignInWithGoogle,
+        signInAsGuest: handleSignInAsGuest,
         signOut: handleSignOut,
         getIdToken,
       }}

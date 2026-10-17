@@ -117,6 +117,44 @@ interface ChatViewProps {
   isLoading: boolean;
 }
 
+// Helper to strip internal prompt instructions or wrappers from user bubbles
+export function cleanUserMessage(raw: any): string {
+  if (raw === null || raw === undefined) return '';
+  let text = '';
+  if (typeof raw === 'string') {
+    text = raw;
+  } else if (typeof raw === 'object') {
+    try {
+      text = raw.content || raw.text || raw.message || JSON.stringify(raw);
+    } catch {
+      text = String(raw);
+    }
+  } else {
+    text = String(raw);
+  }
+
+  // Strip [Think Harder ...] tags regardless of formatting
+  text = text.replace(/^\[Think Harder[^\]]*\]\s*/gi, '');
+  text = text.replace(/\[Think Harder[^\]]*\]\s*/gi, '');
+
+  const userMatch = text.match(/(?:User Prompt|User):\s*([\s\S]+)$/i);
+  if (userMatch) {
+    text = userMatch[1].trim();
+  }
+
+  text = text.replace(/\[(?:USER INSTRUCTIONS & PREFERENCES|MODE|USER PROFILE|TONE REQUIREMENT|PROJECT CONTEXT|INSTRUCTION|Attached File)[^\]]*\]\n*/gi, '').trim();
+
+  // Strip any lingering Think Harder mode lines
+  text = text.replace(/^\[(?:Think Harder|MODE:[^\]]*THINK HARDER)[^\]]*\]\s*/gim, '').trim();
+
+  const fileHeaderMatch = text.match(/^([\s\S]*?)\n\n(?:File Content to analyze|URL to research):/i);
+  if (fileHeaderMatch) {
+    text = fileHeaderMatch[1].trim();
+  }
+
+  return text || (typeof raw === 'string' ? raw : '');
+}
+
 export function ChatView({ 
   prompt, 
   messages, 
@@ -489,6 +527,11 @@ export function ChatView({
         container.scrollTop = container.scrollHeight;
       }
     }
+    if (bottomRef.current) {
+      try {
+        bottomRef.current.scrollIntoView({ behavior, block: 'end' });
+      } catch {}
+    }
   }, []);
 
   const handleTypewriterComplete = React.useCallback((msgKey: string) => {
@@ -502,7 +545,7 @@ export function ChatView({
     const container = containerRef.current;
     if (!container) return;
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-    const isAtBottom = distanceFromBottom < 80;
+    const isAtBottom = distanceFromBottom < 100;
     shouldAutoScrollRef.current = isAtBottom;
     setShowScrollToBottom(!isAtBottom);
   }, []);
@@ -668,33 +711,6 @@ export function ChatView({
     content = content.replace(/^\[MODE:\s*THINK HARDER[^\]]*\]\s*/gi, '').trim();
 
     return { thought, content };
-  };
-
-  // Helper to strip internal prompt instructions or wrappers from user bubbles
-  const cleanUserMessage = (raw: any) => {
-    if (!raw) return '';
-    let text = typeof raw === 'string' ? raw : (typeof raw === 'object' ? JSON.stringify(raw) : String(raw));
-
-    // Strip [Think Harder ...] tags regardless of formatting
-    text = text.replace(/^\[Think Harder[^\]]*\]\s*/gi, '');
-    text = text.replace(/\[Think Harder[^\]]*\]\s*/gi, '');
-
-    const userMatch = text.match(/(?:User Prompt|User):\s*([\s\S]+)$/i);
-    if (userMatch) {
-      text = userMatch[1].trim();
-    }
-
-    text = text.replace(/\[(?:USER INSTRUCTIONS & PREFERENCES|MODE|USER PROFILE|TONE REQUIREMENT|PROJECT CONTEXT|INSTRUCTION|Attached File)[^\]]*\]\n*/gi, '').trim();
-
-    // Strip any lingering Think Harder mode lines
-    text = text.replace(/^\[(?:Think Harder|MODE:[^\]]*THINK HARDER)[^\]]*\]\s*/gim, '').trim();
-
-    const fileHeaderMatch = text.match(/^([\s\S]*?)\n\n(?:File Content to analyze|URL to research):/i);
-    if (fileHeaderMatch) {
-      text = fileHeaderMatch[1].trim();
-    }
-
-    return text || (typeof raw === 'string' ? raw : '');
   };
 
   // Render a single step (Task Progress Item)
@@ -1164,12 +1180,15 @@ export function ChatView({
         <button
           type="button"
           onClick={() => scrollToBottom('smooth')}
-          className="absolute bottom-44 right-4 sm:right-12 z-30 flex items-center gap-2 px-3.5 py-2 rounded-full bg-primary text-primary-foreground shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 transition-all text-xs font-semibold cursor-pointer animate-in fade-in slide-in-from-bottom-2 duration-200"
+          className="absolute bottom-40 right-4 sm:right-10 z-30 flex items-center gap-2 px-4 py-2.5 rounded-full bg-foreground text-background shadow-2xl hover:scale-105 active:scale-95 transition-all text-xs font-semibold cursor-pointer animate-in fade-in slide-in-from-bottom-3 duration-200 border border-border/40 backdrop-blur-md"
           title="Scroll to latest message"
           aria-label="Scroll to latest message"
         >
           <ArrowDown size={14} className="animate-bounce" />
-          <span>Latest message</span>
+          <span>{isStreamingResponse ? 'New response streaming...' : 'Scroll to bottom'}</span>
+          {isStreamingResponse && (
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping ml-0.5" />
+          )}
         </button>
       )}
 

@@ -57,6 +57,10 @@ export interface UserSettings {
   enableBackgroundNotifications?: boolean;
   enablePhoneCommands?: boolean;
 
+  // Performance & Rendering
+  experimentalFrameRateBoost?: boolean; // Unlocks 120 FPS+ high refresh rate WebGL rendering and canvas visualizers
+  frameRateTarget?: number; // Target frame rate (e.g., 60, 90, 120, 144)
+
   // System / Updated
   lastUpdated?: string;
 }

@@ -18,7 +18,8 @@ import {
   Check, 
   Sparkles,
   Volume2,
-  ExternalLink
+  ExternalLink,
+  Zap
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -26,6 +27,8 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { Grok3DAvatar, GrokAvatarStyle, GrokColorTheme } from './Grok3DAvatar';
 import { VoicePulseOrb } from './VoicePulseOrb';
+import { VoiceFrequencyAnalyzer } from './VoiceFrequencyAnalyzer';
+import { UiverseSphereLoader } from './UiverseSphereLoader';
 import { CobpChatInput } from './CobpChatInput';
 import { HorizontalLoader } from '../common/HorizontalLoader';
 import { blink } from '@/lib/blink';
@@ -81,6 +84,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
   const [liveTranscript, setLiveTranscript] = useState('');
   const [statusText, setStatusText] = useState('Start speaking...');
   const [audioLevel, setAudioLevel] = useState<number>(0);
+  const [frequencyData, setFrequencyData] = useState<number[]>(() => new Array(24).fill(0.04));
 
   // Drawers & Overlays
   const [activeOverlay, setActiveOverlay] = useState<'none' | 'transcript' | 'history' | 'settings'>('none');
@@ -104,6 +108,9 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
   });
   const [colorTheme, setColorTheme] = useState<GrokColorTheme>(() => {
     return (localStorage.getItem('grok_color_theme') as GrokColorTheme) || 'electric-blue';
+  });
+  const [frameRateBoost, setFrameRateBoost] = useState<boolean>(() => {
+    return getSettings().experimentalFrameRateBoost ?? true;
   });
   const [voiceHistory, setVoiceHistory] = useState<VoiceHistoryItem[]>(() => {
     try {
@@ -207,6 +214,24 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
               // Smooth attack and decay
               return prev + (target - prev) * (target > prev ? 0.45 : 0.18);
             });
+
+            // Extract 24 multi-band logarithmic frequency bands from live microphone audio stream
+            const numBands = 24;
+            const bands = new Array(numBands);
+            const binCount = analyser.frequencyBinCount;
+            for (let b = 0; b < numBands; b++) {
+              const startBin = Math.floor(Math.pow(b / numBands, 1.8) * (binCount * 0.75));
+              const endBin = Math.max(startBin + 1, Math.floor(Math.pow((b + 1) / numBands, 1.8) * (binCount * 0.75)));
+              let bSum = 0;
+              let count = 0;
+              for (let j = startBin; j < endBin && j < binCount; j++) {
+                bSum += dataArray[j];
+                count++;
+              }
+              const avg = count > 0 ? bSum / count : 0;
+              bands[b] = Math.min(1.0, Math.pow(avg / 190, 1.1));
+            }
+            setFrequencyData(bands);
 
             animFrameId = requestAnimationFrame(updateLevel);
           };
@@ -816,19 +841,47 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
           </span>
         </div>
 
-        {/* Right Icon: Call Settings */}
-        <button
-          type="button"
-          onClick={() => setActiveOverlay(activeOverlay === 'settings' ? 'none' : 'settings')}
-          className={cn(
-            "w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all border border-white/10 cursor-pointer shrink-0",
-            activeOverlay === 'settings' ? "bg-white/20 text-white" : "bg-white/5 text-white/80 hover:bg-white/10"
-          )}
-          title="Call Settings"
-          aria-label="Call Settings"
-        >
-          <SlidersHorizontal size={18} />
-        </button>
+        {/* Right Icons: Frame Rate Boost & Call Settings */}
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              const next = !frameRateBoost;
+              setFrameRateBoost(next);
+              saveSettings({ experimentalFrameRateBoost: next });
+              if (next) {
+                toast.success('Experimental Frame Rate Boost Enabled (120 FPS Mode)');
+              } else {
+                toast.info('Frame Rate Boost Disabled');
+              }
+            }}
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-mono transition-all border cursor-pointer shrink-0 font-semibold",
+              frameRateBoost 
+                ? "bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-[0_0_12px_rgba(245,158,11,0.25)]" 
+                : "bg-white/5 text-white/60 border-white/10 hover:bg-white/10"
+            )}
+            title="Toggle Experimental 120 FPS Frame Rate Boost"
+            aria-label="Toggle Experimental Frame Rate Boost"
+          >
+            <Zap size={13} className={cn(frameRateBoost ? "text-amber-400 fill-amber-400 animate-pulse" : "text-white/50")} />
+            <span className="hidden sm:inline">{frameRateBoost ? '120 FPS Boost' : '60 FPS Standard'}</span>
+            <span className="sm:hidden">{frameRateBoost ? '120 FPS' : '60 FPS'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveOverlay(activeOverlay === 'settings' ? 'none' : 'settings')}
+            className={cn(
+              "w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all border border-white/10 cursor-pointer shrink-0",
+              activeOverlay === 'settings' ? "bg-white/20 text-white" : "bg-white/5 text-white/80 hover:bg-white/10"
+            )}
+            title="Call Settings"
+            aria-label="Call Settings"
+          >
+            <SlidersHorizontal size={18} />
+          </button>
+        </div>
       </div>
 
       {/* Backdrop for active overlays */}
@@ -846,10 +899,18 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
         {/* Interactive Avatar / Sphere Stage */}
         <div className="relative my-auto flex items-center justify-center shrink-0 max-w-full">
           {avatarStyle === 'sphere' ? (
-            <VoicePulseOrb
+            <UiverseSphereLoader
               callStatus={callStatus}
-              audioLevel={audioLevel}
-              className="voice-call-main-orb"
+              colorTheme={colorTheme}
+              avatarStyle={avatarStyle}
+              onStyleChange={(st) => {
+                setAvatarStyle(st);
+                localStorage.setItem('grok_avatar_style', st);
+              }}
+              onColorChange={(col) => {
+                setColorTheme(col);
+                localStorage.setItem('grok_color_theme', col);
+              }}
             />
           ) : (
             <Grok3DAvatar
@@ -858,6 +919,7 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
               liveTranscript={liveTranscript}
               initialStyle={avatarStyle}
               initialColor={colorTheme}
+              experimentalFrameRateBoost={frameRateBoost}
               onStyleChange={(st) => {
                 setAvatarStyle(st);
                 localStorage.setItem('grok_avatar_style', st);
@@ -893,6 +955,20 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
               {callStatus === 'listening' ? 'Start speaking' : callStatus === 'speaking' ? 'Manus speaking' : 'Paused'}
             </p>
           )}
+
+          {/* Dynamic Real-time Audio Frequency Analyzer Bar */}
+          <div className="w-full pt-1 sm:pt-2">
+            <VoiceFrequencyAnalyzer
+              callStatus={callStatus}
+              audioLevel={audioLevel}
+              frequencyData={frequencyData}
+              colorTheme={colorTheme}
+              barCount={24}
+              variant="spectrum"
+              showDbGrid={true}
+              experimentalFrameRateBoost={frameRateBoost}
+            />
+          </div>
 
           {/* Audio Waveform Dots */}
           <div className="flex items-center justify-center gap-2 pt-1 sm:pt-2">
@@ -1267,6 +1343,29 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
                   <SelectItem value="obsidian-gold">Grok Obsidian</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            {/* Experimental Frame Rate Boost Toggle */}
+            <div className="pt-3 border-t border-white/10 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-semibold text-white flex items-center gap-1.5">
+                  <Zap size={14} className="text-amber-400 fill-amber-400/30" />
+                  Frame Rate Boost (120 FPS)
+                </span>
+                <p className="text-[10px] text-white/50">High-refresh WebGL 3D rendering</p>
+              </div>
+              <Switch
+                checked={frameRateBoost}
+                onCheckedChange={(checked) => {
+                  setFrameRateBoost(checked);
+                  saveSettings({ experimentalFrameRateBoost: checked });
+                  if (checked) {
+                    toast.success('Experimental Frame Rate Boost Enabled (120 FPS Mode)');
+                  } else {
+                    toast.info('Frame Rate Boost Disabled');
+                  }
+                }}
+              />
             </div>
 
             {/* Toggles */}

@@ -25,8 +25,12 @@ import {
   Github,
   Cloud,
   Flame,
-  Database as DatabaseIcon
+  Database as DatabaseIcon,
+  Smartphone,
+  Activity
 } from 'lucide-react';
+import { AndroidMainSettings } from './AndroidMainSettings';
+import { DiagnosticPanel } from './DiagnosticPanel';
 import { useFirebase } from '@/context/FirebaseContext';
 import { GitHubRepositoryBrowser } from './GitHubRepositoryBrowser';
 import { 
@@ -91,17 +95,26 @@ interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialTab?: SettingsTab;
+  activeTaskInfo?: {
+    taskId?: string | null;
+    prompt?: string;
+    taskStatus?: 'idle' | 'running' | 'completed' | 'error';
+    messages?: any[];
+    steps?: any[];
+    result?: any;
+  };
 }
 
-type SettingsTab = 'general' | 'robot' | 'ai' | 'personalization' | 'voice' | 'data' | 'connectors' | 'about';
+type SettingsTab = 'general' | 'robot' | 'ai' | 'diagnostics' | 'personalization' | 'voice' | 'data' | 'connectors' | 'about';
 
-export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProps) {
+export function SettingsModal({ isOpen, onClose, initialTab, activeTaskInfo }: SettingsModalProps) {
   const { theme, setTheme } = useTheme();
-  const { user: fbUser, signInWithGoogle, signOut: fbSignOut } = useFirebase();
+  const { user: fbUser, signInWithGoogle, signInAsGuest, signOut: fbSignOut } = useFirebase();
   const [settings, setSettings] = useState<UserSettings>(getSettings());
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab || 'general');
   const [isExporting, setIsExporting] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showAndroidView, setShowAndroidView] = useState(false);
   const [micStatus, setMicStatus] = useState<PermissionState>('prompt');
   const [cameraStatus, setCameraStatus] = useState<PermissionState>('prompt');
   const [showMicHelpModal, setShowMicHelpModal] = useState(false);
@@ -228,40 +241,62 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
     { id: 'connectors', label: 'GitHub & Repos', icon: Github },
     { id: 'robot', label: 'Robot', icon: Bot },
     { id: 'ai', label: 'AI & Models', icon: Brain },
+    { id: 'diagnostics', label: 'Diagnostics', icon: Activity },
     { id: 'personalization', label: 'Personalization', icon: User },
     { id: 'voice', label: 'Voice & Audio', icon: Volume2 },
     { id: 'data', label: 'Data & Privacy', icon: Shield },
     { id: 'about', label: 'About', icon: Info },
   ];
 
+  if (showAndroidView) {
+    return <AndroidMainSettings onBack={() => setShowAndroidView(false)} isOpen={isOpen} />;
+  }
+
   return (
-    <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-150"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
+    <>
+      {/* Mobile Android 15 Edge-to-Edge Main Settings */}
+      <div className="sm:hidden fixed inset-0 z-50">
+        <AndroidMainSettings onBack={onClose} isOpen={isOpen} />
+      </div>
+
+      {/* Desktop Responsive Settings Dialog */}
       <div 
-        className="w-full max-w-2xl h-[560px] max-h-[90vh] bg-background border border-border/70 rounded-2xl shadow-xl flex flex-col overflow-hidden text-foreground animate-in zoom-in-98 duration-150"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="settings-dialog-title"
+        className="hidden sm:flex fixed inset-0 z-50 items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-150"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
       >
-        {/* Minimal Header */}
-        <div className="px-5 py-3.5 border-b border-border/50 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <h2 id="settings-dialog-title" className="text-sm font-semibold tracking-tight text-foreground">
-              Settings
-            </h2>
+        <div 
+          className="w-full max-w-2xl h-[560px] max-h-[90vh] bg-background border border-border/70 rounded-2xl shadow-xl flex flex-col overflow-hidden text-foreground animate-in zoom-in-98 duration-150"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="settings-dialog-title"
+        >
+          {/* Minimal Header */}
+          <div className="px-5 py-3.5 border-b border-border/50 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2">
+              <h2 id="settings-dialog-title" className="text-sm font-semibold tracking-tight text-foreground">
+                Settings
+              </h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowAndroidView(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer"
+                title="Switch to Android 15 Edge-to-Edge Settings View"
+              >
+                <Smartphone size={14} />
+                <span>Android 15 View</span>
+              </button>
+              <button 
+                onClick={onClose}
+                className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer"
+                aria-label="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
           </div>
-          <button 
-            onClick={onClose}
-            className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer"
-            aria-label="Close"
-          >
-            <X size={16} />
-          </button>
-        </div>
 
         {/* Content Layout */}
         <div className="flex-1 flex flex-col sm:flex-row overflow-hidden">
@@ -444,6 +479,31 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                   </button>
                 </div>
 
+                {/* Auto-scroll to results */}
+                <div className="pt-4 border-t border-border/50 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-foreground">Auto-scroll to Results</p>
+                    <p className="text-[11px] text-muted-foreground">Automatically center search content in view once stream finishes</p>
+                  </div>
+                  <button
+                    onClick={() => updateSetting('autoScrollToResults', settings.autoScrollToResults === false ? true : false)}
+                    role="switch"
+                    aria-checked={settings.autoScrollToResults !== false}
+                    aria-label="Toggle auto-scroll to results"
+                    className={cn(
+                      "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                      settings.autoScrollToResults !== false ? "bg-foreground" : "bg-muted"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-xs transform transition duration-200 ease-in-out",
+                        settings.autoScrollToResults !== false ? "translate-x-4" : "translate-x-0"
+                      )}
+                    />
+                  </button>
+                </div>
+
                 {/* Google Workspace Account */}
                 <div className="pt-4 border-t border-border/50 flex items-center justify-between">
                   <div>
@@ -571,6 +631,7 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                       { key: 'robotInteractive' as const, label: 'Pointer / Click Interaction', desc: 'Allow the robot to react to pointer and click input' },
                       { key: 'robotAntenna' as const, label: 'Show Antenna', desc: 'Display the robot antenna' },
                       { key: 'robotFloorShadow' as const, label: 'Floor Shadow', desc: 'Show a shadow beneath the robot' },
+                      { key: 'robotCloudSync' as const, label: 'Cloud-Sync Personality & Themes', desc: 'Enables cloud-syncing of custom robot personalities and visual themes across different devices' },
                     ].map((item) => (
                       <div key={item.key} className="flex items-center justify-between gap-4">
                         <div><p className="text-xs font-medium text-foreground">{item.label}</p><p className="text-[11px] text-muted-foreground">{item.desc}</p></div>
@@ -594,9 +655,10 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                   
                   <div className="space-y-1.5">
                     {[
-                      { id: 'manus-1.6-lite', name: 'Manus 1.6 Lite', desc: 'Fast execution for quick chats and requests', tag: 'Fast' },
-                      { id: 'manus-1.6-max', name: 'Manus 1.6 Max', desc: 'Deep reasoning and complex autonomous flows', tag: 'Pro' },
-                      { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', desc: 'Multimodal vision and rapid document analysis', tag: 'Vision' },
+                      { id: 'manus-1.6-lite', name: 'Manus 1.6 Lite', desc: 'Fast execution for quick chats and requests (1M context)', tag: 'Fast' },
+                      { id: 'manus-1.6-max', name: 'Manus 1.6 Max (2M)', desc: 'Deep reasoning with massive 2 Million token context window', tag: '2M Pro' },
+                      { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (2M Context)', desc: '2,000,000 token context window for huge codebases, books, and documents', tag: '2M Context' },
+                      { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', desc: 'Multimodal vision and rapid document analysis (1M context)', tag: 'Vision' },
                       { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', desc: 'High precision code and structured engineering', tag: 'Code' },
                     ].map((m) => {
                       const isSelected = settings.defaultModel === m.id;
@@ -716,6 +778,18 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                     </button>
                   </div>
                 </div>
+
+                {/* Active Task Diagnostics in AI Tab */}
+                <div className="pt-4 border-t border-border/50">
+                  <DiagnosticPanel activeTaskInfo={activeTaskInfo} />
+                </div>
+              </div>
+            )}
+
+            {/* DIAGNOSTICS TAB */}
+            {activeTab === 'diagnostics' && (
+              <div className="space-y-6 animate-in fade-in duration-100">
+                <DiagnosticPanel activeTaskInfo={activeTaskInfo} />
               </div>
             )}
 
@@ -980,6 +1054,65 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                       </p>
                     </label>
                   </div>
+
+                  {/* Auto-Submit Speech After 7s Silence */}
+                  <div className="flex items-start gap-3 p-3 mt-2.5 rounded-xl border border-border/60 bg-card/40 hover:bg-card/70 transition-colors">
+                    <Checkbox
+                      id="enable-auto-submit-silence"
+                      checked={settings.autoSubmitVoiceAfterSilence ?? true}
+                      onCheckedChange={(checked) => {
+                        const isChecked = checked === true;
+                        updateSetting('autoSubmitVoiceAfterSilence', isChecked);
+                        if (isChecked) {
+                          toast.success('Auto-submit after 7s silence enabled');
+                        } else {
+                          toast.info('Auto-submit after 7s silence disabled');
+                        }
+                      }}
+                      className="mt-0.5"
+                    />
+                    <label htmlFor="enable-auto-submit-silence" className="cursor-pointer select-none space-y-0.5">
+                      <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                        Auto-Submit Speech After 7s Silence
+                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.2 rounded font-semibold bg-primary/10 text-primary">
+                          7 Seconds
+                        </span>
+                      </p>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Automatically sends the transcribed prompt to the AI assistant if you remain silent for more than 7 seconds after speaking.
+                      </p>
+                    </label>
+                  </div>
+
+                  {/* Experimental Frame Rate Boost (120 FPS) */}
+                  <div className="flex items-start gap-3 p-3 mt-2.5 rounded-xl border border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10 transition-colors">
+                    <Checkbox
+                      id="enable-frame-rate-boost"
+                      checked={settings.experimentalFrameRateBoost ?? true}
+                      onCheckedChange={(checked) => {
+                        const isChecked = checked === true;
+                        updateSetting('experimentalFrameRateBoost', isChecked);
+                        if (isChecked) {
+                          toast.success('Experimental Frame Rate Boost Enabled (120 FPS Mode)');
+                        } else {
+                          toast.info('Frame Rate Boost Disabled (60 FPS Standard Mode)');
+                        }
+                      }}
+                      className="mt-0.5 border-amber-500/50 data-[state=checked]:bg-amber-500 data-[state=checked]:text-black"
+                    />
+                    <label htmlFor="enable-frame-rate-boost" className="cursor-pointer select-none space-y-0.5">
+                      <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                        <Zap size={14} className="text-amber-500 fill-amber-500/30" />
+                        Experimental Frame Rate Boost
+                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.2 rounded font-semibold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-mono">
+                          120 FPS Active
+                        </span>
+                      </p>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Unlocks 120 FPS+ high refresh rate WebGL 3D avatar rendering, dynamic frequency spectrum bars, and hardware-accelerated fluid motion.
+                      </p>
+                    </label>
+                  </div>
                 </div>
 
                 {/* Microphone & Camera Permission Check */}
@@ -1190,18 +1323,26 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
                         Sign Out
                       </button>
                     ) : (
-                      <button
-                        onClick={() => signInWithGoogle()}
-                        className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold bg-foreground text-background rounded-lg hover:opacity-90 transition-opacity cursor-pointer shadow-xs"
-                      >
-                        <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
-                          <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                          <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                          <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                          <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                        </svg>
-                        <span>Sign in with Google</span>
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => signInWithGoogle()}
+                          className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold bg-foreground text-background rounded-lg hover:opacity-90 transition-opacity cursor-pointer shadow-xs"
+                        >
+                          <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+                            <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                            <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                            <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                            <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                          </svg>
+                          <span>Sign in with Google</span>
+                        </button>
+                        <button
+                          onClick={() => signInAsGuest()}
+                          className="px-2.5 py-1.5 text-xs font-medium border border-border hover:bg-muted/50 rounded-lg transition-colors cursor-pointer"
+                        >
+                          Guest Login
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1343,15 +1484,7 @@ export function SettingsModal({ isOpen, onClose, initialTab }: SettingsModalProp
           </button>
         </div>
       </div>
-
-      <MicrophonePermissionModal
-        isOpen={showMicHelpModal}
-        onClose={() => setShowMicHelpModal(false)}
-        onPermissionGranted={async () => {
-          setShowMicHelpModal(false);
-          await checkMediaPermissions();
-        }}
-      />
     </div>
-  );
+  </>
+);
 }

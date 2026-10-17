@@ -173,14 +173,16 @@
     background: hsl(var(--muted-foreground) / 0.45);
   }
 
-  /* Custom Scrollbar Utility */
+  /* Custom Scrollbar & Touch Momentum Utilities */
   .custom-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: hsl(var(--muted-foreground) / 0.25) transparent;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.28) transparent;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
   }
   .custom-scrollbar::-webkit-scrollbar {
-    width: 5px;
-    height: 5px;
+    width: 6px;
+    height: 6px;
     background: transparent;
   }
   .custom-scrollbar::-webkit-scrollbar-track {
@@ -193,20 +195,37 @@
     background: transparent !important;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: hsl(var(--muted-foreground) / 0.25);
+    background: hsl(var(--muted-foreground) / 0.28);
     border-radius: 9999px;
+    border: 1.5px solid transparent;
+    background-clip: padding-box;
+    transition: background 0.2s ease;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.55);
   }
 
   /* No Scrollbar Utility */
   .no-scrollbar {
     -ms-overflow-style: none;
     scrollbar-width: none !important;
+    -webkit-overflow-scrolling: touch;
   }
   .no-scrollbar::-webkit-scrollbar {
     display: none !important;
     width: 0 !important;
     height: 0 !important;
     background: transparent !important;
+  }
+
+  /* Smooth Touch & Momentum Scrolling Utilities */
+  .smooth-scroll {
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+  }
+  .overscroll-contain {
+    overscroll-behavior: contain;
   }
 }
 
@@ -422,83 +441,147 @@
   user-select: none;
 }
 
+/* =========================================================================
+   From Uiverse.io by dexter-st - 3D Sphere Loader for Voice Call UI
+   ========================================================================= */
+
+@keyframes sphere-loader-appear {
+  0% {
+    opacity: 0;
+    transform: scale(0.82) translateY(12px);
+    filter: blur(8px);
+  }
+  60% {
+    opacity: 1;
+    filter: blur(0px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    filter: blur(0px);
+  }
+}
+
+.sphere-loader-appear {
+  animation: sphere-loader-appear 0.65s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity, filter;
+}
+
 .loader-wrapper {
   position: relative;
-  width: 100%;
-  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  transform-style: preserve-3d;
-  animation: loaderOrbit 9s linear infinite;
-  will-change: transform;
+  width: 180px;
+  height: 180px;
+  font-family: var(--font-sans), "Inter", sans-serif;
+  font-size: 1.2em;
+  font-weight: 300;
+  color: var(--sphere-letter, #ffffff);
+  border-radius: 50%;
+  background-color: transparent;
+  user-select: none;
 }
 
-.loader-circle {
+.loader {
   position: absolute;
-  width: 130px;
-  height: 130px;
+  top: 0;
+  left: 0;
+  width: 100%;
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, var(--sphere-highlight, #52525b) 0%, var(--sphere-mid, #27272a) 40%, var(--sphere-deep, #18181b) 72%, var(--sphere-dark, #000000) 100%);
-  box-shadow: 
-    0 0 35px var(--sphere-glow, rgba(0, 0, 0, 0.75)),
-    0 0 75px var(--sphere-ambient, rgba(24, 24, 27, 0.45)),
-    inset 0 0 30px rgba(255, 255, 255, 0.4),
-    inset 0 -12px 25px rgba(0, 0, 0, 0.85);
-  animation: loaderCirclePulse 3s ease-in-out infinite alternate;
-  z-index: 5;
-  transform-style: preserve-3d;
+  background-color: transparent;
+  animation: loader-rotate 2s linear infinite;
+  z-index: 0;
+}
+
+@keyframes loader-rotate {
+  0% {
+    transform: rotate(90deg);
+    box-shadow:
+      0 10px 20px 0 var(--sphere-highlight, #fff) inset,
+      0 20px 30px 0 var(--sphere-mid, #ad5fff) inset,
+      0 60px 60px 0 var(--sphere-deep, #471eec) inset;
+  }
+  50% {
+    transform: rotate(270deg);
+    box-shadow:
+      0 10px 20px 0 var(--sphere-highlight, #fff) inset,
+      0 20px 10px 0 var(--sphere-accent, #d60a47) inset,
+      0 40px 60px 0 var(--sphere-dark, #311e80) inset;
+  }
+  100% {
+    transform: rotate(450deg);
+    box-shadow:
+      0 10px 20px 0 var(--sphere-highlight, #fff) inset,
+      0 20px 30px 0 var(--sphere-mid, #ad5fff) inset,
+      0 60px 60px 0 var(--sphere-deep, #471eec) inset;
+  }
 }
 
 .loader-letter {
-  position: absolute;
   display: inline-block;
-  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
-  font-weight: 700;
-  font-size: 15px;
-  line-height: 1;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  opacity: 0.4;
+  transform: translateY(0);
+  animation: loader-letter-anim 2s infinite;
+  z-index: 1;
+  border-radius: 50ch;
+  border: none;
   color: var(--sphere-letter, #ffffff);
-  text-shadow: 0 0 10px var(--sphere-letter-glow, rgba(0, 0, 0, 0.8)), 0 0 20px var(--sphere-glow, rgba(0, 0, 0, 0.7));
-  transform-origin: center center;
-  transform: rotateY(calc(var(--index, 0) * 27.69deg)) translateZ(112px);
-  backface-visibility: visible;
-  animation: loaderLetterWave 2.4s ease-in-out infinite;
-  animation-delay: calc(var(--index, 0) * 0.14s);
-  pointer-events: none;
 }
 
-@keyframes loaderOrbit {
-  0% {
-    transform: rotateX(15deg) rotateY(0deg);
-  }
+.loader-letter:nth-child(1) { animation-delay: 0s; }
+.loader-letter:nth-child(2) { animation-delay: 0.1s; }
+.loader-letter:nth-child(3) { animation-delay: 0.2s; }
+.loader-letter:nth-child(4) { animation-delay: 0.3s; }
+.loader-letter:nth-child(5) { animation-delay: 0.4s; }
+.loader-letter:nth-child(6) { animation-delay: 0.5s; }
+.loader-letter:nth-child(7) { animation-delay: 0.6s; }
+.loader-letter:nth-child(8) { animation-delay: 0.7s; }
+.loader-letter:nth-child(9) { animation-delay: 0.8s; }
+.loader-letter:nth-child(10) { animation-delay: 0.9s; }
+
+@keyframes loader-letter-anim {
+  0%,
   100% {
-    transform: rotateX(15deg) rotateY(360deg);
+    opacity: 0.4;
+    transform: translateY(0);
   }
-}
-
-@keyframes loaderCirclePulse {
-  0% {
-    transform: scale(0.96);
-    filter: brightness(0.95);
-  }
-  100% {
-    transform: scale(1.04);
-    filter: brightness(1.15);
-  }
-}
-
-@keyframes loaderLetterWave {
-  0%, 100% {
-    transform: rotateY(calc(var(--index, 0) * 27.69deg)) translateZ(112px) translateY(0px);
-    opacity: 0.85;
-  }
-  50% {
-    transform: rotateY(calc(var(--index, 0) * 27.69deg)) translateZ(112px) translateY(-7px);
+  20% {
     opacity: 1;
-    color: #ffffff;
-    text-shadow: 0 0 14px rgba(255, 255, 255, 1), 0 0 26px var(--sphere-glow, rgba(0, 0, 0, 0.8));
+    transform: scale(1.15);
+  }
+  40% {
+    opacity: 0.7;
+    transform: translateY(0);
+  }
+}
+
+/* Reduced Motion Compliance for 3D Sphere Loader */
+@media (prefers-reduced-motion: reduce) {
+  .sphere-loader-appear {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+  }
+
+  .loader {
+    animation: none !important;
+    box-shadow:
+      0 10px 20px 0 var(--sphere-highlight, #fff) inset,
+      0 20px 30px 0 var(--sphere-mid, #ad5fff) inset,
+      0 60px 60px 0 var(--sphere-deep, #471eec) inset !important;
+  }
+
+  .loader-letter {
+    animation: none !important;
+    opacity: 0.85 !important;
+    transform: none !important;
+  }
+
+  .loader-wrapper {
+    transition: none !important;
   }
 }
 

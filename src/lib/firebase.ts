@@ -3,6 +3,7 @@ import {
   getAuth, 
   GoogleAuthProvider, 
   signInWithPopup, 
+  signInAnonymously as fbSignInAnonymously,
   signOut as fbSignOut, 
   onAuthStateChanged,
   setPersistence,
@@ -39,9 +40,24 @@ export async function signInWithGoogle(): Promise<FirebaseUser | null> {
   try {
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
-  } catch (error) {
-    console.error('Failed to sign in with Google:', error);
+  } catch (error: any) {
+    if (
+      error?.code !== 'auth/popup-closed-by-user' && 
+      error?.code !== 'auth/cancelled-popup-request'
+    ) {
+      console.warn('[Firebase Auth] Google Sign-In notice:', error?.code || error?.message || error);
+    }
     throw error;
+  }
+}
+
+export async function signInAnonymouslyUser(): Promise<FirebaseUser | null> {
+  try {
+    const result = await fbSignInAnonymously(auth);
+    return result.user;
+  } catch (error) {
+    console.warn('[Firebase Auth] Anonymous sign-in notice:', error);
+    return null;
   }
 }
 

@@ -9,6 +9,7 @@ import {
   User, 
   signOut 
 } from 'firebase/auth';
+import { toast } from 'sonner';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Initialize or get Firebase App instance
@@ -162,6 +163,15 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
       error?.message?.includes('popup-closed-by-user')
     ) {
       console.warn('Google Sign-In popup closed by user.');
+      return null;
+    }
+    if (error?.code === 'auth/unauthorized-domain' || error?.message?.includes('unauthorized-domain')) {
+      const host = typeof window !== 'undefined' ? window.location.hostname : 'current domain';
+      console.warn('Google Workspace Sign-In unauthorized domain:', host);
+      toast.error(`Domain "${host}" is not authorized for Firebase Auth.`, {
+        description: 'Add this domain in Firebase Console > Authentication > Settings > Authorized domains.',
+        duration: 8000,
+      });
       return null;
     }
     console.error('Google Workspace Sign-In Error:', error);
