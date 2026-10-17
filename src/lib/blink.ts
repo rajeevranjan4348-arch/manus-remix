@@ -60,16 +60,28 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
         } catch {}
       };
 
+      const rawMsgs = Array.isArray(options.messages) ? options.messages : [];
+      const sanitizedMsgs = rawMsgs
+        .filter((m: any) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim().length > 0)
+        .map((m: any) => ({ role: m.role, content: m.content.trim() }));
+      while (sanitizedMsgs.length > 0 && sanitizedMsgs[sanitizedMsgs.length - 1].role === 'assistant') {
+        sanitizedMsgs.pop();
+      }
+      if (sanitizedMsgs.length === 0) {
+        sanitizedMsgs.push({ role: 'user', content: lastUserMsg || 'Hello' });
+      }
+
       // 1. Try real Gemini streaming from our server endpoint.
       let serviceFailureMessage = 'The AI response service is temporarily unavailable. Please check your connection and try again.';
       try {
         const streamEndpoint = '/api/gemini/stream';
+        const requestSignal = options?.signal || (typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(45000) : undefined);
         const res = await nativeFetch(streamEndpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          signal: AbortSignal.timeout(60000),
+          signal: requestSignal,
           body: JSON.stringify({
-            messages: options.messages || [{ role: 'user', content: lastUserMsg }],
+            messages: sanitizedMsgs,
             prompt: lastUserMsg,
             systemInstruction: agentConfig?.system,
             model: (() => {
@@ -98,37 +110,35 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
 
         if (res.ok && res.body) {
           const reader = res.body.getReader();
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            controller.enqueue(value);
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              controller.enqueue(value);
+            }
+          } finally {
+            reader.releaseLock();
           }
           controller.close();
           return;
         }
       } catch (err: any) {
-        if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+        if (err?.name === 'TimeoutError') {
           serviceFailureMessage = 'The AI response timed out. Please try again.';
+        } else if (err?.name === 'AbortError') {
+          serviceFailureMessage = 'Generation was stopped.';
         } else if (err instanceof TypeError) {
           serviceFailureMessage = 'Could not reach the AI server. Check your internet connection and try again.';
         }
-        console.warn('[AI Studio] Gemini stream request failed:', err);
+        console.warn('[AI Studio] Gemini stream request failed:', err?.message || err);
       }
 
-      // 2. Honest local fallback: never simulate successful tools or invent factual answers.
-      const cleanMsg = lastUserMsg.toLowerCase().trim();
-      if (/^(?:hi|hello|hey|hiya|howdy|good morning|good afternoon|good evening)[!?.\s,]*$/i.test(cleanMsg)) {
-        sendEvent({
-          type: 'text-delta',
-          delta: 'Hello! How can I help you today?'
-        });
-      } else {
-        sendEvent({
-          type: 'text-delta',
-          delta: serviceFailureMessage + ' Your request was not completed, and no external action is being reported as successful.'
-        });
-      }
-      sendEvent({ type: 'finish', finishReason: 'stop' });
+      // If network or endpoint failed, stream clean error event so thinking stops
+      sendEvent({
+        type: 'text-delta',
+        delta: serviceFailureMessage
+      });
+      sendEvent({ type: 'finish', finishReason: 'error' });
       controller.enqueue(encoder.encode('data: [DONE]\n\n'));
       controller.close();
     }
@@ -136,7 +146,7 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
 
   return new Response(stream, {
     headers: {
-      'Content-Type': 'text/event-stream',
+      'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
     },

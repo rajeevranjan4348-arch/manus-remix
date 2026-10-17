@@ -25,11 +25,12 @@ import {
   Zap,
   AlertCircle,
   RotateCw,
-  GripVertical
+  Pencil
 } from 'lucide-react';
 import { ConnectorsPopupMenu } from '../chat/ConnectorsPopupMenu';
 import { ConnectorsStorePanel, CONNECTOR_CATALOG } from '../connectors/ConnectorsStorePanel';
 import { ConnectorConfigModal } from '../connectors/ConnectorConfigModal';
+import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
 import { readFileForAI, formatFileSize } from '@/lib/fileValidation';
 import { cn } from '@/lib/utils';
@@ -58,7 +59,6 @@ import { Step } from '@/hooks/useAgentTask';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
 import { getChatViewDraft, saveChatViewDraft, clearChatViewDraft } from '@/lib/draftStorage';
-import { useAutoSaveChatInput } from '@/hooks/useAutoSaveChatInput';
 
 
 type ManusMapRequest =
@@ -109,7 +109,6 @@ interface ChatViewProps {
   prompt: string;
   messages: any[];
   steps: Step[];
-  onReorderSteps?: (newSteps: Step[]) => void;
   result: any;
   chartData?: any;
   status: 'idle' | 'running' | 'completed' | 'error';
@@ -117,6 +116,7 @@ interface ChatViewProps {
   onExport?: () => void;
   onSubmit: (prompt: string) => void;
   onStop?: () => void;
+  onReorderSteps?: (steps: Step[]) => void;
   isLoading: boolean;
 }
 
@@ -162,7 +162,6 @@ export function ChatView({
   prompt, 
   messages, 
   steps, 
-  onReorderSteps,
   result, 
   chartData,
   status, 
@@ -174,32 +173,10 @@ export function ChatView({
 }: ChatViewProps) {
   const [input, setInput] = React.useState<string>(() => getChatViewDraft());
 
-  // Local storage persistence: auto-save ChatView draft prompt whenever the user pauses typing for > 500ms
-  useAutoSaveChatInput({
-    value: input,
-    onSave: saveChatViewDraft,
-    delay: 500,
-  });
-  const [localSteps, setLocalSteps] = React.useState<Step[]>(steps);
-  const [draggedStepIndex, setDraggedStepIndex] = React.useState<number | null>(null);
-  const [dragOverStepIndex, setDragOverStepIndex] = React.useState<number | null>(null);
-
+  // Local storage persistence: save ChatView draft prompt automatically
   React.useEffect(() => {
-    setLocalSteps(steps);
-  }, [steps]);
-
-  const handleReorderStep = (fromIndex: number, toIndex: number) => {
-    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= localSteps.length || toIndex >= localSteps.length) return;
-    const updated = [...localSteps];
-    const [movedItem] = updated.splice(fromIndex, 1);
-    updated.splice(toIndex, 0, movedItem);
-    setLocalSteps(updated);
-    if (onReorderSteps) {
-      onReorderSteps(updated);
-    }
-    toast.success(`Moved step "${movedItem.label}" to #${toIndex + 1}`);
-  };
-
+    saveChatViewDraft(input);
+  }, [input]);
   const [expandedSteps, setExpandedSteps] = React.useState<Record<string, boolean>>({});
   const [isThinkHarder, setIsThinkHarder] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
@@ -207,7 +184,11 @@ export function ChatView({
   const [isDragging, setIsDragging] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<VoiceCommandResult | null>(null);
   const [weatherMap, setWeatherMap] = useState<Record<string, WeatherData>>({});
+  // Prevent duplicate weather requests when streaming updates re-render the message list.
+  const weatherRequestsRef = useRef<Set<string>>(new Set());
   const [completedTypewriters, setCompletedTypewriters] = useState<Record<string, boolean>>({});
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editInputContent, setEditInputContent] = useState<string>('');
 
   // Granular robot reaction sync with task status and active execution step
   useEffect(() => {
@@ -254,6 +235,7 @@ export function ChatView({
   const dragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const speechBaseInputRef = useRef<string>('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -323,23 +305,30 @@ export function ChatView({
     toast.success(`Sent "${driveFile.name}" as context to AI Agent`);
   };
 
-  // Check user queries for live weather data
+  // Check new messages for live weather data without duplicating in-flight requests.
   useEffect(() => {
-    messages.forEach(async (m, idx) => {
-      const msgKey = m.id || m.content;
-      if (!weatherMap[msgKey]) {
-        const query = extractWeatherQuery(m.content || '');
-        if (query.isWeather && query.city) {
-          const data = await fetchWeatherByCity(query.city);
-          if (data) {
-            setWeatherMap(prev => ({
-              ...prev,
-              [msgKey]: data,
-              [query.city!.toLowerCase()]: data,
-              [data.locationName.toLowerCase()]: data,
-            }));
-          }
+    messages.forEach(async (m) => {
+      const msgKey = String(m.id || m.content || '');
+      if (!msgKey || weatherRequestsRef.current.has(msgKey)) return;
+
+      const query = extractWeatherQuery(m.content || '');
+      if (!query.isWeather || !query.city) return;
+
+      weatherRequestsRef.current.add(msgKey);
+      try {
+        const data = await fetchWeatherByCity(query.city);
+        if (data) {
+          setWeatherMap(prev => prev[msgKey] ? prev : ({
+            ...prev,
+            [msgKey]: data,
+            [query.city!.toLowerCase()]: data,
+            [data.locationName.toLowerCase()]: data,
+          }));
+        } else {
+          weatherRequestsRef.current.delete(msgKey);
         }
+      } catch {
+        weatherRequestsRef.current.delete(msgKey);
       }
     });
   }, [messages]);
@@ -543,22 +532,15 @@ export function ChatView({
   }, [isLoading, status, steps, displayMessages]);
 
   const scrollToBottom = React.useCallback((behavior: ScrollBehavior = 'smooth') => {
-    const container = containerRef.current;
-    if (container) {
-      shouldAutoScrollRef.current = true;
-      setShowScrollToBottom(false);
-      if (behavior === 'smooth') {
-        container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
-      } else {
-        container.scrollTop = container.scrollHeight;
-      }
+    shouldAutoScrollRef.current = true;
+    setShowScrollToBottom(false);
+    if (virtuosoRef.current && displayMessages.length > 0) {
+      virtuosoRef.current.scrollToIndex({
+        index: displayMessages.length - 1,
+        behavior: behavior === 'smooth' ? 'smooth' : 'auto',
+      });
     }
-    if (bottomRef.current) {
-      try {
-        bottomRef.current.scrollIntoView({ behavior, block: 'end' });
-      } catch {}
-    }
-  }, []);
+  }, [displayMessages]);
 
   const handleTypewriterComplete = React.useCallback((msgKey: string) => {
     setCompletedTypewriters(prev => prev[msgKey] ? prev : { ...prev, [msgKey]: true });
@@ -571,7 +553,8 @@ export function ChatView({
     const container = containerRef.current;
     if (!container) return;
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-    const isAtBottom = distanceFromBottom < 100;
+    // Increased threshold for easier detection, added logging
+    const isAtBottom = distanceFromBottom < 150;
     shouldAutoScrollRef.current = isAtBottom;
     setShowScrollToBottom(!isAtBottom);
   }, []);
@@ -596,58 +579,7 @@ export function ChatView({
     }
   }, [messages, steps, result, isStreamingResponse]);
 
-  // Auto-scroll observer for the ChatView component:
-  // Keeps the scroll position at the bottom ONLY when the agent is streaming a response.
-  // Observes content mutations and dimensional resizes while streaming, disconnecting when idle.
-  useEffect(() => {
-    const container = containerRef.current;
-    // Disconnect and do nothing when not streaming - allowing user to freely browse past messages
-    if (!container || !isStreamingResponse) return;
-
-    let rafId: number | null = null;
-    const scrollDownIfAllowed = () => {
-      if (!shouldAutoScrollRef.current || !container) return;
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        container.scrollTop = container.scrollHeight;
-      });
-    };
-
-    // 1. ResizeObserver: Observes height expansion of container and child elements as tokens stream in
-    const resizeObserver = new ResizeObserver(() => {
-      scrollDownIfAllowed();
-    });
-
-    resizeObserver.observe(container);
-    Array.from(container.children).forEach(child => resizeObserver.observe(child));
-
-    // 2. MutationObserver: Observes characterData and childList updates for real-time text streaming
-    const mutationObserver = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        mutation.addedNodes.forEach(node => {
-          if (node instanceof HTMLElement) {
-            resizeObserver.observe(node);
-          }
-        });
-      }
-      scrollDownIfAllowed();
-    });
-
-    mutationObserver.observe(container, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-    });
-
-    // Ensure immediate bottom alignment on observer mount
-    scrollDownIfAllowed();
-
-    return () => {
-      if (rafId) cancelAnimationFrame(rafId);
-      resizeObserver.disconnect();
-      mutationObserver.disconnect();
-    };
-  }, [isStreamingResponse]);
+  // Virtuoso handles auto-scrolling and follow-output natively via followOutput and atBottomStateChange.
 
   // Initial animation
   useEffect(() => {
@@ -701,6 +633,245 @@ export function ChatView({
     }).trim();
   };
 
+  // Helper to render each message item in the virtualized list
+  const renderMessageItem = (index: number, msg: any) => {
+    if (!msg) return null;
+    if (msg.role === 'user') {
+      const msgId = msg.id || String(index);
+      const isEditing = editingMessageId === msgId;
+      const cleanedText = cleanUserMessage(msg.content);
+
+      return (
+        <div key={msgId} className="flex justify-end my-2 chat-message-enter group relative px-4 sm:px-20">
+          {isEditing ? (
+            <div className="bg-card border border-border p-3 rounded-2xl max-w-[90%] sm:max-w-[80%] shadow-md w-full space-y-2">
+              <textarea
+                value={editInputContent}
+                onChange={(e) => setEditInputContent(e.target.value)}
+                className="w-full bg-transparent border border-border rounded-lg p-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                rows={2}
+              />
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingMessageId(null)}
+                  className="px-3 py-1 rounded-lg text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (editInputContent.trim()) {
+                      onSubmit(editInputContent.trim());
+                      setEditingMessageId(null);
+                    }
+                  }}
+                  className="px-3 py-1 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+                >
+                  Save & Send
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="relative flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingMessageId(msgId);
+                  setEditInputContent(cleanedText);
+                }}
+                className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-full bg-card/80 hover:bg-card border border-border shadow-xs text-muted-foreground hover:text-foreground"
+                title="Edit prompt"
+              >
+                <Pencil size={13} />
+              </button>
+              <div className="bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium max-w-[80%] shadow-xs leading-relaxed">
+                {cleanedText}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    if (msg.role === 'assistant') {
+      const raw = msg.content || '';
+      const { thought, content: extracted } = extractThoughtProcess(raw);
+      const cleanedContent = cleanMessageContent(extracted || raw);
+      const parsedSources = parseSourcesFromMarkdown(cleanedContent);
+      if (!cleanedContent && !thought && isAssistantWorking) return null;
+      if (!cleanedContent && !thought && raw && (result || chartData)) return null;
+
+      const msgKey = msg.id || `msg-${index}-${cleanedContent.slice(0, 20)}`;
+      const isCompleted = Boolean(completedTypewriters[msgKey]);
+      const isLatestAssistant = index === displayMessages.length - 1 || (index === displayMessages.length - 2 && displayMessages[displayMessages.length - 1]?.role !== 'assistant');
+      const shouldAnimate = !isCompleted && isLatestAssistant;
+
+      return (
+        <div key={msg.id || index} className="flex gap-4 max-w-3xl mx-auto my-3 chat-message-enter px-4 sm:px-20">
+          <div className="flex-1 space-y-3 min-w-0">
+            <div className="flex items-center gap-3">
+              <ManusLogo showBadge={true} />
+            </div>
+
+            {thought && (
+              <ThoughtProcess
+                thoughtText={thought}
+                defaultExpanded={false}
+              />
+            )}
+
+            {cleanedContent ? (
+              <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
+                <MarkdownRenderer 
+                  content={parsedSources.cleanedContent} 
+                  animateTypewriter={shouldAnimate}
+                  onTypewriterComplete={() => handleTypewriterComplete(msgKey)}
+                  onTypewriterTick={() => {}}
+                />
+              </div>
+            ) : null}
+
+            {/* Google Calendar Tool Card Detection */}
+            {/(schedule|calendar event|meeting|add event to calendar)/i.test(cleanedContent || '') && (
+              <WorkspaceToolCard
+                type="calendar_event"
+                data={{
+                  summary: 'Team Sync & Project Discussion',
+                  description: 'Scheduled via Manus Workspace AI Assistant',
+                  startDateTime: new Date(Date.now() + 86400000).toISOString(),
+                  endDateTime: new Date(Date.now() + 90000000).toISOString(),
+                }}
+              />
+            )}
+
+            {/* Gmail Draft Tool Card Detection */}
+            {/(draft email|email draft|save draft|gmail draft)/i.test(cleanedContent || '') && (
+              <WorkspaceToolCard
+                type="gmail_draft"
+                data={{
+                  subject: 'Project Status & Follow-up',
+                  body: 'Hi Team,\n\nHere is the updated summary and action items discussed in our current session.\n\nBest regards,\nManus AI',
+                }}
+              />
+            )}
+
+            {/* Google Doc Tool Card Detection */}
+            {/(create google doc|new google doc|doc proposal|draft document)/i.test(cleanedContent || '') && (
+              <WorkspaceToolCard
+                type="google_doc"
+                data={{
+                  title: 'Workspace Document',
+                  content: cleanedContent.slice(0, 300) + '...',
+                }}
+              />
+            )}
+
+            {/* Google Sheet Tool Card Detection */}
+            {/(create google sheet|spreadsheet proposal|new spreadsheet)/i.test(cleanedContent || '') && (
+              <WorkspaceToolCard
+                type="google_sheet"
+                data={{
+                  title: 'Workspace Spreadsheet',
+                  values: [['Item', 'Category', 'Status', 'Date']],
+                }}
+              />
+            )}
+
+            {/* Google Slide Tool Card Detection */}
+            {/(create presentation|slides presentation|new google slide)/i.test(cleanedContent || '') && (
+              <WorkspaceToolCard
+                type="google_slide"
+                data={{
+                  title: 'Workspace Presentation Deck',
+                }}
+              />
+            )}
+
+            {/* Google Meet Tool Card Detection */}
+            {/(google meet|instant meeting|video call link)/i.test(cleanedContent || '') && (
+              <WorkspaceToolCard
+                type="google_meet"
+                data={{
+                  summary: 'Manus Video Meeting',
+                  startDateTime: new Date().toISOString(),
+                  endDateTime: new Date(Date.now() + 3600000).toISOString(),
+                }}
+              />
+            )}
+
+            {/* Google Task Tool Card Detection */}
+            {/(add to-do|create task|new task list|google task)/i.test(cleanedContent || '') && (
+              <WorkspaceToolCard
+                type="google_task"
+                data={{
+                  title: 'Follow-up Task',
+                  notes: 'Created via Manus Assistant',
+                }}
+              />
+            )}
+
+            {isLatestAssistant && (() => {
+              const latestUserMessage = [...messages].reverse().find((message: any) => message?.role === 'user')?.content;
+              const latestUserPrompt = typeof latestUserMessage === 'string' ? latestUserMessage : (latestUserMessage?.text || prompt || '');
+              const mapRequest = extractManusMapRequest(String(latestUserPrompt));
+              if (!mapRequest) return null;
+              if (mapRequest.kind === 'route') {
+                return <RoutePlannerCard key={`route-${mapRequest.origin}-${mapRequest.destination}`} initialOrigin={mapRequest.origin} initialDestination={mapRequest.destination} autoCalculate />;
+              }
+              return <GoogleMapWidgetCard key={`location-${mapRequest.location}`} locationName={mapRequest.location} zoom={12} />;
+            })()}
+
+            {(() => {
+              const prevUserMsg = index > 0 ? displayMessages[index - 1] : null;
+              const wData = weatherMap[msg.id] || 
+                weatherMap[msg.content] || 
+                (prevUserMsg ? (weatherMap[prevUserMsg.id] || weatherMap[prevUserMsg.content]) : null) ||
+                (Object.keys(weatherMap).length > 0 ? Object.values(weatherMap)[0] : null);
+              
+              const isWeatherContent = /(weather|temperature|forecast|humidity|celsius|fahrenheit|open-meteo|climate)/i.test(cleanedContent || '') ||
+                (prevUserMsg && /(weather|temperature|forecast|delhi|mumbai|london|tokyo|city)/i.test(prevUserMsg.content || ''));
+
+              if (wData && isWeatherContent) {
+                return <WeatherWidgetCard data={wData} className="my-3 animate-weather-card" />;
+              }
+              return null;
+            })()}
+
+            {parsedSources.sources.length > 0 && (
+              <SourceCitations sources={parsedSources.sources} />
+            )}
+
+            {isAssistantWorking && isLatestAssistant && (
+              <div className="pt-1">
+                <ContextualThinking
+                  prompt={messages.filter((message: any) => message?.role === 'user').slice(-1)[0]?.content || prompt}
+                  activeStep={activeRunningStep?.label}
+                  deepMode={isThinkHarder}
+                />
+              </div>
+            )}
+
+            {cleanedContent ? (
+              <div className="pt-0.5">
+                <ConversationActionBar 
+                  content={cleanedContent}
+                  onRegenerate={() => {
+                    const lastUser = displayMessages.slice(0, index).reverse().find((m: any) => m.role === 'user');
+                    const promptToReRun = lastUser?.content ? cleanUserMessage(lastUser.content) : prompt;
+                    if (promptToReRun) onSubmit(promptToReRun);
+                  }}
+                />
+              </div>
+            ) : null}
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
+
   // Helper to extract AI thought process (<think>...</think> or [THOUGHTS]...[/THOUGHTS])
   const extractThoughtProcess = (rawContent: any) => {
     if (!rawContent) return { thought: '', content: '' };
@@ -740,122 +911,34 @@ export function ChatView({
   };
 
   // Render a single step (Task Progress Item)
-  const renderStep = (step: Step, index: number) => {
+  const renderStep = (step: Step) => {
     const isCompleted = step.status === 'completed';
     const isRunning = step.status === 'running';
     const isExpanded = expandedSteps[step.id] || isRunning;
-    const isDragging = draggedStepIndex === index;
-    const isDragOver = dragOverStepIndex === index && draggedStepIndex !== index;
 
     return (
-      <div 
-        key={step.id} 
-        draggable={true}
-        onDragStart={(e) => {
-          e.dataTransfer.setData('text/plain', String(index));
-          setDraggedStepIndex(index);
-        }}
-        onDragOver={(e) => {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
-          if (dragOverStepIndex !== index) {
-            setDragOverStepIndex(index);
-          }
-        }}
-        onDrop={(e) => {
-          e.preventDefault();
-          if (draggedStepIndex !== null) {
-            handleReorderStep(draggedStepIndex, index);
-            setDraggedStepIndex(null);
-            setDragOverStepIndex(null);
-          }
-        }}
-        onDragEnd={() => {
-          setDraggedStepIndex(null);
-          setDragOverStepIndex(null);
-        }}
-        className={cn(
-          "relative border border-border/40 rounded-xl bg-card/60 dark:bg-card/60 backdrop-blur-xs overflow-hidden my-2 transition-all group",
-          isDragging && "opacity-40 ring-2 ring-primary/40 border-dashed scale-[0.99]",
-          isDragOver && "border-primary ring-1 ring-primary/30 shadow-md",
-          "animate-in fade-in slide-in-from-bottom-2"
-        )}
-      >
-        {isDragOver && (
-          <div className="absolute top-0 inset-x-0 h-1 bg-primary rounded-full z-20 shadow-xs" />
-        )}
-
-        <div className="flex items-center">
-          {/* Drag Handle */}
-          <div 
-            className="pl-2.5 pr-1 py-3 cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-foreground transition-colors touch-none select-none"
-            title="Drag to reorder step"
-          >
-            <GripVertical size={14} />
+      <div key={step.id} className="border border-border/40 rounded-xl bg-card/60 dark:bg-card/60 backdrop-blur-xs overflow-hidden my-2 animate-in fade-in slide-in-from-bottom-2">
+        <button 
+          onClick={() => toggleStep(step.id)}
+          className="w-full flex items-center justify-between p-3 hover:bg-manus-soft/50 transition-colors text-left"
+        >
+          <div className="flex items-center gap-3">
+            <div className={cn(
+              "flex items-center justify-center w-5 h-5 rounded-full border",
+              isCompleted ? "bg-green-500 border-green-500 text-white" : 
+              isRunning ? "border-primary border-t-transparent animate-spin" : "border-muted-foreground/30 text-muted-foreground/30"
+            )}>
+              {isCompleted && <Check size={12} />}
+            </div>
+            <span className={cn(
+              "text-sm font-medium",
+              isCompleted || isRunning ? "text-foreground" : "text-muted-foreground"
+            )}>
+              {step.label}
+            </span>
           </div>
-
-          <button 
-            type="button"
-            onClick={() => toggleStep(step.id)}
-            className="flex-1 flex items-center justify-between p-3 pl-1 hover:bg-manus-soft/50 transition-colors text-left"
-          >
-            <div className="flex items-center gap-2.5 min-w-0">
-              <span className="text-[10px] font-mono text-muted-foreground/60 px-1.5 py-0.5 rounded bg-muted/40 font-semibold shrink-0">
-                #{index + 1}
-              </span>
-              <div className={cn(
-                "flex items-center justify-center w-5 h-5 rounded-full border shrink-0",
-                isCompleted ? "bg-green-500 border-green-500 text-white" : 
-                isRunning ? "border-primary border-t-transparent animate-spin" : "border-muted-foreground/30 text-muted-foreground/30"
-              )}>
-                {isCompleted && <Check size={12} />}
-              </div>
-              <span className={cn(
-                "text-sm font-medium truncate",
-                isCompleted || isRunning ? "text-foreground" : "text-muted-foreground"
-              )}>
-                {step.label}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1 shrink-0">
-              {/* Quick accessible move buttons for touch & keyboard */}
-              <div 
-                className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity mr-1"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <button
-                  type="button"
-                  disabled={index === 0}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleReorderStep(index, index - 1);
-                  }}
-                  className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-20 disabled:pointer-events-none transition-colors"
-                  title="Move step up"
-                  aria-label="Move step up"
-                >
-                  <ChevronUp size={13} />
-                </button>
-                <button
-                  type="button"
-                  disabled={index === localSteps.length - 1}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleReorderStep(index, index + 1);
-                  }}
-                  className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-20 disabled:pointer-events-none transition-colors"
-                  title="Move step down"
-                  aria-label="Move step down"
-                >
-                  <ChevronDown size={13} />
-                </button>
-              </div>
-
-              {isExpanded ? <ChevronUp size={16} className="text-muted-foreground" /> : <ChevronDown size={16} className="text-muted-foreground" />}
-            </div>
-          </button>
-        </div>
+          {isExpanded ? <ChevronUp size={16} className="text-muted-foreground" /> : <ChevronDown size={16} className="text-muted-foreground" />}
+        </button>
 
         {isExpanded && step.trace && step.trace.length > 0 && (
           <div className="bg-manus-soft/30 p-3 pt-0 space-y-2 border-t border-border/30">
@@ -905,7 +988,7 @@ export function ChatView({
     );
   };
 
-  const isAssistantWorking = isLoading || status === 'running';
+  const isAssistantWorking = (isLoading || status === 'running') && status !== 'error' && status !== 'completed';
   const hasVisibleAssistantMessage = displayMessages.some((m: any) => {
     if (m?.role !== 'assistant') return false;
     const raw = m.content || '';
@@ -936,368 +1019,155 @@ export function ChatView({
 
   return (
     <div className="flex flex-col h-full bg-manus-cream dark:bg-background relative">
-      {/* Chat Area */}
-      <div ref={containerRef} onScroll={handleConversationScroll} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-20 pt-6 pb-40 space-y-8 custom-scrollbar">
+      {/* Virtualized Chat Area Container */}
+      <div className="flex-1 min-h-0 relative overflow-hidden">
         
-        {/* Render Conversation Messages in Chronological Order */}
-        {displayMessages.map((msg, i) => {
-          if (msg.role === 'user') {
-            return (
-              <div key={msg.id || i} className="flex justify-end my-2 chat-message-enter">
-                <div className="bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium max-w-[80%] shadow-xs leading-relaxed">
-                  {cleanUserMessage(msg.content)}
-                </div>
-              </div>
-            );
-          }
-
-          if (msg.role === 'assistant') {
-            const raw = msg.content || '';
-            const { thought, content: extracted } = extractThoughtProcess(raw);
-            const cleanedContent = cleanMessageContent(extracted || raw);
-            const parsedSources = parseSourcesFromMarkdown(cleanedContent);
-            // While a response is streaming, the hook may include an empty assistant placeholder.
-            // Do not render its Manus header alongside the dedicated thinking indicator.
-            if (!cleanedContent && !thought && isAssistantWorking) return null;
-            if (!cleanedContent && !thought && raw && (result || chartData)) return null;
-
-            const msgKey = msg.id || `msg-${i}-${cleanedContent.slice(0, 20)}`;
-            const isCompleted = Boolean(completedTypewriters[msgKey]);
-            const isLatestAssistant = i === displayMessages.length - 1 || (i === displayMessages.length - 2 && displayMessages[displayMessages.length - 1]?.role !== 'assistant');
-            const shouldAnimate = !isCompleted && isLatestAssistant;
-
-            return (
-              <div key={msg.id || i} className="flex gap-4 max-w-3xl mx-auto my-3 chat-message-enter">
-                <div className="flex-1 space-y-3 min-w-0">
-                  <div className="flex items-center gap-3">
-                    <ManusLogo showBadge={true} />
+        <Virtuoso
+          ref={virtuosoRef}
+          data={displayMessages}
+          className="h-full w-full custom-scrollbar overscroll-contain"
+          followOutput={isStreamingResponse ? 'smooth' : false}
+          atBottomStateChange={(atBottom) => {
+            shouldAutoScrollRef.current = atBottom;
+            setShowScrollToBottom(!atBottom);
+          }}
+          itemContent={renderMessageItem}
+          components={{
+            Footer: () => (
+              <div className="px-4 sm:px-20 space-y-4 pb-40 pt-6">
+                {/* Live tool-call progress */}
+                {isAssistantWorking && activeRunningStep && (
+                  <div
+                    role="status"
+                    aria-live="polite"
+                    className="flex items-center gap-3 max-w-3xl mx-auto my-2 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm animate-in fade-in slide-in-from-bottom-2"
+                  >
+                    <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
+                      <span className="absolute inline-flex h-full w-full rounded-full bg-primary/20 animate-ping" />
+                      <span className="relative h-2.5 w-2.5 rounded-full bg-primary" />
+                    </span>
+                    <span className="font-medium text-foreground truncate flex-1">
+                      {typingStatus}
+                    </span>
+                    <span className="text-xs text-muted-foreground font-mono shrink-0">Working</span>
                   </div>
+                )}
 
-                  {thought && (
-                    <ThoughtProcess
-                      thoughtText={thought}
-                      defaultExpanded={false}
-                    />
-                  )}
-
-                  {cleanedContent ? (
-                    <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
-                      <MarkdownRenderer 
-                        content={parsedSources.cleanedContent} 
-                        animateTypewriter={shouldAnimate}
-                        onTypewriterComplete={() => handleTypewriterComplete(msgKey)}
-                        onTypewriterTick={() => {
-                          if (isStreamingResponse && shouldAutoScrollRef.current && containerRef.current) {
-                            containerRef.current.scrollTop = containerRef.current.scrollHeight;
-                          }
-                        }}
-                      />
-                    </div>
-                  ) : null}
-
-                  {/* Google Calendar Tool Card Detection */}
-                  {/(schedule|calendar event|meeting|add event to calendar)/i.test(cleanedContent || '') && (
-                    <WorkspaceToolCard
-                      type="calendar_event"
-                      data={{
-                        summary: 'Team Sync & Project Discussion',
-                        description: 'Scheduled via Manus Workspace AI Assistant',
-                        startDateTime: new Date(Date.now() + 86400000).toISOString(),
-                        endDateTime: new Date(Date.now() + 90000000).toISOString(),
-                      }}
-                    />
-                  )}
-
-                  {/* Gmail Draft Tool Card Detection */}
-                  {/(draft email|email draft|save draft|gmail draft)/i.test(cleanedContent || '') && (
-                    <WorkspaceToolCard
-                      type="gmail_draft"
-                      data={{
-                        subject: 'Project Status & Follow-up',
-                        body: 'Hi Team,\n\nHere is the updated summary and action items discussed in our current session.\n\nBest regards,\nManus AI',
-                      }}
-                    />
-                  )}
-
-                  {/* Google Doc Tool Card Detection */}
-                  {/(create google doc|new google doc|doc proposal|draft document)/i.test(cleanedContent || '') && (
-                    <WorkspaceToolCard
-                      type="google_doc"
-                      data={{
-                        title: 'Workspace Document',
-                        content: cleanedContent.slice(0, 300) + '...',
-                      }}
-                    />
-                  )}
-
-                  {/* Google Sheet Tool Card Detection */}
-                  {/(create google sheet|spreadsheet proposal|new spreadsheet)/i.test(cleanedContent || '') && (
-                    <WorkspaceToolCard
-                      type="google_sheet"
-                      data={{
-                        title: 'Workspace Spreadsheet',
-                        values: [['Item', 'Category', 'Status', 'Date']],
-                      }}
-                    />
-                  )}
-
-                  {/* Google Slide Tool Card Detection */}
-                  {/(create presentation|slides presentation|new google slide)/i.test(cleanedContent || '') && (
-                    <WorkspaceToolCard
-                      type="google_slide"
-                      data={{
-                        title: 'Workspace Presentation Deck',
-                      }}
-                    />
-                  )}
-
-                  {/* Google Meet Tool Card Detection */}
-                  {/(google meet|instant meeting|video call link)/i.test(cleanedContent || '') && (
-                    <WorkspaceToolCard
-                      type="google_meet"
-                      data={{
-                        summary: 'Manus Video Meeting',
-                        startDateTime: new Date().toISOString(),
-                        endDateTime: new Date(Date.now() + 3600000).toISOString(),
-                      }}
-                    />
-                  )}
-
-                  {/* Google Task Tool Card Detection */}
-                  {/(add to-do|create task|new task list|google task)/i.test(cleanedContent || '') && (
-                    <WorkspaceToolCard
-                      type="google_task"
-                      data={{
-                        title: 'Follow-up Task',
-                        notes: 'Created via Manus Assistant',
-                      }}
-                    />
-                  )}
-
-                  {/* Map intent comes from the user's question, while the assistant response remains the direct answer. */}
-                  {isLatestAssistant && (() => {
-                    const latestUserMessage = [...messages].reverse().find((message: any) => message?.role === 'user')?.content;
-                    const latestUserPrompt = typeof latestUserMessage === 'string' ? latestUserMessage : (latestUserMessage?.text || prompt || '');
-                    const mapRequest = extractManusMapRequest(String(latestUserPrompt));
-                    if (!mapRequest) return null;
-                    if (mapRequest.kind === 'route') {
-                      return <RoutePlannerCard key={`route-${mapRequest.origin}-${mapRequest.destination}`} initialOrigin={mapRequest.origin} initialDestination={mapRequest.destination} autoCalculate />;
-                    }
-                    return <GoogleMapWidgetCard key={`location-${mapRequest.location}`} locationName={mapRequest.location} zoom={12} />;
-                  })()}
-
-                  {/* Weather Widget Card Detection */}
-                  {(() => {
-                    const prevUserMsg = i > 0 ? displayMessages[i - 1] : null;
-                    const wData = weatherMap[msg.id] || 
-                      weatherMap[msg.content] || 
-                      (prevUserMsg ? (weatherMap[prevUserMsg.id] || weatherMap[prevUserMsg.content]) : null) ||
-                      (Object.keys(weatherMap).length > 0 ? Object.values(weatherMap)[0] : null);
-                    
-                    const isWeatherContent = /(weather|temperature|forecast|humidity|celsius|fahrenheit|open-meteo|climate)/i.test(cleanedContent || '') ||
-                      (prevUserMsg && /(weather|temperature|forecast|delhi|mumbai|london|tokyo|city)/i.test(prevUserMsg.content || ''));
-
-                    if (wData && isWeatherContent) {
-                      return <WeatherWidgetCard data={wData} className="my-3 animate-weather-card" />;
-                    }
-                    return null;
-                  })()}
-
-                  {parsedSources.sources.length > 0 && (
-                    <SourceCitations sources={parsedSources.sources} />
-                  )}
-
-                  {isAssistantWorking && isLatestAssistant && (
-                    <div className="pt-1">
-                      <ContextualThinking
-                        prompt={messages.filter((message: any) => message?.role === 'user').slice(-1)[0]?.content || prompt}
-                        activeStep={activeRunningStep?.label}
-                        deepMode={isThinkHarder}
-                      />
-                    </div>
-                  )}
-
-                  {cleanedContent ? (
-                    <div className="pt-0.5">
-                      <ConversationActionBar 
-                        content={cleanedContent}
-                        onRegenerate={() => {
-                          const lastUser = displayMessages.slice(0, i).reverse().find((m: any) => m.role === 'user');
-                          const promptToReRun = lastUser?.content ? cleanUserMessage(lastUser.content) : prompt;
-                          if (promptToReRun) onSubmit(promptToReRun);
-                        }}
-                      />
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            );
-          }
-          return null;
-        })}
-
-        {/* Live tool-call progress; automatically disappears on success, stop, or error. */}
-        {isAssistantWorking && activeRunningStep && (
-          <div
-            role="status"
-            aria-live="polite"
-            className="flex items-center gap-3 max-w-3xl mx-auto my-2 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm animate-in fade-in slide-in-from-bottom-2"
-          >
-            <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
-              <span className="absolute inline-flex h-full w-full rounded-full bg-primary/20 animate-ping" />
-              <span className="relative h-2.5 w-2.5 rounded-full bg-primary" />
-            </span>
-            <span className="min-w-0">
-              <span className="font-medium text-foreground">
+                {/* Final Result */}
                 {(() => {
-                  const label = activeRunningStep.label || 'Processing request';
-                  if (/weather/i.test(label)) return 'Searching weather data...';
-                  if (/search|research|web/i.test(label)) return 'Searching the web...';
-                  if (/tool|connector|calendar|gmail|drive/i.test(label)) return `Running tool: ${label}...`;
-                  if (/fetch|load|read/i.test(label)) return `Fetching data: ${label}...`;
-                  return `${label}...`;
-                })()}
-              </span>
-              <span className="block text-xs text-muted-foreground mt-0.5">Manus is working on this step</span>
-            </span>
-          </div>
-        )}
+                  const hasChart = Boolean(
+                    (result?.type === 'graph' || result?.chartData || chartData) &&
+                    ((result?.chartData?.labels && result.chartData.labels.length > 0) || (chartData?.labels && chartData.labels.length > 0))
+                  );
+                  const hasFiles = Boolean(result?.files && Array.isArray(result.files) && result.files.length > 0);
 
-        {/* Steps / Task Progress */}
-        {localSteps.length > 0 && (
-          <div className="flex gap-4 max-w-3xl mx-auto my-2">
-             <div className="w-8 shrink-0" /> {/* Spacer for alignment */}
-             <div className="flex-1 min-w-0">
-               <div className="flex items-center justify-between pb-1.5 px-1 text-xs text-muted-foreground font-medium select-none">
-                 <div className="flex items-center gap-1.5">
-                   <Workflow size={13} className="text-primary" />
-                   <span>Execution Steps ({localSteps.length})</span>
-                 </div>
-                 <div className="flex items-center gap-1 text-[11px] text-muted-foreground/70">
-                   <GripVertical size={12} className="text-muted-foreground/50" />
-                   <span className="hidden sm:inline">Drag handle or use arrows to reorder</span>
-                   <span className="sm:hidden">Drag to reorder</span>
-                 </div>
-               </div>
-               {localSteps.map((step, idx) => renderStep(step, idx))}
-             </div>
-          </div>
-        )}
+                  if (!result || (!hasChart && !hasFiles)) return null;
 
-        {/* Final Result (Chart / Interactive Visualizations / Files) - Only rendered if valid chart or files exist */}
-        {(() => {
-          const hasChart = Boolean(
-            (result?.type === 'graph' || result?.chartData || chartData) &&
-            ((result?.chartData?.labels && result.chartData.labels.length > 0) || (chartData?.labels && chartData.labels.length > 0))
-          );
-          const hasFiles = Boolean(result?.files && Array.isArray(result.files) && result.files.length > 0);
+                  return (
+                    <div className="flex gap-4 max-w-3xl mx-auto my-4 animate-in fade-in slide-in-from-bottom-3 duration-500">
+                      <div className="w-8 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="border border-border/60 rounded-2xl bg-white dark:bg-card overflow-hidden shadow-sm hover:shadow-md transition-all p-5">
+                          {hasChart && (
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between border-b border-border/40 pb-2">
+                                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                                  <span className="w-2 h-2 rounded-full bg-black dark:bg-white inline-block animate-pulse" />
+                                  {result.detectedChartType ? `${result.detectedChartType.toUpperCase()} CHART` : 'DATA VISUALIZATION'}
+                                </span>
+                              </div>
+                              <div className="h-[320px] w-full pt-2">
+                                <ChartResult 
+                                  type={result.detectedChartType || result.type || 'bar'} 
+                                  data={result.chartData || chartData} 
+                                />
+                              </div>
+                            </div>
+                          )}
+                          
+                          {hasFiles && (
+                            <div className={cn("pt-2", hasChart && "mt-4 pt-4 border-t border-border/40")}>
+                              <FileAttachments files={result.files} />
+                            </div>
+                          )}
 
-          if (!result || (!hasChart && !hasFiles)) return null;
-
-          return (
-            <div className="flex gap-4 max-w-3xl mx-auto my-4 animate-in fade-in slide-in-from-bottom-3 duration-500">
-              <div className="w-8 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="border border-border/60 rounded-2xl bg-white dark:bg-card overflow-hidden shadow-sm hover:shadow-md transition-all p-5">
-                  {/* Show Chart if available */}
-                  {hasChart && (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                        <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-black dark:bg-white inline-block animate-pulse" />
-                          {result.detectedChartType ? `${result.detectedChartType.toUpperCase()} CHART` : 'DATA VISUALIZATION'}
-                        </span>
+                          {!messages.some((m: any) => m?.role === 'assistant') && (
+                            <div className="pt-3 mt-3 border-t border-border/40">
+                              <ConversationActionBar
+                                content={result?.summary || result?.content || result?.text || `${result.detectedChartType || 'Visual'} analysis generated`}
+                                onRegenerate={() => onSubmit(cleanUserMessage(prompt))}
+                              />
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      <div className="h-[320px] w-full pt-2">
-                        <ChartResult 
-                          type={result.detectedChartType || result.type || 'bar'} 
-                          data={result.chartData || chartData} 
+                    </div>
+                  );
+                })()}
+
+                {/* Prompt-aware thinking animation */}
+                {isAssistantWorking && !hasVisibleAssistantMessage && (
+                  <div className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    <div className="flex-1 space-y-2.5 min-w-0">
+                      <div className="flex items-center gap-2.5">
+                        <ManusLogo showBadge={true} />
+                      </div>
+                      <div className="pt-1">
+                        <ContextualThinking
+                          prompt={messages.filter((message: any) => message?.role === 'user').slice(-1)[0]?.content || prompt}
+                          activeStep={activeRunningStep?.label}
+                          deepMode={isThinkHarder}
                         />
                       </div>
                     </div>
-                  )}
-                  
-                  {/* Show Files if available */}
-                  {hasFiles && (
-                    <div className={cn("pt-2", hasChart && "mt-4 pt-4 border-t border-border/40")}>
-                      <FileAttachments files={result.files} />
+                  </div>
+                )}
+
+                {/* Error State Card */}
+                {status === 'error' && !isAssistantWorking && (
+                  <div className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    <div className="w-8 shrink-0 flex items-start pt-1">
+                      <div className="w-8 h-8 rounded-full bg-destructive/10 text-destructive flex items-center justify-center">
+                        <AlertCircle size={16} />
+                      </div>
                     </div>
-                  )}
-
-                  {/* Action bar after standalone result */}
-                  {!messages.some((m: any) => m?.role === 'assistant') && (
-                    <div className="pt-3 mt-3 border-t border-border/40">
-                      <ConversationActionBar
-                        content={result?.summary || result?.content || result?.text || `${result.detectedChartType || 'Visual'} analysis generated`}
-                        onRegenerate={() => onSubmit(cleanUserMessage(prompt))}
-                      />
+                    <div className="flex-1 space-y-2.5 min-w-0">
+                      <div className="p-4 rounded-2xl bg-destructive/5 border border-destructive/20 text-sm">
+                        <p className="font-semibold text-destructive mb-1">Execution Interrupted</p>
+                        <p className="text-muted-foreground text-xs leading-relaxed">
+                          The stream was interrupted or the AI provider is temporarily unavailable. Check your connection and API key/provider settings, then select Retry.
+                        </p>
+                        <div className="mt-3 flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const lastUser = displayMessages.reverse().find((m: any) => m.role === 'user');
+                              const promptToRetry = lastUser?.content ? cleanUserMessage(lastUser.content) : prompt;
+                              if (promptToRetry) onSubmit(promptToRetry);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive text-white hover:bg-destructive/90 text-xs font-medium transition-all shadow-xs cursor-pointer"
+                          >
+                            <RotateCw size={13} />
+                            <span>Retry Request</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={onReset}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted text-xs font-medium transition-all cursor-pointer text-muted-foreground hover:text-foreground"
+                          >
+                            <span>Reset</span>
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })()}
+                  </div>
+                )}
 
-        {/* Prompt-aware thinking animation: stages adapt to the user's request */}
-        {isAssistantWorking && !hasVisibleAssistantMessage && (
-          <div className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <div className="flex-1 space-y-2.5 min-w-0">
-              <div className="flex items-center gap-2.5">
-                <ManusLogo showBadge={true} />
+                <div ref={bottomRef} className="h-36 shrink-0" />
               </div>
-              <div className="pt-1">
-                <ContextualThinking
-                  prompt={messages.filter((message: any) => message?.role === 'user').slice(-1)[0]?.content || prompt}
-                  activeStep={activeRunningStep?.label}
-                  deepMode={isThinkHarder}
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Error State Card with Retry & Reset Controls */}
-        {status === 'error' && !isAssistantWorking && (
-          <div className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <div className="w-8 shrink-0 flex items-start pt-1">
-              <div className="w-8 h-8 rounded-full bg-destructive/10 text-destructive flex items-center justify-center">
-                <AlertCircle size={16} />
-              </div>
-            </div>
-            <div className="flex-1 space-y-2.5 min-w-0">
-              <div className="p-4 rounded-2xl bg-destructive/5 border border-destructive/20 text-sm">
-                <p className="font-semibold text-destructive mb-1">Execution Interrupted</p>
-                <p className="text-muted-foreground text-xs leading-relaxed">
-                  The stream was interrupted or the AI provider is temporarily unavailable. Check your connection and API key/provider settings, then select Retry.
-                </p>
-                <div className="mt-3 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const lastUser = [...displayMessages].reverse().find((m: any) => m.role === 'user');
-                      const promptToRetry = lastUser?.content ? cleanUserMessage(lastUser.content) : prompt;
-                      if (promptToRetry) onSubmit(promptToRetry);
-                    }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive text-white hover:bg-destructive/90 text-xs font-medium transition-all shadow-xs cursor-pointer"
-                  >
-                    <RotateCw size={13} />
-                    <span>Retry Request</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onReset}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted text-xs font-medium transition-all cursor-pointer text-muted-foreground hover:text-foreground"
-                  >
-                    <span>Reset</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div ref={bottomRef} className="h-36 shrink-0" /> {/* Spacer for bottom input */}
+            )
+          }}
+        />
       </div>
 
       {/* Floating Scroll-to-bottom button when user scrolled up */}
@@ -1318,7 +1188,10 @@ export function ChatView({
       )}
 
       {/* Input Area - Floating Bottom */}
-      <div className="absolute bottom-3 left-0 right-0 px-4 flex flex-col items-center gap-2 z-20">
+      <div 
+        className="fixed bottom-0 left-0 right-0 px-4 pb-3 pt-2 flex flex-col items-center gap-2 z-50 bg-manus-cream/80 dark:bg-background/80 backdrop-blur-md"
+        style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}
+      >
         {(attachedFile || isThinkHarder) && (
           <div className="flex items-center gap-2 flex-wrap max-w-3xl w-full px-2">
             {isThinkHarder && (

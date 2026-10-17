@@ -1,0 +1,64 @@
+/* Manus Remix motion polish — additive only; does not alter layout, colors, or typography. */
+:root {
+  --manus-motion-fast: 140ms;
+  --manus-motion-standard: 220ms;
+  --manus-motion-ease: cubic-bezier(0.2, 0.75, 0.25, 1);
+}
+
+/* Native scrolling stays compositor-driven and works well on touch devices. */
+html {
+  scroll-behavior: smooth;
+  scroll-padding-block: 1rem;
+  -webkit-overflow-scrolling: touch;
+}
+
+body,
+[role="dialog"],
+[role="list"],
+[data-radix-scroll-area-viewport] {
+  overscroll-behavior: contain;
+}
+
+/* Keep interaction feedback subtle: no size, color, or layout changes. */
+:where(button, a, [role="button"]) {
+  transition:
+    transform var(--manus-motion-fast) var(--manus-motion-ease),
+    opacity var(--manus-motion-fast) ease,
+    box-shadow var(--manus-motion-fast) ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :where(button:not(:disabled), a, [role="button"]):hover {
+    transform: translateY(-1px);
+  }
+}
+
+:where(button:not(:disabled), a, [role="button"]):active {
+  transform: translateY(0) scale(0.985);
+}
+
+/* Animate only message-like containers when they enter the DOM. */
+@media (prefers-reduced-motion: no-preference) {
+  :where([data-message], .chat-message, .message-bubble, .message-item) {
+    animation: manus-message-enter var(--manus-motion-standard) var(--manus-motion-ease) both;
+  }
+
+  @keyframes manus-message-enter {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
+
+/* Avoid costly animated effects when the tab is hidden or the device prefers less motion. */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

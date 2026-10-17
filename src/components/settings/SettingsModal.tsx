@@ -29,8 +29,9 @@ import {
   Smartphone,
   Activity
 } from 'lucide-react';
-import { AndroidMainSettings } from './AndroidMainSettings';
-import { DiagnosticPanel } from './DiagnosticPanel';
+// Removed import AndroidMainSettings
+// import { DiagnosticPanel } from './DiagnosticPanel';
+// Removed import AndroidGeneralSettings
 import { useFirebase } from '@/context/FirebaseContext';
 import { GitHubRepositoryBrowser } from './GitHubRepositoryBrowser';
 import { 
@@ -94,6 +95,7 @@ const ROBOT_THEMES = [
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onBack?: () => void;
   initialTab?: SettingsTab;
   activeTaskInfo?: {
     taskId?: string | null;
@@ -107,7 +109,7 @@ interface SettingsModalProps {
 
 type SettingsTab = 'general' | 'robot' | 'ai' | 'diagnostics' | 'personalization' | 'voice' | 'data' | 'connectors' | 'about';
 
-export function SettingsModal({ isOpen, onClose, initialTab, activeTaskInfo }: SettingsModalProps) {
+export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskInfo }: SettingsModalProps) {
   const { theme, setTheme } = useTheme();
   const { user: fbUser, signInWithGoogle, signInAsGuest, signOut: fbSignOut } = useFirebase();
   const [settings, setSettings] = useState<UserSettings>(getSettings());
@@ -248,16 +250,16 @@ export function SettingsModal({ isOpen, onClose, initialTab, activeTaskInfo }: S
     { id: 'about', label: 'About', icon: Info },
   ];
 
-  if (showAndroidView) {
-    return <AndroidMainSettings onBack={() => setShowAndroidView(false)} isOpen={isOpen} />;
-  }
+  // if (showAndroidView) {
+  //   return <AndroidGeneralSettings onBack={() => setShowAndroidView(false)} isOpen={isOpen} />;
+  // }
 
   return (
     <>
       {/* Mobile Android 15 Edge-to-Edge Main Settings */}
-      <div className="sm:hidden fixed inset-0 z-50">
-        <AndroidMainSettings onBack={onClose} isOpen={isOpen} />
-      </div>
+      {/* <div className="sm:hidden fixed inset-0 z-50">
+        <AndroidGeneralSettings onBack={onClose} isOpen={isOpen} />
+      </div> */}
 
       {/* Desktop Responsive Settings Dialog */}
       <div 
@@ -779,17 +781,14 @@ export function SettingsModal({ isOpen, onClose, initialTab, activeTaskInfo }: S
                   </div>
                 </div>
 
-                {/* Active Task Diagnostics in AI Tab */}
-                <div className="pt-4 border-t border-border/50">
-                  <DiagnosticPanel activeTaskInfo={activeTaskInfo} />
-                </div>
+                {/* <DiagnosticPanel activeTaskInfo={activeTaskInfo} /> */}
               </div>
             )}
 
             {/* DIAGNOSTICS TAB */}
             {activeTab === 'diagnostics' && (
               <div className="space-y-6 animate-in fade-in duration-100">
-                <DiagnosticPanel activeTaskInfo={activeTaskInfo} />
+                {/* <DiagnosticPanel activeTaskInfo={activeTaskInfo} /> */}
               </div>
             )}
 

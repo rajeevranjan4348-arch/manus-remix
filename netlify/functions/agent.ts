@@ -1,7 +1,4 @@
 import { GoogleGenAI } from '@google/genai';
-import { extractWeatherQuery, fetchServerWeather, formatWeatherResponse } from '../../server/weatherService';
-import { geminiCircuitBreaker } from '../../server/circuitBreaker';
-import { buildAgentOrchestrationInstruction } from '../../server/agentOrchestration';
 
 const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -13,35 +10,15 @@ const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(da
   },
 });
 
-function createTextStreamResponse(text: string) {
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    start(controller) {
-      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: text })}\n\n`));
-      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`));
-      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-      controller.close();
-    }
-  });
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache, no-transform',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    },
-  });
-}
-
 export default async (req: Request) => {
   if (req.method !== 'POST') {
     return jsonResponse({ error: 'Method not allowed. Use POST.', code: 'METHOD_NOT_ALLOWED' }, 405);
   }
 
-  // Request size limit check: enforce max 10MB payload to support massive 2M context requests
+  // Request size limit check: enforce max 2MB payload
   const contentLength = req.headers.get('content-length');
-  if (contentLength && parseInt(contentLength, 10) > 10 * 1024 * 1024) {
-    return jsonResponse({ error: 'Payload exceeds maximum allowed size (10MB).', code: 'PAYLOAD_TOO_LARGE' }, 413);
+  if (contentLength && parseInt(contentLength, 10) > 2 * 1024 * 1024) {
+    return jsonResponse({ error: 'Payload exceeds maximum allowed size (2MB).', code: 'PAYLOAD_TOO_LARGE' }, 413);
   }
 
   let body: any;
@@ -55,44 +32,23 @@ export default async (req: Request) => {
     return jsonResponse({ error: 'Invalid request body format. Expected JSON object.', code: 'INVALID_PAYLOAD' }, 400);
   }
 
-  // Validate prompt / messages input bounds - supports 2 Million token context window
-  if (body.prompt !== undefined && (typeof body.prompt !== 'string' || body.prompt.length > 2000000)) {
-    return jsonResponse({ error: 'Prompt must be a string under 2,000,000 characters.', code: 'INVALID_PROMPT' }, 400);
+  // Validate prompt / messages input bounds
+  if (body.prompt !== undefined && (typeof body.prompt !== 'string' || body.prompt.length > 50000)) {
+    return jsonResponse({ error: 'Prompt must be a string under 50,000 characters.', code: 'INVALID_PROMPT' }, 400);
   }
 
   if (body.messages !== undefined) {
-    if (!Array.isArray(body.messages) || body.messages.length > 1000) {
-      return jsonResponse({ error: 'Messages must be an array of at most 1,000 messages.', code: 'INVALID_MESSAGES' }, 400);
+    if (!Array.isArray(body.messages) || body.messages.length > 200) {
+      return jsonResponse({ error: 'Messages must be an array of at most 200 messages.', code: 'INVALID_MESSAGES' }, 400);
     }
     for (const m of body.messages) {
-      if (!m || typeof m !== 'object' || !['user', 'assistant', 'system'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 2000000) {
-        return jsonResponse({ error: 'Each message must have role (user|assistant|system) and content under 2,000,000 characters.', code: 'INVALID_MESSAGE_ITEM' }, 400);
+      if (!m || typeof m !== 'object' || !['user', 'assistant', 'system'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 50000) {
+        return jsonResponse({ error: 'Each message must have role (user|assistant|system) and content under 50,000 characters.', code: 'INVALID_MESSAGE_ITEM' }, 400);
       }
     }
   }
 
   try {
-    const messages = Array.isArray(body.messages) ? body.messages : [];
-    const latestUserText =
-      [...messages].reverse().find((m: any) => m?.role === 'user' && typeof m?.content === 'string')?.content
-      || (typeof body.prompt === 'string' ? body.prompt : '');
-
-    // Weather Tool Calling Layer
-    const weatherCheck = extractWeatherQuery(latestUserText, messages);
-    if (weatherCheck.isWeather) {
-      if (weatherCheck.needsLocation || !weatherCheck.city) {
-        return createTextStreamResponse('Which city or location would you like to check the weather for? (e.g., Delhi, New York, London, Tokyo)');
-      }
-      try {
-        const weatherData = await fetchServerWeather(weatherCheck.city, 8000);
-        if (weatherData) {
-          return createTextStreamResponse(formatWeatherResponse(weatherData));
-        }
-      } catch (wErr) {
-        console.warn('[Netlify Agent] Weather fetch notice:', wErr);
-      }
-    }
-
     const apiKey = process.env.GEMINI_API_KEY;
     const openRouterKeys = [
       process.env.OPENROUTER_WORK_API_KEY,
@@ -118,61 +74,11 @@ export default async (req: Request) => {
       });
     }
 
-    // Image Generation connector: explicit @image or natural-language image requests.
-    // Gemini credentials remain server-side; generated image bytes are returned as a data URL.
-    const wantsImage = /@image\b/i.test(latestUserText)
-      || /\b(generate|create|make|draw|design)\s+(me\s+)?(an?\s+)?(image|picture|illustration|wallpaper|poster|logo|artwork)\b/i.test(latestUserText)
-      || /\b(image|picture|illustration|wallpaper|poster|logo|artwork)\s+(generation|generator)\b/i.test(latestUserText);
-    if (wantsImage) {
-      if (!ai) {
-        return jsonResponse({
-          error: 'Image Generation requires GEMINI_API_KEY. Add it to Netlify Site configuration → Environment variables, then redeploy.',
-          code: 'IMAGE_GENERATION_CREDENTIALS_REQUIRED',
-        }, 503);
-      }
-      const imagePrompt = latestUserText.replace(/@image\b/gi, '').trim();
-      if (!imagePrompt || imagePrompt.length > 4000) {
-        return createTextStreamResponse('Please describe the image you want me to generate (maximum 4,000 characters).');
-      }
-      try {
-        const generated = await ai.models.generateContent({
-          model: 'gemini-2.5-flash-image',
-          contents: imagePrompt,
-          config: { responseModalities: ['TEXT', 'IMAGE'] },
-        });
-        const parts = generated.candidates?.[0]?.content?.parts || [];
-        const imagePart = parts.find((part: any) => part?.inlineData?.data && part?.inlineData?.mimeType);
-        const caption = parts.find((part: any) => typeof part?.text === 'string')?.text || 'Generated with Manus Image Generation.';
-        if (!imagePart) {
-          return createTextStreamResponse('The image provider did not return an image. Please try a more specific prompt.');
-        }
-        const mimeType = String(imagePart.inlineData.mimeType).replace(/[^a-zA-Z0-9/+.-]/g, '');
-        const markdown = `${caption}\n\n![Generated image](data:${mimeType};base64,${imagePart.inlineData.data})`;
-        return createTextStreamResponse(markdown);
-      } catch (imageError: any) {
-        console.error('[Image Generation] Provider request failed:', imageError?.message || imageError);
-        return jsonResponse({
-          error: 'Image generation failed. Check that the Gemini API key is valid and that the image model is available to your project.',
-          code: 'IMAGE_GENERATION_FAILED',
-        }, 502);
-      }
-    }
-
     function normalizeModel(modelName?: string): string {
       if (!modelName || typeof modelName !== 'string') return 'gemini-3.8-flash';
       // Sanitize model string: allow only alphanumeric, dashes, dots, underscores, slashes
       const sanitized = modelName.slice(0, 100).replace(/[^a-zA-Z0-9_\-./:]/g, '');
       const clean = sanitized.replace(/^google\//, '').trim();
-      if (
-        clean === 'manus-1.6-max' ||
-        clean === 'gemini-3.1-pro' ||
-        clean === 'gemini-3.1-pro-preview' ||
-        clean === 'gemini-2m' ||
-        clean === 'manus-2m' ||
-        clean === 'gemini-2m-context'
-      ) {
-        return 'gemini-3.1-pro-preview';
-      }
       if (clean === 'gemini-2.5-flash' || clean === 'gemini-3-flash' || clean === 'gemini-3.0-flash') {
         return 'gemini-3.8-flash';
       }
@@ -181,9 +87,9 @@ export default async (req: Request) => {
 
     const candidateModels = Array.from(new Set([
       normalizeModel(body.model),
-      'gemini-3.1-pro-preview',
       'gemini-3.8-flash',
       'gemini-3.1-flash-lite',
+      'gemini-3.1-pro-preview'
     ]));
 
     let systemInstruction = body.systemInstruction ||
@@ -193,23 +99,20 @@ export default async (req: Request) => {
       systemInstruction += `\n\n[EXTENDED REASONING MODE ACTIVE]\nReason carefully internally, then provide a concise answer without revealing private chain-of-thought.`;
     }
 
-    // Add lightweight, task-aware planning and verification guidance without changing the UI/API contract.
-    systemInstruction += '\n\n' + buildAgentOrchestrationInstruction(latestUserText, Boolean(body.thinkHarder));
+    const messages = Array.isArray(body.messages) ? body.messages : [];
+    const latestUserText =
+      [...messages].reverse().find((m: any) => m?.role === 'user' && typeof m?.content === 'string')?.content
+      || (typeof body.prompt === 'string' ? body.prompt : '');
 
     // Keep greetings and ordinary conversation on the fast, non-search path.
-    // Enable Google Search grounding for queries related to current events, recent news, or fact-checking.
+    // Enable Google Search grounding for queries whose answers can change over time.
     const needsLiveSearch = (text: string) => {
-      if (!text || typeof text !== 'string') return false;
-      const q = text.toLowerCase().trim();
-      return /@(web_search|search|google)\b/i.test(q) || /\b(google search|search web|live search|web search)\b/i.test(q)
-        || /\b(current events?|latest news|recent news|breaking news|news today|headlines|world news|tech news|finance news|market news|election news|sports news|top stories)\b/i.test(q)
-        || /\b(fact[\s-]?check|factcheck|is it true|is that true|verify|verification|debunk|myth|rumor|confirmed|did .* really|is there truth to)\b/i.test(q)
-        || /\b(today|right now|currently|this morning|this afternoon|tonight|yesterday|this week|this month|this year|recent|recently|latest|newest|breaking|live|real[\s-]?time)\b/i.test(q)
-        || /\b(202[4-9]|203\d)\b/.test(q)
-        || /\b(stock price|share price|crypto price|exchange rate|inflation rate|interest rate|weather forecast|score|standings|box office|winner of|who won|who is (the )?(prime minister|president|chief minister|ceo)|who are the (current|latest)|new release|release date|version update|patch notes)\b/i.test(q)
-        || /\b(what happened (to|with|in|at)|what's happening (with|in|at)|whats happening|what is going on|tell me about the latest|latest on)\b/i.test(q);
+      const q = text.toLowerCase();
+      return /\b(latest|today|current|currently|right now|breaking|live|real[\s-]?time|news|headlines|recent|this week|yesterday|weather|stock price|share price|exchange rate|world news|india news|tech news|latest updates|election results|box office|release date|latest version|price today|score|standings|forecast|who won|who is (the )?(prime minister|president|chief minister|ceo)|who are the (current|latest)\b)\b/i.test(q)
+        || /\b(202[5-9]|203\d)\b/.test(q)
+        || /\b(what happened|what's happening|whats happening|tell me about the latest|latest on)\b/i.test(q);
     };
-    const useGoogleSearch = body.useGoogleSearch !== undefined ? Boolean(body.useGoogleSearch) : needsLiveSearch(latestUserText);
+    const useGoogleSearch = needsLiveSearch(latestUserText);
     // External search enriches the model context only for fresh/live questions.
     // Search snippets are untrusted data, never instructions.
     const externalSources = new Map<string, string>();
@@ -265,13 +168,9 @@ export default async (req: Request) => {
 
     if (useGoogleSearch) {
       systemInstruction +=
-        '\n\n[REAL-TIME GOOGLE SEARCH & NEWS GROUNDING ACTIVE]\n' +
-        'You are equipped with real-time Google Search data. Use this live information to:\n' +
-        '1. Discuss current events, breaking developments, and recent news accurately with up-to-date context.\n' +
-        '2. Fact-check claims, debunk rumors or misinformation, and verify facts against reliable web sources.\n' +
-        '3. Cite recent news and sources with publication names, dates, and direct links when available.\n' +
-        '4. Distinguish verified facts from emerging reports or conflicting claims.\n' +
-        '5. Never invent facts, dates, headlines, or URLs. Rely on grounded Google Search data.';
+        '\n\nLIVE WEB SEARCH IS ENABLED. Use Google Search grounding to answer current-events, news, and other changing-fact questions. ' +
+        'Prioritize recent, reliable sources. Clearly distinguish confirmed information from uncertainty. Include useful source links and publication dates when available. ' +
+        'Never invent sources, URLs, dates, headlines, or live facts. If search results are insufficient, say so.';
     }
 
     const contents = messages
@@ -290,32 +189,21 @@ export default async (req: Request) => {
 
     let responseStream: any = null;
 
-    if (ai && geminiCircuitBreaker.canAttempt()) {
+    if (ai) {
       for (const model of candidateModels) {
-        const toolConfigs = useGoogleSearch ? [{ tools: [{ googleSearch: {} }] }, {}] : [{}];
-        for (const toolConfig of toolConfigs) {
-          try {
-            responseStream = await ai.models.generateContentStream({
-              model,
-              contents,
-              config: {
-                systemInstruction,
-                ...toolConfig,
-              },
-            });
-            break;
-          } catch (err: any) {
-            geminiCircuitBreaker.recordFailure(err);
-            const isQuota = err?.status === 429 || String(err?.message || err).includes('RESOURCE_EXHAUSTED');
-            if (!isQuota) {
-              console.log(`[Netlify Agent] Model ${model} retry note`);
-            }
-            if (!geminiCircuitBreaker.canAttempt()) {
-              break;
-            }
-          }
+        try {
+          responseStream = await ai.models.generateContentStream({
+            model,
+            contents,
+            config: {
+              systemInstruction,
+              ...(useGoogleSearch ? { tools: [{ googleSearch: {} }] } : {}),
+            },
+          });
+          break;
+        } catch (err) {
+          console.warn(`[Netlify Agent] Model ${model} failed, trying fallback:`, err);
         }
-        if (responseStream || !geminiCircuitBreaker.canAttempt()) break;
       }
     }
 
@@ -395,10 +283,8 @@ export default async (req: Request) => {
                     controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                     controller.close();
                   } catch (err: any) {
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: `\n\n⚠️ ${err?.message || 'Stream error occurred.'}` })}\n\n`));
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`));
-                    controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-                    try { controller.close(); } catch {}
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: err?.message || 'Stream error' })}\n\n`));
+                    controller.close();
                   }
                 }
               });
@@ -415,32 +301,7 @@ export default async (req: Request) => {
         }
       }
 
-      // Resilient fallback streaming response
-      let fallbackText = `I have received your request regarding: "${latestUserText.slice(0, 200)}". All primary AI models are currently reaching quota limits, but your task has been processed. Would you like me to retry or run a specific autonomous sub-task?`;
-      if (geminiCircuitBreaker.getState() === 'OPEN') {
-        fallbackText = geminiCircuitBreaker.formatActionableRecoveryMessage();
-      }
-      const fallbackEncoder = new TextEncoder();
-      const fallbackStream = new ReadableStream({
-        start(controller) {
-          controller.enqueue(
-            fallbackEncoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: fallbackText })}\n\n`)
-          );
-          controller.enqueue(
-            fallbackEncoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`)
-          );
-          controller.enqueue(fallbackEncoder.encode('data: [DONE]\n\n'));
-          controller.close();
-        },
-      });
-
-      return new Response(fallbackStream, {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
-        },
-      });
+      throw new Error('All candidate models failed');
     }
 
     const encoder = new TextEncoder();
@@ -452,7 +313,6 @@ export default async (req: Request) => {
           for await (const chunk of responseStream) {
             const text = chunk.text;
             if (text) {
-              geminiCircuitBreaker.recordSuccess();
               controller.enqueue(
                 encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: text })}\n\n`)
               );
@@ -487,23 +347,18 @@ export default async (req: Request) => {
           controller.close();
         } catch (err: any) {
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: `\n\n⚠️ ${err?.message || 'The AI stream encountered an error.'}` })}\n\n`)
+            encoder.encode(`data: ${JSON.stringify({ type: 'error', error: err?.message || 'Stream error' })}\n\n`)
           );
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`)
-          );
-          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-          try { controller.close(); } catch {}
+          controller.close();
         }
       },
     });
 
     return new Response(stream, {
       headers: {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache, no-transform',
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
-        'X-Accel-Buffering': 'no',
       },
     });
   } catch (error: any) {

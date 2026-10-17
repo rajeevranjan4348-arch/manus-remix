@@ -26,7 +26,7 @@ import {
   cleanChatTitle,
   StoredMessage,
 } from '@/lib/chatDatabase';
-import { chatAutoSave } from '@/lib/chatAutoSave';
+// Removed import chatAutoSave
 
 export type AgentTaskPhase = 'idle' | 'tool-calling' | 'text-generation' | 'completed' | 'error';
 
@@ -237,6 +237,7 @@ export function useAgentTask() {
     agent,
     sandbox: sandbox || undefined, // Pass sandbox to useAgent
     onFinish: async (response) => {
+      console.log('[Manus Agent] onFinish triggered:', response);
       // Treat empty model output as a failed generation, never as a completed answer.
       const text = typeof response?.text === 'string' ? response.text.trim() : '';
       if (!text) {
@@ -327,6 +328,7 @@ export function useAgentTask() {
       };
       
       setResult(finalResult);
+      isSubmittingRef.current = false;
       setTaskStatus('completed');
       setPhase('completed');
       emitRobotEvent('TASK_SUCCEEDED');
@@ -414,6 +416,7 @@ export function useAgentTask() {
       }
     },
     onError: async (err) => {
+      console.error('[Manus Agent] onError triggered:', err);
       // Provider failures must be visible and retryable. Never convert a failed request
       // into a fabricated success or synthetic chart.
       console.error('[Manus AI] Generation failed:', err);
@@ -488,6 +491,7 @@ export function useAgentTask() {
 
   // Stream Completion Safeguard: Automatically finalize task state when SDK stream closes
   useEffect(() => {
+    console.log('[Manus Agent] Stream completion safeguard check: isLoading=', isLoading, 'taskStatus=', taskStatus);
     if (!isLoading && taskStatus === 'running') {
       const liveAssistant = [...messages].reverse().find((m: any) => m?.role === 'assistant' && typeof m?.content === 'string' && m.content.trim());
       if (liveAssistant?.content) {
@@ -515,8 +519,29 @@ export function useAgentTask() {
           }).catch(() => {});
         }
       }
-      setTaskStatus('completed');
-      setPhase('completed');
+      // A stream can close without an onFinish callback (network drop, proxy timeout,
+      // or SDK-level disconnect). Only treat it as success when an assistant answer
+      // actually exists; otherwise expose a retryable error instead of silently
+      // dismissing the loader and leaving the user without a reply.
+      if (liveAssistant?.content?.trim()) {
+        setTaskStatus('completed');
+        setPhase('completed');
+      } else {
+        const failureText = 'The AI connection ended before a response was received. Please retry.';
+        setResult({
+          type: 'chat',
+          content: failureText,
+          error: true,
+          retryable: true,
+        });
+        setTaskStatus('error');
+        setPhase('error');
+        setSteps(prev => prev.map(step => step.status === 'running'
+          ? { ...step, status: 'error' as const }
+          : step));
+        toast.error(failureText);
+      }
+      isSubmittingRef.current = false;
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
         detail: { isGenerating: false, mode: 'work' }
       }));
@@ -677,12 +702,20 @@ export function useAgentTask() {
 
   const sendMessage = useCallback((content: string) => {
     if (!content || !content.trim()) return;
+    // The SDK hook owns a single active stream. Do not start overlapping requests
+    // that would share its loading/messages state; allow the next turn after the
+    // previous stream reaches any terminal state.
+    if (isSubmittingRef.current) {
+      console.warn('[Manus Agent] Ignored submission while a request is still active.');
+      return;
+    }
     const now = Date.now();
     if (lastSubmitRef.current.prompt === content.trim() && now - lastSubmitRef.current.timestamp < 1200) {
       console.warn('[Manus Agent] Suppressed duplicate rapid submission:', content);
       return;
     }
     lastSubmitRef.current = { prompt: content.trim(), timestamp: now };
+    isSubmittingRef.current = true;
 
     setTaskStatus('running');
     setPhase('tool-calling');
@@ -784,6 +817,8 @@ export function useAgentTask() {
           setSteps(prev => prev.map(step => ({ ...step, status: 'error' as const })));
           emitRobotEvent('TASK_FAILED');
           toast.error("Couldn't reach the AI service. Please try again.");
+        } finally {
+          isSubmittingRef.current = false;
         }
       })();
     }
@@ -1064,69 +1099,60 @@ export function useAgentTask() {
         }));
       }
 
-      // Check for auto-saved session snapshot in case the tab was accidentally closed
-      const autoSaveSnapshot = chatAutoSave.getSnapshot(id);
-      if (autoSaveSnapshot) {
-        // If auto-saved snapshot has messages that were not yet synced or newer
-        if (autoSaveSnapshot.messages && autoSaveSnapshot.messages.length > initialMsgs.length) {
-          initialMsgs = autoSaveSnapshot.messages;
-        }
-      }
+      // End of session load
       setPersistentMessages(initialMsgs);
 
       // 2. Load task data
       const task = await (blink.db as any).tasks.get(id);
       if (task) {
         setCurrentTask({ 
-          prompt: task.prompt || task.title || autoSaveSnapshot?.prompt || '', 
+          prompt: task.prompt || task.title || '', 
           options: { 
-            format: task.outputFormat || autoSaveSnapshot?.outputFormat, 
-            chartType: task.chartType || autoSaveSnapshot?.chartType 
+            format: task.outputFormat || undefined, 
+            chartType: task.chartType || undefined
           } 
         });
-        setTaskStatus((task.status || autoSaveSnapshot?.status || 'idle') as any);
+        setTaskStatus((task.status || 'idle') as any);
         
         if (task.steps) {
           try {
             setSteps(JSON.parse(task.steps));
           } catch { 
-            setSteps(autoSaveSnapshot?.steps || []); 
+            setSteps([]); 
           }
-        } else if (autoSaveSnapshot?.steps) {
-          setSteps(autoSaveSnapshot.steps);
         }
         
         if (task.result) {
           try {
             const parsedResult = JSON.parse(task.result);
             setResult(parsedResult);
-            setChartData(parsedResult.chartData || autoSaveSnapshot?.chartData || null);
+            setChartData(parsedResult.chartData || null);
             if (initialMsgs.length === 0 && parsedResult.messages && parsedResult.messages.length > 0) {
               setPersistentMessages(parsedResult.messages);
             }
           } catch { 
-            if (autoSaveSnapshot?.result) {
-              setResult(autoSaveSnapshot.result);
-              setChartData(autoSaveSnapshot.chartData || null);
-            } else {
+            // if (autoSaveSnapshot?.result) {
+            //   setResult(autoSaveSnapshot.result);
+            //   setChartData(autoSaveSnapshot.chartData || null);
+            // } else {
               setResult(null); 
-            }
+            // }
           }
-        } else if (autoSaveSnapshot?.result) {
-          setResult(autoSaveSnapshot.result);
-          setChartData(autoSaveSnapshot.chartData || null);
-        }
-      } else if (autoSaveSnapshot) {
-        // Full disaster recovery from auto-saved snapshot if task record was not found
-        setCurrentTask({
-          prompt: autoSaveSnapshot.prompt,
-          options: { format: autoSaveSnapshot.outputFormat, chartType: autoSaveSnapshot.chartType }
-        });
-        setTaskStatus(autoSaveSnapshot.status as any);
-        setSteps(autoSaveSnapshot.steps || []);
-        setResult(autoSaveSnapshot.result || null);
-        setChartData(autoSaveSnapshot.chartData || null);
-      }
+        } // else if (autoSaveSnapshot?.result) {
+          // setResult(autoSaveSnapshot.result);
+          // setChartData(autoSaveSnapshot.chartData || null);
+        // }
+      } // else if (autoSaveSnapshot) {
+        // // Full disaster recovery from auto-saved snapshot if task record was not found
+        // setCurrentTask({
+        //   prompt: autoSaveSnapshot.prompt,
+        //   options: { format: autoSaveSnapshot.outputFormat, chartType: autoSaveSnapshot.chartType }
+        // });
+        // setTaskStatus(autoSaveSnapshot.status as any);
+        // setSteps(autoSaveSnapshot.steps || []);
+        // setResult(autoSaveSnapshot.result || null);
+        // setChartData(autoSaveSnapshot.chartData || null);
+      // }
     } catch (e) {
       console.error('Failed to load task:', e);
     }
@@ -1180,7 +1206,7 @@ Report generated by Manus AI Workspace
 
   const deleteTask = useCallback(async (id: string) => {
     try {
-      chatAutoSave.clearSnapshot(id);
+      // chatAutoSave.clearSnapshot(id);
       await (blink.db as any).tasks.delete(id);
       return true;
     } catch (e) {
@@ -1239,7 +1265,7 @@ Report generated by Manus AI Workspace
   useEffect(() => {
     const activeId = taskId || currentTaskIdRef.current;
     if (activeId) {
-      chatAutoSave.updateSession({
+      /* chatAutoSave.updateSession({
         taskId: activeId,
         conversationId: activeId,
         userId: user?.id || 'usr_manus_default',
@@ -1252,7 +1278,7 @@ Report generated by Manus AI Workspace
         steps,
         result,
         chartData
-      });
+      }); */
     }
   }, [taskId, currentTask, taskStatus, displayMessages, steps, result, chartData, user]);
 

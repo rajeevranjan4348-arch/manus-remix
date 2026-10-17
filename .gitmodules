@@ -1,7 +1,3 @@
 [submodule "vendor/android_env"]
 	path = vendor/android_env
 	url = https://github.com/google-deepmind/android_env.git
-
-[submodule "vendor/openui"]
-	path = vendor/openui
-	url = https://github.com/rajeevranjan4348-arch/openui.git

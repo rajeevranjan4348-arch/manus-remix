@@ -522,9 +522,20 @@ function geminiApiPlugin(): Plugin {
           });
 
           req.on('end', async () => {
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-cache, no-transform');
             res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Accel-Buffering', 'no');
+            if (typeof (res as any).flushHeaders === 'function') {
+              (res as any).flushHeaders();
+            }
+
+            let clientAborted = false;
+            res.on('close', () => {
+              if (!res.writableEnded) {
+                clientAborted = true;
+              }
+            });
 
             const check = streamCircuitBreaker.canExecute();
             if (!check.allowed) {
@@ -546,15 +557,21 @@ function geminiApiPlugin(): Plugin {
               });
 
               for await (const delta of stream) {
+                if (clientAborted || res.writableEnded) break;
                 if (delta) {
                   res.write(`data: ${JSON.stringify({ type: 'text-delta', delta })}\n\n`);
+                  if (typeof (res as any).flush === 'function') {
+                    (res as any).flush();
+                  }
                 }
               }
 
-              streamCircuitBreaker.recordSuccess();
-              res.write(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`);
-              res.write('data: [DONE]\n\n');
-              res.end();
+              if (!clientAborted && !res.writableEnded) {
+                streamCircuitBreaker.recordSuccess();
+                res.write(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`);
+                res.write('data: [DONE]\n\n');
+                res.end();
+              }
             } catch (err: any) {
               streamCircuitBreaker.recordFailure();
               console.error('[AI Stream Error]', err?.message || err);
@@ -565,6 +582,8 @@ function geminiApiPlugin(): Plugin {
                 userErrorMsg = '⚠️ API Rate limit or Quota exceeded. Please check your Gemini API plan or wait a few moments before retrying.';
               } else if (errMsg.includes('timeout') || errMsg.includes('abort')) {
                 userErrorMsg = '⚠️ Stream connection timed out waiting for AI model. Please retry your request.';
+              } else if (err?.message) {
+                userErrorMsg = `⚠️ ${err.message}`;
               }
 
               try {

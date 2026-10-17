@@ -7,9 +7,6 @@ import { ChatView } from './components/agent/ChatView';
 import { WebsiteBuilderView } from './components/agent/WebsiteBuilderView';
 import { HistoryPanel } from './components/history/HistoryPanel';
 import { SettingsModal } from './components/settings/SettingsModal';
-import { AndroidMainSettings } from './components/settings/AndroidMainSettings';
-import { AndroidGeneralSettings } from './components/settings/AndroidGeneralSettings';
-import { AndroidRobotSettings } from './components/settings/AndroidRobotSettings';
 import { AndroidVoiceSettings } from './components/settings/AndroidVoiceSettings';
 import { AndroidConnectorsSettings } from './components/settings/AndroidConnectorsSettings';
 import { MyAIChat } from './components/chat/MyAIChat';
@@ -268,19 +265,7 @@ function AppContent() {
                   <Route 
                     path="/settings" 
                     element={
-                      <AndroidMainSettings onBack={() => navigate('/')} />
-                    } 
-                  />
-                  <Route 
-                    path="/settings/general" 
-                    element={
-                      <AndroidGeneralSettings onBack={() => navigate('/settings')} />
-                    } 
-                  />
-                  <Route 
-                    path="/settings/robot" 
-                    element={
-                      <AndroidRobotSettings onBack={() => navigate('/settings')} />
+                      <SettingsModal isOpen={true} onClose={() => navigate('/')} onBack={() => navigate('/')} />
                     } 
                   />
                   <Route 

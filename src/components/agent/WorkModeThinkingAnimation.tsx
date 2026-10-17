@@ -1,6 +1,7 @@
 import React from 'react';
-import { Sparkles, Brain, Cpu, Search, Code, Globe, Terminal } from 'lucide-react';
+import { Sparkles, Brain, Cpu } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import LatticeLoader from '../ui/LatticeLoader';
 
 interface WorkModeThinkingAnimationProps {
   prompt?: string;
@@ -17,32 +18,40 @@ export function WorkModeThinkingAnimation({
   steps = [],
   className,
 }: WorkModeThinkingAnimationProps) {
-  const currentStatusText = activeStep || 'Processing your request...';
+  const currentStatusText = activeStep || 'Thinking';
 
   return (
     <div className={cn("p-4 rounded-2xl border border-primary/20 bg-primary/5 dark:bg-primary/10 backdrop-blur-xs space-y-3 my-2 animate-in fade-in duration-200", className)}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2.5 min-w-0">
           <div className="relative flex items-center justify-center w-7 h-7 rounded-full bg-primary/15 text-primary shrink-0">
             <Brain size={16} className="animate-pulse" />
             <span className="absolute inset-0 rounded-full bg-primary/20 animate-ping opacity-75" />
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
               Manus AI is working
               <Sparkles size={13} className="text-amber-500 animate-spin" style={{ animationDuration: '3s' }} />
             </p>
-            <p className="text-[11px] text-muted-foreground font-mono truncate max-w-xs sm:max-w-md">
-              {currentStatusText}
-            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '0ms' }} />
-          <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '150ms' }} />
-          <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" style={{ animationDelay: '300ms' }} />
-        </div>
+        {/* Integrated Lattice Loader Thinking Animation */}
+        <LatticeLoader
+          label={currentStatusText}
+          doneLabel="Completed in"
+          errorLabel="Failed after"
+          status={isLive ? "working" : "done"}
+          pattern="orbit"
+          grid={3}
+          shape="round"
+          cellSize={5}
+          gap={2}
+          fontSize={12}
+          glow={true}
+          showTimer={true}
+          className="shrink-0"
+        />
       </div>
 
       {steps && steps.length > 0 && (

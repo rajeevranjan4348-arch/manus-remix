@@ -23,12 +23,7 @@ export interface UserSettings {
   robotInteractive: boolean;
   robotAntenna: boolean;
   robotFloorShadow: boolean;
-  robotCloudSync: boolean; // Enables cloud-syncing of custom robot personalities and visual themes across devices
-  robotPersonality?: string; // Custom personality trait (e.g., 'balanced', 'analytical', 'creative', 'companion')
-  robotEyeColor?: string;
-  robotAccentHardware?: string;
-  robotName?: string;
-  robotSize?: number;
+  robotCloudSync: boolean;
 
   // AI & Intelligence
   defaultModel: string;
