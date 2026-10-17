@@ -636,13 +636,16 @@ export function ChatView({
   // Helper to render each message item in the virtualized list
   const renderMessageItem = (index: number, msg: any) => {
     if (!msg) return null;
+    const prevMsg = index > 0 ? displayMessages[index - 1] : null;
+    const isConsecutive = prevMsg && prevMsg.role === msg.role;
+
     if (msg.role === 'user') {
       const msgId = msg.id || String(index);
       const isEditing = editingMessageId === msgId;
       const cleanedText = cleanUserMessage(msg.content);
 
       return (
-        <div key={msgId} className="flex justify-end my-2 chat-message-enter group relative px-4 sm:px-20">
+        <div key={msgId} className={cn("flex justify-end chat-message-enter group relative px-4 sm:px-20", isConsecutive ? "my-1" : "my-2")}>
           {isEditing ? (
             <div className="bg-card border border-border p-3 rounded-2xl max-w-[90%] sm:max-w-[80%] shadow-md w-full space-y-2">
               <textarea
@@ -709,11 +712,13 @@ export function ChatView({
       const shouldAnimate = !isCompleted && isLatestAssistant;
 
       return (
-        <div key={msg.id || index} className="flex gap-4 max-w-3xl mx-auto my-3 chat-message-enter px-4 sm:px-20">
+        <div key={msg.id || index} className={cn("flex gap-4 max-w-3xl mx-auto chat-message-enter px-4 sm:px-20", isConsecutive ? "my-1.5" : "my-3")}>
           <div className="flex-1 space-y-3 min-w-0">
-            <div className="flex items-center gap-3">
-              <ManusLogo showBadge={true} />
-            </div>
+            {!isConsecutive && (
+              <div className="flex items-center gap-3">
+                <ManusLogo showBadge={true} />
+              </div>
+            )}
 
             {thought && (
               <ThoughtProcess
