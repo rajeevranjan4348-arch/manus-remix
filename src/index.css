@@ -225,6 +225,54 @@
   will-change: transform, opacity;
 }
 
+/* Smoothness UI layer: opt-in utilities that refine perceived motion
+   without altering layout, color, or component structure. */
+.smooth-scroll-surface {
+  -webkit-overflow-scrolling: touch; /* iOS momentum scrolling */
+  overscroll-behavior: contain;      /* no rubber-band bleed to page */
+  scroll-behavior: smooth;
+  scroll-padding-block: 1rem;
+}
+
+/* Stabilize text during font loading so transitions aren't jolted by reflow */
+.smooth-text {
+  font-synthesis-weight: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Spring-like overshoot easing token for interactive elements */
+.ease-spring {
+  transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Cross-fade helper: keeps absolutely-stacked variants fluid on swap */
+.smooth-crossfade > * {
+  transition:
+    opacity var(--manus-motion-normal, 240ms) var(--manus-motion-ease, ease),
+    transform var(--manus-motion-normal, 240ms) var(--manus-motion-ease, ease);
+}
+
+/* Ultra-smooth scrolling layer (logic-side): the rAF spring engine owns all
+   programmatic scrolls, so CSS scroll-behavior is neutralized to prevent
+   double-animation fights. Visual layout, colors, and structure unchanged. */
+html:not(.no-ultra-scroll) {
+  scroll-behavior: auto;
+}
+
+/* Opt-out escape hatch: surfaces without the JS engine can keep native smooth. */
+.no-ultra-scroll {
+  scroll-behavior: smooth;
+}
+
+/* Chat surfaces use the JS engine for programmatic scrolls; drop the static
+   `scroll-smooth` utility there so it never competes with rAF animation. */
+.chat-scroll-surface {
+  scroll-behavior: auto !important;
+  overscroll-behavior-y: contain;
+}
+
 /* Off-screen chat message rendering optimization: layout calculation virtualization */
 .chat-message-enter {
   content-visibility: auto;
@@ -970,6 +1018,10 @@ html {
   button:active,
   [role="button"]:active { transform: none; }
   .manus-transition-enter { animation: none; }
+  /* Smoothness UI layer gracefully degrades with reduced motion */
+  .smooth-scroll-surface { scroll-behavior: auto; }
+  .ease-spring { transition-timing-function: ease; }
+  .smooth-crossfade > * { transition: opacity 0.01ms linear; }
 }
 
 

@@ -13,18 +13,14 @@ export interface StreamChatOptions {
   mode?: 'chat' | 'work';
 }
 
+const PLACEHOLDER_MODELS = new Set(['gemini-3.8-flash', 'gemini-3-flash', 'gemini-3.0-flash']);
+
 function normalizeModel(modelName?: string): string {
-  if (!modelName) return 'gemini-3.8-flash';
+  if (!modelName) return 'gemini-flash-latest';
   const clean = modelName.replace(/^google\//, '').trim();
-  if (
-    clean === 'gemini-2.5-flash' ||
-    clean === 'gemini-3-flash' ||
-    clean === 'gemini-3.0-flash' ||
-    clean === 'gemini-2.0-flash' ||
-    clean === 'gemini-1.5-flash'
-  ) {
-    return 'gemini-3.8-flash';
-  }
+  // Placeholder / deprecated ids must never reach the Gemini API — a bad model
+  // name causes HTTP 404 from the provider. Map them to valid current models.
+  if (PLACEHOLDER_MODELS.has(clean)) return 'gemini-flash-latest';
   return clean;
 }
 
@@ -121,13 +117,12 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     });
 
   const preferredModel = normalizeModel(options.model);
-  // Order candidate models prioritizing active high-speed models
+  // Candidate models — all must be valid Gemini API model ids (invalid ids cause provider 404)
   const candidateModels = Array.from(new Set([
     preferredModel,
-    'gemini-3.8-flash',
-    'gemini-3.1-flash-lite',
     'gemini-flash-latest',
     'gemini-flash-lite-latest',
+    'gemini-2.5-flash',
   ]));
 
   let systemPrompt = options.systemInstruction ||

@@ -23,7 +23,7 @@ export interface AgentPolicyConfig {
 const CONFIG_STORAGE_KEY = 'manus_agent_policy_config';
 
 const DEFAULT_POLICY: AgentPolicyConfig = {
-  defaultModel: 'gemini-3.8-flash',
+  defaultModel: 'gemini-flash-latest',
   maxAutonomousSteps: 15,
   toolApprovalPolicy: 'ask_sensitive',
   enableWebSearch: true,

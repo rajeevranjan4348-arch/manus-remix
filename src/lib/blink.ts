@@ -33,7 +33,7 @@ try {
   baseClient = createClient({
     projectId: PROJECT_ID,
     publishableKey: PUBLISHABLE_KEY,
-    auth: { mode: 'managed' },
+    auth: { mode: 'managed', authUrl: typeof window !== 'undefined' ? window.location.origin : undefined },
   });
 } catch (e) {
   console.warn('[AI Studio] Running with in-memory Blink client adapter:', e);
@@ -63,7 +63,13 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
       // 1. Try real Gemini streaming from our server endpoint.
       let serviceFailureMessage = 'The AI response service is temporarily unavailable. Please check your connection and try again.';
       try {
-        const streamEndpoint = '/api/gemini/stream';
+        // Resolution order: explicit VITE_AI_API_BASE_URL (absolute https URL for
+        // serverless deploys) -> same-origin /api/gemini/stream (dev server or
+        // standalone node server). Never call a non-existent relative route.
+        const configuredBase = (import.meta as any).env?.VITE_AI_API_BASE_URL || '';
+        const streamEndpoint = configuredBase
+          ? configuredBase.replace(/\/$/, '') + '/gemini/stream'
+          : '/api/gemini/stream';
         const res = await nativeFetch(streamEndpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -73,15 +79,20 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
             prompt: lastUserMsg,
             systemInstruction: agentConfig?.system,
             model: (() => {
-              const m = (agentConfig?.model?.replace(/^google\//, '') || 'gemini-3.8-flash').trim();
-              return m === 'gemini-2.5-flash' || m === 'gemini-3-flash' || m === 'gemini-3.0-flash' ? 'gemini-3.8-flash' : m;
+              const m = (agentConfig?.model?.replace(/^google\//, '') || 'gemini-flash-latest').trim();
+              // Placeholder ids never reach the provider — they cause upstream HTTP 404.
+              return (m === 'gemini-2.5-flash' || m === 'gemini-3-flash' || m === 'gemini-3.0-flash' || m === 'gemini-3.8-flash') ? 'gemini-flash-latest' : m;
             })(),
             thinkHarder: Boolean(options.thinkHarder),
           }),
         });
 
         if (!res.ok) {
+          // Log exact failing URL + response body for debugging (requirement #4)
+          let resBodySnippet = '';
+          try { resBodySnippet = (await res.text()).slice(0, 500); } catch {}
           try { await res.body?.cancel(); } catch {}
+          console.error('[AI Studio] Failing request:', 'POST', streamEndpoint, '-> HTTP', res.status, '| body:', resBodySnippet);
           if (res.status === 429) {
             serviceFailureMessage = 'The AI service is receiving too many requests. Please wait a moment and try again.';
           } else if (res.status === 401 || res.status === 403 || res.status === 503) {
@@ -90,6 +101,8 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
             serviceFailureMessage = 'The AI server encountered a problem. Your message was not completed; please try again.';
           } else if (res.status === 400 || res.status === 413) {
             serviceFailureMessage = 'The request could not be processed. Please check your message or shorten it, then try again.';
+          } else if (res.status === 404) {
+            serviceFailureMessage = 'The AI endpoint (' + streamEndpoint + ') was not found on this server. Run the app with `npm run dev` or `node server/standalone.mjs` so /api routes are registered.';
           } else {
             serviceFailureMessage = 'The AI request failed (HTTP ' + res.status + '). Please try again.';
           }
