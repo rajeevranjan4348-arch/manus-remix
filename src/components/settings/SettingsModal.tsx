@@ -120,6 +120,34 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
   const [micStatus, setMicStatus] = useState<PermissionState>('prompt');
   const [cameraStatus, setCameraStatus] = useState<PermissionState>('prompt');
   const [showMicHelpModal, setShowMicHelpModal] = useState(false);
+  const [accentCombo, setAccentCombo] = useState(() => {
+    try { return localStorage.getItem('manus_accent_combo') || 'ocean'; } catch { return 'ocean'; }
+  });
+  const accentCombos = [
+    { id: 'ocean', label: 'Ocean', primary: '217 91% 60%', ring: '217 91% 60%', swatches: ['#2563eb', '#06b6d4'] },
+    { id: 'violet', label: 'Violet', primary: '262 83% 58%', ring: '262 83% 58%', swatches: ['#7c3aed', '#c084fc'] },
+    { id: 'emerald', label: 'Emerald', primary: '160 84% 39%', ring: '160 84% 39%', swatches: ['#059669', '#34d399'] },
+    { id: 'sunset', label: 'Sunset', primary: '25 95% 53%', ring: '25 95% 53%', swatches: ['#f97316', '#ec4899'] },
+    { id: 'rose', label: 'Rose', primary: '346 77% 50%', ring: '346 77% 50%', swatches: ['#e11d48', '#fb7185'] },
+    { id: 'mono', label: 'Graphite', primary: '220 9% 46%', ring: '220 9% 46%', swatches: ['#52525b', '#a1a1aa'] },
+  ];
+
+  const applyAccentCombo = (id: string) => {
+    const combo = accentCombos.find((item) => item.id === id) || accentCombos[0];
+    setAccentCombo(combo.id);
+    const root = document.documentElement;
+    root.style.setProperty('--primary', combo.primary);
+    root.style.setProperty('--ring', combo.ring);
+    root.style.setProperty('--sidebar-primary', combo.primary);
+    try { localStorage.setItem('manus_accent_combo', combo.id); } catch {}
+  };
+
+  useEffect(() => {
+    applyAccentCombo(accentCombo);
+  // Apply once on mount and whenever the selected accent changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accentCombo]);
+
 
   const checkMediaPermissions = async () => {
     const status = await getPermissionsStatus();
@@ -359,6 +387,39 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
                         >
                           <Icon size={13} />
                           <span>{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Accent colour combinations */}
+                <div className="pt-4 border-t border-border/50">
+                  <div className="mb-3">
+                    <p className="text-xs font-medium text-foreground">Accent colour</p>
+                    <p className="text-[11px] text-muted-foreground">Choose a colour combo for buttons, highlights, and focus states</p>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {accentCombos.map((combo) => {
+                      const selected = accentCombo === combo.id;
+                      return (
+                        <button
+                          key={combo.id}
+                          type="button"
+                          onClick={() => applyAccentCombo(combo.id)}
+                          aria-pressed={selected}
+                          className={cn(
+                            "flex items-center gap-2 rounded-xl border px-2.5 py-2 text-xs transition-all text-left",
+                            selected ? "border-foreground/30 bg-muted/60 ring-1 ring-border" : "border-border/60 hover:bg-muted/40"
+                          )}
+                        >
+                          <span className="flex -space-x-1.5 shrink-0" aria-hidden="true">
+                            {combo.swatches.map((colour) => (
+                              <span key={colour} className="h-5 w-5 rounded-full border-2 border-background" style={{ backgroundColor: colour }} />
+                            ))}
+                          </span>
+                          <span className="flex-1">{combo.label}</span>
+                          {selected && <Check size={13} className="text-foreground" />}
                         </button>
                       );
                     })}
