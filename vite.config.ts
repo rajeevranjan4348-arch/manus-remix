@@ -339,7 +339,7 @@ function geminiApiPlugin(): Plugin {
                   const stream = streamGeminiResponse({
                     messages,
                     systemInstruction: body.systemInstruction,
-                    model: body.model || 'gemini-3.8-flash',
+                    model: body.model || 'gemini-flash-latest',
                     thinkHarder: Boolean(body.thinkHarder),
                   });
                   for await (const chunk of stream) {
@@ -439,7 +439,7 @@ function geminiApiPlugin(): Plugin {
               const stream = streamGeminiResponse({
                 messages: body.messages || (body.prompt ? [{ role: 'user', content: body.prompt }] : []),
                 systemInstruction: body.systemInstruction,
-                model: body.model || 'gemini-3.8-flash',
+                model: body.model || 'gemini-flash-latest',
                 thinkHarder: Boolean(body.thinkHarder),
               });
 

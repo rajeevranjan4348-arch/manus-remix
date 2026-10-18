@@ -136,17 +136,19 @@ export function useAgentTask() {
 
   // Define the agent
   const agent = useMemo(() => {
-    const selectedModelId = localStorage.getItem('selected_manus_model') || 'gemini-3.8-flash';
+    const selectedModelId = localStorage.getItem('selected_manus_model') || 'gemini-flash-latest';
+    // NOTE: values must be provider-valid model ids. Placeholder ids like
+    // 'gemini-3.8-flash'/'gemini-3.1-flash-lite' do not exist upstream and cause HTTP 404.
     const modelMap: Record<string, string> = {
-      'manus-1.6-lite': 'google/gemini-3.1-flash-lite',
-      'manus-1.6-max': 'google/gemini-3.8-flash',
-      'gemini-3.8-flash': 'google/gemini-3.8-flash',
-      'gemini-3.1-flash-lite': 'google/gemini-3.1-flash-lite',
+      'manus-1.6-lite': 'google/gemini-flash-lite-latest',
+      'manus-1.6-max': 'google/gemini-flash-latest',
+      'gemini-3.8-flash': 'google/gemini-flash-latest',
+      'gemini-3.1-flash-lite': 'google/gemini-flash-lite-latest',
       'gemini-flash-latest': 'google/gemini-flash-latest',
-      'gemini-2.5-flash': 'google/gemini-3.8-flash',
-      'claude-3.5-sonnet': 'google/gemini-3.8-flash',
+      'gemini-2.5-flash': 'google/gemini-2.5-flash',
+      'claude-3.5-sonnet': 'google/gemini-flash-latest',
     };
-    const activeModel = modelMap[selectedModelId] || 'google/gemini-3.8-flash';
+    const activeModel = modelMap[selectedModelId] || 'google/gemini-flash-latest';
 
     return new Agent({
       model: activeModel,
@@ -436,7 +438,9 @@ export function useAgentTask() {
               messages: messages.map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })),
               model: (() => {
                 const sel = localStorage.getItem('selected_manus_model');
-                if (!sel || sel.includes('gemini-2.0') || sel.includes('gemini-2.5')) return 'gemini-3.8-flash';
+                // 'gemini-3.8-flash' is a placeholder id that does not exist at the
+                // provider (causes upstream 404). Use a valid current model instead.
+                if (!sel || sel.includes('gemini-2.0') || sel.includes('gemini-2.5') || sel === 'gemini-3.8-flash') return 'gemini-flash-latest';
                 return sel;
               })(),
               mode: currentTask?.options?.mode || 'chat',
@@ -449,6 +453,11 @@ export function useAgentTask() {
             if (data.text) {
               fallbackContent = data.text;
             }
+          } else {
+            // Log exact failing URL + response body for debugging
+            let errBody = '';
+            try { errBody = (await res.text()).slice(0, 500); } catch {}
+            console.error('[AI Studio] Failing request:', 'POST', '/api/ai/completion', '-> HTTP', res.status, '| body:', errBody);
           }
         } catch (fetchErr) {
           console.warn('[AI Studio] Server completion fetch notice:', fetchErr);
