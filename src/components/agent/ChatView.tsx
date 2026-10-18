@@ -30,6 +30,7 @@ import { ConnectorsPopupMenu } from '../chat/ConnectorsPopupMenu';
 import { ConnectorsStorePanel, CONNECTOR_CATALOG } from '../connectors/ConnectorsStorePanel';
 import { ConnectorConfigModal } from '../connectors/ConnectorConfigModal';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
+import { animateScrollTop, attachWheelSmoothing } from '@/lib/smoothScroll';
 import { readFileForAI, formatFileSize } from '@/lib/fileValidation';
 import { cn } from '@/lib/utils';
 import { Logo, ManusLogo } from '../layout/Logo';
@@ -411,11 +412,20 @@ export function ChatView({
       shouldAutoScrollRef.current = true;
       setShowScrollToBottom(false);
       if (behavior === 'smooth') {
-        container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+        // Ultra-smooth spring scroll (falls back to native smooth on touch / reduced-motion)
+        animateScrollTop(container, container.scrollHeight, { duration: 500 });
       } else {
         container.scrollTop = container.scrollHeight;
       }
     }
+  }, []);
+
+  // Wheel-step smoothing for the conversation surface (no-op on touch devices
+  // and when the user prefers reduced motion — handled inside the engine).
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    return attachWheelSmoothing(container);
   }, []);
 
   const handleTypewriterComplete = React.useCallback((msgKey: string) => {
@@ -737,7 +747,7 @@ export function ChatView({
       )}
 
       {/* Chat Area */}
-      <div ref={containerRef} onScroll={handleConversationScroll} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-20 pt-6 pb-40 space-y-8 custom-scrollbar scroll-smooth">
+      <div ref={containerRef} onScroll={handleConversationScroll} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-20 pt-6 pb-40 space-y-8 custom-scrollbar scroll-smooth chat-scroll-surface">
         
         {/* Render Conversation Messages in Chronological Order */}
         {displayMessages.map((msg, i) => {
