@@ -59,6 +59,59 @@ import { Step } from '@/hooks/useAgentTask';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
 import { getChatViewDraft, saveChatViewDraft, clearChatViewDraft } from '@/lib/draftStorage';
+import { getSettings } from '@/lib/settingsStore';
+
+/** Scrolls a target element to the vertical center of a scrollable container. */
+export function centerElementInContainer(
+  container: HTMLElement,
+  target: Element,
+  behavior: ScrollBehavior = 'smooth'
+): number {
+  const containerRect = container.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const targetTop = targetRect.top - containerRect.top + container.scrollTop;
+  const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+  const centeredTop = targetTop - container.clientHeight / 2 + targetRect.height / 2;
+  const finalTop = Math.min(maxScrollTop, Math.max(0, centeredTop));
+
+  if (typeof container.scrollTo === 'function') {
+    try {
+      container.scrollTo({ top: finalTop, behavior });
+    } catch {
+      // Some embedded browsers expose scrollTo but do not support its options form.
+      container.scrollTop = finalTop;
+    }
+  } else {
+    container.scrollTop = finalTop;
+  }
+
+  return finalTop;
+}
+
+/**
+ * Finds the most useful search result to bring into view. Prefer actual sources,
+ * then rendered result cards, followed by search traces and the assistant answer.
+ */
+export function findSearchContentElement(container: ParentNode | null | undefined): HTMLElement | null {
+  if (!container || typeof container.querySelectorAll !== 'function') return null;
+
+  const selectors = [
+    '[data-testid="search-citations"]',
+    '.search-content-result',
+    '[data-testid="task-result-content"]',
+    '[data-search-step="true"]',
+    '[data-search-trace="true"]',
+    '[data-search-content="true"]',
+    '[data-search-message="true"]',
+  ];
+
+  for (const selector of selectors) {
+    const match = container.querySelectorAll<HTMLElement>(selector)[0];
+    if (match) return match;
+  }
+
+  return null;
+}
 
 
 type ManusMapRequest =
@@ -234,7 +287,7 @@ export function ChatView({
   const [interimSpeech, setInterimSpeech] = useState<string>('');
   const dragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLElement>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const speechBaseInputRef = useRef<string>('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -559,10 +612,13 @@ export function ChatView({
     setShowScrollToBottom(!isAtBottom);
   }, []);
 
-  // When a streaming response begins, reset auto-scroll lock to true and align to bottom
+  // Reset to the bottom when a response starts, then center the finished result.
   const prevStreamingRef = useRef(false);
   useEffect(() => {
-    if (isStreamingResponse && !prevStreamingRef.current) {
+    const justStartedStreaming = isStreamingResponse && !prevStreamingRef.current;
+    const justFinishedStreaming = !isStreamingResponse && prevStreamingRef.current;
+
+    if (justStartedStreaming) {
       shouldAutoScrollRef.current = true;
       setShowScrollToBottom(false);
       if (containerRef.current) {
@@ -570,6 +626,30 @@ export function ChatView({
       }
     }
     prevStreamingRef.current = isStreamingResponse;
+
+    if (!justFinishedStreaming || getSettings().autoScrollToResults === false) return;
+
+    let timeoutId: number;
+    let attempts = 0;
+    const scrollToResult = () => {
+      const container = containerRef.current;
+      const target = container ? findSearchContentElement(container) : null;
+
+      if (container && target) {
+        shouldAutoScrollRef.current = false;
+        centerElementInContainer(container, target, 'smooth');
+        return;
+      }
+
+      // Virtualized items may mount one frame after the stream completes. Retry briefly.
+      if (attempts < 3) {
+        attempts += 1;
+        timeoutId = window.setTimeout(scrollToResult, 50);
+      }
+    };
+
+    timeoutId = window.setTimeout(scrollToResult, 0);
+    return () => window.clearTimeout(timeoutId);
   }, [isStreamingResponse]);
 
   // Keep scroll position at the bottom during active streaming token/step updates
@@ -707,9 +787,19 @@ export function ChatView({
       const isCompleted = Boolean(completedTypewriters[msgKey]);
       const isLatestAssistant = index === displayMessages.length - 1 || (index === displayMessages.length - 2 && displayMessages[displayMessages.length - 1]?.role !== 'assistant');
       const shouldAnimate = !isCompleted && isLatestAssistant;
+      const precedingUserMessage = displayMessages
+        .slice(0, index)
+        .reverse()
+        .find((message: any) => message?.role === 'user')?.content;
+      const searchPrompt = cleanUserMessage(precedingUserMessage || prompt);
+      const isSearchMessage = parsedSources.sources.length > 0 || /\b(search|research|look\s+up|find\s+online|latest|current|news|sources?|fact[-\s]+check|verify|web)\b/i.test(searchPrompt);
 
       return (
-        <div key={msg.id || index} className="flex gap-4 max-w-3xl mx-auto my-3 chat-message-enter px-4 sm:px-20">
+        <div
+          key={msg.id || index}
+          data-search-message={isSearchMessage ? 'true' : undefined}
+          className="flex gap-4 max-w-3xl mx-auto my-3 chat-message-enter px-4 sm:px-20"
+        >
           <div className="flex-1 space-y-3 min-w-0">
             <div className="flex items-center gap-3">
               <ManusLogo showBadge={true} />
@@ -1024,6 +1114,9 @@ export function ChatView({
         
         <Virtuoso
           ref={virtuosoRef}
+          scrollerRef={(scroller) => {
+            containerRef.current = scroller && 'scrollTop' in scroller ? scroller as HTMLElement : null;
+          }}
           data={displayMessages}
           className="h-full w-full custom-scrollbar overscroll-contain"
           followOutput={isStreamingResponse ? 'smooth' : false}
@@ -1067,7 +1160,10 @@ export function ChatView({
                     <div className="flex gap-4 max-w-3xl mx-auto my-4 animate-in fade-in slide-in-from-bottom-3 duration-500">
                       <div className="w-8 shrink-0" />
                       <div className="flex-1 min-w-0">
-                        <div className="border border-border/60 rounded-2xl bg-white dark:bg-card overflow-hidden shadow-sm hover:shadow-md transition-all p-5">
+                        <div
+                          data-testid="task-result-content"
+                          className="border border-border/60 rounded-2xl bg-white dark:bg-card overflow-hidden shadow-sm hover:shadow-md transition-all p-5"
+                        >
                           {hasChart && (
                             <div className="space-y-3">
                               <div className="flex items-center justify-between border-b border-border/40 pb-2">
