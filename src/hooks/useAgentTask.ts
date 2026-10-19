@@ -804,10 +804,10 @@ export function useAgentTask() {
         setSteps(prev => prev.map(s => s.label === toolIntent.suggestedAction ? { ...s, status: 'completed' } : s));
         if (res.success) {
           const augmentedPrompt = `${content}\n\n[EXECUTED CONNECTED TOOL: ${toolIntent.connectorName} (${toolIntent.toolName})]\n[RESULT DATA]:\n${JSON.stringify(res.data, null, 2)}\n\n[INSTRUCTION: Synthesize a clear, verified answer based on the retrieved data above. Highlight key documents/messages/events and provide links where applicable.]`;
-          agentSendMessage(augmentedPrompt);
+          await agentSendMessage(augmentedPrompt);
         } else {
           const errorPrompt = `${content}\n\n[CONNECTOR TOOL ERROR: ${res.error || 'Execution failed'}]\n${res.message}\nProvide a helpful explanation of the failure.`;
-          agentSendMessage(errorPrompt);
+          await agentSendMessage(errorPrompt);
         }
       }).catch(error => {\n        console.error('[Manus AI] Connector tool failed:', error);\n        setTaskStatus('error');\n        setPhase('error');\n        setResult({ type: 'chat', content: 'The connected tool failed before an AI response could be generated. Please retry.', error: true, retryable: true });\n      }).finally(() => {\n        isSubmittingRef.current = false;\n      });
       return;
@@ -819,7 +819,7 @@ export function useAgentTask() {
       const chartPrompt = `${content}\n\n[INSTRUCTION: Format your chart data as a JSON code block using the format below so it renders as an interactive chart]\n\`\`\`json\n{\n  "graph": {\n    "type": "bar",\n    "labels": ["Category A", "Category B", "Category C", "Category D"],\n    "datasets": [{\n      "label": "Metric",\n      "data": [45, 72, 88, 95]\n    }]\n  }\n}\n\`\`\``;
       void (async () => {
         try {
-          agentSendMessage(await preparePromptWithConnectors(chartPrompt));
+          await agentSendMessage(await preparePromptWithConnectors(chartPrompt));
         } catch (error) {
           console.error('[Manus AI] Failed to prepare chart request:', error);
           setTaskStatus('error');
