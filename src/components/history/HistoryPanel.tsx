@@ -27,7 +27,8 @@ import {
   LayoutGrid,
   Calendar,
   Filter,
-  CheckSquare
+  CheckSquare,
+  Tag
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { blink } from '@/lib/blink';
@@ -35,6 +36,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { syncTasksToLibrary, getLibraryItems } from '@/lib/libraryStore';
 import { listConversations, deleteConversation, exportAllChatHistory, recoverChatHistory, getAllMessages } from '@/lib/chatDatabase';
+import { classifyTaskTags, getTagStyle, getAvailableTags, TaskTag } from '@/lib/taskTaggingService';
 import { TaskQuickPreviewCard } from './TaskQuickPreviewCard';
 import { SwipeableHistoryItem } from './SwipeableHistoryItem';
 import {
@@ -78,6 +80,7 @@ export interface TaskHistoryItem {
   websiteName?: string;
   mode?: string;
   content?: string;
+  tags?: string[];
 }
 
 export interface VoiceHistoryRecord {
@@ -228,9 +231,22 @@ export function filterTasks(
   dateFilter: 'all' | 'today' | 'yesterday' | 'week' | 'month' | 'custom' = 'all',
   startDate?: string,
   endDate?: string,
-  referenceDate: Date = new Date()
+  referenceDate: Date = new Date(),
+  selectedTag: string = 'all'
 ): TaskHistoryItem[] {
   return tasks.filter(task => {
+    // Tag Filter
+    if (selectedTag && selectedTag !== 'all') {
+      const taskTags = Array.isArray(task.tags) && task.tags.length > 0
+        ? task.tags
+        : typeof task.tags === 'string'
+          ? JSON.parse(task.tags)
+          : classifyTaskTags(task.prompt || task.title || '', (task as any).result);
+      if (!taskTags.includes(selectedTag)) {
+        return false;
+      }
+    }
+
     const created = new Date(task.created_at || referenceDate);
     const createdTime = created.getTime();
 
@@ -259,7 +275,7 @@ export function filterTasks(
       }
     }
 
-    // 2. Keyword Filter (Search by title or content)
+    // 2. Keyword Filter (Search by title, content, or tag)
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase().trim();
 
@@ -268,6 +284,7 @@ export function filterTasks(
     const content = (task.content || '').toLowerCase();
     const status = (task.status || '').toLowerCase();
     const mode = ((task as any).mode || '').toLowerCase();
+    const tagsStr = (Array.isArray(task.tags) ? task.tags.join(' ') : '').toLowerCase();
 
     const dateFormatted = created.toLocaleDateString('en-US', {
       month: 'short',
@@ -284,6 +301,7 @@ export function filterTasks(
       content.includes(q) ||
       status.includes(q) ||
       mode.includes(q) ||
+      tagsStr.includes(q) ||
       dateFormatted.includes(q) ||
       fullDate.includes(q) ||
       isoDate.includes(q)
@@ -331,6 +349,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'yesterday' | 'week' | 'month' | 'custom'>('all');
+  const [selectedTagFilter, setSelectedTagFilter] = useState<string>('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [showDateFilter, setShowDateFilter] = useState(false);
@@ -808,8 +827,8 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
   }, [libraryItems, searchQuery, activeTab, dateFilter, startDate, endDate]);
 
   const filteredTasks = useMemo(() => {
-    return filterTasks(tasks, searchQuery, dateFilter, startDate, endDate);
-  }, [tasks, searchQuery, dateFilter, startDate, endDate]);
+    return filterTasks(tasks, searchQuery, dateFilter, startDate, endDate, new Date(), selectedTagFilter);
+  }, [tasks, searchQuery, dateFilter, startDate, endDate, selectedTagFilter]);
 
   // Automatically group task sessions by date periods ('Today', 'This Week', 'Older')
   const groupedTasks = useMemo(() => {
@@ -969,6 +988,36 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                 )}
               </button>
             </div>
+
+            {/* Tag Filter Pills for Past Tasks */}
+            {activeTab === 'sessions' && (
+              <div className="flex items-center gap-1.5 overflow-x-auto py-1 custom-scrollbar no-scrollbar">
+                <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider shrink-0 flex items-center gap-1">
+                  <Tag size={10} className="text-primary" /> Tag:
+                </span>
+                {['all', ...getAvailableTags()].map((tag) => {
+                  const isActive = selectedTagFilter === tag;
+                  const style = tag !== 'all' ? getTagStyle(tag) : null;
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => setSelectedTagFilter(tag)}
+                      className={cn(
+                        "px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all shrink-0 cursor-pointer border",
+                        isActive
+                          ? tag === 'all'
+                            ? "bg-primary text-primary-foreground border-primary shadow-2xs font-bold"
+                            : `${style?.badgeClass} font-bold shadow-2xs ring-1 ring-primary/30`
+                          : "bg-muted/50 border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+                      )}
+                    >
+                      {tag === 'all' ? 'All Tags' : tag}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             {/* Real-time search counter / indicator */}
             {searchQuery.trim() && (
@@ -1557,10 +1606,23 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                                 </div>
 
                                 <div className="flex-1 min-w-0 space-y-1.5">
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
                                     <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
                                       <MessageSquare size={11} /> {((task as any).mode === 'work' || task.outputFormat === 'website' || Boolean(task.websiteName)) ? 'Work' : 'Chat'}
                                     </span>
+                                    {((Array.isArray(task.tags) && task.tags.length > 0)
+                                      ? task.tags
+                                      : typeof task.tags === 'string'
+                                        ? JSON.parse(task.tags)
+                                        : classifyTaskTags(task.prompt || task.title || '', (task as any).result)
+                                    ).map((tag: string) => {
+                                      const style = getTagStyle(tag);
+                                      return (
+                                        <span key={tag} className={cn("text-[9px] font-bold px-2 py-0.5 rounded-full border tracking-wide", style.badgeClass)}>
+                                          {tag}
+                                        </span>
+                                      );
+                                    })}
                                     <span className="text-[10px] text-muted-foreground font-mono">
                                       {getRelativeTime(task.created_at)}
                                     </span>

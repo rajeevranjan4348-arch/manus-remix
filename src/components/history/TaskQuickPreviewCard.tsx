@@ -1,7 +1,8 @@
 import React from 'react';
 import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card';
-import { Sparkles, Calendar, ArrowUpRight } from 'lucide-react';
+import { Sparkles, Calendar, ArrowUpRight, Tag } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { classifyTaskTags, getTagStyle } from '@/lib/taskTaggingService';
 
 export interface TaskQuickPreviewCardProps {
   task: any;
@@ -20,6 +21,11 @@ export function TaskQuickPreviewCard({
 
   const promptText = task.prompt || task.title || 'Untitled Task';
   const status = task.status || 'completed';
+  const taskTags = Array.isArray(task.tags) && task.tags.length > 0
+    ? task.tags
+    : typeof task.tags === 'string'
+      ? JSON.parse(task.tags)
+      : classifyTaskTags(promptText, task.result);
   const createdAtFormatted = task.createdAt 
     ? new Date(task.createdAt).toLocaleDateString(undefined, { 
         month: 'short', 
@@ -61,6 +67,25 @@ export function TaskQuickPreviewCard({
             <h4 className="font-semibold text-xs text-foreground line-clamp-2 leading-snug">
               {promptText}
             </h4>
+            {/* Auto-assigned task tags */}
+            {taskTags.length > 0 && (
+              <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                {taskTags.map((tag: string) => {
+                  const style = getTagStyle(tag);
+                  return (
+                    <span
+                      key={tag}
+                      className={cn(
+                        "px-2 py-0.5 rounded-full text-[9px] font-bold border tracking-wide",
+                        style.badgeClass
+                      )}
+                    >
+                      {tag}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
             {task.summary && (
               <p className="text-[11px] text-muted-foreground mt-1 line-clamp-3 leading-relaxed">
                 {task.summary}

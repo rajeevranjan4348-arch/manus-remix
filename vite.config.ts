@@ -131,6 +131,60 @@ function geminiApiPlugin(): Plugin {
           }
         }
 
+        // Server-Side Task AI Tagging Endpoint
+        if (url === '/api/tag-task' && req.method === 'POST') {
+          res.setHeader('Content-Type', 'application/json');
+          let bodyStr = '';
+          req.on('data', chunk => { bodyStr += chunk; });
+          req.on('end', async () => {
+            try {
+              const body = bodyStr ? JSON.parse(bodyStr) : {};
+              const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : '';
+              const content = typeof body?.content === 'string' ? body.content.trim() : '';
+
+              if (!prompt) {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ error: 'Prompt is required' }));
+                return;
+              }
+
+              if (process.env.GEMINI_API_KEY) {
+                const ai = new GoogleGenAI({
+                  apiKey: process.env.GEMINI_API_KEY,
+                  httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+                });
+
+                const tagRes = await ai.models.generateContent({
+                  model: 'gemini-3.8-flash',
+                  contents: `Analyze the user's task prompt and generated response below. Select 1 to 3 relevant concise tags from this allowed set: ["Research", "Coding", "Analysis", "Design", "Writing", "Automation", "General"].
+
+Prompt: "${prompt.slice(0, 1500)}"
+Response Preview: "${content.slice(0, 1500)}"
+
+Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "Coding"]}.`,
+                  config: {
+                    responseMimeType: 'application/json',
+                  },
+                });
+
+                const textOut = tagRes.text?.trim() || '';
+                try {
+                  const parsed = JSON.parse(textOut);
+                  if (Array.isArray(parsed?.tags) && parsed.tags.length > 0) {
+                    res.end(JSON.stringify({ tags: parsed.tags }));
+                    return;
+                  }
+                } catch {}
+              }
+
+              res.end(JSON.stringify({ tags: [] }));
+            } catch (err: any) {
+              res.end(JSON.stringify({ tags: [] }));
+            }
+          });
+          return;
+        }
+
         // Server-Side Web Search Endpoint (mirrors netlify/functions/web-search.ts)
         if ((url === '/api/web-search' || url === '/api/search') && req.method === 'POST') {
           res.setHeader('Content-Type', 'application/json');

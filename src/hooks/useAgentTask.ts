@@ -26,6 +26,8 @@ import {
   cleanChatTitle,
   StoredMessage,
 } from '@/lib/chatDatabase';
+import { tagTaskAfterCompletion } from '@/lib/taskTaggingService';
+import { taskTagger } from '@/services/taskTagger';
 // Removed import chatAutoSave
 
 export type AgentTaskPhase = 'idle' | 'tool-calling' | 'text-generation' | 'completed' | 'error';
@@ -380,6 +382,8 @@ export function useAgentTask() {
             result: finalResult,
             steps: steps.map(s => ({ ...s, status: 'completed' }))
           });
+          // Auto-tag task using AI model analysis
+          taskTagger.processTaskTags(activeId, currentTask?.prompt || assistantText, assistantText).catch(() => {});
         } catch {}
       }
       
@@ -493,10 +497,10 @@ export function useAgentTask() {
   useEffect(() => {
     console.log('[Manus Agent] Stream completion safeguard check: isLoading=', isLoading, 'taskStatus=', taskStatus);
     if (!isLoading && taskStatus === 'running') {
+      const activeId = taskId || currentTaskIdRef.current;
       const liveAssistant = [...messages].reverse().find((m: any) => m?.role === 'assistant' && typeof m?.content === 'string' && m.content.trim());
       if (liveAssistant?.content) {
         const assistantText = liveAssistant.content.trim();
-        const activeId = taskId || currentTaskIdRef.current;
         if (activeId && assistantText) {
           const assistantMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
           setPersistentMessages(prev => {
@@ -526,6 +530,9 @@ export function useAgentTask() {
       if (liveAssistant?.content?.trim()) {
         setTaskStatus('completed');
         setPhase('completed');
+        if (activeId) {
+          taskTagger.processTaskTags(activeId, currentTask?.prompt || liveAssistant.content, liveAssistant.content).catch(() => {});
+        }
       } else {
         const failureText = 'The AI connection ended before a response was received. Please retry.';
         setResult({
