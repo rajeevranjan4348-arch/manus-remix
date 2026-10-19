@@ -800,7 +800,7 @@ export function useAgentTask() {
         { id: String(prev.length + 1), label: toolIntent.suggestedAction, status: 'running', trace: [`Executing ${toolIntent.toolName}...`] }
       ]);
 
-      executeConnectorTool(toolIntent.toolName, toolIntent.args).then(res => {
+      executeConnectorTool(toolIntent.toolName, toolIntent.args).then(async res => {
         setSteps(prev => prev.map(s => s.label === toolIntent.suggestedAction ? { ...s, status: 'completed' } : s));
         if (res.success) {
           const augmentedPrompt = `${content}\n\n[EXECUTED CONNECTED TOOL: ${toolIntent.connectorName} (${toolIntent.toolName})]\n[RESULT DATA]:\n${JSON.stringify(res.data, null, 2)}\n\n[INSTRUCTION: Synthesize a clear, verified answer based on the retrieved data above. Highlight key documents/messages/events and provide links where applicable.]`;
@@ -809,7 +809,14 @@ export function useAgentTask() {
           const errorPrompt = `${content}\n\n[CONNECTOR TOOL ERROR: ${res.error || 'Execution failed'}]\n${res.message}\nProvide a helpful explanation of the failure.`;
           await agentSendMessage(errorPrompt);
         }
-      }).catch(error => {\n        console.error('[Manus AI] Connector tool failed:', error);\n        setTaskStatus('error');\n        setPhase('error');\n        setResult({ type: 'chat', content: 'The connected tool failed before an AI response could be generated. Please retry.', error: true, retryable: true });\n      }).finally(() => {\n        isSubmittingRef.current = false;\n      });
+      }).catch(error => {
+        console.error('[Manus AI] Connector tool failed:', error);
+        setTaskStatus('error');
+        setPhase('error');
+        setResult({ type: 'chat', content: 'The connected tool failed before an AI response could be generated. Please retry.', error: true, retryable: true });
+      }).finally(() => {
+        isSubmittingRef.current = false;
+      });
       return;
     }
 
