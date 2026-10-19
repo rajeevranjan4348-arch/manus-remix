@@ -101,8 +101,16 @@ function AppContent() {
       const batteryLow = Boolean(batteryManager && !batteryManager.charging && batteryManager.level <= 0.2);
       const hidden = document.visibilityState === 'hidden';
       const mode = reducedMotion || batteryLow ? 'saver' : 'balanced';
+      
       document.documentElement.dataset.perfMode = mode;
       document.documentElement.dataset.pageHidden = hidden ? 'true' : 'false';
+      document.documentElement.dataset.batteryLow = batteryLow ? 'true' : 'false';
+      document.documentElement.dataset.pausePolling = batteryLow ? 'true' : 'false';
+      document.documentElement.dataset.animFps = batteryLow || mode === 'saver' ? 'low' : 'normal';
+
+      window.dispatchEvent(new CustomEvent('manus_battery_saver_change', {
+        detail: { batteryLow, pausePolling: batteryLow, perfMode: mode }
+      }));
     };
 
     const onVisibilityChange = () => updatePerformanceMode();
@@ -133,6 +141,9 @@ function AppContent() {
       batteryManager?.removeEventListener?.('chargingchange', updatePerformanceMode);
       delete document.documentElement.dataset.perfMode;
       delete document.documentElement.dataset.pageHidden;
+      delete document.documentElement.dataset.batteryLow;
+      delete document.documentElement.dataset.pausePolling;
+      delete document.documentElement.dataset.animFps;
     };
   }, []);
 

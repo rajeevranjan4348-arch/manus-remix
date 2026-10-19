@@ -583,6 +583,20 @@
   }
 }
 
+/* Low FPS / Saver Mode Animation Throttling for Battery Saving */
+[data-anim-fps="low"] .loader,
+[data-perf-mode="saver"] .loader {
+  animation-duration: 4s !important;
+}
+[data-anim-fps="low"] .loader-letter,
+[data-perf-mode="saver"] .loader-letter {
+  animation-duration: 4s !important;
+}
+[data-anim-fps="low"] .typing-dot,
+[data-perf-mode="saver"] .typing-dot {
+  animation-duration: 2.6s !important;
+}
+
 /* =========================================================================
    From Uiverse.io by Cobp - Chatbot Input Component Styles
    ========================================================================= */
