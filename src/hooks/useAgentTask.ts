@@ -116,7 +116,7 @@ export function useAgentTask() {
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
         detail: { isGenerating: true, mode: 'work', text: 'Manus is typing...' }
       }));
-      // 45-second watchdog to guarantee no permanently stuck loading states
+      // 30-second watchdog: surface a retryable failure before the UI appears permanently stuck
       watchdogTimer = setTimeout(() => {
         console.warn('[useAgentTask] Watchdog: Task ran past timeout, recovering to terminal state');
         isSubmittingRef.current = false;
@@ -132,7 +132,7 @@ export function useAgentTask() {
         window.dispatchEvent(new CustomEvent('manus_agent_generating', {
           detail: { isGenerating: false, mode: 'work' }
         }));
-      }, 45000);
+      }, 30000);
     } else {
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
         detail: { isGenerating: false, mode: 'work' }
@@ -780,7 +780,18 @@ export function useAgentTask() {
           customMessage: `The ${toolIntent.connectorName} connector is required for "${toolIntent.toolName}" but is not currently authorized.`
         });
         const noticePrompt = `${content}\n\n[CONNECTOR STATUS NOTICE: The ${toolIntent.connectorName} connector is required for this request but is currently NOT connected. Inform the user clearly that ${toolIntent.connectorName} needs to be authorized in Connectors & Plugins, and offer to open Connectors.]`;
-        agentSendMessage(noticePrompt);
+        void (async () => {
+          try {
+            await agentSendMessage(noticePrompt);
+          } catch (error) {
+            console.error('[Manus AI] Failed to send connector notice:', error);
+            setTaskStatus('error');
+            setPhase('error');
+            setResult({ type: 'chat', content: "I couldn't reach the AI service. Check your connection and try again.", error: true, retryable: true });
+          } finally {
+            isSubmittingRef.current = false;
+          }
+        })();
         return;
       }
 
@@ -798,7 +809,7 @@ export function useAgentTask() {
           const errorPrompt = `${content}\n\n[CONNECTOR TOOL ERROR: ${res.error || 'Execution failed'}]\n${res.message}\nProvide a helpful explanation of the failure.`;
           agentSendMessage(errorPrompt);
         }
-      });
+      }).catch(error => {\n        console.error('[Manus AI] Connector tool failed:', error);\n        setTaskStatus('error');\n        setPhase('error');\n        setResult({ type: 'chat', content: 'The connected tool failed before an AI response could be generated. Please retry.', error: true, retryable: true });\n      }).finally(() => {\n        isSubmittingRef.current = false;\n      });
       return;
     }
 
@@ -806,7 +817,17 @@ export function useAgentTask() {
     const lower = content.toLowerCase();
     if (lower.includes('graph') || lower.includes('chart') || lower.includes('plot') || lower.includes('diagram') || lower.includes('bar') || lower.includes('pie') || lower.includes('line')) {
       const chartPrompt = `${content}\n\n[INSTRUCTION: Format your chart data as a JSON code block using the format below so it renders as an interactive chart]\n\`\`\`json\n{\n  "graph": {\n    "type": "bar",\n    "labels": ["Category A", "Category B", "Category C", "Category D"],\n    "datasets": [{\n      "label": "Metric",\n      "data": [45, 72, 88, 95]\n    }]\n  }\n}\n\`\`\``;
-      void (async () => { agentSendMessage(await preparePromptWithConnectors(chartPrompt)); })();
+      void (async () => {
+        try {
+          agentSendMessage(await preparePromptWithConnectors(chartPrompt));
+        } catch (error) {
+          console.error('[Manus AI] Failed to prepare chart request:', error);
+          setTaskStatus('error');
+          setPhase('error');
+          setResult({ type: 'chat', content: "I couldn't prepare this request. Check your connection and try again.", error: true, retryable: true });
+          isSubmittingRef.current = false;
+        }
+      })();
     } else {
       void (async () => {
         try {
