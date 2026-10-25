@@ -1,15 +1,26 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { Sidebar } from './components/layout/Sidebar';
 import { Topbar } from './components/layout/Topbar';
-import { Home } from './pages/Home';
 import { ChatView } from './components/agent/ChatView';
-import { WebsiteBuilderView } from './components/agent/WebsiteBuilderView';
-import { HistoryPanel } from './components/history/HistoryPanel';
-import { SettingsModal } from './components/settings/SettingsModal';
-import { AndroidVoiceSettings } from './components/settings/AndroidVoiceSettings';
-import { AndroidConnectorsSettings } from './components/settings/AndroidConnectorsSettings';
-import { MyAIChat } from './components/chat/MyAIChat';
+
+// Performance: split heavy, non-critical views into lazily-loaded chunks so the
+// initial bundle only contains what is needed for first paint (Home shell + sidebar).
+const Home = lazy(() => import('./pages/Home').then(m => ({ default: m.Home })));
+const WebsiteBuilderView = lazy(() => import('./components/agent/WebsiteBuilderView').then(m => ({ default: m.WebsiteBuilderView })));
+const HistoryPanel = lazy(() => import('./components/history/HistoryPanel').then(m => ({ default: m.HistoryPanel })));
+const SettingsModal = lazy(() => import('./components/settings/SettingsModal').then(m => ({ default: m.SettingsModal })));
+const AndroidVoiceSettings = lazy(() => import('./components/settings/AndroidVoiceSettings').then(m => ({ default: m.AndroidVoiceSettings })));
+const AndroidConnectorsSettings = lazy(() => import('./components/settings/AndroidConnectorsSettings').then(m => ({ default: m.AndroidConnectorsSettings })));
+const MyAIChat = lazy(() => import('./components/chat/MyAIChat').then(m => ({ default: m.MyAIChat })));
+
+function RouteFallback() {
+  return (
+    <div className="flex h-full w-full items-center justify-center">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-primary" />
+    </div>
+  );
+}
 import { useAgentTask } from './hooks/useAgentTask';
 import { useWebsiteBuilder } from './hooks/useWebsiteBuilder';
 import { BlinkProvider, BlinkAuthProvider, useBlinkAuth } from '@blinkdotnew/react';
@@ -73,6 +84,11 @@ function AppContent() {
   const [historyInitialTab, setHistoryInitialTab] = React.useState<'sessions' | 'all' | 'photos' | 'videos' | 'docs'>('sessions');
   const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = React.useState<'general' | 'robot' | 'ai' | 'personalization' | 'voice' | 'data' | 'about'>('general');
+  // Once a lazy panel/modal has been opened we keep its chunk mounted (it renders
+  // closed via isOpen=false) so re-opening is instant; chunks are also prefetched
+  // during idle time (see effect below).
+  const [historyPreloaded, setHistoryPreloaded] = React.useState(false);
+  const [settingsPreloaded, setSettingsPreloaded] = React.useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const { user, isLoading: isAuthLoading } = useBlinkAuth();
@@ -142,12 +158,28 @@ function AppContent() {
   }, []);
 
 
+  // Warm the lazy chunks for History/Settings during idle time so opening them
+  // later feels instantaneous, without competing with the initial page load.
+  React.useEffect(() => {
+    const prefetch = () => {
+      import('./components/history/HistoryPanel').catch(() => {});
+      import('./components/settings/SettingsModal').catch(() => {});
+    };
+    if ('requestIdleCallback' in window) {
+      const id = (window as any).requestIdleCallback(prefetch, { timeout: 5000 });
+      return () => (window as any).cancelIdleCallback(id);
+    }
+    const t = setTimeout(prefetch, 2500);
+    return () => clearTimeout(t);
+  }, []);
+
   // Global keyboard shortcuts (Ctrl+H: History, Ctrl+, : Settings)
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'h') {
         e.preventDefault();
         setHistoryInitialTab('sessions');
+        setHistoryPreloaded(true);
         setIsHistoryOpen(prev => !prev);
       }
       if ((e.ctrlKey || e.metaKey) && (e.key === ',' || e.key.toLowerCase() === 'p')) {
@@ -159,11 +191,13 @@ function AppContent() {
     const handleOpenSettings = (e: any) => {
       const tab = e?.detail?.tab || 'general';
       setSettingsInitialTab(tab);
+      setSettingsPreloaded(true);
       setIsSettingsOpen(true);
     };
     const handleOpenHistory = (e?: any) => {
       const tab = e?.detail?.tab || 'sessions';
       setHistoryInitialTab(tab);
+      setHistoryPreloaded(true);
       setIsHistoryOpen(true);
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -228,8 +262,14 @@ function AppContent() {
         isOpen={isSidebarOpen} 
         onToggle={() => setIsSidebarOpen(!isSidebarOpen)} 
         onNewTask={handleReset}
-        onOpenHistory={() => setIsHistoryOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenHistory={() => {
+          setHistoryPreloaded(true);
+          setIsHistoryOpen(true);
+        }}
+        onOpenSettings={() => {
+          setSettingsPreloaded(true);
+          setIsSettingsOpen(true);
+        }}
         activeTaskId={location.pathname.startsWith('/task/') ? location.pathname.split('/')[2] : undefined}
       />
       <div className="flex-1 flex flex-col min-w-0">
@@ -238,10 +278,14 @@ function AppContent() {
             onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
             onOpenHistory={() => {
               setHistoryInitialTab('sessions');
+              setHistoryPreloaded(true);
               setIsHistoryOpen(true);
             }} 
             onNewTask={handleReset}
-            onOpenSettings={() => setIsSettingsOpen(true)}
+            onOpenSettings={() => {
+              setSettingsPreloaded(true);
+              setIsSettingsOpen(true);
+            }}
             onExport={agentTask.exportToPDF}
             showNewTask={hasSentMessage}
           />
@@ -249,6 +293,7 @@ function AppContent() {
         <main className="flex-1 overflow-hidden relative transition-all duration-300 ease-out">
           {isWebsiteActive ? (
             <div className="w-full h-full animate-in fade-in-0 slide-in-from-bottom-2 duration-350 ease-out">
+              <Suspense fallback={<RouteFallback />}>
               <WebsiteBuilderView
                 websiteName={websiteTask?.websiteName || 'Website'}
                 steps={websiteSteps}
@@ -257,10 +302,12 @@ function AppContent() {
                 previewUrl={previewUrl}
                 isLoading={isBuilding || isInitializing}
               />
+              </Suspense>
             </div>
           ) : (
             <div key={location.pathname} className="w-full h-full animate-in fade-in-0 slide-in-from-bottom-2 duration-300 ease-out gpu-accelerated">
               <ErrorBoundary>
+                <Suspense fallback={<RouteFallback />}>
                 <Routes>
                   <Route path="/" element={<Home onStartTask={handleStartTask} />} />
                   <Route 
@@ -303,37 +350,46 @@ function AppContent() {
                     } 
                   />
                 </Routes>
+                </Suspense>
               </ErrorBoundary>
             </div>
           )}
         </main>
       </div>
 
-      {/* Slide-out Activity & History Panel */}
-      <HistoryPanel 
-        isOpen={isHistoryOpen} 
-        onClose={() => setIsHistoryOpen(false)}
-        initialTab={historyInitialTab}
-        onSelectTask={(id) => {
-          setIsHistoryOpen(false);
-          navigate(`/task/${id}`);
-        }}
-      />
+      {/* Slide-out Activity & History Panel (lazy chunk: only fetched when first opened) */}
+      {isHistoryOpen || historyPreloaded ? (
+        <Suspense fallback={null}>
+          <HistoryPanel
+            isOpen={isHistoryOpen}
+            onClose={() => setIsHistoryOpen(false)}
+            initialTab={historyInitialTab}
+            onSelectTask={(id) => {
+              setIsHistoryOpen(false);
+              navigate(`/task/${id}`);
+            }}
+          />
+        </Suspense>
+      ) : null}
 
-      {/* Global Settings & Preferences Modal */}
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        initialTab={settingsInitialTab}
-        activeTaskInfo={{
-          taskId: agentTask.taskId,
-          prompt: agentTask.currentTask?.prompt,
-          taskStatus: agentTask.taskStatus,
-          messages: agentTask.messages,
-          steps: agentTask.steps,
-          result: agentTask.result,
-        }}
-      />
+      {/* Global Settings & Preferences Modal (lazy chunk: only fetched when first opened) */}
+      {isSettingsOpen || settingsPreloaded ? (
+        <Suspense fallback={null}>
+          <SettingsModal
+            isOpen={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+            initialTab={settingsInitialTab}
+            activeTaskInfo={{
+              taskId: agentTask.taskId,
+              prompt: agentTask.currentTask?.prompt,
+              taskStatus: agentTask.taskStatus,
+              messages: agentTask.messages,
+              steps: agentTask.steps,
+              result: agentTask.result,
+            }}
+          />
+        </Suspense>
+      ) : null}
 
       <Toaster />
     </div>
