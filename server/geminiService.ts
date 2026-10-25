@@ -88,6 +88,19 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
   const latestUserText = [...options.messages].reverse()
     .find(m => m.role === 'user')?.content || '';
 
+  // Per-request upstream timeout. Without this, a hung provider connection keeps the
+  // async generator awaiting forever, which leaves the UI stuck on "Manus AI is working — Thinking".
+  const requestAbortController = new AbortController();
+  const upstreamTimeoutMs = 30000;
+  const upstreamTimeout = setTimeout(() => requestAbortController.abort(), upstreamTimeoutMs);
+  let streamFinallyDone = false;
+  const finalizeStream = () => {
+    if (streamFinallyDone) return;
+    streamFinallyDone = true;
+    clearTimeout(upstreamTimeout);
+  };
+
+  try {
   if (apiKey) {
     const ai = new GoogleGenAI({
       apiKey,
@@ -95,6 +108,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
         headers: {
           'User-Agent': 'aistudio-build',
         },
+        timeout: upstreamTimeoutMs,
       },
     });
 
@@ -116,8 +130,6 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     systemPrompt += '\n\n[EXTENDED REASONING MODE ACTIVE]\nEnclose your step-by-step logical deconstruction and trade-off evaluation inside <think> and </think> tags at the beginning of your response.';
   }
 
-  const latestUserText = [...options.messages].reverse()
-    .find(m => m.role === 'user')?.content || '';
   const useGoogleSearch = needsLiveSearch(latestUserText);
 
   if (useGoogleSearch) {
@@ -154,6 +166,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
             systemInstruction: systemPrompt,
             ...toolConfig,
           },
+          abortSignal: requestAbortController.signal,
         });
 
         let hasYielded = false;
