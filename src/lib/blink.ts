@@ -44,23 +44,109 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 // Preserve original fetch for internal Gemini API calls
 const nativeFetch = typeof window !== 'undefined' ? window.fetch.bind(window) : fetch;
 
-function createAutonomousStreamResponse(options: any, agentConfig: any): Response {
-  const encoder = new TextEncoder();
-  const lastUserMsg = options.messages
-    ? options.messages.filter((m: any) => m.role === 'user').slice(-1)[0]?.content || ''
-    : options.prompt || '';
+// Track active stream AbortControllers so stopTask / new requests can cancel in-flight streams
+const activeStreamControllers = new Set<AbortController>();
 
-  const isWebsite = options.sandbox || (agentConfig?.system && agentConfig.system.includes('Website Builder')) || lastUserMsg.toLowerCase().includes('website');
+export function abortActiveAutonomousStreams(): void {
+  for (const controller of activeStreamControllers) {
+    try {
+      controller.abort();
+    } catch {}
+  }
+  activeStreamControllers.clear();
+}
+
+export function createAutonomousStreamResponse(options: any, agentConfig?: any): Response {
+  const encoder = new TextEncoder();
+  const normalizedOptions = Array.isArray(options) ? { messages: options } : (options || {});
+  const lastUserMsg = Array.isArray(normalizedOptions.messages)
+    ? normalizedOptions.messages.filter((m: any) => m?.role === 'user').slice(-1)[0]?.content || ''
+    : normalizedOptions.prompt || '';
+
+  const requestId = normalizedOptions.requestId || `req_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
   const stream = new ReadableStream({
     async start(controller) {
-      const sendEvent = (event: any) => {
+      let streamClosed = false;
+      let finishEmitted = false;
+      let doneEmitted = false;
+      let accumulatedText = '';
+
+      const streamAbortController = new AbortController();
+      activeStreamControllers.add(streamAbortController);
+      const timeoutId = setTimeout(() => {
         try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+          streamAbortController.abort(new DOMException('The AI response timed out.', 'TimeoutError'));
+        } catch {
+          streamAbortController.abort();
+        }
+      }, 38000);
+
+      if (normalizedOptions?.signal) {
+        if (normalizedOptions.signal.aborted) {
+          streamAbortController.abort();
+        } else {
+          normalizedOptions.signal.addEventListener(
+            'abort',
+            () => streamAbortController.abort(),
+            { once: true }
+          );
+        }
+      }
+
+      const safeEnqueue = (chunk: Uint8Array) => {
+        if (streamClosed) return;
+        try {
+          controller.enqueue(chunk);
+        } catch {
+          streamClosed = true;
+        }
+      };
+
+      const safeClose = () => {
+        if (streamClosed) return;
+        streamClosed = true;
+        try {
+          controller.close();
         } catch {}
       };
 
-      const rawMsgs = Array.isArray(options.messages) ? options.messages : [];
+      const emitWindowEvent = (name: string, detail: Record<string, unknown>) => {
+        if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+          try {
+            window.dispatchEvent(new CustomEvent(name, { detail }));
+          } catch {}
+        }
+      };
+
+      const sendEvent = (event: any) => {
+        if (event?.type === 'finish') finishEmitted = true;
+        safeEnqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+      };
+
+      const sendDone = () => {
+        if (doneEmitted) return;
+        doneEmitted = true;
+        safeEnqueue(encoder.encode('data: [DONE]\n\n'));
+      };
+
+      const emitTextDelta = (deltaText: string) => {
+        if (!deltaText) return;
+        accumulatedText += deltaText;
+        sendEvent({
+          type: 'text-delta',
+          textDelta: deltaText,
+          delta: deltaText,
+          content: deltaText,
+        });
+        emitWindowEvent('manus_stream_delta', {
+          requestId,
+          delta: deltaText,
+          text: accumulatedText,
+        });
+      };
+
+      const rawMsgs = Array.isArray(normalizedOptions.messages) ? normalizedOptions.messages : [];
       const sanitizedMsgs = rawMsgs
         .filter((m: any) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim().length > 0)
         .map((m: any) => ({ role: m.role, content: m.content.trim() }));
@@ -71,76 +157,238 @@ function createAutonomousStreamResponse(options: any, agentConfig: any): Respons
         sanitizedMsgs.push({ role: 'user', content: lastUserMsg || 'Hello' });
       }
 
-      // 1. Try real Gemini streaming from our server endpoint.
       let serviceFailureMessage = 'The AI response service is temporarily unavailable. Please check your connection and try again.';
+      let finishReason: 'stop' | 'error' = 'stop';
+
       try {
-        const streamEndpoint = '/api/gemini/stream';
-        const requestSignal = options?.signal || (typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(45000) : undefined);
-        const res = await nativeFetch(streamEndpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: requestSignal,
-          body: JSON.stringify({
-            messages: sanitizedMsgs,
-            prompt: lastUserMsg,
-            systemInstruction: agentConfig?.system,
-            model: (() => {
-              const m = (agentConfig?.model?.replace(/^google\//, '') || 'gemini-3.8-flash').trim();
-              return m === 'gemini-2.5-flash' || m === 'gemini-3-flash' || m === 'gemini-3.0-flash' ? 'gemini-3.8-flash' : m;
-            })(),
-            thinkHarder: Boolean(options.thinkHarder),
-          }),
+        const activeFetch =
+          typeof globalThis.fetch === 'function' && globalThis.fetch !== (typeof window !== 'undefined' ? window.fetch : undefined)
+            ? globalThis.fetch
+            : nativeFetch;
+
+        const payloadStr = JSON.stringify({
+          requestId,
+          messages: sanitizedMsgs,
+          prompt: lastUserMsg,
+          systemInstruction: agentConfig?.system,
+          model: (() => {
+            const m = (agentConfig?.model?.replace(/^google\//, '') || 'gemini-3.8-flash').trim();
+            return m === 'gemini-2.5-flash' || m === 'gemini-3-flash' || m === 'gemini-3.0-flash' ? 'gemini-3.8-flash' : m;
+          })(),
+          thinkHarder: Boolean(normalizedOptions.thinkHarder),
         });
 
-        if (!res.ok) {
-          try { await res.body?.cancel(); } catch {}
-          if (res.status === 429) {
-            serviceFailureMessage = 'The AI service is receiving too many requests. Please wait a moment and try again.';
-          } else if (res.status === 401 || res.status === 403 || res.status === 503) {
-            serviceFailureMessage = 'The AI service is not available right now. Please check the server configuration or try again later.';
-          } else if (res.status >= 500) {
-            serviceFailureMessage = 'The AI server encountered a problem. Your message was not completed; please try again.';
-          } else if (res.status === 400 || res.status === 413) {
-            serviceFailureMessage = 'The request could not be processed. Please check your message or shorten it, then try again.';
+        let res = await activeFetch('/api/gemini/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: streamAbortController.signal,
+          body: payloadStr,
+        });
+
+        const contentType = (res.headers?.get?.('content-type') || '').toLowerCase();
+        if ((!res.ok || contentType.includes('text/html')) && !streamAbortController.signal.aborted) {
+          // If /api/gemini/stream returned an HTML SPA fallback or 404, try Netlify function directly
+          if (res.status === 404 || contentType.includes('text/html')) {
+            try { await res.body?.cancel(); } catch {}
+            try {
+              res = await activeFetch('/.netlify/functions/agent', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                signal: streamAbortController.signal,
+                body: payloadStr,
+              });
+            } catch {}
+          }
+        }
+
+        const finalContentType = (res.headers?.get?.('content-type') || '').toLowerCase();
+        if (!res.ok || finalContentType.includes('text/html')) {
+          let backendErrorMsg = '';
+          if (finalContentType.includes('application/json')) {
+            try {
+              const errJson = await res.json();
+              if (typeof errJson?.error === 'string' && errJson.error.trim()) {
+                backendErrorMsg = errJson.error.trim();
+              } else if (typeof errJson?.message === 'string' && errJson.message.trim()) {
+                backendErrorMsg = errJson.message.trim();
+              }
+            } catch {}
           } else {
-            serviceFailureMessage = 'The AI request failed (HTTP ' + res.status + '). Please try again.';
+            try { await res.body?.cancel(); } catch {}
+          }
+
+          if (res.status === 429) {
+            serviceFailureMessage = backendErrorMsg || 'The AI service is receiving too many requests. Please wait a moment and try again.';
+          } else if (res.status === 401 || res.status === 403 || res.status === 503) {
+            serviceFailureMessage = backendErrorMsg || 'The AI service is not available right now. Please check the server configuration or try again later.';
+          } else if (res.status >= 500) {
+            serviceFailureMessage = backendErrorMsg || 'The AI server encountered a problem. Your message was not completed; please try again.';
+          } else if (res.status === 400 || res.status === 413) {
+            serviceFailureMessage = backendErrorMsg || 'The request could not be processed. Please check your message or shorten it, then try again.';
+          } else {
+            serviceFailureMessage = backendErrorMsg || ('The AI request failed (HTTP ' + res.status + '). Please try again.');
           }
           throw new Error('AI endpoint returned HTTP ' + res.status);
         }
 
         if (res.ok && res.body) {
           const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let lineBuffer = '';
+          let currentSseEventType = '';
+
+          const processSseLine = (rawLine: string) => {
+            const trimmed = rawLine.trim();
+            if (!trimmed) {
+              currentSseEventType = '';
+              return;
+            }
+            if (trimmed.startsWith(':')) return;
+            if (trimmed.startsWith('event:')) {
+              currentSseEventType = trimmed.slice(6).trim().toLowerCase();
+              return;
+            }
+            if (trimmed === 'data: [DONE]' || trimmed === 'data:[DONE]' || currentSseEventType === 'done') {
+              doneEmitted = true;
+              safeEnqueue(encoder.encode('data: [DONE]\n\n'));
+              currentSseEventType = '';
+              return;
+            }
+            if (!trimmed.startsWith('data:')) return;
+            const jsonStr = trimmed.slice(5).trim();
+            if (!jsonStr) return;
+
+            try {
+              const parsed = JSON.parse(jsonStr);
+              const eventType = String(parsed.type || currentSseEventType || '').toLowerCase();
+
+              if (
+                eventType === 'text-delta' ||
+                eventType === 'text' ||
+                eventType === 'message' ||
+                eventType === 'data' ||
+                eventType === 'content' ||
+                typeof parsed.delta === 'string' ||
+                typeof parsed.textDelta === 'string' ||
+                typeof parsed.choices?.[0]?.delta?.content === 'string'
+              ) {
+                const deltaText =
+                  parsed.textDelta ??
+                  parsed.delta ??
+                  parsed.content ??
+                  parsed.text ??
+                  parsed.value ??
+                  (typeof parsed.data === 'string' ? parsed.data : undefined) ??
+                  parsed.choices?.[0]?.delta?.content ??
+                  parsed.choices?.[0]?.message?.content ??
+                  '';
+                if (deltaText) {
+                  emitTextDelta(String(deltaText));
+                }
+                return;
+              }
+              if (eventType === 'error') {
+                finishReason = 'error';
+                const errMsg = parsed.error || parsed.message || serviceFailureMessage;
+                serviceFailureMessage = String(errMsg);
+                if (!accumulatedText.trim()) {
+                  emitTextDelta(String(errMsg));
+                }
+                sendEvent({ type: 'finish', finishReason: 'error', error: String(errMsg) });
+                return;
+              }
+              if (eventType === 'finish' || eventType === 'done') {
+                finishEmitted = true;
+                if (parsed.finishReason === 'error') {
+                  finishReason = 'error';
+                  if (parsed.error) serviceFailureMessage = String(parsed.error);
+                }
+                sendEvent({ ...parsed, type: 'finish', finishReason: parsed.finishReason || finishReason });
+                return;
+              }
+              sendEvent(parsed);
+            } catch {
+              // Ignore malformed partial JSON frames rather than crashing the stream
+            }
+          };
+
           try {
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
-              controller.enqueue(value);
+              lineBuffer += decoder.decode(value, { stream: true });
+              const lines = lineBuffer.split('\n');
+              lineBuffer = lines.pop() || '';
+              for (const line of lines) {
+                processSseLine(line);
+              }
+            }
+            lineBuffer += decoder.decode();
+            if (lineBuffer.trim()) {
+              for (const line of lineBuffer.split('\n')) {
+                processSseLine(line);
+              }
             }
           } finally {
-            reader.releaseLock();
+            try { reader.releaseLock(); } catch {}
           }
-          controller.close();
+
+          if (!accumulatedText.trim()) {
+            finishReason = 'error';
+            emitTextDelta(serviceFailureMessage);
+          }
+          if (!finishEmitted) {
+            sendEvent({
+              type: 'finish',
+              finishReason,
+              ...(finishReason === 'error' ? { error: serviceFailureMessage } : {}),
+            });
+          }
+          sendDone();
+          emitWindowEvent('manus_stream_done', {
+            requestId,
+            text: accumulatedText,
+            finishReason,
+            ...(finishReason === 'error' ? { error: serviceFailureMessage } : {}),
+          });
+          safeClose();
           return;
         }
       } catch (err: any) {
-        if (err?.name === 'TimeoutError') {
+        finishReason = 'error';
+        const errName = err?.name || streamAbortController.signal.reason?.name || '';
+        if (errName === 'TimeoutError') {
           serviceFailureMessage = 'The AI response timed out. Please try again.';
-        } else if (err?.name === 'AbortError') {
+        } else if (errName === 'AbortError') {
           serviceFailureMessage = 'Generation was stopped.';
         } else if (err instanceof TypeError) {
           serviceFailureMessage = 'Could not reach the AI server. Check your internet connection and try again.';
         }
         console.warn('[AI Studio] Gemini stream request failed:', err?.message || err);
+      } finally {
+        clearTimeout(timeoutId);
+        activeStreamControllers.delete(streamAbortController);
+        if (!streamClosed) {
+          if (!accumulatedText.trim()) {
+            emitTextDelta(serviceFailureMessage);
+          }
+          if (!finishEmitted) {
+            sendEvent({
+              type: 'finish',
+              finishReason,
+              ...(finishReason === 'error' ? { error: serviceFailureMessage } : {}),
+            });
+          }
+          sendDone();
+          emitWindowEvent('manus_stream_done', {
+            requestId,
+            text: accumulatedText,
+            finishReason,
+            ...(finishReason === 'error' ? { error: serviceFailureMessage } : {}),
+          });
+          safeClose();
+        }
       }
-
-      // If network or endpoint failed, stream clean error event so thinking stops
-      sendEvent({
-        type: 'text-delta',
-        delta: serviceFailureMessage
-      });
-      sendEvent({ type: 'finish', finishReason: 'error' });
-      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-      controller.close();
     }
   });
 
@@ -175,8 +423,14 @@ if (typeof window !== 'undefined' && window.fetch) {
   window.fetch = async function(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as any)?.url || '';
 
-    // NEVER intercept our local server API endpoints (/api/*)
-    if (urlStr && !urlStr.startsWith('/api/') && !urlStr.includes('/api/gemini/') && (urlStr.includes('api.blink.new') || urlStr.includes('blink.new/api/'))) {
+    // NEVER intercept our local server API endpoints (/api/* or /.netlify/functions/*)
+    if (
+      urlStr &&
+      !urlStr.startsWith('/api/') &&
+      !urlStr.startsWith('/.netlify/') &&
+      !urlStr.includes('/api/gemini/') &&
+      (urlStr.includes('api.blink.new') || urlStr.includes('core.blink.new') || urlStr.includes('blink.new/api/'))
+    ) {
       // Parse payload
       let bodyObj: any = {};
       try {
@@ -185,8 +439,12 @@ if (typeof window !== 'undefined' && window.fetch) {
         }
       } catch {}
 
+      if (init?.signal) {
+        bodyObj.signal = init.signal;
+      }
+
       const isStream = bodyObj.stream !== false;
-      if (isStream) {
+      if (isStream && (urlStr.includes('/ai/') || bodyObj.messages || bodyObj.prompt)) {
         return createAutonomousStreamResponse(bodyObj, bodyObj.agent);
       } else {
         return new Response(JSON.stringify({
@@ -484,7 +742,10 @@ export const blink: any = new Proxy(baseClient || {}, {
           if (authProp === 'me') {
             return async () => {
               try {
-                return await authTarget.me();
+                return await Promise.race([
+                  authTarget.me(),
+                  new Promise<null>((resolve) => setTimeout(() => resolve(null), 1200)),
+                ]);
               } catch {
                 return null;
               }

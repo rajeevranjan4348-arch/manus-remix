@@ -221,25 +221,45 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const lastTextareaHeightRef = useRef<number>(28);
+
+  const wordCount = React.useMemo(() => {
+    const trimmed = prompt.trim();
+    return trimmed ? trimmed.split(/\s+/).filter(Boolean).length : 0;
+  }, [prompt]);
 
   // Auto-resize typing area dynamically as user types a big prompt/question
   React.useEffect(() => {
-    const wordCount = prompt.trim() ? prompt.trim().split(/\s+/).filter(Boolean).length : 0;
     if (wordCount < 50 && isExpanded) {
       setIsExpanded(false);
     }
-    if (textareaRef.current) {
+    const el = textareaRef.current;
+    if (!el) return;
+    if (!prompt) {
+      if (lastTextareaHeightRef.current !== 28) {
+        lastTextareaHeightRef.current = 28;
+        el.style.height = '28px';
+      }
+      return;
+    }
+    const rafId = window.requestAnimationFrame(() => {
+      if (!textareaRef.current) return;
       textareaRef.current.style.height = 'auto';
       const scrollHeight = textareaRef.current.scrollHeight;
       const maxHeight = isExpanded ? 460 : 280;
       const targetHeight = Math.max(Math.min(scrollHeight, maxHeight), 28);
+      lastTextareaHeightRef.current = targetHeight;
       textareaRef.current.style.height = `${targetHeight}px`;
-    }
-  }, [prompt, isExpanded]);
+    });
+    return () => window.cancelAnimationFrame(rafId);
+  }, [prompt, wordCount, isExpanded]);
 
   // Local storage persistence: save draft prompt so navigating away or refreshing restores it
   React.useEffect(() => {
-    saveDraftPrompt(prompt);
+    const timer = window.setTimeout(() => {
+      saveDraftPrompt(prompt);
+    }, 120);
+    return () => window.clearTimeout(timer);
   }, [prompt]);
 
   const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -736,7 +756,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                   }
                 }}
                 className={cn(
-                  "w-full bg-transparent border-none outline-none resize-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-base leading-snug sm:leading-relaxed p-0 focus:ring-0 focus:outline-none min-h-[28px] custom-scrollbar transition-[height] duration-150 ease-out",
+                  "w-full bg-transparent border-none outline-none resize-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-base leading-snug sm:leading-relaxed p-0 focus:ring-0 focus:outline-none min-h-[28px] custom-scrollbar",
                   isExpanded ? "max-h-[460px]" : "max-h-[280px]"
                 )}
                 rows={1}
@@ -856,7 +876,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
 
               {/* Right Side: Expand (only when question has >= 50 words), Mic & Circular Send Button */}
               <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto">
-                {prompt.trim().split(/\s+/).filter(Boolean).length >= 50 && (
+                {wordCount >= 50 && (
                   <button
                     type="button"
                     onClick={() => setIsExpanded(prev => !prev)}

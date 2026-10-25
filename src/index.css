@@ -242,23 +242,21 @@
   will-change: transform, opacity;
 }
 
-/* Off-screen chat message rendering optimization: layout calculation virtualization */
+/* GPU-composited chat message entrance compatible with virtualized lists */
 .chat-message-enter {
-  content-visibility: auto;
-  contain-intrinsic-size: 0 100px;
-  contain: layout style;
-  animation: messageGlideIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  will-change: transform, opacity;
+  contain: style;
+  backface-visibility: hidden;
+  animation: chat-message-slide-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @keyframes messageGlideIn {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translate3d(0, 6px, 0);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translate3d(0, 0, 0);
   }
 }
 
@@ -961,15 +959,15 @@
 
 /* Smooth entrance for newly added conversation messages */
 .chat-message-enter {
-  animation: chat-message-slide-in 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: chat-message-slide-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
   transform-origin: center bottom;
-  will-change: opacity, transform;
+  backface-visibility: hidden;
 }
 
 @keyframes chat-message-slide-in {
   from {
     opacity: 0;
-    transform: translate3d(0, 14px, 0);
+    transform: translate3d(0, 10px, 0);
   }
   65% {
     opacity: 1;
@@ -977,7 +975,6 @@
   to {
     opacity: 1;
     transform: translate3d(0, 0, 0);
-    will-change: auto;
   }
 }
 
@@ -1009,10 +1006,10 @@
 
 /* Manus Remix: consistent, lightweight UI transitions */
 :root {
-  --manus-motion-fast: 160ms;
-  --manus-motion-normal: 240ms;
-  --manus-motion-slow: 360ms;
-  --manus-motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --manus-motion-fast: 150ms;
+  --manus-motion-normal: 220ms;
+  --manus-motion-slow: 320ms;
+  --manus-motion-ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 button,
@@ -1023,18 +1020,27 @@ textarea,
 select,
 [role="tab"],
 [data-state] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
   transition:
     color var(--manus-motion-fast) var(--manus-motion-ease),
     background-color var(--manus-motion-fast) var(--manus-motion-ease),
     border-color var(--manus-motion-fast) var(--manus-motion-ease),
     box-shadow var(--manus-motion-normal) var(--manus-motion-ease),
     opacity var(--manus-motion-normal) var(--manus-motion-ease),
-    transform var(--manus-motion-normal) var(--manus-motion-ease);
+    transform var(--manus-motion-fast) var(--manus-motion-ease);
+}
+
+[role="dialog"],
+[role="menu"],
+[data-radix-popper-content-wrapper] {
+  backface-visibility: hidden;
+  transform: translateZ(0);
 }
 
 button:active,
 [role="button"]:active {
-  transform: scale(0.985);
+  transform: scale(0.985) translateZ(0);
 }
 
 input:focus-visible,
@@ -1048,6 +1054,7 @@ a:focus-visible {
 
 html {
   scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
 }
 
 /* Reusable opt-in entrance for page sections, dialogs, and cards. */

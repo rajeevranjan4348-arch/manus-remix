@@ -51,6 +51,7 @@ import { getProjects, deleteProject, addTaskToProject } from '@/lib/projectStore
 import { ProjectModal } from '@/components/projects/ProjectModal';
 import { ProjectViewModal } from '@/components/projects/ProjectViewModal';
 import { SettingsModal } from '@/components/settings/SettingsModal';
+import { TagAnalyticsModal } from '@/components/analytics/TagAnalyticsModal';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -176,6 +177,7 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isConnectorsOpen, setIsConnectorsOpen] = useState(false);
+  const [isTagAnalyticsOpen, setIsTagAnalyticsOpen] = useState(false);
   const [taskToDelete, setTaskToDelete] = useState<{ id: string; title: string } | null>(null);
   const [taskToRename, setTaskToRename] = useState<{ id: string; title: string } | null>(null);
   const [newChatTitle, setNewChatTitle] = useState('');
@@ -357,6 +359,12 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
       } 
     },
     { id: 'library', label: 'Library', icon: Library, action: onOpenHistory },
+    {
+      id: 'analytics',
+      label: 'Tag Analytics',
+      icon: BarChart3,
+      action: () => setIsTagAnalyticsOpen(true)
+    },
     { 
       id: 'settings', 
       label: 'Settings', 
@@ -523,6 +531,10 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
             </Tooltip>
           </TooltipProvider>
         </div>
+        <TagAnalyticsModal
+          isOpen={isTagAnalyticsOpen}
+          onClose={() => setIsTagAnalyticsOpen(false)}
+        />
       </aside>
     );
   }
@@ -1088,6 +1100,11 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
       <ConnectorsStorePanel
         isOpen={isConnectorsOpen}
         onClose={() => setIsConnectorsOpen(false)}
+      />
+      {/* D3 Tag Analytics Dashboard Modal */}
+      <TagAnalyticsModal
+        isOpen={isTagAnalyticsOpen}
+        onClose={() => setIsTagAnalyticsOpen(false)}
       />
     </>
   );

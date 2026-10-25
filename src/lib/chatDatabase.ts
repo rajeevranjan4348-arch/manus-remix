@@ -83,7 +83,24 @@ function openDatabase(): Promise<IDBDatabase> {
   }
 
   dbPromise = new Promise((resolve, reject) => {
-    const request = idb.open(DB_NAME, DB_VERSION);
+    let settled = false;
+    const timeoutId = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        dbPromise = null;
+        reject(new Error('IndexedDB open timed out'));
+      }
+    }, 1500);
+
+    let request: IDBOpenDBRequest;
+    try {
+      request = idb.open(DB_NAME, DB_VERSION);
+    } catch (err) {
+      clearTimeout(timeoutId);
+      dbPromise = null;
+      reject(err);
+      return;
+    }
 
     request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
       const db = (event.target as IDBOpenDBRequest).result;
@@ -107,13 +124,31 @@ function openDatabase(): Promise<IDBDatabase> {
       }
     };
 
+    request.onblocked = () => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeoutId);
+        dbPromise = null;
+        reject(new Error('IndexedDB open blocked'));
+      }
+    };
+
     request.onsuccess = () => {
-      resolve(request.result);
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeoutId);
+        resolve(request.result);
+      }
     };
 
     request.onerror = () => {
-      console.error('[ChatDB] Failed to open IndexedDB:', request.error);
-      reject(request.error);
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeoutId);
+        dbPromise = null;
+        console.error('[ChatDB] Failed to open IndexedDB:', request.error);
+        reject(request.error);
+      }
     };
   });
 

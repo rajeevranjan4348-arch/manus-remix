@@ -64,9 +64,18 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   };
 
   useEffect(() => {
-    if (!animateTypewriter) {
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      ((typeof window.matchMedia === 'function' &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches) ||
+        document.documentElement.dataset.perfMode === 'saver');
+
+    if (!animateTypewriter || prefersReducedMotion) {
       setDisplayedLength(processedContent.length);
-      setIsTyping(false);
+      if (isTyping || animateTypewriter) {
+        setIsTyping(false);
+        onCompleteRef.current?.();
+      }
       return;
     }
 
@@ -81,12 +90,12 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       if (!lastTickRef.current) lastTickRef.current = timestamp;
       const elapsed = timestamp - lastTickRef.current;
 
-      // Batch 6-12 characters every ~32ms for smooth 30-60fps reading cadence
+      // Batch 6-14 characters every ~24ms for smooth 60fps reading cadence
       // Prevents thrashing the ReactMarkdown parser while maintaining natural flow
-      if (elapsed >= 32) {
+      if (elapsed >= 24) {
         lastTickRef.current = timestamp;
         setDisplayedLength((prev) => {
-          const charsToAdd = Math.max(4, Math.floor(elapsed / 4));
+          const charsToAdd = Math.max(6, Math.floor(elapsed / 3));
           const next = prev + charsToAdd;
           onTickRef.current?.();
           return Math.min(next, processedContent.length);
@@ -117,7 +126,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
   return (
     <div 
-      className={cn("manus-markdown relative select-text transition-all duration-150 contain-content", isTyping && "cursor-pointer", className)}
+      className={cn("manus-markdown relative select-text transition-opacity duration-150 contain-content", isTyping && "cursor-pointer", className)}
       onClick={handleSkip}
       title={isTyping ? "Click to reveal complete text" : undefined}
     >

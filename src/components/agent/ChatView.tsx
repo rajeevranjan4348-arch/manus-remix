@@ -158,6 +158,53 @@ export function cleanUserMessage(raw: any): string {
   return text || (typeof raw === 'string' ? raw : '');
 }
 
+export function centerElementInContainer(
+  container: HTMLElement,
+  target: HTMLElement,
+  behavior: ScrollBehavior = 'smooth'
+): number {
+  const containerRect = container.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const relativeTargetTop = (targetRect.top - containerRect.top) + container.scrollTop;
+  const centeredTop = relativeTargetTop - (container.clientHeight / 2) + (targetRect.height / 2);
+  const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight);
+  const clampedTop = Math.max(0, Math.min(centeredTop, maxScroll));
+
+  if (typeof container.scrollTo === 'function') {
+    container.scrollTo({
+      top: clampedTop,
+      behavior,
+    });
+  } else {
+    container.scrollTop = clampedTop;
+  }
+
+  return clampedTop;
+}
+
+export function findSearchContentElement(container: HTMLElement | null): HTMLElement | null {
+  if (!container) return null;
+
+  const prioritySelectors = [
+    '[data-testid="search-citations"]',
+    '.search-content-result',
+    '[data-testid="task-result-content"]',
+    '[data-search-step="true"]',
+    '[data-search-trace="true"]',
+    '[data-search-content="true"]',
+    '[data-search-message="true"]',
+  ];
+
+  for (const selector of prioritySelectors) {
+    const matches = container.querySelectorAll<HTMLElement>(selector);
+    if (matches && matches.length > 0) {
+      return matches[matches.length - 1];
+    }
+  }
+
+  return null;
+}
+
 export function ChatView({ 
   prompt, 
   messages, 
@@ -196,7 +243,15 @@ export function ChatView({
       window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'error' }));
       return;
     }
-    
+
+    if (status === 'completed') {
+      window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'happy' }));
+      const timer = setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+
     if (status === 'running' || isLoading) {
       const runningStep = steps.find(s => s.status === 'running');
       if (runningStep) {
@@ -214,13 +269,7 @@ export function ChatView({
       return;
     }
 
-    if (status === 'completed') {
-      window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'happy' }));
-      const timer = setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
-      }, 4000);
-      return () => clearTimeout(timer);
-    }
+    window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
   }, [status, isLoading, steps]);
   const [isDrivePickerOpen, setIsDrivePickerOpen] = useState(false);
   const [isConnectorsMenuOpen, setIsConnectorsMenuOpen] = useState(false);
@@ -238,15 +287,28 @@ export function ChatView({
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const speechBaseInputRef = useRef<string>('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const lastTextareaHeightRef = useRef<number>(22);
 
-  // Auto-resize chat typing area smoothly as user types while keeping initial height compact
+  // Auto-resize chat typing area smoothly on animation frame without layout thrashing
   React.useEffect(() => {
-    if (textareaRef.current) {
+    const el = textareaRef.current;
+    if (!el) return;
+    if (!input) {
+      if (lastTextareaHeightRef.current !== 22) {
+        lastTextareaHeightRef.current = 22;
+        el.style.height = '22px';
+      }
+      return;
+    }
+    const rafId = window.requestAnimationFrame(() => {
+      if (!textareaRef.current) return;
       textareaRef.current.style.height = 'auto';
       const scrollHeight = textareaRef.current.scrollHeight;
       const targetHeight = Math.max(Math.min(scrollHeight, 90), 22);
+      lastTextareaHeightRef.current = targetHeight;
       textareaRef.current.style.height = `${targetHeight}px`;
-    }
+    });
+    return () => window.cancelAnimationFrame(rafId);
   }, [input]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -425,7 +487,10 @@ export function ChatView({
     }
   };
 
+  const isAssistantWorking = (isLoading || status === 'running') && status !== 'error' && status !== 'completed';
+
   const handleSend = async () => {
+    if (isAssistantWorking) return;
     if (!input.trim() && !attachedFile && activeConnectorTags.length === 0) return;
     let message = input.trim();
 
@@ -521,6 +586,7 @@ export function ChatView({
 
   // Determine if the agent is actively streaming a response
   const isStreamingResponse = React.useMemo(() => {
+    if (status === 'completed' || status === 'error') return false;
     if (isLoading || status === 'running') return true;
     const hasRunningStep = steps.some(s => s.status === 'running');
     if (hasRunningStep) return true;
@@ -843,16 +909,6 @@ export function ChatView({
               <SourceCitations sources={parsedSources.sources} />
             )}
 
-            {isAssistantWorking && isLatestAssistant && (
-              <div className="pt-1">
-                <ContextualThinking
-                  prompt={messages.filter((message: any) => message?.role === 'user').slice(-1)[0]?.content || prompt}
-                  activeStep={activeRunningStep?.label}
-                  deepMode={isThinkHarder}
-                />
-              </div>
-            )}
-
             {cleanedContent ? (
               <div className="pt-0.5">
                 <ConversationActionBar 
@@ -988,7 +1044,6 @@ export function ChatView({
     );
   };
 
-  const isAssistantWorking = (isLoading || status === 'running') && status !== 'error' && status !== 'completed';
   const hasVisibleAssistantMessage = displayMessages.some((m: any) => {
     if (m?.role !== 'assistant') return false;
     const raw = m.content || '';
@@ -1017,6 +1072,173 @@ export function ChatView({
     }
   }
 
+  const footerRenderRef = useRef<() => React.ReactNode>(() => null);
+  footerRenderRef.current = () => (
+    <div className="px-4 sm:px-20 space-y-4 pb-40 pt-6">
+      {/* Live tool-call progress */}
+      {isAssistantWorking && activeRunningStep && !hasVisibleAssistantMessage && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-center gap-3 max-w-3xl mx-auto my-2 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm animate-in fade-in slide-in-from-bottom-2"
+        >
+          <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
+            <span className="absolute inline-flex h-full w-full rounded-full bg-primary/20 animate-ping" />
+            <span className="relative h-2.5 w-2.5 rounded-full bg-primary" />
+          </span>
+          <span className="font-medium text-foreground truncate flex-1">
+            {typingStatus}
+          </span>
+          <span className="text-xs text-muted-foreground font-mono shrink-0">Working</span>
+        </div>
+      )}
+
+      {/* Final Result */}
+      {(() => {
+        const hasChart = Boolean(
+          (result?.type === 'graph' || result?.chartData || chartData) &&
+          ((result?.chartData?.labels && result.chartData.labels.length > 0) || (chartData?.labels && chartData.labels.length > 0))
+        );
+        const hasFiles = Boolean(result?.files && Array.isArray(result.files) && result.files.length > 0);
+
+        if (!result || (!hasChart && !hasFiles)) return null;
+
+        return (
+          <div className="flex gap-4 max-w-3xl mx-auto my-4 animate-in fade-in slide-in-from-bottom-3 duration-500">
+            <div className="w-8 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="border border-border/60 rounded-2xl bg-white dark:bg-card overflow-hidden shadow-sm hover:shadow-md transition-shadow p-5">
+                {hasChart && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between border-b border-border/40 pb-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-black dark:bg-white inline-block animate-pulse" />
+                        {result.detectedChartType ? `${result.detectedChartType.toUpperCase()} CHART` : 'DATA VISUALIZATION'}
+                      </span>
+                    </div>
+                    <div className="h-[320px] w-full pt-2">
+                      <ChartResult 
+                        type={result.detectedChartType || result.type || 'bar'} 
+                        data={result.chartData || chartData} 
+                      />
+                    </div>
+                  </div>
+                )}
+                
+                {hasFiles && (
+                  <div className={cn("pt-2", hasChart && "mt-4 pt-4 border-t border-border/40")}>
+                    <FileAttachments files={result.files} />
+                  </div>
+                )}
+
+                {!messages.some((m: any) => m?.role === 'assistant') && (
+                  <div className="pt-3 mt-3 border-t border-border/40">
+                    <ConversationActionBar
+                      content={result?.summary || result?.content || result?.text || `${result.detectedChartType || 'Visual'} analysis generated`}
+                      onRegenerate={() => onSubmit(cleanUserMessage(prompt))}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Prompt-aware thinking animation */}
+      {isAssistantWorking && !hasVisibleAssistantMessage && (
+        <div className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <div className="flex-1 space-y-2.5 min-w-0">
+            <div className="flex items-center gap-2.5">
+              <ManusLogo showBadge={true} />
+            </div>
+            <div className="pt-1">
+              <ContextualThinking
+                prompt={messages.filter((message: any) => message?.role === 'user').slice(-1)[0]?.content || prompt}
+                activeStep={activeRunningStep?.label}
+                deepMode={isThinkHarder}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error State Card */}
+      {status === 'error' && !isAssistantWorking && (
+        <div className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <div className="w-8 shrink-0 flex items-start pt-1">
+            <div className="w-8 h-8 rounded-full bg-destructive/10 text-destructive flex items-center justify-center">
+              <AlertCircle size={16} />
+            </div>
+          </div>
+          <div className="flex-1 space-y-2.5 min-w-0">
+            <div className="p-4 rounded-2xl bg-destructive/5 border border-destructive/20 text-sm">
+              <p className="font-semibold text-destructive mb-1">Execution Interrupted</p>
+              <p className="text-muted-foreground text-xs leading-relaxed">
+                {result?.error && typeof result?.content === 'string' && result.content.trim()
+                  ? result.content
+                  : 'The stream was interrupted or the AI provider is temporarily unavailable. Check your connection and API key/provider settings, then select Retry.'}
+              </p>
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const lastUser = [...displayMessages].reverse().find((m: any) => m.role === 'user');
+                    const promptToRetry = lastUser?.content ? cleanUserMessage(lastUser.content) : prompt;
+                    if (promptToRetry) onSubmit(promptToRetry);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive text-white hover:bg-destructive/90 text-xs font-medium transition-all shadow-xs cursor-pointer"
+                >
+                  <RotateCw size={13} />
+                  <span>Retry Request</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onReset}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted text-xs font-medium transition-all cursor-pointer text-muted-foreground hover:text-foreground"
+                >
+                  <span>Reset</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div ref={bottomRef} className="h-36 shrink-0" />
+    </div>
+  );
+
+  const virtuosoContext = React.useMemo(() => ({
+    isAssistantWorking,
+    status,
+    activeRunningStepId: activeRunningStep?.id,
+    activeRunningStepLabel: activeRunningStep?.label,
+    activeRunningStepStatus: activeRunningStep?.status,
+    hasVisibleAssistantMessage,
+    typingStatus,
+    result,
+    chartData,
+    messagesCount: displayMessages.length,
+  }), [
+    isAssistantWorking,
+    status,
+    activeRunningStep?.id,
+    activeRunningStep?.label,
+    activeRunningStep?.status,
+    hasVisibleAssistantMessage,
+    typingStatus,
+    result,
+    chartData,
+    displayMessages.length,
+  ]);
+
+  const virtuosoComponents = React.useMemo(() => ({
+    Footer: function VirtuosoStableFooter(_props: { context?: typeof virtuosoContext }) {
+      return <>{footerRenderRef.current()}</>;
+    }
+  }), []);
+
   return (
     <div className="flex flex-col h-full bg-manus-cream dark:bg-background relative">
       {/* Virtualized Chat Area Container */}
@@ -1025,6 +1247,9 @@ export function ChatView({
         <Virtuoso
           ref={virtuosoRef}
           data={displayMessages}
+          context={virtuosoContext}
+          computeItemKey={(index, item) => item?.id || `msg-${index}`}
+          increaseViewportBy={{ top: 280, bottom: 360 }}
           className="h-full w-full custom-scrollbar overscroll-contain"
           followOutput={isStreamingResponse ? 'smooth' : false}
           atBottomStateChange={(atBottom) => {
@@ -1032,141 +1257,7 @@ export function ChatView({
             setShowScrollToBottom(!atBottom);
           }}
           itemContent={renderMessageItem}
-          components={{
-            Footer: () => (
-              <div className="px-4 sm:px-20 space-y-4 pb-40 pt-6">
-                {/* Live tool-call progress */}
-                {isAssistantWorking && activeRunningStep && (
-                  <div
-                    role="status"
-                    aria-live="polite"
-                    className="flex items-center gap-3 max-w-3xl mx-auto my-2 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm animate-in fade-in slide-in-from-bottom-2"
-                  >
-                    <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
-                      <span className="absolute inline-flex h-full w-full rounded-full bg-primary/20 animate-ping" />
-                      <span className="relative h-2.5 w-2.5 rounded-full bg-primary" />
-                    </span>
-                    <span className="font-medium text-foreground truncate flex-1">
-                      {typingStatus}
-                    </span>
-                    <span className="text-xs text-muted-foreground font-mono shrink-0">Working</span>
-                  </div>
-                )}
-
-                {/* Final Result */}
-                {(() => {
-                  const hasChart = Boolean(
-                    (result?.type === 'graph' || result?.chartData || chartData) &&
-                    ((result?.chartData?.labels && result.chartData.labels.length > 0) || (chartData?.labels && chartData.labels.length > 0))
-                  );
-                  const hasFiles = Boolean(result?.files && Array.isArray(result.files) && result.files.length > 0);
-
-                  if (!result || (!hasChart && !hasFiles)) return null;
-
-                  return (
-                    <div className="flex gap-4 max-w-3xl mx-auto my-4 animate-in fade-in slide-in-from-bottom-3 duration-500">
-                      <div className="w-8 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <div className="border border-border/60 rounded-2xl bg-white dark:bg-card overflow-hidden shadow-sm hover:shadow-md transition-all p-5">
-                          {hasChart && (
-                            <div className="space-y-3">
-                              <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                                  <span className="w-2 h-2 rounded-full bg-black dark:bg-white inline-block animate-pulse" />
-                                  {result.detectedChartType ? `${result.detectedChartType.toUpperCase()} CHART` : 'DATA VISUALIZATION'}
-                                </span>
-                              </div>
-                              <div className="h-[320px] w-full pt-2">
-                                <ChartResult 
-                                  type={result.detectedChartType || result.type || 'bar'} 
-                                  data={result.chartData || chartData} 
-                                />
-                              </div>
-                            </div>
-                          )}
-                          
-                          {hasFiles && (
-                            <div className={cn("pt-2", hasChart && "mt-4 pt-4 border-t border-border/40")}>
-                              <FileAttachments files={result.files} />
-                            </div>
-                          )}
-
-                          {!messages.some((m: any) => m?.role === 'assistant') && (
-                            <div className="pt-3 mt-3 border-t border-border/40">
-                              <ConversationActionBar
-                                content={result?.summary || result?.content || result?.text || `${result.detectedChartType || 'Visual'} analysis generated`}
-                                onRegenerate={() => onSubmit(cleanUserMessage(prompt))}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Prompt-aware thinking animation */}
-                {isAssistantWorking && !hasVisibleAssistantMessage && (
-                  <div className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                    <div className="flex-1 space-y-2.5 min-w-0">
-                      <div className="flex items-center gap-2.5">
-                        <ManusLogo showBadge={true} />
-                      </div>
-                      <div className="pt-1">
-                        <ContextualThinking
-                          prompt={messages.filter((message: any) => message?.role === 'user').slice(-1)[0]?.content || prompt}
-                          activeStep={activeRunningStep?.label}
-                          deepMode={isThinkHarder}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Error State Card */}
-                {status === 'error' && !isAssistantWorking && (
-                  <div className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                    <div className="w-8 shrink-0 flex items-start pt-1">
-                      <div className="w-8 h-8 rounded-full bg-destructive/10 text-destructive flex items-center justify-center">
-                        <AlertCircle size={16} />
-                      </div>
-                    </div>
-                    <div className="flex-1 space-y-2.5 min-w-0">
-                      <div className="p-4 rounded-2xl bg-destructive/5 border border-destructive/20 text-sm">
-                        <p className="font-semibold text-destructive mb-1">Execution Interrupted</p>
-                        <p className="text-muted-foreground text-xs leading-relaxed">
-                          The stream was interrupted or the AI provider is temporarily unavailable. Check your connection and API key/provider settings, then select Retry.
-                        </p>
-                        <div className="mt-3 flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const lastUser = displayMessages.reverse().find((m: any) => m.role === 'user');
-                              const promptToRetry = lastUser?.content ? cleanUserMessage(lastUser.content) : prompt;
-                              if (promptToRetry) onSubmit(promptToRetry);
-                            }}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive text-white hover:bg-destructive/90 text-xs font-medium transition-all shadow-xs cursor-pointer"
-                          >
-                            <RotateCw size={13} />
-                            <span>Retry Request</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={onReset}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted text-xs font-medium transition-all cursor-pointer text-muted-foreground hover:text-foreground"
-                          >
-                            <span>Reset</span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div ref={bottomRef} className="h-36 shrink-0" />
-              </div>
-            )
-          }}
+          components={virtuosoComponents}
         />
       </div>
 
@@ -1337,7 +1428,7 @@ export function ChatView({
                     : "Type a message or ask anything..."
               }
               className="w-full bg-transparent border-none outline-none resize-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-[14px] sm:text-[15px] leading-snug p-0 focus:ring-0 focus:outline-none min-h-[22px] sm:min-h-[24px] max-h-[90px] custom-scrollbar"
-              disabled={isLoading}
+              disabled={isAssistantWorking}
             />
           </div>
 
@@ -1435,7 +1526,7 @@ export function ChatView({
               <button 
                 type="button"
                 onClick={() => {
-                  if (isLoading || status === 'running') {
+                  if (isAssistantWorking) {
                     if (onStop) {
                       onStop();
                       toast.info('Response stopped');
@@ -1444,19 +1535,19 @@ export function ChatView({
                     handleSend();
                   }
                 }}
-                disabled={(!isLoading && status !== 'running') && (!input.trim() && !attachedFile && activeConnectorTags.length === 0)}
+                disabled={!isAssistantWorking && (!input.trim() && !attachedFile && activeConnectorTags.length === 0)}
                 className={cn(
                   "w-9 h-9 rounded-full flex items-center justify-center transition-all duration-150 shadow-2xs shrink-0 cursor-pointer",
-                  isLoading || status === 'running'
+                  isAssistantWorking
                     ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md"
                     : (input.trim() || attachedFile || activeConnectorTags.length > 0)
                       ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md opacity-100"
                       : "bg-[#e2e8f0]/80 dark:bg-muted text-slate-400 dark:text-muted-foreground cursor-not-allowed opacity-50"
                 )}
-                title={isLoading || status === 'running' ? "Stop response" : "Send message"}
-                aria-label={isLoading || status === 'running' ? "Stop response" : "Send message"}
+                title={isAssistantWorking ? "Stop response" : "Send message"}
+                aria-label={isAssistantWorking ? "Stop response" : "Send message"}
               >
-                {isLoading || status === 'running'
+                {isAssistantWorking
                   ? <Square size={13} fill="currentColor" strokeWidth={2.5} className="shrink-0" />
                   : <ArrowUp size={18} strokeWidth={2.6} className="font-bold shrink-0" />}
               </button>

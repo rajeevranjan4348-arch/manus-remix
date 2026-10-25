@@ -289,15 +289,15 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
         <AndroidGeneralSettings onBack={onClose} isOpen={isOpen} />
       </div> */}
 
-      {/* Desktop Responsive Settings Dialog */}
+      {/* Responsive Settings Dialog */}
       <div 
-        className="hidden sm:flex fixed inset-0 z-50 items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-150"
+        className="flex fixed inset-0 z-50 items-center justify-center p-2 sm:p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-150"
         onClick={(e) => {
           if (e.target === e.currentTarget) onClose();
         }}
       >
         <div 
-          className="w-full max-w-2xl h-[560px] max-h-[90vh] bg-background border border-border/70 rounded-2xl shadow-xl flex flex-col overflow-hidden text-foreground animate-in zoom-in-98 duration-150"
+          className="w-full max-w-2xl h-[560px] max-h-[90vh] bg-background border border-border/70 rounded-2xl shadow-xl flex flex-col overflow-hidden text-foreground animate-in zoom-in-98 duration-150 gpu-accelerated"
           role="dialog"
           aria-modal="true"
           aria-labelledby="settings-dialog-title"

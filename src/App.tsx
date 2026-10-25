@@ -56,7 +56,7 @@ function TaskView({
         onReorderSteps={reorderSteps}
         result={result}
         chartData={chartData}
-        status={taskStatus === 'idle' ? 'running' : taskStatus as any}
+        status={isLoading && taskStatus === 'idle' ? 'running' : taskStatus as any}
         onReset={onReset}
         onExport={exportToPDF}
         onSubmit={sendMessage}
@@ -99,18 +99,15 @@ function AppContent() {
       if (disposed) return;
       const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
       const batteryLow = Boolean(batteryManager && !batteryManager.charging && batteryManager.level <= 0.2);
+      const nav = navigator as any;
+      const lowEndHardware =
+        (typeof nav.deviceMemory === 'number' && nav.deviceMemory > 0 && nav.deviceMemory <= 4) ||
+        (typeof nav.hardwareConcurrency === 'number' && nav.hardwareConcurrency > 0 && nav.hardwareConcurrency <= 4) ||
+        Boolean(nav.connection?.saveData);
       const hidden = document.visibilityState === 'hidden';
-      const mode = reducedMotion || batteryLow ? 'saver' : 'balanced';
-      
+      const mode = reducedMotion || batteryLow || lowEndHardware ? 'saver' : 'balanced';
       document.documentElement.dataset.perfMode = mode;
       document.documentElement.dataset.pageHidden = hidden ? 'true' : 'false';
-      document.documentElement.dataset.batteryLow = batteryLow ? 'true' : 'false';
-      document.documentElement.dataset.pausePolling = batteryLow ? 'true' : 'false';
-      document.documentElement.dataset.animFps = batteryLow || mode === 'saver' ? 'low' : 'normal';
-
-      window.dispatchEvent(new CustomEvent('manus_battery_saver_change', {
-        detail: { batteryLow, pausePolling: batteryLow, perfMode: mode }
-      }));
     };
 
     const onVisibilityChange = () => updatePerformanceMode();
@@ -141,9 +138,6 @@ function AppContent() {
       batteryManager?.removeEventListener?.('chargingchange', updatePerformanceMode);
       delete document.documentElement.dataset.perfMode;
       delete document.documentElement.dataset.pageHidden;
-      delete document.documentElement.dataset.batteryLow;
-      delete document.documentElement.dataset.pausePolling;
-      delete document.documentElement.dataset.animFps;
     };
   }, []);
 
@@ -194,18 +188,23 @@ function AppContent() {
     isInitializing
   } = useWebsiteBuilder();
 
-  const handleStartTask = async (prompt: string, options: any) => {
-    if (options.format === 'website') {
+  const handleStartTask = async (prompt: string, options: any = {}) => {
+    if (options?.format === 'website') {
       // Extract website name from prompt or use default
       const websiteName = options.websiteName || prompt.split(' ').slice(0, 3).join(' ') + ' Website';
-      // setTaskType('website'); // logic moved to route
       startBuilding(prompt, websiteName);
-      // Website builder doesn't have persistence yet in this refactor, keeping it as overlay or separate route
-      // For now, let's keep website builder as a state-based view overlaying everything or separate route
-      // navigating to /website?
     } else {
-      const newTaskId = await startTask(prompt, options);
-      if (newTaskId) {
+      let navigated = false;
+      const newTaskId = await startTask(prompt, {
+        ...options,
+        onTaskCreated: (id: string) => {
+          if (id && !navigated) {
+            navigated = true;
+            navigate(`/task/${id}`);
+          }
+        },
+      });
+      if (newTaskId && !navigated) {
         navigate(`/task/${newTaskId}`);
       }
     }
@@ -260,7 +259,7 @@ function AppContent() {
               />
             </div>
           ) : (
-            <div key={location.pathname} className="w-full h-full animate-in fade-in-0 slide-in-from-bottom-2 duration-350 ease-out">
+            <div key={location.pathname} className="w-full h-full animate-in fade-in-0 slide-in-from-bottom-2 duration-300 ease-out gpu-accelerated">
               <ErrorBoundary>
                 <Routes>
                   <Route path="/" element={<Home onStartTask={handleStartTask} />} />

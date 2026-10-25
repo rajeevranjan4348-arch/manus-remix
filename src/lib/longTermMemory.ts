@@ -54,12 +54,15 @@ class LongTermMemoryService {
       } catch {}
     }
 
-    // 2. Sync from Firestore if authenticated
+    // 2. Sync from Firestore if authenticated (bounded with 800ms timeout so it never stalls AI requests)
     const currentUser = auth.currentUser;
     if (currentUser && currentUser.uid === userId) {
       try {
-        const snap = await getDoc(doc(db, 'users', userId, 'settings', 'memories'));
-        if (snap.exists()) {
+        const snap = await Promise.race([
+          getDoc(doc(db, 'users', userId, 'settings', 'memories')),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 800)),
+        ]);
+        if (snap && snap.exists()) {
           const remoteRecords = snap.data()?.records as MemoryRecord[];
           if (Array.isArray(remoteRecords) && remoteRecords.length > 0) {
             records = remoteRecords;

@@ -61,6 +61,11 @@ function geminiApiPlugin(): Plugin {
           res.setHeader('Content-Type', 'application/json');
           const userId = (req.headers['x-user-id'] as string) || 'usr_manus_default';
 
+          if (req.method === 'GET' && (url === '/api/connectors' || url === '/api/connectors/')) {
+            res.end(JSON.stringify({ connectors: [] }));
+            return;
+          }
+
           if (req.method === 'GET' && url.includes('/auth-url')) {
             const parts = url.split('/');
             const connectorId = parts[3] || 'github';
@@ -155,7 +160,7 @@ function geminiApiPlugin(): Plugin {
                 });
 
                 const tagRes = await ai.models.generateContent({
-                  model: 'gemini-3.8-flash',
+                  model: 'gemini-3-flash-preview',
                   contents: `Analyze the user's task prompt and generated response below. Select 1 to 3 relevant concise tags from this allowed set: ["Research", "Coding", "Analysis", "Design", "Writing", "Automation", "General"].
 
 Prompt: "${prompt.slice(0, 1500)}"
@@ -216,7 +221,7 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
                   });
 
                   const searchRes = await ai.models.generateContent({
-                    model: 'gemini-3.8-flash',
+                    model: 'gemini-3-flash-preview',
                     contents: `Search Google for real-time information, current events, recent news, or fact-checking about: "${query}". Provide a concise factual summary citing the verified sources.`,
                     config: {
                       tools: [{ googleSearch: {} }],
@@ -613,7 +618,7 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
               for await (const delta of stream) {
                 if (clientAborted || res.writableEnded) break;
                 if (delta) {
-                  res.write(`data: ${JSON.stringify({ type: 'text-delta', delta })}\n\n`);
+                  res.write(`data: ${JSON.stringify({ type: 'text-delta', delta, textDelta: delta })}\n\n`);
                   if (typeof (res as any).flush === 'function') {
                     (res as any).flush();
                   }
