@@ -32,7 +32,7 @@ import { toast } from 'sonner';
 import { AttachmentMenu } from '@/components/chat/AttachmentMenu';
 import { VoiceInputButton, formatSpeechAutoFill } from '@/components/voice/VoiceInputButton';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
-import { validateFile, formatFileSize } from '@/lib/fileValidation';
+import { validateFile, formatFileSize, compressImageForAI } from '@/lib/fileValidation';
 import { ConnectorsPopupMenu } from '@/components/chat/ConnectorsPopupMenu';
 import { ConnectorsStorePanel, CONNECTOR_CATALOG } from '@/components/connectors/ConnectorsStorePanel';
 import { ConnectorConfigModal } from '@/components/connectors/ConnectorConfigModal';
@@ -405,23 +405,20 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
     try {
       const fileName = file.name.toLowerCase();
       
-      // Handle images (from Camera or Photos)
+      // Handle images (from Camera or Photos) — compress to keep payload fast and responsive
       if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const dataUrl = event.target?.result as string;
+        try {
+          const dataUrl = await compressImageForAI(file);
           setFileData(dataUrl);
           toast.success(`Attached photo: ${file.name}`);
           if (!prompt.trim()) {
             setPrompt('Examine and analyze this image in detail');
           }
-          setIsExtracting(false);
-        };
-        reader.onerror = () => {
+        } catch {
           toast.error('Failed to read image');
+        } finally {
           setIsExtracting(false);
-        };
-        reader.readAsDataURL(file);
+        }
         return;
       }
 
@@ -538,7 +535,8 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   };
 
   const handleStart = () => {
-    if (!prompt.trim()) {
+    const effectivePrompt = prompt.trim() || (uploadedFile ? `Examine and analyze ${uploadedFile.name} in detail` : '');
+    if (!effectivePrompt) {
       toast.error('Please enter a prompt');
       return;
     }
@@ -556,22 +554,27 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
     if (fileData) {
       options.fileData = fileData;
       options.fileName = uploadedFile?.name;
+      options.isImage = Boolean(uploadedFile?.type.startsWith('image/') || fileData.startsWith('data:image/'));
     }
 
     // If intent is website, the prompt IS the website name
     if (activeIntent?.label === 'Website') {
-      options.websiteName = prompt.trim();
+      options.websiteName = effectivePrompt;
     }
 
     // If intent is research, the prompt IS the URL
     if (activeIntent?.label === 'Research') {
-      options.url = prompt.trim();
+      options.url = effectivePrompt;
     }
 
-    const taskPrompt = prompt;
     clearDraftPrompt();
     setPrompt('');
-    onStartTask(taskPrompt, options);
+    setUploadedFile(null);
+    setFileData(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    onStartTask(effectivePrompt, options);
     setIsExpanded(false);
   };
 
@@ -911,7 +914,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                   onClick={handleStart}
                   className={cn(
                     "w-9 h-9 rounded-full flex items-center justify-center transition-all duration-150 cursor-pointer shadow-md shrink-0",
-                    (prompt.trim() || activeConnectorTags.length > 0)
+                    (prompt.trim() || uploadedFile || activeConnectorTags.length > 0)
                       ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-lg opacity-100"
                       : "bg-foreground/10 text-foreground/40 dark:bg-white/10 dark:text-white/40 hover:bg-foreground/15 dark:hover:bg-white/20"
                   )}

@@ -39,6 +39,7 @@ import { MarkdownRenderer } from './MarkdownRenderer';
 import { ChartResult } from './ChartResult';
 import { FileAttachments } from './FileAttachments';
 import { ContextualThinking } from './ContextualThinking';
+import { deriveContextualThinkingStages } from './WorkModeThinkingAnimation';
 import { AttachmentMenu } from '../chat/AttachmentMenu';
 import { ThoughtProcess } from './ThoughtProcess';
 import { ConversationActionBar } from './ConversationActionBar';
@@ -120,6 +121,13 @@ interface ChatViewProps {
   isLoading: boolean;
 }
 
+// Extract embedded image Data URL from user message if present
+export function extractUserImageAttachment(raw: any): string | null {
+  if (!raw || typeof raw !== 'string') return null;
+  const match = raw.match(/\[IMAGE_DATA_URL:(data:image\/[^\]]+)\]/i);
+  return match ? match[1] : null;
+}
+
 // Helper to strip internal prompt instructions or wrappers from user bubbles
 export function cleanUserMessage(raw: any): string {
   if (raw === null || raw === undefined) return '';
@@ -135,6 +143,13 @@ export function cleanUserMessage(raw: any): string {
   } else {
     text = String(raw);
   }
+
+  // Strip embedded image data URLs and image attachment metadata from visible text
+  text = text.replace(/\[IMAGE_DATA_URL:[^\]]*\]\s*/gi, '');
+  text = text.replace(/\[Attached Image Data URL:[^\]]*\]\s*/gi, '');
+  text = text.replace(/\[Attached Image:[^\]]*\]\s*/gi, '');
+  text = text.replace(/^Type:\s*Image\s*\([^\n]*\)\n?/gim, '');
+  text = text.replace(/^The user attached an image file\.[^\n]*\n?/gim, '');
 
   // Strip [Think Harder ...] tags regardless of formatting
   text = text.replace(/^\[Think Harder[^\]]*\]\s*/gi, '');
@@ -155,7 +170,7 @@ export function cleanUserMessage(raw: any): string {
     text = fileHeaderMatch[1].trim();
   }
 
-  return text || (typeof raw === 'string' ? raw : '');
+  return text.trim() || (typeof raw === 'string' && !raw.includes('[IMAGE_DATA_URL:') ? raw : '');
 }
 
 export function centerElementInContainer(
@@ -203,6 +218,54 @@ export function findSearchContentElement(container: HTMLElement | null): HTMLEle
   }
 
   return null;
+}
+
+export interface AutoScrollMetrics {
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+  previousScrollTop?: number;
+  userScrolledUp?: boolean;
+  resumeThreshold?: number;
+}
+
+export function evaluateAutoScrollState(metrics: AutoScrollMetrics): {
+  shouldAutoScroll: boolean;
+  userScrolledUp: boolean;
+  distanceFromBottom: number;
+  isAtBottom: boolean;
+} {
+  const resumeThreshold = metrics.resumeThreshold ?? 64;
+  const distanceFromBottom = Math.max(0, metrics.scrollHeight - metrics.scrollTop - metrics.clientHeight);
+  const isAtBottom = distanceFromBottom <= resumeThreshold;
+  const scrolledUpward =
+    typeof metrics.previousScrollTop === 'number' &&
+    metrics.scrollTop < metrics.previousScrollTop - 4;
+
+  if (isAtBottom) {
+    return {
+      shouldAutoScroll: true,
+      userScrolledUp: false,
+      distanceFromBottom,
+      isAtBottom: true,
+    };
+  }
+
+  if (scrolledUpward || metrics.userScrolledUp) {
+    return {
+      shouldAutoScroll: false,
+      userScrolledUp: true,
+      distanceFromBottom,
+      isAtBottom: false,
+    };
+  }
+
+  return {
+    shouldAutoScroll: false,
+    userScrolledUp: true,
+    distanceFromBottom,
+    isAtBottom: false,
+  };
 }
 
 export function ChatView({ 
@@ -283,8 +346,10 @@ export function ChatView({
   const [interimSpeech, setInterimSpeech] = useState<string>('');
   const dragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const chatWrapperRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const touchStartYRef = useRef<number | null>(null);
   const speechBaseInputRef = useRef<string>('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastTextareaHeightRef = useRef<number>(22);
@@ -539,13 +604,14 @@ export function ChatView({
         const aiFile = await readFileForAI(attachedFile);
         if (aiFile.dataUrl) {
           // Multimodal image attachment for vision analysis
-          message = `${aiFile.summary}\n[Attached Image Data URL: ${aiFile.dataUrl.slice(0, 100)}...]\n${message}`.trim();
+          const userQuestion = message || 'Analyze this image and answer any questions about it.';
+          message = `[Attached Image: ${attachedFile.name}]\n[IMAGE_DATA_URL:${aiFile.dataUrl}]\n${userQuestion}`.trim();
         } else {
-          message = `${aiFile.summary}\n${message}`.trim();
+          message = `${aiFile.summary}\n${message || `Analyze ${attachedFile.name}`}`.trim();
         }
       } catch (err: any) {
         console.warn('File reading error:', err);
-        message = `[Attached File: ${attachedFile.name} (${formatFileSize(attachedFile.size)})]\n${message}`.trim();
+        message = `[Attached File: ${attachedFile.name} (${formatFileSize(attachedFile.size)})]\n${message || `Analyze ${attachedFile.name}`}`.trim();
       }
     }
     if (isThinkHarder) {
@@ -560,9 +626,29 @@ export function ChatView({
   };
 
   // Smart auto-follow: follow streamed output while the reader stays near the bottom.
-  // If they scroll upward to read earlier messages, stop forcing the scroll position.
+  // If they scroll upward to read earlier messages, pause auto-scroll immediately and
+  // resume automatically when they scroll back to the bottom.
   const shouldAutoScrollRef = React.useRef(true);
+  const userScrolledUpRef = React.useRef(false);
+  const lastScrollTopRef = React.useRef(0);
+  const [isAutoScrollPaused, setIsAutoScrollPaused] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const thinkingStartRef = React.useRef<number>(Date.now());
+  const thoughtDurationsRef = React.useRef<Record<string, number>>({});
+
+  const pauseAutoScroll = React.useCallback(() => {
+    userScrolledUpRef.current = true;
+    shouldAutoScrollRef.current = false;
+    setIsAutoScrollPaused(true);
+    setShowScrollToBottom(true);
+  }, []);
+
+  const resumeAutoScroll = React.useCallback(() => {
+    userScrolledUpRef.current = false;
+    shouldAutoScrollRef.current = true;
+    setIsAutoScrollPaused(false);
+    setShowScrollToBottom(false);
+  }, []);
 
   const displayMessages = React.useMemo(() => {
     const list: any[] = [];
@@ -598,19 +684,30 @@ export function ChatView({
   }, [isLoading, status, steps, displayMessages]);
 
   const scrollToBottom = React.useCallback((behavior: ScrollBehavior = 'smooth') => {
-    shouldAutoScrollRef.current = true;
-    setShowScrollToBottom(false);
+    resumeAutoScroll();
     if (virtuosoRef.current && displayMessages.length > 0) {
       virtuosoRef.current.scrollToIndex({
         index: displayMessages.length - 1,
+        align: 'end',
         behavior: behavior === 'smooth' ? 'smooth' : 'auto',
       });
     }
-  }, [displayMessages]);
+    if (containerRef.current) {
+      try {
+        containerRef.current.scrollTo({
+          top: containerRef.current.scrollHeight,
+          behavior,
+        });
+      } catch {
+        containerRef.current.scrollTop = containerRef.current.scrollHeight;
+      }
+      lastScrollTopRef.current = containerRef.current.scrollTop;
+    }
+  }, [displayMessages.length, resumeAutoScroll]);
 
   const handleTypewriterComplete = React.useCallback((msgKey: string) => {
     setCompletedTypewriters(prev => prev[msgKey] ? prev : { ...prev, [msgKey]: true });
-    if (isStreamingResponse && shouldAutoScrollRef.current && containerRef.current) {
+    if (isStreamingResponse && shouldAutoScrollRef.current && !userScrolledUpRef.current && containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
   }, [isStreamingResponse]);
@@ -618,45 +715,72 @@ export function ChatView({
   const handleConversationScroll = React.useCallback(() => {
     const container = containerRef.current;
     if (!container) return;
-    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-    // Increased threshold for easier detection, added logging
-    const isAtBottom = distanceFromBottom < 150;
-    shouldAutoScrollRef.current = isAtBottom;
-    setShowScrollToBottom(!isAtBottom);
+    const nextState = evaluateAutoScrollState({
+      scrollTop: container.scrollTop,
+      scrollHeight: container.scrollHeight,
+      clientHeight: container.clientHeight,
+      previousScrollTop: lastScrollTopRef.current,
+      userScrolledUp: userScrolledUpRef.current,
+      resumeThreshold: 64,
+    });
+    lastScrollTopRef.current = container.scrollTop;
+    userScrolledUpRef.current = nextState.userScrolledUp;
+    shouldAutoScrollRef.current = nextState.shouldAutoScroll;
+    setIsAutoScrollPaused(!nextState.shouldAutoScroll);
+    setShowScrollToBottom(!nextState.isAtBottom);
   }, []);
 
-  // When a streaming response begins, reset auto-scroll lock to true and align to bottom
+  // When a new user message is submitted, reset auto-scroll lock and align to bottom
   const prevStreamingRef = useRef(false);
+  const prevMsgCountRef = useRef(displayMessages.length);
   useEffect(() => {
-    if (isStreamingResponse && !prevStreamingRef.current) {
-      shouldAutoScrollRef.current = true;
-      setShowScrollToBottom(false);
-      if (containerRef.current) {
-        containerRef.current.scrollTop = containerRef.current.scrollHeight;
-      }
+    const lastMsg = displayMessages[displayMessages.length - 1];
+    const msgCountIncreased = displayMessages.length > prevMsgCountRef.current;
+    const newTurnStarted = (!prevStreamingRef.current && isStreamingResponse) || (msgCountIncreased && lastMsg?.role === 'user');
+    prevMsgCountRef.current = displayMessages.length;
+
+    if (!prevStreamingRef.current && isStreamingResponse) {
+      thinkingStartRef.current = Date.now();
+    }
+
+    if (newTurnStarted) {
+      resumeAutoScroll();
+      requestAnimationFrame(() => {
+        if (containerRef.current && shouldAutoScrollRef.current && !userScrolledUpRef.current) {
+          containerRef.current.scrollTop = containerRef.current.scrollHeight;
+          lastScrollTopRef.current = containerRef.current.scrollTop;
+        }
+      });
+    } else if (msgCountIncreased && shouldAutoScrollRef.current && !userScrolledUpRef.current) {
+      requestAnimationFrame(() => {
+        if (containerRef.current && shouldAutoScrollRef.current && !userScrolledUpRef.current) {
+          containerRef.current.scrollTop = containerRef.current.scrollHeight;
+          lastScrollTopRef.current = containerRef.current.scrollTop;
+        }
+      });
     }
     prevStreamingRef.current = isStreamingResponse;
-  }, [isStreamingResponse]);
+  }, [isStreamingResponse, displayMessages, resumeAutoScroll]);
 
-  // Keep scroll position at the bottom during active streaming token/step updates
+  // Keep scroll position at the bottom during active streaming token/step updates ONLY if user hasn't scrolled up
   useEffect(() => {
-    if (isStreamingResponse && shouldAutoScrollRef.current && containerRef.current) {
+    if (isStreamingResponse && shouldAutoScrollRef.current && !userScrolledUpRef.current && containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
+      lastScrollTopRef.current = containerRef.current.scrollTop;
     }
   }, [messages, steps, result, isStreamingResponse]);
 
-  // Virtuoso handles auto-scrolling and follow-output natively via followOutput and atBottomStateChange.
-
-  // Initial animation
+  // Initial animation on outer wrapper (NEVER clearProps:'all' on Virtuoso's scrollerRef,
+  // because Virtuoso relies on inline style="height: 100%; overflow-y: auto; position: relative;" to scroll!)
   useEffect(() => {
-    if (containerRef.current) {
+    if (chatWrapperRef.current) {
       const ctx = gsap.context(() => {
         gsap.fromTo(
-          containerRef.current,
+          chatWrapperRef.current,
           { opacity: 0, y: 15 },
-          { opacity: 1, y: 0, duration: 0.4, ease: 'power2.out', clearProps: 'all' }
+          { opacity: 1, y: 0, duration: 0.4, ease: 'power2.out', clearProps: 'transform,opacity' }
         );
-      }, containerRef);
+      }, chatWrapperRef);
       return () => ctx.revert();
     }
   }, []);
@@ -706,6 +830,7 @@ export function ChatView({
       const msgId = msg.id || String(index);
       const isEditing = editingMessageId === msgId;
       const cleanedText = cleanUserMessage(msg.content);
+      const attachedImageUrl = extractUserImageAttachment(msg.content);
 
       return (
         <div key={msgId} className="flex justify-end my-2 chat-message-enter group relative px-4 sm:px-20">
@@ -740,20 +865,30 @@ export function ChatView({
               </div>
             </div>
           ) : (
-            <div className="relative flex items-center gap-2">
+            <div className="relative flex items-center gap-2 max-w-[85%] sm:max-w-[75%]">
               <button
                 type="button"
                 onClick={() => {
                   setEditingMessageId(msgId);
                   setEditInputContent(cleanedText);
                 }}
-                className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-full bg-card/80 hover:bg-card border border-border shadow-xs text-muted-foreground hover:text-foreground"
+                className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-full bg-card/80 hover:bg-card border border-border shadow-xs text-muted-foreground hover:text-foreground shrink-0"
                 title="Edit prompt"
               >
                 <Pencil size={13} />
               </button>
-              <div className="bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium max-w-[80%] shadow-xs leading-relaxed">
-                {cleanedText}
+              <div className="bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium shadow-xs leading-relaxed space-y-2 overflow-hidden">
+                {attachedImageUrl && (
+                  <div className="rounded-xl overflow-hidden border border-white/15 max-w-[260px] sm:max-w-[320px]">
+                    <img
+                      src={attachedImageUrl}
+                      alt="Attached upload"
+                      className="w-full max-h-[240px] object-cover block"
+                      loading="lazy"
+                    />
+                  </div>
+                )}
+                {cleanedText && <div className="whitespace-pre-wrap break-words">{cleanedText}</div>}
               </div>
             </div>
           )}
@@ -773,6 +908,25 @@ export function ChatView({
       const isCompleted = Boolean(completedTypewriters[msgKey]);
       const isLatestAssistant = index === displayMessages.length - 1 || (index === displayMessages.length - 2 && displayMessages[displayMessages.length - 1]?.role !== 'assistant');
       const shouldAnimate = !isCompleted && isLatestAssistant;
+      const isThoughtStreaming = Boolean(isLatestAssistant && isAssistantWorking && thought && !cleanedContent);
+
+      if (cleanedContent && !thoughtDurationsRef.current[msgKey]) {
+        const elapsedSec = Math.max(0.8, Math.min(24, (Date.now() - thinkingStartRef.current) / 1000));
+        thoughtDurationsRef.current[msgKey] = elapsedSec;
+      }
+
+      const prevUserMsg = displayMessages.slice(0, index).reverse().find((m: any) => m?.role === 'user');
+      const synthesizedThought = !thought && cleanedContent
+        ? deriveContextualThinkingStages(
+            prevUserMsg?.content || prompt,
+            isThinkHarder,
+            isLatestAssistant && steps.length > 0 ? steps : undefined,
+            99
+          )
+            .map((s, sIdx) => `Step ${sIdx + 1}: ${s.label}${s.detail ? ` — ${s.detail}` : ''}`)
+            .join('\n')
+        : '';
+      const effectiveThought = thought || synthesizedThought;
 
       return (
         <div key={msg.id || index} className="flex gap-4 max-w-3xl mx-auto my-3 chat-message-enter px-4 sm:px-20">
@@ -781,10 +935,12 @@ export function ChatView({
               <ManusLogo showBadge={true} />
             </div>
 
-            {thought && (
+            {effectiveThought && (
               <ThoughtProcess
-                thoughtText={thought}
-                defaultExpanded={false}
+                thoughtText={effectiveThought}
+                isLive={isThoughtStreaming}
+                durationSeconds={thoughtDurationsRef.current[msgKey] || 1.4}
+                defaultExpanded={isThoughtStreaming}
               />
             )}
 
@@ -1044,13 +1200,17 @@ export function ChatView({
     );
   };
 
-  const hasVisibleAssistantMessage = displayMessages.some((m: any) => {
-    if (m?.role !== 'assistant') return false;
-    const raw = m.content || '';
-    const { thought, content: extracted } = extractThoughtProcess(raw);
-    const cleanedContent = cleanMessageContent(extracted || raw);
-    return Boolean(cleanedContent || thought);
-  });
+  const lastDisplayMessage = displayMessages[displayMessages.length - 1];
+  const hasVisibleAssistantMessage = Boolean(
+    lastDisplayMessage &&
+    lastDisplayMessage.role === 'assistant' &&
+    (() => {
+      const raw = lastDisplayMessage.content || '';
+      const { thought, content: extracted } = extractThoughtProcess(raw);
+      const cleanedContent = cleanMessageContent(extracted || raw);
+      return Boolean(cleanedContent || thought);
+    })()
+  );
   const activeRunningStep = steps.find(s => s.status === 'running');
   const latestUserMsg = [...displayMessages].reverse().find((m: any) => m?.role === 'user')?.content || prompt;
   const weatherQuery = extractWeatherQuery(latestUserMsg);
@@ -1073,8 +1233,9 @@ export function ChatView({
   }
 
   const footerRenderRef = useRef<() => React.ReactNode>(() => null);
+  const footerSubscribersRef = useRef<Set<() => void>>(new Set());
   footerRenderRef.current = () => (
-    <div className="px-4 sm:px-20 space-y-4 pb-40 pt-6">
+    <div className="px-4 sm:px-20 space-y-4 pb-28 pt-4">
       {/* Live tool-call progress */}
       {isAssistantWorking && activeRunningStep && !hasVisibleAssistantMessage && (
         <div
@@ -1157,6 +1318,7 @@ export function ChatView({
                 prompt={messages.filter((message: any) => message?.role === 'user').slice(-1)[0]?.content || prompt}
                 activeStep={activeRunningStep?.label}
                 deepMode={isThinkHarder}
+                steps={steps}
               />
             </div>
           </div>
@@ -1205,7 +1367,7 @@ export function ChatView({
         </div>
       )}
 
-      <div ref={bottomRef} className="h-36 shrink-0" />
+      <div ref={bottomRef} className="h-4 shrink-0" />
     </div>
   );
 
@@ -1233,28 +1395,81 @@ export function ChatView({
     displayMessages.length,
   ]);
 
+  useEffect(() => {
+    footerSubscribersRef.current.forEach((notify) => {
+      try { notify(); } catch {}
+    });
+  }, [virtuosoContext]);
+
   const virtuosoComponents = React.useMemo(() => ({
     Footer: function VirtuosoStableFooter(_props: { context?: typeof virtuosoContext }) {
+      const [, setTick] = React.useState(0);
+      React.useEffect(() => {
+        const listener = () => setTick((t) => t + 1);
+        footerSubscribersRef.current.add(listener);
+        return () => {
+          footerSubscribersRef.current.delete(listener);
+        };
+      }, []);
       return <>{footerRenderRef.current()}</>;
     }
   }), []);
 
   return (
-    <div className="flex flex-col h-full bg-manus-cream dark:bg-background relative">
+    <div ref={chatWrapperRef} className="flex flex-col h-full bg-manus-cream dark:bg-background relative">
       {/* Virtualized Chat Area Container */}
-      <div className="flex-1 min-h-0 relative overflow-hidden">
-        
+      <div
+        className="flex-1 min-h-0 relative overflow-hidden"
+        onWheel={(e) => {
+          if (e.deltaY < 0) {
+            pauseAutoScroll();
+          } else if (e.deltaY > 0 && containerRef.current) {
+            handleConversationScroll();
+          }
+        }}
+        onTouchStart={(e) => {
+          if (e.touches.length > 0) {
+            touchStartYRef.current = e.touches[0].clientY;
+          }
+        }}
+        onTouchMove={(e) => {
+          if (e.touches.length > 0 && touchStartYRef.current !== null) {
+            const deltaY = e.touches[0].clientY - touchStartYRef.current;
+            // Swiping finger down (scrolling upward to earlier content)
+            if (deltaY > 8) {
+              pauseAutoScroll();
+            } else if (deltaY < -8 && containerRef.current) {
+              handleConversationScroll();
+            }
+          }
+        }}
+      >
         <Virtuoso
           ref={virtuosoRef}
+          scrollerRef={(el) => {
+            const prevEl = containerRef.current;
+            if (prevEl && prevEl !== el) {
+              prevEl.removeEventListener('scroll', handleConversationScroll);
+            }
+            const nextEl = (el as HTMLDivElement | null);
+            containerRef.current = nextEl;
+            if (nextEl) {
+              nextEl.addEventListener('scroll', handleConversationScroll, { passive: true });
+            }
+          }}
           data={displayMessages}
           context={virtuosoContext}
           computeItemKey={(index, item) => item?.id || `msg-${index}`}
           increaseViewportBy={{ top: 280, bottom: 360 }}
-          className="h-full w-full custom-scrollbar overscroll-contain"
-          followOutput={isStreamingResponse ? 'smooth' : false}
+          atBottomThreshold={64}
+          className="h-full w-full overflow-y-auto relative touch-pan-y custom-scrollbar overscroll-contain"
+          followOutput={isStreamingResponse && !isAutoScrollPaused && shouldAutoScrollRef.current ? 'smooth' : false}
           atBottomStateChange={(atBottom) => {
-            shouldAutoScrollRef.current = atBottom;
-            setShowScrollToBottom(!atBottom);
+            if (atBottom) {
+              resumeAutoScroll();
+            } else {
+              pauseAutoScroll();
+            }
           }}
           itemContent={renderMessageItem}
           components={virtuosoComponents}

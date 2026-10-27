@@ -215,19 +215,45 @@ export async function createConversation(data: {
   const id = data.id || 'chat_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
   const userId = data.userId || 'usr_manus_default';
   
+  let existingConv: StoredConversation | null = null;
+  if (isIndexedDBSupported()) {
+    try {
+      const db = await openDatabase();
+      existingConv = await new Promise<StoredConversation | null>((resolve) => {
+        try {
+          const tx = db.transaction(STORE_CONVERSATIONS, 'readonly');
+          const req = tx.objectStore(STORE_CONVERSATIONS).get(id);
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => resolve(null);
+        } catch {
+          resolve(null);
+        }
+      });
+    } catch {}
+  }
+  if (!existingConv) {
+    existingConv = getFallbackConversations().find(c => c.id === id) || null;
+  }
+
+  const preserveTerminalState =
+    existingConv &&
+    (existingConv.status === 'completed' || existingConv.status === 'error' || existingConv.result !== undefined);
+
   const conversation: StoredConversation = {
     id,
     userId,
-    title: data.title || 'New Conversation',
-    createdAt: now,
+    title: data.title || existingConv?.title || 'New Conversation',
+    createdAt: existingConv?.createdAt || now,
     updatedAt: now,
-    mode: data.mode || 'chat',
-    outputFormat: data.outputFormat,
-    chartType: data.chartType,
-    projectId: data.projectId || null,
-    status: 'idle',
-    isPermanent: Boolean(data.isPermanent),
-    metadata: data.metadata || {},
+    mode: data.mode || existingConv?.mode || 'chat',
+    outputFormat: data.outputFormat ?? existingConv?.outputFormat,
+    chartType: data.chartType ?? existingConv?.chartType,
+    projectId: data.projectId !== undefined ? data.projectId : (existingConv?.projectId || null),
+    status: preserveTerminalState ? existingConv!.status : 'idle',
+    result: preserveTerminalState ? existingConv!.result : undefined,
+    steps: preserveTerminalState ? existingConv!.steps : undefined,
+    isPermanent: Boolean(data.isPermanent ?? existingConv?.isPermanent),
+    metadata: { ...(existingConv?.metadata || {}), ...(data.metadata || {}) },
   };
 
   if (isIndexedDBSupported()) {

@@ -32,9 +32,9 @@ export default async (req: Request) => {
     return jsonResponse({ error: 'Invalid request body format. Expected JSON object.', code: 'INVALID_PAYLOAD' }, 400);
   }
 
-  // Validate prompt / messages input bounds
-  if (body.prompt !== undefined && (typeof body.prompt !== 'string' || body.prompt.length > 50000)) {
-    return jsonResponse({ error: 'Prompt must be a string under 50,000 characters.', code: 'INVALID_PROMPT' }, 400);
+  // Validate prompt / messages input bounds (up to 500KB per message to accommodate compressed image attachments)
+  if (body.prompt !== undefined && (typeof body.prompt !== 'string' || body.prompt.length > 500000)) {
+    return jsonResponse({ error: 'Prompt must be a string under 500,000 characters.', code: 'INVALID_PROMPT' }, 400);
   }
 
   if (body.messages !== undefined) {
@@ -42,8 +42,8 @@ export default async (req: Request) => {
       return jsonResponse({ error: 'Messages must be an array of at most 200 messages.', code: 'INVALID_MESSAGES' }, 400);
     }
     for (const m of body.messages) {
-      if (!m || typeof m !== 'object' || !['user', 'assistant', 'system'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 50000) {
-        return jsonResponse({ error: 'Each message must have role (user|assistant|system) and content under 50,000 characters.', code: 'INVALID_MESSAGE_ITEM' }, 400);
+      if (!m || typeof m !== 'object' || !['user', 'assistant', 'system'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 500000) {
+        return jsonResponse({ error: 'Each message must have role (user|assistant|system) and content under 500,000 characters.', code: 'INVALID_MESSAGE_ITEM' }, 400);
       }
     }
   }
@@ -109,9 +109,13 @@ export default async (req: Request) => {
     ].filter(Boolean) as string[];
 
     const messages = Array.isArray(body.messages) ? body.messages : [];
-    const latestUserText =
+    const rawLatestUserText =
       [...messages].reverse().find((m: any) => m?.role === 'user' && typeof m?.content === 'string')?.content
       || (typeof body.prompt === 'string' ? body.prompt : '');
+    const latestUserText = rawLatestUserText
+      .replace(/\[IMAGE_DATA_URL:[^\]]+\]\s*/gi, '')
+      .replace(/\[Attached Image:[^\]]*\]\s*/gi, '')
+      .trim();
 
     if (!apiKey && openRouterKeys.length === 0) {
       return createFallbackSseResponse(buildFallbackAnswer(latestUserText), 'stop');
@@ -231,17 +235,37 @@ export default async (req: Request) => {
         'Never invent sources, URLs, dates, headlines, or live facts. If search results are insufficient, say so.';
     }
 
+    const parseMessageParts = (rawContent: string) => {
+      const parts: any[] = [];
+      const imgRegex = /\[IMAGE_DATA_URL:(data:(image\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+))\]/gi;
+      let match: RegExpExecArray | null;
+      while ((match = imgRegex.exec(rawContent)) !== null) {
+        const mimeType = match[2];
+        const base64Data = match[3].replace(/\s+/g, '');
+        if (mimeType && base64Data) {
+          parts.push({ inlineData: { mimeType, data: base64Data } });
+        }
+      }
+      const cleanText = rawContent.replace(/\[IMAGE_DATA_URL:[^\]]+\]\s*/gi, '').trim();
+      parts.push({ text: cleanText || 'Analyze this image and answer the user question.' });
+      return parts;
+    };
+
     const contents = messages
       .filter((m: any) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim().length > 0)
       .map((m: any) => ({
         role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content }],
+        parts: m.role === 'user' && m.content.includes('[IMAGE_DATA_URL:')
+          ? parseMessageParts(m.content)
+          : [{ text: m.content }],
       }));
 
     if (contents.length === 0 && body.prompt) {
       contents.push({
         role: 'user',
-        parts: [{ text: body.prompt }],
+        parts: typeof body.prompt === 'string' && body.prompt.includes('[IMAGE_DATA_URL:')
+          ? parseMessageParts(body.prompt)
+          : [{ text: body.prompt }],
       });
     }
 

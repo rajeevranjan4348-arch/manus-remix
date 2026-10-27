@@ -47,6 +47,22 @@ const nativeFetch = typeof window !== 'undefined' ? window.fetch.bind(window) : 
 // Track active stream AbortControllers so stopTask / new requests can cancel in-flight streams
 const activeStreamControllers = new Set<AbortController>();
 
+export interface ActiveStreamContext {
+  requestId: string;
+  taskId?: string | null;
+  messages?: Array<{ role: string; content: string }>;
+}
+
+let activeStreamContext: ActiveStreamContext | null = null;
+
+export function setActiveStreamContext(ctx: ActiveStreamContext | null): void {
+  activeStreamContext = ctx;
+}
+
+export function getActiveStreamContext(): ActiveStreamContext | null {
+  return activeStreamContext;
+}
+
 export function abortActiveAutonomousStreams(): void {
   for (const controller of activeStreamControllers) {
     try {
@@ -59,15 +75,20 @@ export function abortActiveAutonomousStreams(): void {
 export function createAutonomousStreamResponse(options: any, agentConfig?: any): Response {
   const encoder = new TextEncoder();
   const normalizedOptions = Array.isArray(options) ? { messages: options } : (options || {});
+  const ctx = activeStreamContext;
   const lastUserMsg = Array.isArray(normalizedOptions.messages)
     ? normalizedOptions.messages.filter((m: any) => m?.role === 'user').slice(-1)[0]?.content || ''
     : normalizedOptions.prompt || '';
 
-  const requestId = normalizedOptions.requestId || `req_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const requestId =
+    normalizedOptions.requestId ||
+    ctx?.requestId ||
+    `req_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
   const stream = new ReadableStream({
     async start(controller) {
       let streamClosed = false;
+      let streamFinalized = false;
       let finishEmitted = false;
       let doneEmitted = false;
       let accumulatedText = '';
@@ -146,8 +167,17 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
         });
       };
 
-      const rawMsgs = Array.isArray(normalizedOptions.messages) ? normalizedOptions.messages : [];
-      const sanitizedMsgs = rawMsgs
+      const sourceMsgs =
+        ctx && Array.isArray(ctx.messages) && ctx.messages.length > 0 && (!normalizedOptions.requestId || normalizedOptions.requestId === ctx.requestId)
+          ? ctx.messages.map((m, idx, arr) =>
+              idx === arr.length - 1 && m.role === 'user' && lastUserMsg
+                ? { role: 'user', content: lastUserMsg }
+                : m
+            )
+          : Array.isArray(normalizedOptions.messages)
+            ? normalizedOptions.messages
+            : [];
+      const sanitizedMsgs = sourceMsgs
         .filter((m: any) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim().length > 0)
         .map((m: any) => ({ role: m.role, content: m.content.trim() }));
       while (sanitizedMsgs.length > 0 && sanitizedMsgs[sanitizedMsgs.length - 1].role === 'assistant') {
@@ -333,25 +363,28 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
             try { reader.releaseLock(); } catch {}
           }
 
-          if (!accumulatedText.trim()) {
-            finishReason = 'error';
-            emitTextDelta(serviceFailureMessage);
-          }
-          if (!finishEmitted) {
-            sendEvent({
-              type: 'finish',
+          if (!streamFinalized) {
+            streamFinalized = true;
+            if (!accumulatedText.trim()) {
+              finishReason = 'error';
+              emitTextDelta(serviceFailureMessage);
+            }
+            if (!finishEmitted) {
+              sendEvent({
+                type: 'finish',
+                finishReason,
+                ...(finishReason === 'error' ? { error: serviceFailureMessage } : {}),
+              });
+            }
+            sendDone();
+            emitWindowEvent('manus_stream_done', {
+              requestId,
+              text: accumulatedText,
               finishReason,
               ...(finishReason === 'error' ? { error: serviceFailureMessage } : {}),
             });
+            safeClose();
           }
-          sendDone();
-          emitWindowEvent('manus_stream_done', {
-            requestId,
-            text: accumulatedText,
-            finishReason,
-            ...(finishReason === 'error' ? { error: serviceFailureMessage } : {}),
-          });
-          safeClose();
           return;
         }
       } catch (err: any) {
@@ -368,7 +401,8 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
       } finally {
         clearTimeout(timeoutId);
         activeStreamControllers.delete(streamAbortController);
-        if (!streamClosed) {
+        if (!streamFinalized && !streamClosed) {
+          streamFinalized = true;
           if (!accumulatedText.trim()) {
             emitTextDelta(serviceFailureMessage);
           }
@@ -623,6 +657,23 @@ const localTasksDb = {
     }
 
     const list = getStoredTasks();
+    const existingIdx = list.findIndex((t) => t.id === id);
+    if (existingIdx !== -1) {
+      const existing = list[existingIdx];
+      const hasFinished =
+        existing.status === 'completed' ||
+        existing.status === 'error' ||
+        (existing.result !== null && existing.result !== undefined && existing.result !== '{}' && existing.result !== '');
+      list[existingIdx] = {
+        ...newTask,
+        ...existing,
+        status: hasFinished ? existing.status : newTask.status,
+        result: hasFinished ? existing.result : newTask.result,
+        steps: hasFinished && existing.steps ? existing.steps : newTask.steps,
+      };
+      saveStoredTasks(list);
+      return list[existingIdx];
+    }
     list.unshift(newTask);
     saveStoredTasks(list);
     return newTask;

@@ -104,6 +104,54 @@ export function validateFile(file: File): FileValidationResult {
 }
 
 /**
+ * Compress and resize an image File into a compact DataURL suitable for Vision AI and smooth UI rendering
+ */
+export async function compressImageForAI(file: File, maxDimension = 800, quality = 0.78): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const rawDataUrl = e.target?.result as string;
+      if (!rawDataUrl || typeof Image === 'undefined' || typeof document === 'undefined') {
+        resolve(rawDataUrl || '');
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        try {
+          let { width, height } = img;
+          if (width > maxDimension || height > maxDimension) {
+            if (width >= height) {
+              height = Math.round((height * maxDimension) / width);
+              width = maxDimension;
+            } else {
+              width = Math.round((width * maxDimension) / height);
+              height = maxDimension;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, width);
+          canvas.height = Math.max(1, height);
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(rawDataUrl);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const compressed = canvas.toDataURL('image/jpeg', quality);
+          resolve(compressed || rawDataUrl);
+        } catch {
+          resolve(rawDataUrl);
+        }
+      };
+      img.onerror = () => resolve(rawDataUrl);
+      img.src = rawDataUrl;
+    };
+    reader.onerror = () => reject(new Error('Failed to read image file.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
  * Read file content optimized for AI agent consumption
  */
 export async function readFileForAI(file: File): Promise<{
@@ -116,20 +164,13 @@ export async function readFileForAI(file: File): Promise<{
     throw new Error(val.error || 'Invalid file');
   }
 
-  // 1. Images: Read as DataURL for Vision AI models
+  // 1. Images: Compress and read as DataURL for Vision AI models
   if (val.isImage) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const dataUrl = e.target?.result as string;
-        resolve({
-          dataUrl,
-          summary: `[Attached Image: ${val.sanitizedName} (${val.sizeFormatted})]`
-        });
-      };
-      reader.onerror = () => reject(new Error('Failed to read image file.'));
-      reader.readAsDataURL(file);
-    });
+    const dataUrl = await compressImageForAI(file);
+    return {
+      dataUrl,
+      summary: `[Attached Image: ${val.sanitizedName} (${val.sizeFormatted})]`
+    };
   }
 
   // 2. Text, Code, CSV, JSON: Read text content up to safe boundary

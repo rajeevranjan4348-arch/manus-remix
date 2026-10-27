@@ -87,7 +87,8 @@ if (typeof globalThis.document === 'undefined') {
   };
 }
 
-import { centerElementInContainer, findSearchContentElement } from '@/components/agent/ChatView';
+import { centerElementInContainer, findSearchContentElement, evaluateAutoScrollState } from '@/components/agent/ChatView';
+import { deriveContextualThinkingStages } from '@/components/agent/WorkModeThinkingAnimation';
 import { getSettings, saveSettings, DEFAULT_SETTINGS, resetSettings } from '@/lib/settingsStore';
 
 describe('Auto-scroll to Results Feature', () => {
@@ -357,6 +358,68 @@ describe('Auto-scroll to Results Feature', () => {
 
       saveSettings({ autoScrollToResults: true });
       expect(getSettings().autoScrollToResults).toBe(true);
+    });
+  });
+
+  describe('evaluateAutoScrollState Pause & Resume Behavior', () => {
+    it('pauses auto-scroll when user scrolls upward to inspect older messages', () => {
+      const state = evaluateAutoScrollState({
+        scrollTop: 900,
+        scrollHeight: 2000,
+        clientHeight: 600,
+        previousScrollTop: 1200,
+        userScrolledUp: false,
+      });
+
+      expect(state.shouldAutoScroll).toBe(false);
+      expect(state.userScrolledUp).toBe(true);
+      expect(state.isAtBottom).toBe(false);
+    });
+
+    it('keeps auto-scroll paused while user views older messages even on small downward adjustments', () => {
+      const state = evaluateAutoScrollState({
+        scrollTop: 1050,
+        scrollHeight: 2000,
+        clientHeight: 600,
+        previousScrollTop: 1000,
+        userScrolledUp: true,
+      });
+
+      expect(state.shouldAutoScroll).toBe(false);
+      expect(state.userScrolledUp).toBe(true);
+      expect(state.isAtBottom).toBe(false);
+    });
+
+    it('automatically resumes auto-scroll when user reaches the bottom again', () => {
+      const state = evaluateAutoScrollState({
+        scrollTop: 1360,
+        scrollHeight: 2000,
+        clientHeight: 600,
+        previousScrollTop: 1100,
+        userScrolledUp: true,
+      });
+
+      expect(state.isAtBottom).toBe(true);
+      expect(state.shouldAutoScroll).toBe(true);
+      expect(state.userScrolledUp).toBe(false);
+    });
+  });
+
+  describe('Contextual Thinking Stage Pipeline', () => {
+    it('builds multi-stage thinking pipeline with image inspection when an image is attached', () => {
+      const stages = deriveContextualThinkingStages(
+        '[Attached Image: chart.png]\n[IMAGE_DATA_URL:data:image/jpeg;base64,abc]\nWhat does this chart show?',
+        true,
+        undefined,
+        1
+      );
+
+      expect(stages.length).toBe(4);
+      expect(stages[0].status).toBe('completed');
+      expect(stages[1].label).toContain('Inspecting visual content');
+      expect(stages[1].status).toBe('running');
+      expect(stages[2].label).toContain('Multi-angle chain-of-thought');
+      expect(stages[3].status).toBe('pending');
     });
   });
 });

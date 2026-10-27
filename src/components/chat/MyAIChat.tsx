@@ -26,6 +26,8 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mainRef = useRef<HTMLElement>(null);
+  const activeRequestIdRef = useRef<number>(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const scrollToBottom = () => {
     requestAnimationFrame(() => {
@@ -91,6 +93,13 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
 
   useEffect(() => {
     return () => {
+      activeRequestIdRef.current += 1;
+      if (abortControllerRef.current) {
+        try {
+          abortControllerRef.current.abort();
+        } catch (_) {}
+        abortControllerRef.current = null;
+      }
       clearSilenceTimer();
       if (recognitionRef.current) {
         try {
@@ -237,6 +246,20 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
       textareaRef.current.style.height = 'auto';
     }
 
+    const reqId = ++activeRequestIdRef.current;
+    if (abortControllerRef.current) {
+      try {
+        abortControllerRef.current.abort();
+      } catch (_) {}
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const timeoutId = setTimeout(() => {
+      try {
+        controller.abort();
+      } catch (_) {}
+    }, 38000);
+
     setIsGenerating(true);
 
     const assistantPlaceholder: Message = { role: 'assistant', content: '' };
@@ -246,7 +269,9 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
       const res = await fetch('/api/gemini/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
+          requestId: `myai_${Date.now()}_${reqId}`,
           messages: updatedMessages,
           model: 'gemini-3.8-flash',
         }),
@@ -254,42 +279,72 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
 
       if (!res.ok) throw new Error(`API returned ${res.status}`);
       if (!res.body) {
-        setMessages([...updatedMessages, { role: 'assistant', content: 'Response received.' }]);
+        if (activeRequestIdRef.current === reqId) {
+          setMessages([...updatedMessages, { role: 'assistant', content: 'Response received.' }]);
+        }
         return;
       }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let accumulated = '';
+      let lineBuffer = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      const processLine = (rawLine: string) => {
+        if (activeRequestIdRef.current !== reqId) return;
+        const line = rawLine.trim();
+        if (!line.startsWith('data:')) return;
+        const dataStr = line.slice(5).trim();
+        if (!dataStr || dataStr === '[DONE]') return;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
+        try {
+          const parsed = JSON.parse(dataStr);
+          const deltaText = parsed.textDelta ?? parsed.delta ?? parsed.content ?? '';
+          if (deltaText && parsed.type !== 'finish') {
+            accumulated += String(deltaText);
+            setMessages(prev => {
+              if (activeRequestIdRef.current !== reqId) return prev;
+              const next = [...prev];
+              next[next.length - 1] = { role: 'assistant', content: accumulated };
+              return next;
+            });
+            scrollToBottom();
+          } else if (parsed.type === 'error' && parsed.error && !accumulated) {
+            accumulated = String(parsed.error);
+            setMessages(prev => {
+              if (activeRequestIdRef.current !== reqId) return prev;
+              const next = [...prev];
+              next[next.length - 1] = { role: 'assistant', content: accumulated };
+              return next;
+            });
+          }
+        } catch (_) {}
+      };
 
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const dataStr = line.slice(6).trim();
-          if (dataStr === '[DONE]') continue;
-
-          try {
-            const parsed = JSON.parse(dataStr);
-            if (parsed.delta) {
-              accumulated += parsed.delta;
-              setMessages(prev => {
-                const next = [...prev];
-                next[next.length - 1] = { role: 'assistant', content: accumulated };
-                return next;
-              });
-              scrollToBottom();
-            }
-          } catch (_) {}
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          lineBuffer += decoder.decode(value, { stream: true });
+          const lines = lineBuffer.split('\n');
+          lineBuffer = lines.pop() || '';
+          for (const line of lines) {
+            processLine(line);
+          }
         }
+        lineBuffer += decoder.decode();
+        if (lineBuffer.trim()) {
+          for (const line of lineBuffer.split('\n')) {
+            processLine(line);
+          }
+        }
+      } finally {
+        try {
+          reader.releaseLock();
+        } catch (_) {}
       }
 
-      if (!accumulated) {
+      if (!accumulated && activeRequestIdRef.current === reqId) {
         setMessages(prev => {
           const next = [...prev];
           next[next.length - 1] = { role: 'assistant', content: 'No response received.' };
@@ -297,17 +352,25 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
         });
       }
     } catch (err) {
-      setMessages(prev => {
-        const next = [...prev];
-        next[next.length - 1] = {
-          role: 'assistant',
-          content: 'I apologize, but I encountered an error connecting to the AI service. Please try again.',
-        };
-        return next;
-      });
+      if (activeRequestIdRef.current === reqId) {
+        setMessages(prev => {
+          const next = [...prev];
+          next[next.length - 1] = {
+            role: 'assistant',
+            content: 'I apologize, but I encountered an error connecting to the AI service. Please try again.',
+          };
+          return next;
+        });
+      }
     } finally {
-      setIsGenerating(false);
-      scrollToBottom();
+      clearTimeout(timeoutId);
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
+      if (activeRequestIdRef.current === reqId) {
+        setIsGenerating(false);
+        scrollToBottom();
+      }
     }
   };
 

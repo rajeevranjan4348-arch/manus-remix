@@ -166,7 +166,8 @@ export function AttachmentMenu({
             {/* Photos Option */}
             <button
               onClick={() => {
-                photosInputRef.current?.click();
+                setIsOpen(false);
+                setTimeout(() => photosInputRef.current?.click(), 0);
               }}
               className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer"
             >
@@ -179,7 +180,8 @@ export function AttachmentMenu({
             {/* Files Option */}
             <button
               onClick={() => {
-                filesInputRef.current?.click();
+                setIsOpen(false);
+                setTimeout(() => filesInputRef.current?.click(), 0);
               }}
               className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer"
             >

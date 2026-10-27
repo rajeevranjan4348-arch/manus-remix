@@ -20,7 +20,17 @@ export const ThoughtProcess = memo(function ThoughtProcess({
   defaultExpanded = false,
 }: ThoughtProcessProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded || isLive);
+  const [userToggled, setUserToggled] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  React.useEffect(() => {
+    if (userToggled) return;
+    if (isLive) {
+      setIsExpanded(true);
+    } else if (!defaultExpanded) {
+      setIsExpanded(false);
+    }
+  }, [isLive, defaultExpanded, userToggled]);
 
   if (!thoughtText || !thoughtText.trim()) return null;
 
@@ -53,7 +63,10 @@ export const ThoughtProcess = memo(function ThoughtProcess({
     >
       {/* Header Bar */}
       <div
-        onClick={() => setIsExpanded(prev => !prev)}
+        onClick={() => {
+          setUserToggled(true);
+          setIsExpanded(prev => !prev);
+        }}
         className="flex items-center justify-between px-4 py-3 cursor-pointer select-none group transition-colors hover:bg-purple-100/40 dark:hover:bg-purple-900/20"
       >
         <div className="flex items-center gap-2.5 min-w-0">

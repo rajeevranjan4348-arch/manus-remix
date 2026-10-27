@@ -41,8 +41,37 @@ export function needsLiveSearch(text: string): boolean {
     || /\b(what happened|what's happening|whats happening|tell me about the latest|latest on)\b/i.test(clean);
 }
 
+export function parseMultimodalMessageParts(content: string): { parts: any[]; cleanText: string } {
+  const raw = String(content || '');
+  const parts: any[] = [];
+  const imgRegex = /\[IMAGE_DATA_URL:(data:(image\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+))\]/gi;
+  let match: RegExpExecArray | null;
+  while ((match = imgRegex.exec(raw)) !== null) {
+    const mimeType = match[2];
+    const base64Data = match[3].replace(/\s+/g, '');
+    if (mimeType && base64Data) {
+      parts.push({
+        inlineData: {
+          mimeType,
+          data: base64Data,
+        },
+      });
+    }
+  }
+  const cleanText = raw
+    .replace(/\[IMAGE_DATA_URL:[^\]]+\]\s*/gi, '')
+    .trim();
+  parts.push({ text: cleanText || 'Analyze this image and answer the user question.' });
+  return { parts, cleanText };
+}
+
 export function generateResilientResponse(prompt: string, messages: ChatMessage[] = []): string {
-  const raw = prompt.replace(/^\[MODE:[^\]]*\]\s*/i, '').replace(/^\[Think Harder[^\]]*\]\s*/i, '').trim();
+  const raw = prompt
+    .replace(/\[IMAGE_DATA_URL:[^\]]+\]\s*/gi, '')
+    .replace(/\[Attached Image:[^\]]*\]\s*/gi, '')
+    .replace(/^\[MODE:[^\]]*\]\s*/i, '')
+    .replace(/^\[Think Harder[^\]]*\]\s*/i, '')
+    .trim();
   const clean = raw.toLowerCase();
 
   if (/^(hi|hello|hey|hiya|howdy|yo|namaste|greetings|good\s+(morning|afternoon|evening|day|night))[!?.\s]*$/i.test(clean)) {
@@ -116,8 +145,10 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     systemPrompt += '\n\n[EXTENDED REASONING MODE ACTIVE]\nEnclose your step-by-step logical deconstruction and trade-off evaluation inside <think> and </think> tags at the beginning of your response.';
   }
 
-  const latestUserText = [...options.messages].reverse()
-    .find(m => m.role === 'user')?.content || '';
+  const latestUserText = ([...options.messages].reverse()
+    .find(m => m.role === 'user')?.content || '')
+    .replace(/\[IMAGE_DATA_URL:[^\]]+\]\s*/gi, '')
+    .trim();
   const useGoogleSearch = needsLiveSearch(latestUserText);
 
   if (useGoogleSearch) {
@@ -129,10 +160,16 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
 
   const contents = options.messages
     .filter(m => m.role === 'user' || m.role === 'assistant')
-    .map(m => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
-    }));
+    .map(m => {
+      if (m.role === 'user' && m.content.includes('[IMAGE_DATA_URL:')) {
+        const { parts } = parseMultimodalMessageParts(m.content);
+        return { role: 'user', parts };
+      }
+      return {
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }],
+      };
+    });
 
   if (contents.length === 0) {
     contents.push({

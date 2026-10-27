@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useAgent, Agent, webSearch, sandboxTools, fetchUrl, useBlinkAuth } from '@blinkdotnew/react';
-import { blink, abortActiveAutonomousStreams } from '@/lib/blink';
+import { blink, abortActiveAutonomousStreams, setActiveStreamContext } from '@/lib/blink';
 import type { Sandbox } from '@blinkdotnew/sdk';
 import { getSettings, playNotificationSound } from '@/lib/settingsStore';
 import { speakCleanHumanVoice } from '@/lib/speechSynthesis';
@@ -165,7 +165,18 @@ export function useAgentTask() {
   persistentMessagesRef.current = persistentMessages;
   const currentTaskIdRef = useRef<string | null>(null);
   currentTaskIdRef.current = taskId;
+  const currentTaskRef = useRef<{ prompt: string; options: any; fileData?: string; url?: string } | null>(null);
+  currentTaskRef.current = currentTask;
+  const stepsRef = useRef<Step[]>([]);
+  stepsRef.current = steps;
+  const taskStatusRef = useRef<'idle' | 'running' | 'completed' | 'error'>('idle');
+  taskStatusRef.current = taskStatus;
   const activeRequestIdRef = useRef<number>(0);
+  const activeStreamRequestIdRef = useRef<string>('');
+  const activeUserMsgIdRef = useRef<string>('');
+  const activeAssistantMsgIdRef = useRef<string>('');
+  const finalizedRequestIdsRef = useRef<Set<number>>(new Set());
+  const completedSdkMsgIdsRef = useRef<Set<string>>(new Set());
   const stepTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const streamRafRef = useRef<number | null>(null);
   const lastStreamFinishReasonRef = useRef<'stop' | 'error' | null>(null);
@@ -182,12 +193,26 @@ export function useAgentTask() {
     }
   }, []);
 
+  const markExistingSdkMessagesCompleted = useCallback(() => {
+    for (const m of messagesRef.current) {
+      if (m?.id) {
+        completedSdkMsgIdsRef.current.add(String(m.id));
+      }
+    }
+  }, []);
+
   // Listen to real-time SSE stream deltas from blink.ts and coalesce React state updates
   // to display refresh frames (60-120 FPS) so rapid token bursts never block the main thread.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const handleDelta = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
+      if (detail?.requestId && activeStreamRequestIdRef.current && detail.requestId !== activeStreamRequestIdRef.current) {
+        return;
+      }
+      if (finalizedRequestIdsRef.current.has(activeRequestIdRef.current)) {
+        return;
+      }
       if (typeof detail?.text === 'string') {
         liveStreamTextRef.current = detail.text;
         // Once real response tokens begin arriving, stop synthetic step timers and complete active step banners
@@ -205,7 +230,9 @@ export function useAgentTask() {
           if (streamRafRef.current === null) {
             streamRafRef.current = window.requestAnimationFrame(() => {
               streamRafRef.current = null;
-              setLiveStreamText(liveStreamTextRef.current);
+              if (!finalizedRequestIdsRef.current.has(activeRequestIdRef.current)) {
+                setLiveStreamText(liveStreamTextRef.current);
+              }
             });
           }
         } else {
@@ -214,19 +241,24 @@ export function useAgentTask() {
       }
     };
     const handleStreamDone = (e: Event) => {
-      clearStepTimers();
       const detail = (e as CustomEvent)?.detail;
+      if (detail?.requestId && activeStreamRequestIdRef.current && detail.requestId !== activeStreamRequestIdRef.current) {
+        return;
+      }
+      clearStepTimers();
       if (detail?.finishReason === 'error' || detail?.finishReason === 'stop') {
         lastStreamFinishReasonRef.current = detail.finishReason;
       }
       if (typeof detail?.error === 'string' && detail.error.trim()) {
         lastStreamErrorRef.current = detail.error.trim();
       }
-      if (typeof detail?.text === 'string' && detail.text) {
-        liveStreamTextRef.current = detail.text;
-        setLiveStreamText(detail.text);
-      } else if (liveStreamTextRef.current) {
-        setLiveStreamText(liveStreamTextRef.current);
+      if (!finalizedRequestIdsRef.current.has(activeRequestIdRef.current)) {
+        if (typeof detail?.text === 'string' && detail.text) {
+          liveStreamTextRef.current = detail.text;
+          setLiveStreamText(detail.text);
+        } else if (liveStreamTextRef.current) {
+          setLiveStreamText(liveStreamTextRef.current);
+        }
       }
     };
     window.addEventListener('manus_stream_delta', handleDelta);
@@ -237,6 +269,21 @@ export function useAgentTask() {
       if (streamRafRef.current !== null && typeof window.cancelAnimationFrame === 'function') {
         window.cancelAnimationFrame(streamRafRef.current);
         streamRafRef.current = null;
+      }
+    };
+  }, [clearStepTimers]);
+
+  // Clean up in-flight streams and loading indicators on component unmount
+  useEffect(() => {
+    return () => {
+      abortActiveAutonomousStreams();
+      setActiveStreamContext(null);
+      clearStepTimers();
+      isSubmittingRef.current = false;
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('manus_agent_generating', {
+          detail: { isGenerating: false, mode: 'work' }
+        }));
       }
     };
   }, [clearStepTimers]);
@@ -396,12 +443,229 @@ export function useAgentTask() {
   });
 }, []);
 
+  const getCurrentTurnSdkAssistantText = useCallback((): string => {
+    const msgs = messagesRef.current;
+    if (!Array.isArray(msgs) || msgs.length === 0) return '';
+    // Walk backwards only up to the latest user message in SDK state
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (!m) continue;
+      if (m.role === 'user') break;
+      if (
+        m.role === 'assistant' &&
+        (!m.id || !completedSdkMsgIdsRef.current.has(String(m.id))) &&
+        typeof m.content === 'string' &&
+        m.content.trim().length > 0
+      ) {
+        return m.content.trim();
+      }
+    }
+    return '';
+  }, []);
+
+  const finalizeRequestTurn = useCallback((
+    reqId: number,
+    explicitActiveId?: string | null,
+    explicitText?: string,
+    rawResponse?: any
+  ): boolean => {
+    if (reqId !== activeRequestIdRef.current) {
+      return false;
+    }
+    if (finalizedRequestIdsRef.current.has(reqId)) {
+      return true;
+    }
+    if (lastStreamFinishReasonRef.current === 'error') {
+      return false;
+    }
+
+    const rawText = (explicitText && explicitText.trim())
+      ? explicitText.trim()
+      : (liveStreamTextRef.current.trim() || getCurrentTurnSdkAssistantText());
+    if (!rawText) {
+      return false;
+    }
+
+    finalizedRequestIdsRef.current.add(reqId);
+    markExistingSdkMessagesCompleted();
+    setActiveStreamContext(null);
+
+    const activeTask = currentTaskRef.current;
+    const activeId = explicitActiveId || currentTaskIdRef.current || taskId;
+
+    let parsedChartData = null;
+    let extractedChartData = null;
+    let parsedFiles = null;
+    let detectedType = null;
+
+    const jsonMatch = rawText.match(/```json\n?([\s\S]*?)\n?```/) || rawText.match(/```\n?([\s\S]*?)\n?```/);
+    let parsedJson: any = null;
+
+    if (jsonMatch) {
+      try {
+        parsedJson = JSON.parse(jsonMatch[1]);
+      } catch (e) {
+        console.log('Failed to parse json block:', e);
+      }
+    } else if (rawText.trim().startsWith('{') && rawText.trim().endsWith('}')) {
+      try {
+        parsedJson = JSON.parse(rawText.trim());
+      } catch {}
+    }
+
+    if (parsedJson) {
+      const chartDataCandidate = parsedJson.graph || parsedJson.data || parsedJson;
+      const hasValidChartShape =
+        Array.isArray(chartDataCandidate?.labels) &&
+        chartDataCandidate.labels.length > 0 &&
+        chartDataCandidate.labels.every((label: unknown) => typeof label === 'string' || typeof label === 'number') &&
+        Array.isArray(chartDataCandidate?.datasets) &&
+        chartDataCandidate.datasets.length > 0 &&
+        chartDataCandidate.datasets.every((dataset: any) =>
+          dataset &&
+          typeof dataset.label === 'string' &&
+          Array.isArray(dataset.data) &&
+          dataset.data.length === chartDataCandidate.labels.length &&
+          dataset.data.every((value: unknown) => typeof value === 'number' && Number.isFinite(value))
+        );
+      if (hasValidChartShape) {
+        parsedChartData = parsedJson;
+        extractedChartData = chartDataCandidate;
+        detectedType = parsedJson.graph?.type || parsedJson.type || 'bar';
+        setChartData(chartDataCandidate);
+      }
+      if (parsedJson.files) {
+        parsedFiles = parsedJson.files;
+      }
+    }
+
+    const isGraphRequested =
+      activeTask?.options?.format === 'graph' ||
+      persistentMessagesRef.current.some(m => m.role === 'user' && /\b(graph|chart|plot|diagram|histogram|pie\s+chart|bar\s+chart|line\s+chart|scatter\s+plot)\b/i.test(m.content));
+
+    if (isGraphRequested && !extractedChartData) {
+      setChartData(null);
+    }
+
+    const cleanedText = parsedChartData?.content || rawText.replace(/```json\n?[\s\S]*?\n?```/g, '').trim() || rawText;
+    const assistantMsgId = activeAssistantMsgIdRef.current || ('msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8));
+    const assistantMsg = {
+      id: assistantMsgId,
+      role: 'assistant' as const,
+      content: cleanedText,
+      timestamp: new Date().toISOString(),
+      status: 'success' as const,
+    };
+
+    const nextMessages = (() => {
+      const prev = persistentMessagesRef.current;
+      const existingIdx = prev.findIndex(m => m?.id === assistantMsgId);
+      if (existingIdx !== -1) {
+        const copy = [...prev];
+        copy[existingIdx] = assistantMsg;
+        return copy;
+      }
+      const last = prev[prev.length - 1];
+      if (last && last.role === 'assistant' && last.content?.trim() === cleanedText.trim()) {
+        return prev;
+      }
+      return [...prev, assistantMsg];
+    })();
+
+    persistentMessagesRef.current = nextMessages;
+    setPersistentMessages(nextMessages);
+
+    const finalResult = {
+      type: isGraphRequested || extractedChartData ? 'graph' : (activeTask?.options?.format || 'report'),
+      content: cleanedText,
+      chartData: extractedChartData || parsedChartData,
+      files: parsedFiles,
+      detectedChartType: detectedType || parsedChartData?.graph?.type || (activeTask?.options?.chartType !== 'auto' ? activeTask?.options?.chartType : undefined) || 'bar',
+      rawResponse: rawResponse ?? null,
+      messages: nextMessages,
+    };
+
+    liveStreamTextRef.current = '';
+    setLiveStreamText('');
+    setResult(finalResult);
+    isSubmittingRef.current = false;
+    setTaskStatus('completed');
+    setPhase('completed');
+    const completedSteps = stepsRef.current.map(s => ({ ...s, status: 'completed' as const }));
+    setSteps(completedSteps);
+    emitRobotEvent('TASK_SUCCEEDED');
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('manus_agent_generating', {
+        detail: { isGenerating: false, mode: 'work' }
+      }));
+    }
+
+    if (activeId) {
+      saveMessage({
+        id: assistantMsgId,
+        conversationId: activeId,
+        userId: user?.id || 'usr_manus_default',
+        role: 'assistant',
+        content: cleanedText,
+        status: 'success',
+      }).catch(err => console.warn('Failed to save assistant response to DB:', err));
+
+      Promise.resolve((blink.db as any).tasks.update(activeId, {
+        status: 'completed',
+        result: JSON.stringify(finalResult),
+        steps: JSON.stringify(completedSteps),
+      })).catch(e => console.error('Failed to update task in DB:', e));
+
+      updateConversation(activeId, {
+        status: 'completed',
+        result: finalResult,
+        steps: completedSteps,
+      }).catch(() => {});
+
+      taskTagger.processTaskTags(activeId, activeTask?.prompt || cleanedText, cleanedText).catch(() => {});
+      taskCheckpoint.clearCheckpoint(activeId);
+    }
+
+    const curSettings = getSettings();
+    if (curSettings.autoPlayAudio || activeTask?.options?.voicePlayback) {
+      speakCleanHumanVoice(cleanedText, {
+        voicePersona: curSettings.voicePersona,
+        rate: curSettings.speechSpeed,
+        pitch: curSettings.voicePitch,
+      });
+    }
+
+    if (typeof document !== 'undefined' && document.hidden && curSettings.enableBackgroundNotifications) {
+      sendBackgroundNotification(
+        'Manus AI Agent',
+        `Task completed: ${cleanChatTitle(cleanedText)}`
+      );
+    }
+
+    notificationDispatcher.dispatch({
+      channel: 'task_completed',
+      title: 'Manus AI Agent',
+      body: `Task completed: ${cleanChatTitle(cleanedText)}`,
+      taskId: activeId || undefined,
+      sound: curSettings.soundEffects,
+    });
+
+    return true;
+  }, [getCurrentTurnSdkAssistantText, markExistingSdkMessagesCompleted, taskId, user]);
+
   const useAgentResult = useAgent({
     agent,
     sandbox: sandbox || undefined,
     onFinish: async (response) => {
-      console.log('[Manus Agent] onFinish triggered:', response);
+      const reqId = activeRequestIdRef.current;
+      console.log('[Manus Agent] onFinish triggered for reqId:', reqId, response);
       clearStepTimers();
+      markExistingSdkMessagesCompleted();
+
+      if (finalizedRequestIdsRef.current.has(reqId)) {
+        return;
+      }
+
       const text = (typeof response?.text === 'string' && response.text.trim())
         ? response.text.trim()
         : liveStreamTextRef.current.trim();
@@ -410,13 +674,15 @@ export function useAgentTask() {
       if (!text || isErrorFinish) {
         const errorContent = lastStreamErrorRef.current || (isErrorFinish && text ? text : "I didn't receive an answer from the AI service. Please try again.");
         console.error('[Manus AI] Provider finished with error or empty text:', errorContent);
+        finalizedRequestIdsRef.current.add(reqId);
+        setActiveStreamContext(null);
         isSubmittingRef.current = false;
         liveStreamTextRef.current = '';
         setLiveStreamText('');
         setTaskStatus('error');
         setPhase('error');
         setResult({
-          type: currentTask?.options?.format || 'chat',
+          type: currentTaskRef.current?.options?.format || 'chat',
           content: errorContent,
           error: true,
           retryable: true,
@@ -434,163 +700,15 @@ export function useAgentTask() {
         return;
       }
 
-      let parsedChartData = null;
-      let extractedChartData = null;
-      let parsedFiles = null;
-      let detectedType = null;
-
-      const jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/) || text.match(/```\n?([\s\S]*?)\n?```/);
-      let parsedJson: any = null;
-
-      if (jsonMatch) {
-        try {
-          parsedJson = JSON.parse(jsonMatch[1]);
-        } catch (e) {
-          console.log('Failed to parse json block:', e);
-        }
-      } else if (text.trim().startsWith('{') && text.trim().endsWith('}')) {
-        try {
-          parsedJson = JSON.parse(text.trim());
-        } catch (e) {}
-      }
-
-      if (parsedJson) {
-        const chartDataCandidate = parsedJson.graph || parsedJson.data || parsedJson;
-        const hasValidChartShape =
-          Array.isArray(chartDataCandidate?.labels) &&
-          chartDataCandidate.labels.length > 0 &&
-          chartDataCandidate.labels.every((label: unknown) => typeof label === 'string' || typeof label === 'number') &&
-          Array.isArray(chartDataCandidate?.datasets) &&
-          chartDataCandidate.datasets.length > 0 &&
-          chartDataCandidate.datasets.every((dataset: any) =>
-            dataset &&
-            typeof dataset.label === 'string' &&
-            Array.isArray(dataset.data) &&
-            dataset.data.length === chartDataCandidate.labels.length &&
-            dataset.data.every((value: unknown) => typeof value === 'number' && Number.isFinite(value))
-          );
-        if (hasValidChartShape) {
-          parsedChartData = parsedJson;
-          extractedChartData = chartDataCandidate;
-          detectedType = parsedJson.graph?.type || parsedJson.type || 'bar';
-          setChartData(chartDataCandidate);
-        }
-        if (parsedJson.files) {
-          parsedFiles = parsedJson.files;
-        }
-      }
-
-      const isGraphRequested =
-        currentTask?.options?.format === 'graph' ||
-        messages.some(m => m.role === 'user' && /\b(graph|chart|plot|diagram|histogram|pie\s+chart|bar\s+chart|line\s+chart|scatter\s+plot)\b/i.test(m.content));
-
-      if (isGraphRequested && !extractedChartData) {
-        setChartData(null);
-      }
-
-      const finalResult = {
-        type: isGraphRequested || extractedChartData ? 'graph' : (currentTask?.options?.format || 'report'),
-        content: parsedChartData?.content || text.replace(/```json\n?[\s\S]*?\n?```/g, '').trim() || text,
-        chartData: extractedChartData || parsedChartData,
-        files: parsedFiles,
-        detectedChartType: detectedType || parsedChartData?.graph?.type || (currentTask?.options?.chartType !== 'auto' ? currentTask?.options?.chartType : undefined) || 'bar',
-        rawResponse: response,
-        messages: messages
-      };
-
-      const activeId = taskId || currentTaskIdRef.current;
-      const assistantText = finalResult.content || text;
-
-      if (activeId && assistantText) {
-        const assistantMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
-        const assistantMsg = {
-          id: assistantMsgId,
-          role: 'assistant' as const,
-          content: assistantText,
-          timestamp: new Date().toISOString(),
-          status: 'success' as const
-        };
-        setPersistentMessages(prev => {
-          const last = prev[prev.length - 1];
-          if (last && last.role === 'assistant' && last.content.trim() === assistantText.trim()) {
-            return prev;
-          }
-          return [...prev, assistantMsg];
-        });
-
-        saveMessage({
-          id: assistantMsgId,
-          conversationId: activeId,
-          userId: user?.id || 'usr_manus_default',
-          role: 'assistant',
-          content: assistantText,
-          status: 'success'
-        }).catch(err => console.warn('Failed to save assistant response to DB:', err));
-      }
-
-      liveStreamTextRef.current = '';
-      setLiveStreamText('');
-      setResult(finalResult);
-      isSubmittingRef.current = false;
-      setTaskStatus('completed');
-      setPhase('completed');
-      setSteps(prev => prev.map(s => ({ ...s, status: 'completed' as const })));
-      emitRobotEvent('TASK_SUCCEEDED');
-      window.dispatchEvent(new CustomEvent('manus_agent_generating', {
-        detail: { isGenerating: false, mode: 'work' }
-      }));
-
-      if (activeId) {
-        try {
-          await (blink.db as any).tasks.update(activeId, {
-            status: 'completed',
-            result: JSON.stringify(finalResult),
-            steps: JSON.stringify(steps.map(s => ({ ...s, status: 'completed' })))
-          });
-        } catch (e) {
-          console.error('Failed to update task in DB:', e);
-        }
-        try {
-          await updateConversation(activeId, {
-            status: 'completed',
-            result: finalResult,
-            steps: steps.map(s => ({ ...s, status: 'completed' }))
-          });
-          taskTagger.processTaskTags(activeId, currentTask?.prompt || assistantText, assistantText).catch(() => {});
-        } catch {}
-      }
-
-      const curSettings = getSettings();
-      if (curSettings.autoPlayAudio || currentTask?.options?.voicePlayback) {
-        speakCleanHumanVoice(assistantText, {
-          voicePersona: curSettings.voicePersona,
-          rate: curSettings.speechSpeed,
-          pitch: curSettings.voicePitch,
-        });
-      }
-
-      if (typeof document !== 'undefined' && document.hidden && curSettings.enableBackgroundNotifications) {
-        sendBackgroundNotification(
-          'Manus AI Agent',
-          `Task completed: ${cleanChatTitle(assistantText)}`
-        );
-      }
-
-      notificationDispatcher.dispatch({
-        channel: 'task_completed',
-        title: 'Manus AI Agent',
-        body: `Task completed: ${cleanChatTitle(assistantText)}`,
-        taskId: activeId || undefined,
-        sound: curSettings.soundEffects,
-      });
-
-      if (activeId) {
-        taskCheckpoint.clearCheckpoint(activeId);
-      }
+      finalizeRequestTurn(reqId, currentTaskIdRef.current || taskId, text, response);
     },
     onError: async (err) => {
+      const reqId = activeRequestIdRef.current;
       console.error('[Manus Agent] onError triggered:', err);
       clearStepTimers();
+      markExistingSdkMessagesCompleted();
+      finalizedRequestIdsRef.current.add(reqId);
+      setActiveStreamContext(null);
       isSubmittingRef.current = false;
       liveStreamTextRef.current = '';
       setLiveStreamText('');
@@ -599,7 +717,7 @@ export function useAgentTask() {
         : 'The selected AI provider could not complete this request.';
       const failureText = `AI response failed: ${message}. Please retry or check the selected model and server configuration.`;
       setResult({
-        type: currentTask?.options?.format || 'chat',
+        type: currentTaskRef.current?.options?.format || 'chat',
         content: failureText,
         error: true,
         retryable: true,
@@ -615,7 +733,7 @@ export function useAgentTask() {
       }));
       toast.error('AI response failed. You can retry the request.');
 
-      const activeId = taskId || currentTaskIdRef.current;
+      const activeId = currentTaskIdRef.current || taskId;
       if (activeId) {
         const errorMsgId = 'msg_error_' + Date.now();
         setPersistentMessages(prev => prev.some(m => m.role === 'assistant' && m.error && m.content === failureText)
@@ -639,7 +757,7 @@ export function useAgentTask() {
         }).catch(() => {});
         (blink.db as any).tasks.update(activeId, {
           status: 'error',
-          result: JSON.stringify({ type: currentTask?.options?.format || 'chat', content: failureText, error: true, retryable: true }),
+          result: JSON.stringify({ type: currentTaskRef.current?.options?.format || 'chat', content: failureText, error: true, retryable: true }),
         }).catch(() => {});
       }
     }
@@ -648,62 +766,32 @@ export function useAgentTask() {
   const { sendMessage: agentSendMessage, isLoading, messages, append, clearMessages } = useAgentResult;
   const setMessages = (useAgentResult as any).setMessages;
 
-  const finalizeAssistantTurnIfMissing = useCallback((activeId: string | null) => {
-    if (lastStreamFinishReasonRef.current === 'error') {
-      return false;
-    }
-    const streamed = liveStreamTextRef.current.trim();
-    const sdkAssistant = [...messagesRef.current].reverse().find((m: any) => m?.role === 'assistant' && typeof m?.content === 'string' && m.content.trim())?.content?.trim() || '';
-    const candidateText = streamed || sdkAssistant;
-    if (!candidateText) return false;
+  // Keep messagesRef synchronized on every render so turn boundaries are always accurate
+  messagesRef.current = messages;
 
-    const currentList = persistentMessagesRef.current;
-    const lastMsg = currentList[currentList.length - 1];
-    if (lastMsg?.role === 'assistant' && lastMsg.content?.trim() === candidateText) {
-      return true;
-    }
-
-    const assistantMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
-    const assistantMsg = {
-      id: assistantMsgId,
-      role: 'assistant' as const,
-      content: candidateText,
-      timestamp: new Date().toISOString(),
-      status: 'success' as const,
-    };
-    setPersistentMessages(prev => {
-      const prevLast = prev[prev.length - 1];
-      if (prevLast?.role === 'assistant' && prevLast.content?.trim() === candidateText) {
-        return prev;
-      }
-      return [...prev, assistantMsg];
-    });
-    if (activeId) {
-      saveMessage({
-        id: assistantMsgId,
-        conversationId: activeId,
-        userId: user?.id || 'usr_manus_default',
-        role: 'assistant',
-        content: candidateText,
-        status: 'success',
-      }).catch(() => {});
-      (blink.db as any).tasks.update(activeId, {
-        status: 'completed',
-      }).catch(() => {});
-    }
-    return true;
-  }, [user]);
+  const finalizeAssistantTurnIfMissing = useCallback((activeId: string | null, reqIdOverride?: number) => {
+    const reqId = reqIdOverride ?? activeRequestIdRef.current;
+    return finalizeRequestTurn(reqId, activeId);
+  }, [finalizeRequestTurn]);
 
   const stopTask = useCallback(() => {
+    const interruptedReqId = activeRequestIdRef.current;
+    const partialText = liveStreamTextRef.current.trim();
+    if (partialText) {
+      finalizeRequestTurn(interruptedReqId, currentTaskIdRef.current || taskId, partialText);
+    }
+    finalizedRequestIdsRef.current.add(interruptedReqId);
     activeRequestIdRef.current += 1;
+    activeStreamRequestIdRef.current = '';
+    setActiveStreamContext(null);
     abortActiveAutonomousStreams();
     clearStepTimers();
+    markExistingSdkMessagesCompleted();
     const stop = (useAgentResult as any).stop || (useAgentResult as any).abort || (useAgentResult as any).cancel;
     if (typeof stop === 'function') {
       try { void stop(); } catch (error) { console.warn('[Agent] Stop request failed:', error); }
     }
     isSubmittingRef.current = false;
-    finalizeAssistantTurnIfMissing(taskId || currentTaskIdRef.current);
     liveStreamTextRef.current = '';
     setLiveStreamText('');
     setTaskStatus('completed');
@@ -715,7 +803,7 @@ export function useAgentTask() {
     }));
     window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
     toast.info('Generation stopped');
-  }, [useAgentResult, clearStepTimers, finalizeAssistantTurnIfMissing, taskId]);
+  }, [useAgentResult, clearStepTimers, finalizeRequestTurn, markExistingSdkMessagesCompleted, taskId]);
 
   const lastSubmitRef = useRef<{ prompt: string; timestamp: number }>({ prompt: '', timestamp: 0 });
 
@@ -723,48 +811,21 @@ export function useAgentTask() {
   useEffect(() => {
     if (!isLoading && taskStatus === 'running' && !isSubmittingRef.current) {
       clearStepTimers();
-      const activeId = taskId || currentTaskIdRef.current;
-      const liveAssistant = [...messages].reverse().find((m: any) => m?.role === 'assistant' && typeof m?.content === 'string' && m.content.trim());
-      const fallbackStreamText = liveStreamTextRef.current.trim();
-      const assistantText = liveAssistant?.content?.trim() || fallbackStreamText;
+      const reqId = activeRequestIdRef.current;
+      const activeId = currentTaskIdRef.current || taskId;
+      const finalized = finalizeRequestTurn(reqId, activeId);
 
-      if (assistantText) {
-        if (activeId) {
-          const assistantMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
-          setPersistentMessages(prev => {
-            const last = prev[prev.length - 1];
-            if (last && last.role === 'assistant' && last.content.trim() === assistantText) return prev;
-            return [...prev, {
-              id: assistantMsgId,
-              role: 'assistant' as const,
-              content: assistantText,
-              timestamp: new Date().toISOString(),
-              status: 'success' as const
-            }];
-          });
-          saveMessage({
-            id: assistantMsgId,
-            conversationId: activeId,
-            userId: user?.id || 'usr_manus_default',
-            role: 'assistant',
-            content: assistantText,
-            status: 'success'
-          }).catch(() => {});
-        }
-        liveStreamTextRef.current = '';
-        setLiveStreamText('');
-        setTaskStatus('completed');
-        setPhase('completed');
-        setSteps(prev => prev.map(step => step.status === 'running' ? { ...step, status: 'completed' as const } : step));
-        if (activeId) {
-          taskTagger.processTaskTags(activeId, currentTask?.prompt || assistantText, assistantText).catch(() => {});
-        }
-      } else if (persistentMessagesRef.current.some(m => m.role === 'assistant')) {
+      if (finalized) {
+        return;
+      }
+
+      const lastMsg = persistentMessagesRef.current[persistentMessagesRef.current.length - 1];
+      if (lastMsg?.role === 'assistant') {
         setTaskStatus('completed');
         setPhase('completed');
         setSteps(prev => prev.map(step => step.status === 'running' ? { ...step, status: 'completed' as const } : step));
       } else {
-        const failureText = 'The AI connection ended before a response was received. Please retry.';
+        const failureText = lastStreamErrorRef.current || 'The AI connection ended before a response was received. Please retry.';
         setResult({
           type: 'chat',
           content: failureText,
@@ -781,7 +842,7 @@ export function useAgentTask() {
         detail: { isGenerating: false, mode: 'work' }
       }));
     }
-  }, [isLoading, taskStatus, messages, taskId, user, clearStepTimers, currentTask]);
+  }, [isLoading, taskStatus, taskId, clearStepTimers, finalizeRequestTurn]);
 
   const processedInvocationsRef = useRef<Set<string>>(new Set());
 
@@ -961,7 +1022,12 @@ export function useAgentTask() {
     }
     lastSubmitRef.current = { prompt: content.trim(), timestamp: now };
     isSubmittingRef.current = true;
+    abortActiveAutonomousStreams();
+    markExistingSdkMessagesCompleted();
+
     const reqId = ++activeRequestIdRef.current;
+    const streamReqId = `req_${now}_${reqId}`;
+    activeStreamRequestIdRef.current = streamReqId;
     clearStepTimers();
     liveStreamTextRef.current = '';
     setLiveStreamText('');
@@ -972,9 +1038,17 @@ export function useAgentTask() {
     setPhase('tool-calling');
     emitRobotEvent('USER_SUBMITTED');
     setResult(null);
+    setSteps([
+      { id: 'think_1', label: 'Understanding intent & context', status: 'running', trace: ['Analyzing prompt & conversation history...'] },
+      { id: 'think_2', label: 'Synthesizing response', status: 'pending', trace: [] },
+    ]);
 
-    const activeId = taskId || currentTaskIdRef.current;
-    const userMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+    const activeId = currentTaskIdRef.current || taskId;
+    const userMsgId = 'msg_' + now + '_' + Math.random().toString(36).substring(2, 8);
+    const assistantMsgId = 'msg_assistant_' + now + '_' + Math.random().toString(36).substring(2, 8);
+    activeUserMsgIdRef.current = userMsgId;
+    activeAssistantMsgIdRef.current = assistantMsgId;
+
     const userMsg = {
       id: userMsgId,
       role: 'user' as const,
@@ -983,13 +1057,24 @@ export function useAgentTask() {
       status: 'success' as const
     };
 
-    setPersistentMessages(prev => {
-      const cleanedPrev = prev.filter(m => !(m?.role === 'assistant' && (m?.error || m?.status === 'error')));
-      const last = cleanedPrev[cleanedPrev.length - 1];
-      if (last && last.role === 'user' && last.content.trim() === content.trim()) {
-        return cleanedPrev;
-      }
-      return [...cleanedPrev, userMsg];
+    const cleanedHistory = persistentMessagesRef.current.filter(
+      m => m && !(m.role === 'assistant' && (m.error || m.status === 'error'))
+    );
+    const lastExisting = cleanedHistory[cleanedHistory.length - 1];
+    const nextHistory =
+      lastExisting && lastExisting.role === 'user' && lastExisting.content.trim() === content.trim()
+        ? cleanedHistory
+        : [...cleanedHistory, userMsg];
+
+    persistentMessagesRef.current = nextHistory;
+    setPersistentMessages(nextHistory);
+
+    setActiveStreamContext({
+      requestId: streamReqId,
+      taskId: activeId,
+      messages: nextHistory
+        .filter(m => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
+        .map(m => ({ role: m.role, content: m.content.trim() })),
     });
 
     if (activeId) {
@@ -1015,14 +1100,17 @@ export function useAgentTask() {
 
     const runSendLifecycle = async () => {
       try {
-        const toolIntent = !isSimpleConversationalPrompt(content) ? detectToolIntent(content) : null;
+        // Strip embedded base64 image data before running connector regexes / RAG enrichment
+        // so multi-kilobyte base64 strings never stall main-thread text processing.
+        const textWithoutImagePayload = content.replace(/\[IMAGE_DATA_URL:[^\]]+\]\n?/gi, '').trim();
+        const toolIntent = !isSimpleConversationalPrompt(textWithoutImagePayload) ? detectToolIntent(textWithoutImagePayload) : null;
         if (toolIntent) {
           if (toolIntent.status !== 'connected') {
             handleConnectorError(toolIntent.connectorId, null, {
               issueType: toolIntent.status === 'expired' ? 'expired' : toolIntent.status === 'permission_required' ? 'permission_required' : 'disconnected',
               customMessage: `The ${toolIntent.connectorName} connector is required for "${toolIntent.toolName}" but is not currently authorized.`
             });
-            const noticePrompt = `${content}\n\n[CONNECTOR STATUS NOTICE: The ${toolIntent.connectorName} connector is required for this request but is currently NOT connected. Inform the user clearly that ${toolIntent.connectorName} needs to be authorized in Connectors & Plugins, and offer to open Connectors.]`;
+            const noticePrompt = `${textWithoutImagePayload}\n\n[CONNECTOR STATUS NOTICE: The ${toolIntent.connectorName} connector is required for this request but is currently NOT connected. Inform the user clearly that ${toolIntent.connectorName} needs to be authorized in Connectors & Plugins, and offer to open Connectors.]`;
             await agentSendMessage(noticePrompt);
             return;
           }
@@ -1035,19 +1123,19 @@ export function useAgentTask() {
           const res = await executeConnectorTool(toolIntent.toolName, toolIntent.args);
           setSteps(prev => prev.map(s => s.label === toolIntent.suggestedAction ? { ...s, status: 'completed' } : s));
           if (res.success) {
-            const augmentedPrompt = `${content}\n\n[EXECUTED CONNECTED TOOL: ${toolIntent.connectorName} (${toolIntent.toolName})]\n[RESULT DATA]:\n${JSON.stringify(res.data, null, 2)}\n\n[INSTRUCTION: Synthesize a clear, verified answer based on the retrieved data above. Highlight key documents/messages/events and provide links where applicable.]`;
+            const augmentedPrompt = `${textWithoutImagePayload}\n\n[EXECUTED CONNECTED TOOL: ${toolIntent.connectorName} (${toolIntent.toolName})]\n[RESULT DATA]:\n${JSON.stringify(res.data, null, 2)}\n\n[INSTRUCTION: Synthesize a clear, verified answer based on the retrieved data above. Highlight key documents/messages/events and provide links where applicable.]`;
             await agentSendMessage(augmentedPrompt);
           } else {
-            const errorPrompt = `${content}\n\n[CONNECTOR TOOL ERROR: ${res.error || 'Execution failed'}]\n${res.message}\nProvide a helpful explanation of the failure.`;
+            const errorPrompt = `${textWithoutImagePayload}\n\n[CONNECTOR TOOL ERROR: ${res.error || 'Execution failed'}]\n${res.message}\nProvide a helpful explanation of the failure.`;
             await agentSendMessage(errorPrompt);
           }
           return;
         }
 
-        const isExplicitChartPrompt = /\b(graph|chart|plot|diagram|histogram|pie\s+chart|bar\s+chart|line\s+chart|scatter\s+plot|visualize\s+data)\b/i.test(content);
+        const isExplicitChartPrompt = /\b(graph|chart|plot|diagram|histogram|pie\s+chart|bar\s+chart|line\s+chart|scatter\s+plot|visualize\s+data)\b/i.test(textWithoutImagePayload);
         const targetPrompt = isExplicitChartPrompt
-          ? `${content}\n\n[INSTRUCTION: Format your chart data as a JSON code block using the format below so it renders as an interactive chart]\n\`\`\`json\n{\n  "graph": {\n    "type": "bar",\n    "labels": ["Category A", "Category B", "Category C", "Category D"],\n    "datasets": [{\n      "label": "Metric",\n      "data": [45, 72, 88, 95]\n    }]\n  }\n}\n\`\`\``
-          : content;
+          ? `${textWithoutImagePayload}\n\n[INSTRUCTION: Format your chart data as a JSON code block using the format below so it renders as an interactive chart]\n\`\`\`json\n{\n  "graph": {\n    "type": "bar",\n    "labels": ["Category A", "Category B", "Category C", "Category D"],\n    "datasets": [{\n      "label": "Metric",\n      "data": [45, 72, 88, 95]\n    }]\n  }\n}\n\`\`\``
+          : textWithoutImagePayload;
 
         const preparedPrompt = await preparePromptWithConnectors(targetPrompt);
         if (activeRequestIdRef.current !== reqId) return;
@@ -1055,6 +1143,8 @@ export function useAgentTask() {
       } catch (error) {
         if (activeRequestIdRef.current !== reqId) return;
         console.error('[Manus AI] Failed to send chat message:', error);
+        finalizedRequestIdsRef.current.add(reqId);
+        setActiveStreamContext(null);
         setTaskStatus('error');
         setPhase('error');
         setResult({
@@ -1070,8 +1160,9 @@ export function useAgentTask() {
         if (activeRequestIdRef.current === reqId) {
           clearStepTimers();
           isSubmittingRef.current = false;
+          setActiveStreamContext(null);
           const hadErrorFinish = lastStreamFinishReasonRef.current === 'error';
-          const finalized = !hadErrorFinish && finalizeAssistantTurnIfMissing(activeId);
+          const finalized = !hadErrorFinish && finalizeRequestTurn(reqId, activeId);
           liveStreamTextRef.current = '';
           setLiveStreamText('');
           if (hadErrorFinish) {
@@ -1086,7 +1177,9 @@ export function useAgentTask() {
             });
             setSteps(prev => prev.map(step => step.status === 'running' ? { ...step, status: 'error' as const } : step));
           } else {
-            setTaskStatus(prev => (prev === 'running' || prev === 'idle') ? (finalized || persistentMessagesRef.current.some(m => m.role === 'assistant') ? 'completed' : 'error') : prev);
+            const lastMsg = persistentMessagesRef.current[persistentMessagesRef.current.length - 1];
+            const hasAssistantReply = finalized || lastMsg?.role === 'assistant';
+            setTaskStatus(prev => (prev === 'running' || prev === 'idle') ? (hasAssistantReply ? 'completed' : 'error') : prev);
             setPhase(prev => (prev === 'tool-calling' || prev === 'text-generation' || prev === 'idle') ? 'completed' : prev);
             setSteps(prev => prev.map(step => step.status === 'running' ? { ...step, status: 'completed' as const } : step));
           }
@@ -1098,7 +1191,7 @@ export function useAgentTask() {
     };
 
     void runSendLifecycle();
-  }, [agentSendMessage, preparePromptWithConnectors, taskId, taskStatus, user, clearStepTimers, finalizeAssistantTurnIfMissing]);
+  }, [agentSendMessage, preparePromptWithConnectors, taskId, taskStatus, user, clearStepTimers, finalizeRequestTurn, markExistingSdkMessagesCompleted]);
 
   const startTask = useCallback(async (prompt: string, options: any = {}) => {
     if (!prompt || !prompt.trim()) return null;
@@ -1113,7 +1206,12 @@ export function useAgentTask() {
     }
     lastSubmitRef.current = { prompt: prompt.trim(), timestamp: now };
     isSubmittingRef.current = true;
+    abortActiveAutonomousStreams();
+    markExistingSdkMessagesCompleted();
+
     const reqId = ++activeRequestIdRef.current;
+    const streamReqId = `req_${now}_${reqId}`;
+    activeStreamRequestIdRef.current = streamReqId;
     clearStepTimers();
     liveStreamTextRef.current = '';
     setLiveStreamText('');
@@ -1127,11 +1225,20 @@ export function useAgentTask() {
     }
 
     let newTaskId: string | null = null;
-    const userMsgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+    const userMsgId = 'msg_' + now + '_' + Math.random().toString(36).substring(2, 8);
+    const assistantMsgId = 'msg_assistant_' + now + '_' + Math.random().toString(36).substring(2, 8);
+    activeUserMsgIdRef.current = userMsgId;
+    activeAssistantMsgIdRef.current = assistantMsgId;
+
+    const isImageFile = typeof options.fileData === 'string' && options.fileData.startsWith('data:image/');
+    const userMessageContent = isImageFile && !prompt.includes('[IMAGE_DATA_URL:')
+      ? `[Attached Image: ${options.fileName || 'image.jpg'}]\n[IMAGE_DATA_URL:${options.fileData}]\n${prompt.trim()}`
+      : prompt;
+
     const userMsg = {
       id: userMsgId,
       role: 'user' as const,
-      content: prompt,
+      content: userMessageContent,
       timestamp: new Date().toISOString(),
       status: 'success' as const
     };
@@ -1139,13 +1246,21 @@ export function useAgentTask() {
     setPersistentMessages([userMsg]);
     persistentMessagesRef.current = [userMsg];
 
-    const generatedId = 'task_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+    const generatedId = 'task_' + now + '_' + Math.random().toString(36).substring(2, 8);
     newTaskId = generatedId;
     setTaskId(newTaskId);
     currentTaskIdRef.current = newTaskId;
 
+    setActiveStreamContext({
+      requestId: streamReqId,
+      taskId: newTaskId,
+      messages: [{ role: 'user', content: userMessageContent.trim() }],
+    });
+
     processedInvocationsRef.current.clear();
-    setCurrentTask({ prompt, options, fileData: options.fileData, url: options.url });
+    const nextTaskObj = { prompt, options, fileData: options.fileData, url: options.url };
+    currentTaskRef.current = nextTaskObj;
+    setCurrentTask(nextTaskObj);
     setTaskStatus('running');
     setPhase('tool-calling');
     setResult(null);
@@ -1212,7 +1327,7 @@ export function useAgentTask() {
           conversationId: newTaskId,
           userId,
           role: 'user',
-          content: prompt,
+          content: userMessageContent,
           status: 'success'
         });
 
@@ -1236,20 +1351,44 @@ export function useAgentTask() {
     let enhancedPrompt = prompt;
     let initialSteps: Step[] = [];
 
-    if (!isSimple) {
+    if (isSimple) {
+      initialSteps = [
+        {
+          id: 'think_1',
+          label: isImageFile ? 'Inspecting attached image' : 'Understanding intent & context',
+          status: 'running',
+          trace: [isImageFile ? 'Scanning visual features & question context...' : 'Analyzing prompt semantics...'],
+        },
+        {
+          id: 'think_2',
+          label: 'Synthesizing final response',
+          status: 'pending',
+          trace: [],
+        },
+      ];
+    } else {
       initialSteps.push({ id: '1', label: 'Analyzing Request', status: 'running', trace: ['Parsing intent...', `Output: ${options.format}`, `Chart: ${options.chartType || 'auto'}`] });
 
       if (options.fileData) {
-        const isCSV = options.fileName?.toLowerCase().endsWith('.csv');
-        initialSteps.push(
-          { id: '2', label: isCSV ? 'Parsing CSV Data' : 'Parsing File Content', status: 'pending', trace: [] },
-          { id: '3', label: 'Profiling Data', status: 'pending', trace: [] },
-          { id: '4', label: 'Computing Statistics', status: 'pending', trace: [] },
-          { id: '5', label: 'Generating Insights', status: 'pending', trace: [] },
-          { id: '6', label: 'Creating Visualizations', status: 'pending', trace: [] },
-        );
+        if (isImageFile) {
+          initialSteps.push(
+            { id: '2', label: 'Inspecting Image Content', status: 'pending', trace: [] },
+            { id: '3', label: 'Extracting Visual Details', status: 'pending', trace: [] },
+            { id: '4', label: 'Generating Analysis', status: 'pending', trace: [] },
+          );
+          enhancedPrompt = `${prompt}\n\n[Attached Image: ${options.fileName || 'image.jpg'}]`;
+        } else {
+          const isCSV = options.fileName?.toLowerCase().endsWith('.csv');
+          initialSteps.push(
+            { id: '2', label: isCSV ? 'Parsing CSV Data' : 'Parsing File Content', status: 'pending', trace: [] },
+            { id: '3', label: 'Profiling Data', status: 'pending', trace: [] },
+            { id: '4', label: 'Computing Statistics', status: 'pending', trace: [] },
+            { id: '5', label: 'Generating Insights', status: 'pending', trace: [] },
+            { id: '6', label: 'Creating Visualizations', status: 'pending', trace: [] },
+          );
 
-        enhancedPrompt = `${prompt}\n\nFile Content to analyze (${options.fileName}):\n\`\`\`${isCSV ? 'csv' : 'text'}\n${options.fileData}\n\`\`\`\n\nPlease:\n1. Parse and validate this ${isCSV ? 'CSV data' : 'content'}\n2. Identify ${isCSV ? 'column types and compute summary statistics' : 'key themes and data points'}\n3. Generate insights about trends, patterns, and anomalies\n4. If applicable, create chart data in JSON format for ${options.chartType} chart\n5. Provide ${options.format} output with key findings`;
+          enhancedPrompt = `${prompt}\n\nFile Content to analyze (${options.fileName}):\n\`\`\`${isCSV ? 'csv' : 'text'}\n${options.fileData}\n\`\`\`\n\nPlease:\n1. Parse and validate this ${isCSV ? 'CSV data' : 'content'}\n2. Identify ${isCSV ? 'column types and compute summary statistics' : 'key themes and data points'}\n3. Generate insights about trends, patterns, and anomalies\n4. If applicable, create chart data in JSON format for ${options.chartType} chart\n5. Provide ${options.format} output with key findings`;
+        }
       } else if (options.url) {
         initialSteps.push(
           { id: '2', label: 'Researching URL', status: 'pending', trace: [] },
@@ -1356,6 +1495,8 @@ export function useAgentTask() {
     } catch (error) {
       if (activeRequestIdRef.current === reqId) {
         console.error('[Manus AI] Failed to start generation:', error);
+        finalizedRequestIdsRef.current.add(reqId);
+        setActiveStreamContext(null);
         setTaskStatus('error');
         setPhase('error');
         setResult({
@@ -1372,8 +1513,9 @@ export function useAgentTask() {
       if (activeRequestIdRef.current === reqId) {
         clearStepTimers();
         isSubmittingRef.current = false;
+        setActiveStreamContext(null);
         const hadErrorFinish = lastStreamFinishReasonRef.current === 'error';
-        const finalized = !hadErrorFinish && finalizeAssistantTurnIfMissing(newTaskId);
+        const finalized = !hadErrorFinish && finalizeRequestTurn(reqId, newTaskId);
         liveStreamTextRef.current = '';
         setLiveStreamText('');
         if (hadErrorFinish) {
@@ -1388,7 +1530,9 @@ export function useAgentTask() {
           });
           setSteps(prev => prev.map(step => step.status === 'running' ? { ...step, status: 'error' as const } : step));
         } else {
-          setTaskStatus(prev => (prev === 'running' || prev === 'idle') ? (finalized || persistentMessagesRef.current.some(m => m.role === 'assistant') ? 'completed' : 'error') : prev);
+          const lastMsg = persistentMessagesRef.current[persistentMessagesRef.current.length - 1];
+          const hasAssistantReply = finalized || lastMsg?.role === 'assistant';
+          setTaskStatus(prev => (prev === 'running' || prev === 'idle') ? (hasAssistantReply ? 'completed' : 'error') : prev);
           setPhase(prev => (prev === 'tool-calling' || prev === 'text-generation' || prev === 'idle') ? 'completed' : prev);
           setSteps(prev => prev.map(step => step.status === 'running' ? { ...step, status: 'completed' as const } : step));
         }
@@ -1399,7 +1543,7 @@ export function useAgentTask() {
     }
 
     return newTaskId;
-  }, [isAuthenticated, user, taskStatus, agentSendMessage, preparePromptWithConnectors, clearMessages, setMessages, clearStepTimers, finalizeAssistantTurnIfMissing]);
+  }, [isAuthenticated, user, taskStatus, agentSendMessage, preparePromptWithConnectors, clearMessages, setMessages, clearStepTimers, finalizeRequestTurn, markExistingSdkMessagesCompleted]);
 
   const loadTask = useCallback(async (id: string) => {
     try {
@@ -1478,13 +1622,17 @@ export function useAgentTask() {
 
   const resetTask = useCallback(() => {
     activeRequestIdRef.current += 1;
+    activeStreamRequestIdRef.current = '';
+    setActiveStreamContext(null);
     abortActiveAutonomousStreams();
     clearStepTimers();
+    markExistingSdkMessagesCompleted();
     isSubmittingRef.current = false;
     liveStreamTextRef.current = '';
     setLiveStreamText('');
     setTaskId(null);
     currentTaskIdRef.current = null;
+    currentTaskRef.current = null;
     setCurrentTask(null);
     setTaskStatus('idle');
     setPhase('idle');
@@ -1492,6 +1640,7 @@ export function useAgentTask() {
     setResult(null);
     setChartData(null);
     setPersistentMessages([]);
+    persistentMessagesRef.current = [];
     if (clearMessages) {
       clearMessages();
     } else if (setMessages) {
@@ -1500,7 +1649,7 @@ export function useAgentTask() {
     window.dispatchEvent(new CustomEvent('manus_agent_generating', {
       detail: { isGenerating: false, mode: 'work' }
     }));
-  }, [clearMessages, setMessages, clearStepTimers]);
+  }, [clearMessages, setMessages, clearStepTimers, markExistingSdkMessagesCompleted]);
 
   const exportToPDF = useCallback(async () => {
     if (!result) return;
@@ -1541,29 +1690,44 @@ Report generated by Manus AI Workspace
 
   const displayMessages = useMemo(() => {
     const rawList: any[] = [...persistentMessages];
+    const isTurnActive = (isLoading || taskStatus === 'running') && !finalizedRequestIdsRef.current.has(activeRequestIdRef.current);
 
-    const liveAssistant = [...messages].reverse().find((message: any) =>
-      message?.role === 'assistant' && typeof message.content === 'string' && message.content.trim().length > 0
-    );
-    const candidateLiveText = liveStreamText.trim() || liveAssistant?.content || '';
-
-    if (candidateLiveText && (isLoading || taskStatus === 'running' || rawList[rawList.length - 1]?.role === 'user')) {
-      const last = rawList[rawList.length - 1];
-      if (last?.role === 'assistant') {
-        if (isLoading || !last.content || last.content.length < candidateLiveText.length) {
-          rawList[rawList.length - 1] = {
-            ...last,
-            content: candidateLiveText,
-            id: last.id || liveAssistant?.id || 'live-assistant-current',
-          };
+    let currentTurnSdkText = '';
+    if (isTurnActive && Array.isArray(messages) && messages.length > 0) {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i];
+        if (!m) continue;
+        if (m.role === 'user') break;
+        if (
+          m.role === 'assistant' &&
+          (!m.id || !completedSdkMsgIdsRef.current.has(String(m.id))) &&
+          typeof m.content === 'string' &&
+          m.content.trim().length > 0
+        ) {
+          currentTurnSdkText = m.content;
+          break;
         }
-      } else {
+      }
+    }
+
+    const candidateLiveText = isTurnActive ? (liveStreamText.trim() || currentTurnSdkText) : '';
+    const liveMsgId = activeAssistantMsgIdRef.current || 'live-assistant-current';
+
+    if (candidateLiveText && isTurnActive) {
+      const last = rawList[rawList.length - 1];
+      if (last?.role === 'assistant' && last?.id === liveMsgId) {
+        rawList[rawList.length - 1] = {
+          ...last,
+          content: candidateLiveText,
+          status: 'streaming',
+        };
+      } else if (last?.role === 'user') {
         rawList.push({
-          id: liveAssistant?.id || 'live-assistant-current',
+          id: liveMsgId,
           role: 'assistant',
           content: candidateLiveText,
           timestamp: new Date().toISOString(),
-          status: (isLoading || taskStatus === 'running') ? 'streaming' : 'success',
+          status: 'streaming',
         });
       }
     }

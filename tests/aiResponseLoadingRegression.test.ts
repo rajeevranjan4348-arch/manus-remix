@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { isSimpleConversationalPrompt } from '../src/hooks/useAgentTask';
-import { generateResilientResponse, needsLiveSearch } from '../server/geminiService';
-import { createAutonomousStreamResponse } from '../src/lib/blink';
+import { generateResilientResponse, needsLiveSearch, parseMultimodalMessageParts } from '../server/geminiService';
+import { createAutonomousStreamResponse, setActiveStreamContext } from '../src/lib/blink';
+import { cleanUserMessage, extractUserImageAttachment } from '../src/components/agent/ChatView';
 
 describe('AI Response Streaming and Loading State Regression Tests', () => {
   it('correctly filters empty assistant turns so request ends with a valid user turn', () => {
@@ -283,6 +284,113 @@ describe('AI Response Streaming and Loading State Regression Tests', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it('never re-displays a previous turn AI response under a new user message while waiting for the new stream', () => {
+    const completedSdkMsgIds = new Set<string>(['sdk_user_1', 'sdk_asst_1']);
+    const persistentMessages = [
+      { id: 'msg_user_1', role: 'user', content: 'Hello' },
+      { id: 'msg_asst_1', role: 'assistant', content: 'Hello! How can I help you today?' },
+      { id: 'msg_user_2', role: 'user', content: 'Sun' },
+    ];
+    // SDK state when Turn 2 starts: Turn 1 messages + Turn 2 user message + empty assistant placeholder
+    const sdkMessages = [
+      { id: 'sdk_user_1', role: 'user', content: 'Hello' },
+      { id: 'sdk_asst_1', role: 'assistant', content: 'Hello! How can I help you today?' },
+      { id: 'sdk_user_2', role: 'user', content: 'Sun' },
+      { id: 'sdk_asst_2', role: 'assistant', content: '' },
+    ];
+
+    const getCurrentTurnSdkText = (msgs: any[]) => {
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        if (!m) continue;
+        if (m.role === 'user') break;
+        if (
+          m.role === 'assistant' &&
+          (!m.id || !completedSdkMsgIds.has(String(m.id))) &&
+          typeof m.content === 'string' &&
+          m.content.trim().length > 0
+        ) {
+          return m.content;
+        }
+      }
+      return '';
+    };
+
+    // Before first token of Turn 2 arrives, currentTurnSdkText MUST be empty (not Turn 1's response!)
+    expect(getCurrentTurnSdkText(sdkMessages)).toBe('');
+
+    // Once Turn 2 streams tokens into sdk_asst_2, it returns Turn 2's response
+    sdkMessages[3].content = 'The Sun is the star at the center of the Solar System.';
+    expect(getCurrentTurnSdkText(sdkMessages)).toBe('The Sun is the star at the center of the Solar System.');
+  });
+
+  it('uses activeStreamContext to synchronize requestId and exclude stale messages from previous tasks', async () => {
+    let capturedBody: any = null;
+    const mockFetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.body && typeof init.body === 'string') {
+        capturedBody = JSON.parse(init.body);
+      }
+      return new Response(
+        'data: {"type":"text-delta","delta":"Vast means immense."}\n\ndata: {"type":"finish","finishReason":"stop"}\n\ndata: [DONE]\n\n',
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
+      );
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mockFetch as any;
+
+    try {
+      setActiveStreamContext({
+        requestId: 'req_sync_42',
+        taskId: 'task_new',
+        messages: [{ role: 'user', content: 'Vast matlab kya hota hai' }],
+      });
+
+      // Even if useAgent passes stale messages from a previous task in options.messages,
+      // createAutonomousStreamResponse must use the clean activeStreamContext messages and requestId.
+      const response = createAutonomousStreamResponse({
+        messages: [
+          { role: 'user', content: 'Stale prompt from old task' },
+          { role: 'assistant', content: 'Stale answer from old task' },
+          { role: 'user', content: 'Vast matlab kya hota hai' },
+        ],
+      });
+      const text = await response.text();
+      expect(text).toContain('Vast means immense.');
+      expect(capturedBody).toBeTruthy();
+      expect(capturedBody.requestId).toBe('req_sync_42');
+      expect(capturedBody.messages).toEqual([{ role: 'user', content: 'Vast matlab kya hota hai' }]);
+      // Verify finish and [DONE] are emitted exactly once
+      expect((text.match(/"type":"finish"/g) || []).length).toBe(1);
+      expect((text.match(/data: \[DONE\]/g) || []).length).toBe(1);
+    } finally {
+      setActiveStreamContext(null);
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('extracts image Data URLs for user bubbles and strips base64 payload from visible text', () => {
+    const sampleDataUrl = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/';
+    const rawMsg = `[Attached Image: photo.jpg]\n[IMAGE_DATA_URL:${sampleDataUrl}]\nWhat is shown in this picture?`;
+
+    expect(extractUserImageAttachment(rawMsg)).toBe(sampleDataUrl);
+    expect(cleanUserMessage(rawMsg)).toBe('What is shown in this picture?');
+  });
+
+  it('converts embedded [IMAGE_DATA_URL:...] in user messages into Gemini Vision inlineData parts', () => {
+    const sampleDataUrl = 'data:image/jpeg;base64,QUJDREVGRw==';
+    const rawMsg = `[Attached Image: diagram.jpg]\n[IMAGE_DATA_URL:${sampleDataUrl}]\nExplain this diagram step by step.`;
+
+    const { parts, cleanText } = parseMultimodalMessageParts(rawMsg);
+    expect(parts.length).toBe(2);
+    expect(parts[0]).toEqual({
+      inlineData: {
+        mimeType: 'image/jpeg',
+        data: 'QUJDREVGRw==',
+      },
+    });
+    expect(parts[1].text).toContain('Explain this diagram step by step.');
+    expect(cleanText).not.toContain('IMAGE_DATA_URL');
+  });
 });
-
-
