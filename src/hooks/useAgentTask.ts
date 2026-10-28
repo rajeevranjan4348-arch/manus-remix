@@ -353,7 +353,12 @@ export function useAgentTask() {
 
   // Define the agent
   const agent = useMemo(() => {
-    const selectedModelId = localStorage.getItem('selected_manus_model') || 'gemini-3.8-flash';
+    let selectedModelId = 'gemini-3.8-flash';
+    try {
+      if (typeof localStorage !== 'undefined') {
+        selectedModelId = localStorage.getItem('selected_manus_model') || 'gemini-3.8-flash';
+      }
+    } catch {}
     const modelMap: Record<string, string> = {
       'manus-1.6-lite': 'google/gemini-3.1-flash-lite',
       'manus-1.6-max': 'google/gemini-3.1-pro-preview',

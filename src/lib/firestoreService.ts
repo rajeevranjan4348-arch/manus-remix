@@ -23,29 +23,46 @@ export interface FirebaseUserProfile {
   createdAt: string;
 }
 
+function getAuthenticatedUser() {
+  const currentUser = auth.currentUser;
+  if (!currentUser || currentUser.isAnonymous || String(currentUser.uid || '').startsWith('guest-')) {
+    return null;
+  }
+  return currentUser;
+}
+
 // User Profile Operations
 export async function syncUserProfile(profile: FirebaseUserProfile): Promise<void> {
+  const currentUser = getAuthenticatedUser();
+  if (!currentUser || !profile?.id || profile.id.startsWith('guest-') || currentUser.uid !== profile.id) {
+    return;
+  }
   const path = `users/${profile.id}`;
   try {
     await setDoc(doc(db, 'users', profile.id), profile, { merge: true });
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn(`[Firestore] Skipped profile sync (${path}):`, (error as any)?.message || error);
   }
 }
 
 export async function getUserProfile(userId: string): Promise<FirebaseUserProfile | null> {
+  const currentUser = getAuthenticatedUser();
+  if (!currentUser || !userId || userId.startsWith('guest-')) {
+    return null;
+  }
   const path = `users/${userId}`;
   try {
     const snap = await getDoc(doc(db, 'users', userId));
     return snap.exists() ? (snap.data() as FirebaseUserProfile) : null;
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, path);
+    console.warn(`[Firestore] Skipped profile fetch (${path}):`, (error as any)?.message || error);
+    return null;
   }
 }
 
 // User Settings Operations
 export async function saveUserSettingsToFirestore(settings: Partial<UserSettings>): Promise<void> {
-  const currentUser = auth.currentUser;
+  const currentUser = getAuthenticatedUser();
   if (!currentUser) return;
 
   const path = `users/${currentUser.uid}/settings/preferences`;
@@ -61,13 +78,13 @@ export async function saveUserSettingsToFirestore(settings: Partial<UserSettings
     };
     await setDoc(doc(db, 'users', currentUser.uid, 'settings', 'preferences'), payload, { merge: true });
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn(`[Firestore] Skipped settings save (${path}):`, (error as any)?.message || error);
   }
 }
 
 // Project Operations
 export async function saveProjectToFirestore(project: Project): Promise<void> {
-  const currentUser = auth.currentUser;
+  const currentUser = getAuthenticatedUser();
   if (!currentUser) return;
 
   const path = `projects/${project.id}`;
@@ -85,12 +102,12 @@ export async function saveProjectToFirestore(project: Project): Promise<void> {
     };
     await setDoc(doc(db, 'projects', project.id), payload, { merge: true });
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn(`[Firestore] Skipped project save (${path}):`, (error as any)?.message || error);
   }
 }
 
 export async function getProjectsFromFirestore(): Promise<Project[]> {
-  const currentUser = auth.currentUser;
+  const currentUser = getAuthenticatedUser();
   if (!currentUser) return [];
 
   const path = 'projects';
@@ -99,22 +116,26 @@ export async function getProjectsFromFirestore(): Promise<Project[]> {
     const snap = await getDocs(q);
     return snap.docs.map(d => d.data() as Project);
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, path);
+    console.warn(`[Firestore] Skipped projects list (${path}):`, (error as any)?.message || error);
+    return [];
   }
 }
 
 export async function deleteProjectFromFirestore(projectId: string): Promise<void> {
+  const currentUser = getAuthenticatedUser();
+  if (!currentUser) return;
+
   const path = `projects/${projectId}`;
   try {
     await deleteDoc(doc(db, 'projects', projectId));
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    console.warn(`[Firestore] Skipped project delete (${path}):`, (error as any)?.message || error);
   }
 }
 
 // Conversation / Task Operations
 export async function saveConversationToFirestore(conv: StoredConversation): Promise<void> {
-  const currentUser = auth.currentUser;
+  const currentUser = getAuthenticatedUser();
   if (!currentUser) return;
 
   const path = `conversations/${conv.id}`;
@@ -136,12 +157,12 @@ export async function saveConversationToFirestore(conv: StoredConversation): Pro
     }
     await setDoc(doc(db, 'conversations', conv.id), payload, { merge: true });
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn(`[Firestore] Skipped conversation save (${path}):`, (error as any)?.message || error);
   }
 }
 
 export async function getConversationsFromFirestore(): Promise<StoredConversation[]> {
-  const currentUser = auth.currentUser;
+  const currentUser = getAuthenticatedUser();
   if (!currentUser) return [];
 
   const path = 'conversations';
@@ -153,22 +174,26 @@ export async function getConversationsFromFirestore(): Promise<StoredConversatio
     const snap = await getDocs(q);
     return snap.docs.map(d => d.data() as StoredConversation);
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, path);
+    console.warn(`[Firestore] Skipped conversations list (${path}):`, (error as any)?.message || error);
+    return [];
   }
 }
 
 export async function deleteConversationFromFirestore(conversationId: string): Promise<void> {
+  const currentUser = getAuthenticatedUser();
+  if (!currentUser) return;
+
   const path = `conversations/${conversationId}`;
   try {
     await deleteDoc(doc(db, 'conversations', conversationId));
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    console.warn(`[Firestore] Skipped conversation delete (${path}):`, (error as any)?.message || error);
   }
 }
 
 // Message Operations
 export async function saveMessageToFirestore(msg: StoredMessage): Promise<void> {
-  const currentUser = auth.currentUser;
+  const currentUser = getAuthenticatedUser();
   if (!currentUser) return;
 
   const path = `conversations/${msg.conversationId}/messages/${msg.id}`;
@@ -184,11 +209,14 @@ export async function saveMessageToFirestore(msg: StoredMessage): Promise<void> 
     };
     await setDoc(doc(db, 'conversations', msg.conversationId, 'messages', msg.id), payload);
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn(`[Firestore] Skipped message save (${path}):`, (error as any)?.message || error);
   }
 }
 
 export async function getMessagesFromFirestore(conversationId: string): Promise<StoredMessage[]> {
+  const currentUser = getAuthenticatedUser();
+  if (!currentUser) return [];
+
   const path = `conversations/${conversationId}/messages`;
   try {
     const snap = await getDocs(collection(db, 'conversations', conversationId, 'messages'));
@@ -196,6 +224,7 @@ export async function getMessagesFromFirestore(conversationId: string): Promise<
     list.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
     return list;
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, path);
+    console.warn(`[Firestore] Skipped messages list (${path}):`, (error as any)?.message || error);
+    return [];
   }
 }

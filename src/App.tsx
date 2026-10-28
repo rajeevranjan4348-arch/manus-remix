@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useCallback, useMemo } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { Sidebar } from './components/layout/Sidebar';
 import { Topbar } from './components/layout/Topbar';
@@ -210,45 +210,69 @@ function AppContent() {
     }
   };
 
-  const handleReset = () => {
+  const handleReset = useCallback(() => {
     resetBuilder();
     resetTask();
     navigate('/');
-  };
+  }, [resetBuilder, resetTask, navigate]);
+
+  const handleToggleSidebar = useCallback(() => {
+    setIsSidebarOpen(prev => !prev);
+  }, []);
+
+  const handleOpenHistory = useCallback(() => {
+    setHistoryInitialTab('sessions');
+    setIsHistoryOpen(true);
+  }, []);
+
+  const handleOpenSettings = useCallback(() => {
+    setIsSettingsOpen(true);
+  }, []);
+
+  const activeTaskInfo = useMemo(() => ({
+    taskId: agentTask.taskId,
+    prompt: agentTask.currentTask?.prompt,
+    taskStatus: agentTask.taskStatus,
+    messages: agentTask.messages,
+    steps: agentTask.steps,
+    result: agentTask.result,
+  }), [
+    agentTask.taskId,
+    agentTask.currentTask?.prompt,
+    agentTask.taskStatus,
+    agentTask.messages,
+    agentTask.steps,
+    agentTask.result,
+  ]);
 
   const isWebsiteActive = websiteTask !== null;
   const isHomePage = location.pathname === '/';
   const hasSentMessage = !isHomePage || isWebsiteActive || Boolean(agentTask.currentTask) || agentTask.messages.length > 0 || agentTask.isLoading;
 
-
-
   return (
-    <div className="flex h-screen w-full max-w-full bg-background overflow-hidden">
+    <div className="flex h-[100dvh] w-full max-w-full bg-background overflow-hidden">
       <Sidebar 
         isOpen={isSidebarOpen} 
-        onToggle={() => setIsSidebarOpen(!isSidebarOpen)} 
+        onToggle={handleToggleSidebar} 
         onNewTask={handleReset}
-        onOpenHistory={() => setIsHistoryOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenHistory={handleOpenHistory}
+        onOpenSettings={handleOpenSettings}
         activeTaskId={location.pathname.startsWith('/task/') ? location.pathname.split('/')[2] : undefined}
       />
       <div className="flex-1 flex flex-col min-w-0">
         {!isWebsiteActive && (
           <Topbar 
-            onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-            onOpenHistory={() => {
-              setHistoryInitialTab('sessions');
-              setIsHistoryOpen(true);
-            }} 
+            onToggleSidebar={handleToggleSidebar}
+            onOpenHistory={handleOpenHistory} 
             onNewTask={handleReset}
-            onOpenSettings={() => setIsSettingsOpen(true)}
+            onOpenSettings={handleOpenSettings}
             onExport={agentTask.exportToPDF}
             showNewTask={hasSentMessage}
           />
         )}
         <main className="flex-1 overflow-hidden relative transition-all duration-300 ease-out">
           {isWebsiteActive ? (
-            <div className="w-full h-full animate-in fade-in-0 slide-in-from-bottom-2 duration-350 ease-out">
+            <div className="w-full h-full manus-transition-enter gpu-accelerated">
               <WebsiteBuilderView
                 websiteName={websiteTask?.websiteName || 'Website'}
                 steps={websiteSteps}
@@ -259,7 +283,7 @@ function AppContent() {
               />
             </div>
           ) : (
-            <div key={location.pathname} className="w-full h-full animate-in fade-in-0 slide-in-from-bottom-2 duration-300 ease-out gpu-accelerated">
+            <div key={location.pathname} className="w-full h-full manus-transition-enter gpu-accelerated">
               <ErrorBoundary>
                 <Routes>
                   <Route path="/" element={<Home onStartTask={handleStartTask} />} />
@@ -325,14 +349,7 @@ function AppContent() {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         initialTab={settingsInitialTab}
-        activeTaskInfo={{
-          taskId: agentTask.taskId,
-          prompt: agentTask.currentTask?.prompt,
-          taskStatus: agentTask.taskStatus,
-          messages: agentTask.messages,
-          steps: agentTask.steps,
-          result: agentTask.result,
-        }}
+        activeTaskInfo={activeTaskInfo}
       />
 
       <Toaster />

@@ -18,8 +18,9 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   onTypewriterComplete,
   onTypewriterTick
 }: MarkdownRendererProps) {
-  // Pre-process content to remove internal chart data JSON blocks
+  // Pre-process content to remove internal chart data JSON blocks (fast-path when no json fence exists)
   const processedContent = useMemo(() => {
+    if (!content || !content.includes('```json')) return content || '';
     return content.replace(/```json\n([\s\S]*?)\n```/g, (match, p1) => {
       try {
         const parsed = JSON.parse(p1);
@@ -40,6 +41,9 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   const [displayedLength, setDisplayedLength] = useState(() => 
     animateTypewriter ? Math.min(12, processedContent.length) : processedContent.length
   );
+  const displayedLengthRef = useRef(displayedLength);
+  displayedLengthRef.current = displayedLength;
+
   const [isTyping, setIsTyping] = useState(animateTypewriter && processedContent.length > 0);
   const animationRef = useRef<number | null>(null);
   const lastTickRef = useRef<number>(0);
@@ -57,6 +61,11 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   // Allow user to click to immediately finish typing
   const handleSkip = () => {
     if (isTyping) {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
+      }
+      displayedLengthRef.current = processedContent.length;
       setDisplayedLength(processedContent.length);
       setIsTyping(false);
       onCompleteRef.current?.();
@@ -71,6 +80,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         document.documentElement.dataset.perfMode === 'saver');
 
     if (!animateTypewriter || prefersReducedMotion) {
+      displayedLengthRef.current = processedContent.length;
       setDisplayedLength(processedContent.length);
       if (isTyping || animateTypewriter) {
         setIsTyping(false);
@@ -79,7 +89,12 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       return;
     }
 
-    if (displayedLength >= processedContent.length) {
+    if (displayedLengthRef.current > processedContent.length) {
+      displayedLengthRef.current = processedContent.length;
+      setDisplayedLength(processedContent.length);
+    }
+
+    if (displayedLengthRef.current >= processedContent.length) {
       setIsTyping(false);
       return;
     }
@@ -90,19 +105,37 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       if (!lastTickRef.current) lastTickRef.current = timestamp;
       const elapsed = timestamp - lastTickRef.current;
 
-      // Batch 6-14 characters every ~24ms for smooth 60fps reading cadence
-      // Prevents thrashing the ReactMarkdown parser while maintaining natural flow
-      if (elapsed >= 24) {
+      // Velocity-adaptive 60/120fps cadence: advances every ~16ms with proportional catch-up
+      // so streamed text glides smoothly without choppy jumps or parser thrashing.
+      if (elapsed >= 16) {
         lastTickRef.current = timestamp;
-        setDisplayedLength((prev) => {
-          const charsToAdd = Math.max(6, Math.floor(elapsed / 3));
-          const next = prev + charsToAdd;
-          onTickRef.current?.();
-          return Math.min(next, processedContent.length);
-        });
+        const prev = displayedLengthRef.current;
+        const remaining = processedContent.length - prev;
+        if (remaining <= 0) {
+          animationRef.current = null;
+          setIsTyping(false);
+          onCompleteRef.current?.();
+          return;
+        }
+        const adaptiveStep = Math.max(3, Math.min(36, Math.ceil(remaining * 0.14) + Math.floor(elapsed / 5)));
+        const next = Math.min(prev + adaptiveStep, processedContent.length);
+        displayedLengthRef.current = next;
+        setDisplayedLength(next);
+        onTickRef.current?.();
+
+        if (next >= processedContent.length) {
+          animationRef.current = null;
+          setIsTyping(false);
+          onCompleteRef.current?.();
+          return;
+        }
       }
 
-      animationRef.current = requestAnimationFrame(animate);
+      if (displayedLengthRef.current < processedContent.length) {
+        animationRef.current = requestAnimationFrame(animate);
+      } else {
+        animationRef.current = null;
+      }
     };
 
     animationRef.current = requestAnimationFrame(animate);
@@ -110,6 +143,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     return () => {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
       }
     };
   }, [processedContent, animateTypewriter]);
@@ -126,7 +160,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
   return (
     <div 
-      className={cn("manus-markdown relative select-text transition-opacity duration-150 contain-content", isTyping && "cursor-pointer", className)}
+      className={cn("manus-markdown relative select-text transition-opacity duration-200 contain-content", isTyping && "cursor-pointer", className)}
       onClick={handleSkip}
       title={isTyping ? "Click to reveal complete text" : undefined}
     >
@@ -135,7 +169,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       </ReactMarkdown>
       {isTyping && (
         <span 
-          className="inline-block w-1.5 h-4 ml-1 bg-primary/80 rounded-xs animate-pulse align-middle shadow-xs" 
+          className="ultra-smooth-caret" 
           aria-hidden="true"
         />
       )}

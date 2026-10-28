@@ -22,17 +22,27 @@ const MODELS = [
   { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', badge: 'Code', desc: 'Advanced coding & data synthesis', icon: Cpu },
 ];
 
-export function Topbar({ onToggleSidebar, onOpenHistory, onNewTask, onOpenSettings, onExport, showNewTask }: TopbarProps) {
+export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistory, onNewTask, onOpenSettings, onExport, showNewTask }: TopbarProps) {
   const location = useLocation();
   const isAtHome = location.pathname === '/';
   const shouldShowNewTask = showNewTask !== undefined ? showNewTask : !isAtHome;
   const isChatPage = !isAtHome || location.pathname.startsWith('/task');
 
   const [selectedModel, setSelectedModel] = useState(() => {
-    return localStorage.getItem('selected_manus_model') || 'manus-1.6-lite';
+    try {
+      if (typeof localStorage !== 'undefined') {
+        return localStorage.getItem('selected_manus_model') || 'manus-1.6-lite';
+      }
+    } catch {}
+    return 'manus-1.6-lite';
   });
   const [activeMode, setActiveMode] = useState<'chat' | 'work'>(() => {
-    return localStorage.getItem('manus_chat_work_mode') === 'work' ? 'work' : 'chat';
+    try {
+      if (typeof localStorage !== 'undefined') {
+        return localStorage.getItem('manus_chat_work_mode') === 'work' ? 'work' : 'chat';
+      }
+    } catch {}
+    return 'chat';
   });
   const [isOpen, setIsOpen] = useState(false);
   const [showOverflowMenu, setShowOverflowMenu] = useState(false);
@@ -355,4 +365,4 @@ export function Topbar({ onToggleSidebar, onOpenHistory, onNewTask, onOpenSettin
       )}
     </header>
   );
-}
+});

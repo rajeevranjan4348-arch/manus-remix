@@ -170,7 +170,7 @@ function groupTasksByTime(tasks: TaskHistory[]): { group: string; items: TaskHis
     .map(([group, items]) => ({ group, items }));
 }
 
-export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHistory, onOpenSettings }: SidebarProps) {
+export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHistory, onOpenSettings }: SidebarProps) {
   const [activeTab, setActiveTab] = React.useState('new');
   const [tasks, setTasks] = useState<TaskHistory[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -206,19 +206,14 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
     const handleProjectsUpdated = () => {
       loadProjects();
     };
-    const handleOpenSettingsEvent = () => {
-      setIsSettingsOpen(true);
-    };
     const handleChatDbUpdated = () => {
       loadTasks();
     };
     window.addEventListener('manus_projects_updated', handleProjectsUpdated);
-    window.addEventListener('manus_open_settings', handleOpenSettingsEvent);
     window.addEventListener('chat_db_updated', handleChatDbUpdated);
     window.addEventListener('manus_tasks_updated', handleChatDbUpdated);
     return () => {
       window.removeEventListener('manus_projects_updated', handleProjectsUpdated);
-      window.removeEventListener('manus_open_settings', handleOpenSettingsEvent);
       window.removeEventListener('chat_db_updated', handleChatDbUpdated);
       window.removeEventListener('manus_tasks_updated', handleChatDbUpdated);
     };
@@ -1009,11 +1004,69 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
         }}
       />
 
-      {/* Settings & Preferences Modal */}
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-      />
+      {/* Settings & Preferences Modal (fallback when onOpenSettings prop is not used) */}
+      {isSettingsOpen && (
+        <SettingsModal
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+        />
+      )}
+
+      {/* Rename Session Alert Dialog */}
+      <AlertDialog
+        open={!!taskToRename}
+        onOpenChange={(open) => {
+          if (!open) {
+            setTaskToRename(null);
+          }
+        }}
+      >
+        <AlertDialogContent className="max-w-md rounded-2xl p-6 bg-card border border-border">
+          <AlertDialogHeader>
+            <div className="w-11 h-11 rounded-2xl flex items-center justify-center mb-2 mx-auto sm:mx-0 bg-primary/10 text-primary">
+              <Edit3 size={20} />
+            </div>
+            <AlertDialogTitle className="text-base sm:text-lg font-bold text-foreground">
+              Rename Chat Session
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-muted-foreground leading-relaxed">
+              Enter a new title for this conversation.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="my-2">
+            <input
+              type="text"
+              value={newChatTitle}
+              onChange={(e) => setNewChatTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  confirmRenameTask();
+                }
+              }}
+              placeholder="Conversation title..."
+              autoFocus
+              className="w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm text-foreground outline-none focus:border-primary/40"
+            />
+          </div>
+          <AlertDialogFooter className="mt-4 gap-2 sm:gap-2">
+            <AlertDialogCancel
+              disabled={isRenamingTask}
+              onClick={() => setTaskToRename(null)}
+              className="rounded-xl text-xs cursor-pointer border border-border hover:bg-muted"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isRenamingTask || !newChatTitle.trim()}
+              onClick={confirmRenameTask}
+              className="rounded-xl text-xs bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer shadow-xs font-semibold"
+            >
+              {isRenamingTask ? 'Saving...' : 'Save'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete Session Confirmation Alert Dialog */}
       <AlertDialog 
@@ -1108,4 +1161,4 @@ export function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHisto
       />
     </>
   );
-}
+});

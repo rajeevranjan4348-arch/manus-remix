@@ -44,7 +44,7 @@ import { AttachmentMenu } from '../chat/AttachmentMenu';
 import { ThoughtProcess } from './ThoughtProcess';
 import { ConversationActionBar } from './ConversationActionBar';
 import { VoiceInputButton, formatSpeechAutoFill } from '../voice/VoiceInputButton';
-import { SourceCitations, parseSourcesFromMarkdown } from './SourceCitations';
+import { SourceCitations, parseSourcesFromMarkdown, resolveMessageSourcesAndQueries } from './SourceCitations';
 import { WeatherWidgetCard } from './WeatherWidgetCard';
 import { ToolApprovalCard } from './ToolApprovalCard';
 import { extractWeatherQuery, fetchWeatherByCity, WeatherData } from '@/lib/weatherService';
@@ -726,9 +726,24 @@ export function ChatView({
     lastScrollTopRef.current = container.scrollTop;
     userScrolledUpRef.current = nextState.userScrolledUp;
     shouldAutoScrollRef.current = nextState.shouldAutoScroll;
-    setIsAutoScrollPaused(!nextState.shouldAutoScroll);
-    setShowScrollToBottom(!nextState.isAtBottom);
+    const nextPaused = !nextState.shouldAutoScroll;
+    const nextShowButton = !nextState.isAtBottom;
+    setIsAutoScrollPaused(prev => (prev === nextPaused ? prev : nextPaused));
+    setShowScrollToBottom(prev => (prev === nextShowButton ? prev : nextShowButton));
   }, []);
+
+  const handleScrollerRef = React.useCallback((el: HTMLElement | Window | null) => {
+    const prevEl = containerRef.current;
+    const nextEl = (el as HTMLDivElement | null);
+    if (prevEl === nextEl) return;
+    if (prevEl) {
+      prevEl.removeEventListener('scroll', handleConversationScroll);
+    }
+    containerRef.current = nextEl;
+    if (nextEl) {
+      nextEl.addEventListener('scroll', handleConversationScroll, { passive: true });
+    }
+  }, [handleConversationScroll]);
 
   // When a new user message is submitted, reset auto-scroll lock and align to bottom
   const prevStreamingRef = useRef(false);
@@ -762,12 +777,30 @@ export function ChatView({
     prevStreamingRef.current = isStreamingResponse;
   }, [isStreamingResponse, displayMessages, resumeAutoScroll]);
 
-  // Keep scroll position at the bottom during active streaming token/step updates ONLY if user hasn't scrolled up
+  // Keep scroll position at the bottom during active streaming token/step updates ONLY if user hasn't scrolled up.
+  // Synchronously align and coalesce frame updates via requestAnimationFrame for 60/120fps smoothness.
+  const scrollRafRef = useRef<number | null>(null);
   useEffect(() => {
     if (isStreamingResponse && shouldAutoScrollRef.current && !userScrolledUpRef.current && containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
       lastScrollTopRef.current = containerRef.current.scrollTop;
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current);
+      }
+      scrollRafRef.current = requestAnimationFrame(() => {
+        scrollRafRef.current = null;
+        if (containerRef.current && shouldAutoScrollRef.current && !userScrolledUpRef.current) {
+          containerRef.current.scrollTop = containerRef.current.scrollHeight;
+          lastScrollTopRef.current = containerRef.current.scrollTop;
+        }
+      });
     }
+    return () => {
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = null;
+      }
+    };
   }, [messages, steps, result, isStreamingResponse]);
 
   // Initial animation on outer wrapper (NEVER clearProps:'all' on Virtuoso's scrollerRef,
@@ -777,8 +810,8 @@ export function ChatView({
       const ctx = gsap.context(() => {
         gsap.fromTo(
           chatWrapperRef.current,
-          { opacity: 0, y: 15 },
-          { opacity: 1, y: 0, duration: 0.4, ease: 'power2.out', clearProps: 'transform,opacity' }
+          { opacity: 0, y: 10 },
+          { opacity: 1, y: 0, duration: 0.32, ease: 'expo.out', clearProps: 'transform,opacity' }
         );
       }, chatWrapperRef);
       return () => ctx.revert();
@@ -806,22 +839,36 @@ export function ChatView({
     if (!content) return '';
     let text = typeof content === 'string' ? content : (typeof content === 'object' ? JSON.stringify(content) : String(content));
     
-    // Remove raw planner/step_index log lines if present
-    text = text.replace(/\{"step_index"[\s\S]*?\}/g, '');
-    text = text.replace(/^\{.*?"source"\s*:\s*"(?:MODEL|PLANNER_RESPONSE)".*?\}$/gm, '');
-    
-    return text.replace(/```(json)?\n[\s\S]*?\n```/g, (match) => {
-      if (
-        match.includes('"graph"') || 
-        match.includes('"labels"') || 
-        match.includes('"datasets"') ||
-        match.includes('"files"')
-      ) {
-        return '';
-      }
-      return match;
-    }).trim();
+    // Fast-path guards to avoid running multiline regexes on clean conversational messages
+    if (text.includes('"step_index"')) {
+      text = text.replace(/\{"step_index"[\s\S]*?\}/g, '');
+    }
+    if (text.includes('"source"')) {
+      text = text.replace(/^\{.*?"source"\s*:\s*"(?:MODEL|PLANNER_RESPONSE)".*?\}$/gm, '');
+    }
+    if (text.includes('```')) {
+      text = text.replace(/```(json)?\n[\s\S]*?\n```/g, (match) => {
+        if (
+          match.includes('"graph"') || 
+          match.includes('"labels"') || 
+          match.includes('"datasets"') ||
+          match.includes('"files"')
+        ) {
+          return '';
+        }
+        return match;
+      });
+    }
+    return text.trim();
   };
+
+  // Per-message parsed payload cache so completed messages never re-run regex/source extraction on input keystrokes or scroll events
+  const messageParseCacheRef = useRef<Map<string, {
+    raw: string;
+    thought: string | null;
+    cleanedContent: string;
+    parsedSources: ReturnType<typeof parseSourcesFromMarkdown>;
+  }>>(new Map());
 
   // Helper to render each message item in the virtualized list
   const renderMessageItem = (index: number, msg: any) => {
@@ -897,10 +944,26 @@ export function ChatView({
     }
 
     if (msg.role === 'assistant') {
-      const raw = msg.content || '';
-      const { thought, content: extracted } = extractThoughtProcess(raw);
-      const cleanedContent = cleanMessageContent(extracted || raw);
-      const parsedSources = parseSourcesFromMarkdown(cleanedContent);
+      const raw = typeof msg.content === 'string' ? msg.content : String(msg.content || '');
+      const cacheKey = msg.id || `idx_${index}`;
+      let cached = messageParseCacheRef.current.get(cacheKey);
+      if (!cached || cached.raw !== raw) {
+        const { thought: extractedThought, content: extracted } = extractThoughtProcess(raw);
+        const cleaned = cleanMessageContent(extracted || raw);
+        const sources = parseSourcesFromMarkdown(cleaned);
+        cached = {
+          raw,
+          thought: extractedThought,
+          cleanedContent: cleaned,
+          parsedSources: sources,
+        };
+        if (messageParseCacheRef.current.size > 200) {
+          const oldestKey = messageParseCacheRef.current.keys().next().value;
+          if (oldestKey) messageParseCacheRef.current.delete(oldestKey);
+        }
+        messageParseCacheRef.current.set(cacheKey, cached);
+      }
+      const { thought, cleanedContent, parsedSources } = cached;
       if (!cleanedContent && !thought && isAssistantWorking) return null;
       if (!cleanedContent && !thought && raw && (result || chartData)) return null;
 
@@ -1061,9 +1124,23 @@ export function ChatView({
               return null;
             })()}
 
-            {parsedSources.sources.length > 0 && (
-              <SourceCitations sources={parsedSources.sources} />
-            )}
+            {cleanedContent && (() => {
+              const resolvedSources = resolveMessageSourcesAndQueries({
+                parsed: parsedSources,
+                userPrompt: prevUserMsg?.content || prompt,
+                assistantContent: parsedSources.cleanedContent || cleanedContent,
+                steps: isLatestAssistant ? steps : undefined,
+              });
+              if (resolvedSources.sources.length === 0 && resolvedSources.searchQueries.length === 0) {
+                return null;
+              }
+              return (
+                <SourceCitations
+                  sources={resolvedSources.sources}
+                  searchQueries={resolvedSources.searchQueries}
+                />
+              );
+            })()}
 
             {cleanedContent ? (
               <div className="pt-0.5">
@@ -1446,17 +1523,7 @@ export function ChatView({
       >
         <Virtuoso
           ref={virtuosoRef}
-          scrollerRef={(el) => {
-            const prevEl = containerRef.current;
-            if (prevEl && prevEl !== el) {
-              prevEl.removeEventListener('scroll', handleConversationScroll);
-            }
-            const nextEl = (el as HTMLDivElement | null);
-            containerRef.current = nextEl;
-            if (nextEl) {
-              nextEl.addEventListener('scroll', handleConversationScroll, { passive: true });
-            }
-          }}
+          scrollerRef={handleScrollerRef}
           data={displayMessages}
           context={virtuosoContext}
           computeItemKey={(index, item) => item?.id || `msg-${index}`}
@@ -1527,7 +1594,7 @@ export function ChatView({
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           className={cn(
-            "w-full max-w-3xl bg-white dark:bg-[#1a1b1e] rounded-[1.75rem] sm:rounded-[2rem] shadow-xl border border-slate-200/80 dark:border-border/60 px-3.5 py-2.5 sm:px-4.5 sm:py-3 flex flex-col gap-1.5 sm:gap-2 transition-[box-shadow,border-color,background-color] duration-200 ease-out focus-within:ring-2 focus-within:ring-primary/20 relative gpu-accelerated",
+            "w-full max-w-3xl bg-white dark:bg-[#1a1b1e] rounded-[1.75rem] sm:rounded-[2rem] shadow-xl border border-slate-200/80 dark:border-border/60 px-3.5 py-2.5 sm:px-4.5 sm:py-3 flex flex-col gap-1.5 sm:gap-2 transition-[box-shadow,border-color,background-color,transform] duration-200 ease-out focus-within:ring-2 focus-within:ring-primary/20 relative gpu-accelerated ultra-smooth-composer",
             isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30",
             isListening && "ring-2 ring-rose-500/40 border-rose-400 dark:border-rose-500/60 shadow-lg shadow-rose-500/10"
           )}

@@ -138,17 +138,27 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     'gemini-flash-lite-latest',
   ]));
 
-  let systemPrompt = options.systemInstruction ||
-    'You are Manus, an elite AI workspace agent. Provide direct, authoritative, structured, and high-quality responses. When reasoning through complex challenges, write your thoughts inside <think> and </think> tags before your final response. If asked factual questions, answer directly and accurately. Do not generate fake business reports or irrelevant charts unless specifically asked for data visualization, financial reports, or charts.';
+  const latestUserText = ([...options.messages].reverse()
+    .find(m => m.role === 'user')?.content || '')
+    .replace(/\[IMAGE_DATA_URL:[^\]]+\]\s*/gi, '')
+    .trim();
+  const isComplexReasoningPrompt = Boolean(
+    options.thinkHarder ||
+    options.mode === 'work' ||
+    latestUserText.length > 140 ||
+    /\b(analyze|compare|architecture|debug|explain why|step[\s-]by[\s-]step|algorithm|implement|design|math|calculate|prove|strategy)\b/i.test(latestUserText)
+  );
+
+  let systemPrompt = options.systemInstruction || (
+    isComplexReasoningPrompt
+      ? 'You are Manus, an elite AI workspace agent. Provide direct, authoritative, structured, and high-quality responses. When reasoning through complex challenges, write your concise thoughts inside <think> and </think> tags before your final response. If asked factual questions, answer directly and accurately. Do not generate fake business reports or irrelevant charts unless specifically asked for data visualization, financial reports, or charts.'
+      : 'You are Manus, an elite AI workspace agent. Provide direct, authoritative, structured, and high-quality responses. Answer factual and conversational questions directly and concisely without <think> tags. Do not generate fake business reports or irrelevant charts unless specifically asked for data visualization, financial reports, or charts.'
+  );
 
   if (options.thinkHarder) {
     systemPrompt += '\n\n[EXTENDED REASONING MODE ACTIVE]\nEnclose your step-by-step logical deconstruction and trade-off evaluation inside <think> and </think> tags at the beginning of your response.';
   }
 
-  const latestUserText = ([...options.messages].reverse()
-    .find(m => m.role === 'user')?.content || '')
-    .replace(/\[IMAGE_DATA_URL:[^\]]+\]\s*/gi, '')
-    .trim();
   const useGoogleSearch = needsLiveSearch(latestUserText);
 
   if (useGoogleSearch) {
@@ -181,6 +191,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
   modelLoop: for (const model of candidateModels) {
     // Attempt with Google Search grounding if applicable, and if that fails, retry without tools
     const toolConfigs = useGoogleSearch ? [{ tools: [{ googleSearch: {} }] }, {}] : [{}];
+    const supportsThinkingBudget = model.includes('gemini-2.5') || model.includes('gemini-3');
 
     for (const toolConfig of toolConfigs) {
       try {
@@ -189,12 +200,16 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
           contents,
           config: {
             systemInstruction: systemPrompt,
+            ...(supportsThinkingBudget && !options.thinkHarder
+              ? { thinkingConfig: { thinkingBudget: isComplexReasoningPrompt ? 512 : 0 } }
+              : {}),
             ...toolConfig,
           },
         });
 
         let hasYielded = false;
         const sources = new Map<string, string>();
+        const searchQueries = new Set<string>();
 
         for await (const chunk of responseStream) {
           const text = chunk.text;
@@ -203,7 +218,15 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
             yield text;
           }
 
-          const groundingChunks = chunk?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+          const groundingMetadata = chunk?.candidates?.[0]?.groundingMetadata;
+          const webSearchQueries = groundingMetadata?.webSearchQueries || [];
+          for (const q of webSearchQueries) {
+            if (typeof q === 'string' && q.trim()) {
+              searchQueries.add(q.trim());
+            }
+          }
+
+          const groundingChunks = groundingMetadata?.groundingChunks || [];
           for (const groundingChunk of groundingChunks) {
             const web = groundingChunk?.web;
             if (typeof web?.uri === 'string' && /^https?:\/\//i.test(web.uri)) {
@@ -212,11 +235,22 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
           }
         }
 
-        if (useGoogleSearch && sources.size > 0) {
-          yield '\n\n**Sources**\n' + Array.from(sources.entries())
-            .slice(0, 8)
-            .map(([url, title]) => `- [${title.replace(/[\[\]]/g, '')}](${url})`)
-            .join('\n');
+        if (useGoogleSearch && (sources.size > 0 || searchQueries.size > 0)) {
+          if (searchQueries.size === 0 && latestUserText) {
+            searchQueries.add(latestUserText);
+          }
+          if (searchQueries.size > 0) {
+            yield '\n\n**Search Queries**\n' + Array.from(searchQueries)
+              .slice(0, 6)
+              .map(q => `- ${q.replace(/\r?\n/g, ' ').trim()}`)
+              .join('\n');
+          }
+          if (sources.size > 0) {
+            yield '\n\n**Sources**\n' + Array.from(sources.entries())
+              .slice(0, 8)
+              .map(([url, title]) => `- [${title.replace(/[\[\]]/g, '')}](${url})`)
+              .join('\n');
+          }
         }
 
         if (hasYielded) {

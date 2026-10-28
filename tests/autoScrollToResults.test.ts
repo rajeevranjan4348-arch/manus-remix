@@ -88,6 +88,7 @@ if (typeof globalThis.document === 'undefined') {
 }
 
 import { centerElementInContainer, findSearchContentElement, evaluateAutoScrollState } from '@/components/agent/ChatView';
+import { parseSourcesFromMarkdown, resolveMessageSourcesAndQueries } from '@/components/agent/SourceCitations';
 import { deriveContextualThinkingStages } from '@/components/agent/WorkModeThinkingAnimation';
 import { getSettings, saveSettings, DEFAULT_SETTINGS, resetSettings } from '@/lib/settingsStore';
 
@@ -420,6 +421,44 @@ describe('Auto-scroll to Results Feature', () => {
       expect(stages[1].status).toBe('running');
       expect(stages[2].label).toContain('Multi-angle chain-of-thought');
       expect(stages[3].status).toBe('pending');
+    });
+  });
+
+  describe('Show Sources Toggle & Search Query/URL Extraction', () => {
+    it('extracts both **Search Queries** and **Sources** blocks from grounded markdown', () => {
+      const markdown = `Here is the latest update on NVIDIA Blackwell architecture.\n\n**Search Queries**\n- NVIDIA Blackwell architecture specs\n- NVIDIA GB200 release 2026\n\n**Sources**\n- [NVIDIA Official Blackwell Architecture](https://www.nvidia.com/en-us/data-center/technologies/blackwell-architecture/)\n- [Reuters Technology Report](https://www.reuters.com/technology/nvidia-blackwell/)`;
+
+      const parsed = parseSourcesFromMarkdown(markdown);
+      expect(parsed.cleanedContent).toBe('Here is the latest update on NVIDIA Blackwell architecture.');
+      expect(parsed.searchQueries).toEqual([
+        'NVIDIA Blackwell architecture specs',
+        'NVIDIA GB200 release 2026',
+      ]);
+      expect(parsed.sources).toHaveLength(2);
+      expect(parsed.sources[0].domain).toBe('nvidia.com');
+      expect(parsed.sources[0].url).toBe('https://www.nvidia.com/en-us/data-center/technologies/blackwell-architecture/');
+      expect(parsed.sources[1].domain).toBe('reuters.com');
+    });
+
+    it('merges step search traces and synthesizes fallback queries and URLs when needed', () => {
+      const parsed = parseSourcesFromMarkdown('NVIDIA designs GPUs and AI accelerators.');
+      const resolved = resolveMessageSourcesAndQueries({
+        parsed,
+        userPrompt: 'Tell me about Nvidia GPUs',
+        assistantContent: parsed.cleanedContent,
+        steps: [
+          {
+            label: 'Searching Web',
+            trace: [
+              'Searching for: Nvidia GPU architecture overview',
+              'Fetching: https://developer.nvidia.com/cuda-zone',
+            ],
+          },
+        ],
+      });
+
+      expect(resolved.searchQueries).toContain('Nvidia GPU architecture overview');
+      expect(resolved.sources.some(s => s.url === 'https://developer.nvidia.com/cuda-zone')).toBe(true);
     });
   });
 });

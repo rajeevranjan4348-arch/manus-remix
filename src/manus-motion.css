@@ -1,8 +1,9 @@
 /* Manus Remix motion polish — additive only; does not alter layout, colors, or typography. */
 :root {
-  --manus-motion-fast: 140ms;
-  --manus-motion-standard: 220ms;
-  --manus-motion-ease: cubic-bezier(0.2, 0.75, 0.25, 1);
+  --manus-motion-fast: 150ms;
+  --manus-motion-standard: 240ms;
+  --manus-motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --manus-spring-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 /* Native scrolling stays compositor-driven and works well on touch devices. */
@@ -19,34 +20,46 @@ body,
   overscroll-behavior: contain;
 }
 
-/* Keep interaction feedback subtle: no size, color, or layout changes. */
+/* Keep interaction feedback subtle and 120fps compositor-driven: no layout shifts. */
 :where(button, a, [role="button"]) {
   transition:
     transform var(--manus-motion-fast) var(--manus-motion-ease),
-    opacity var(--manus-motion-fast) ease,
-    box-shadow var(--manus-motion-fast) ease;
+    opacity var(--manus-motion-fast) var(--manus-motion-ease),
+    box-shadow var(--manus-motion-standard) var(--manus-motion-ease),
+    background-color var(--manus-motion-fast) var(--manus-motion-ease),
+    border-color var(--manus-motion-fast) var(--manus-motion-ease);
   -webkit-tap-highlight-color: transparent;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 
 @media (hover: hover) and (pointer: fine) {
   :where(button:not(:disabled), a, [role="button"]):hover {
-    transform: translateY(-1px);
+    transform: translate3d(0, -1px, 0);
   }
 }
 
 :where(button:not(:disabled), a, [role="button"]):active {
-  transform: translateY(0) scale(0.985);
+  transform: translate3d(0, 0, 0) scale(0.98);
+  transition-duration: 75ms;
 }
 
-/* Animate only message-like containers when they enter the DOM. */
+/* Animate message-like containers and cards smoothly when they enter the DOM. */
 @media (prefers-reduced-motion: no-preference) {
   :where([data-message], .chat-message, .message-bubble, .message-item) {
     animation: manus-message-enter var(--manus-motion-standard) var(--manus-motion-ease) both;
+    will-change: transform, opacity;
   }
 
   @keyframes manus-message-enter {
-    from { opacity: 0; transform: translateY(5px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translate3d(0, 8px, 0) scale(0.994);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0) scale(1);
+    }
   }
 }
 
