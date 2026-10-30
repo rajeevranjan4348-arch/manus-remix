@@ -206,8 +206,62 @@ export async function createConversation(data: {
   return conversation;
 }
 
+/**
+ * ULTRA-LITE ENGINE: bounded in-memory caches (LRU with fixed capacity).
+ * Prevents repeated IndexedDB reads for the same conversation/messages while
+ * guaranteeing a hard ceiling on retained objects — nothing grows unbounded on
+ * 2GB-class devices. Entries are invalidated by every write path below.
+ */
+import { getLimits } from '@/lib/perfProfile';
+
+class BoundedCache<V> {
+  private map = new Map<string, V>();
+  constructor(private getSize: () => number) {}
+  get(key: string): V | undefined {
+    const v = this.map.get(key);
+    if (v !== undefined) {
+      // refresh recency
+      this.map.delete(key);
+      this.map.set(key, v);
+    }
+    return v;
+  }
+  set(key: string, value: V) {
+    if (this.map.has(key)) this.map.delete(key);
+    this.map.set(key, value);
+    const cap = Math.max(1, this.getSize());
+    while (this.map.size > cap) {
+      const oldest = this.map.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.map.delete(oldest);
+    }
+  }
+  delete(key: string) {
+    this.map.delete(key);
+  }
+  clear() {
+    this.map.clear();
+  }
+}
+
+const conversationCache = new BoundedCache<StoredConversation>(() => getLimits().conversationCacheSize);
+const messagesCache = new BoundedCache<StoredMessage[]>(() => getLimits().conversationCacheSize);
+
+export function invalidateChatCaches(conversationId?: string): void {
+  if (conversationId) {
+    conversationCache.delete(conversationId);
+    messagesCache.delete(conversationId);
+  } else {
+    conversationCache.clear();
+    messagesCache.clear();
+  }
+}
+
 export async function getConversation(id: string): Promise<StoredConversation | null> {
   if (!id) return null;
+
+  const cached = conversationCache.get(id);
+  if (cached) return cached;
 
   try {
     const db = await openDatabase();
@@ -217,12 +271,16 @@ export async function getConversation(id: string): Promise<StoredConversation | 
       req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => reject(req.error);
     });
-    if (result) return result;
+    if (result) {
+      conversationCache.set(id, result);
+      return result;
+    }
   } catch (err) {
     console.warn('[ChatDB] IndexedDB get error:', err);
   }
 
   const fallback = getFallbackConversations().find(c => c.id === id);
+  if (fallback) conversationCache.set(id, fallback);
   return fallback || null;
 }
 
@@ -253,6 +311,9 @@ export async function updateConversation(id: string, updates: Partial<StoredConv
 
   const fallbackList = getFallbackConversations().map(c => c.id === id ? updated : c);
   saveFallbackConversations(fallbackList);
+
+  // Keep the bounded cache coherent with the freshest value
+  conversationCache.set(id, updated);
 
   notifyDbUpdated(id);
   return updated;
@@ -414,6 +475,9 @@ export async function saveMessage(data: {
   fallbackList.push(message);
   saveFallbackMessages(fallbackList);
 
+  // Invalidate the bounded read cache for this conversation (new message added)
+  messagesCache.delete(data.conversationId);
+
   // Automatically update conversation updatedAt & set title from first user message if placeholder
   const conv = await getConversation(data.conversationId);
   if (conv) {
@@ -432,6 +496,12 @@ export async function saveMessage(data: {
 
 export async function getMessages(conversationId: string): Promise<StoredMessage[]> {
   if (!conversationId) return [];
+
+  // ULTRA-LITE ENGINE: bounded LRU read cache — avoids repeated IndexedDB
+  // scans of the same conversation (e.g. saveMessage dedupe lookups during a
+  // single streaming turn hit this path multiple times).
+  const cached = messagesCache.get(conversationId);
+  if (cached) return cached;
 
   let list: StoredMessage[] = [];
 
@@ -477,6 +547,7 @@ export async function getMessages(conversationId: string): Promise<StoredMessage
     deduped.push(msg);
   }
 
+  messagesCache.set(conversationId, deduped);
   return deduped;
 }
 
