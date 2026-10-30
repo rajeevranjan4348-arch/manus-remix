@@ -60,13 +60,13 @@ const ICON_MAP: Record<string, any> = {
 };
 
 const COLOR_MAP: Record<string, { bg: string; text: string; badgeBg: string }> = {
-  blue: { bg: 'bg-black', text: 'text-black dark:text-white', badgeBg: 'bg-black/10 dark:bg-white/10' },
-  indigo: { bg: 'bg-indigo-500', text: 'text-indigo-500', badgeBg: 'bg-indigo-500/10 dark:bg-indigo-500/20' },
-  purple: { bg: 'bg-purple-500', text: 'text-purple-500', badgeBg: 'bg-purple-500/10 dark:bg-purple-500/20' },
-  emerald: { bg: 'bg-emerald-500', text: 'text-emerald-500', badgeBg: 'bg-emerald-500/10 dark:bg-emerald-500/20' },
-  amber: { bg: 'bg-amber-500', text: 'text-amber-500', badgeBg: 'bg-amber-500/10 dark:bg-amber-500/20' },
-  rose: { bg: 'bg-rose-500', text: 'text-rose-500', badgeBg: 'bg-rose-500/10 dark:bg-rose-500/20' },
-  cyan: { bg: 'bg-cyan-500', text: 'text-cyan-500', badgeBg: 'bg-cyan-500/10 dark:bg-cyan-500/20' },
+  blue: { bg: 'bg-[#000000]', text: 'text-[#000000] dark:text-[#FFFFFF]', badgeBg: 'bg-[#F2F2F2] dark:bg-[#111111]' },
+  indigo: { bg: 'bg-[#111111]', text: 'text-[#111111] dark:text-[#FFFFFF]', badgeBg: 'bg-[#F2F2F2] dark:bg-[#111111]' },
+  purple: { bg: 'bg-[#333333]', text: 'text-[#333333] dark:text-[#FFFFFF]', badgeBg: 'bg-[#F2F2F2] dark:bg-[#111111]' },
+  emerald: { bg: 'bg-[#000000]', text: 'text-[#000000] dark:text-[#FFFFFF]', badgeBg: 'bg-[#F2F2F2] dark:bg-[#111111]' },
+  amber: { bg: 'bg-[#333333]', text: 'text-[#333333] dark:text-[#FFFFFF]', badgeBg: 'bg-[#F2F2F2] dark:bg-[#111111]' },
+  rose: { bg: 'bg-[#111111]', text: 'text-[#111111] dark:text-[#FFFFFF]', badgeBg: 'bg-[#F2F2F2] dark:bg-[#111111]' },
+  cyan: { bg: 'bg-[#333333]', text: 'text-[#333333] dark:text-[#FFFFFF]', badgeBg: 'bg-[#F2F2F2] dark:bg-[#111111]' },
 };
 
 export function ProjectViewModal({ isOpen, onClose, project, onEdit, onNewTaskInProject }: ProjectViewModalProps) {
@@ -135,28 +135,28 @@ export function ProjectViewModal({ isOpen, onClose, project, onEdit, onNewTaskIn
   return (
     <div 
       onClick={onClose}
-      className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs animate-in fade-in"
+      className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-2.5 sm:p-4 backdrop-blur-xs animate-in fade-in"
     >
       <div 
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-2xl bg-white dark:bg-[#18191c] rounded-3xl border border-border shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-150"
+        className="w-full max-w-2xl bg-white dark:bg-[#18191c] rounded-2xl sm:rounded-3xl border border-border shadow-2xl overflow-hidden flex flex-col max-h-[calc(100dvh-1.25rem)] animate-in zoom-in-95 duration-150"
       >
         {/* Banner / Header */}
-        <div className="p-6 pb-5 border-b border-border/60 bg-manus-soft dark:bg-card/40 relative">
+        <div className="p-4 sm:p-6 pb-4 sm:pb-5 border-b border-border/60 bg-manus-soft dark:bg-card/40 relative shrink-0">
           <button 
             onClick={onClose}
-            className="absolute top-4 right-4 p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+            className="absolute top-3.5 right-3.5 sm:top-4 sm:right-4 p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
           >
             <X size={18} />
           </button>
 
-          <div className="flex items-start gap-4">
-            <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center text-white shadow-lg shrink-0", theme.bg)}>
-              <IconComponent size={28} />
+          <div className="flex items-start gap-3 sm:gap-4 min-w-0">
+            <div className={cn("w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center text-white shadow-lg shrink-0", theme.bg)}>
+              <IconComponent size={24} />
             </div>
 
-            <div className="space-y-1 flex-1 pr-8">
-              <div className="flex items-center gap-2">
+            <div className="space-y-1 flex-1 pr-8 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className={cn("text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider", theme.badgeBg, theme.text)}>
                   Project
                 </span>
@@ -166,12 +166,12 @@ export function ProjectViewModal({ isOpen, onClose, project, onEdit, onNewTaskIn
                 </span>
               </div>
 
-              <h2 className="text-xl font-bold text-foreground tracking-tight">
+              <h2 className="text-lg sm:text-xl font-bold text-foreground tracking-tight truncate">
                 {project.name}
               </h2>
 
               {project.description && (
-                <p className="text-xs text-muted-foreground leading-relaxed">
+                <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
                   {project.description}
                 </p>
               )}
@@ -179,13 +179,13 @@ export function ProjectViewModal({ isOpen, onClose, project, onEdit, onNewTaskIn
           </div>
 
           {/* Action Toolbar */}
-          <div className="flex items-center justify-between mt-5 pt-3 border-t border-border/40 gap-2">
+          <div className="flex items-center justify-between flex-wrap mt-4 sm:mt-5 pt-3 border-t border-border/40 gap-2">
             <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
               <MessageSquare size={14} className={theme.text} />
               <span>{tasks.length} Session(s)</span>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               {onNewTaskInProject && (
                 <button
                   onClick={() => {
@@ -210,7 +210,7 @@ export function ProjectViewModal({ isOpen, onClose, project, onEdit, onNewTaskIn
 
               <button
                 onClick={handleDelete}
-                className="p-1.5 rounded-xl text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors cursor-pointer"
+                className="p-1.5 rounded-xl text-foreground hover:bg-muted transition-colors cursor-pointer"
                 title="Delete Project"
               >
                 <Trash2 size={15} />
@@ -220,7 +220,7 @@ export function ProjectViewModal({ isOpen, onClose, project, onEdit, onNewTaskIn
         </div>
 
         {/* Content Body */}
-        <div className="p-6 flex-1 overflow-y-auto space-y-5 custom-scrollbar">
+        <div className="p-4 sm:p-6 flex-1 overflow-y-auto overflow-x-hidden space-y-5 custom-scrollbar min-h-0">
           {/* Custom Instructions Banner */}
           {project.customInstructions && (
             <div className="p-3.5 rounded-2xl bg-primary/5 border border-primary/20 space-y-1">

@@ -13,12 +13,21 @@ interface VoiceInputButtonProps {
   onTranscript: (text: string) => void;
   onInterimChange?: (interim: string) => void;
   onListeningStateChange?: (isListening: boolean) => void;
+  onAudioLevelChange?: (level: number) => void;
   onAutoSubmit?: (text: string) => void;
   onExecuteCommand?: (cmd: VoiceCommandResult) => void;
   onRequestApproval?: (cmd: VoiceCommandResult) => void;
   className?: string;
   size?: number;
   autoSubmitOnSpeech?: boolean;
+}
+
+/**
+ * Checks whether the browser supports the Web Speech API (SpeechRecognition / webkitSpeechRecognition).
+ */
+export function isSpeechRecognitionSupported(win: any = typeof window !== 'undefined' ? window : undefined): boolean {
+  if (!win) return false;
+  return Boolean(win.SpeechRecognition || win.webkitSpeechRecognition);
 }
 
 /**
@@ -89,6 +98,7 @@ export function VoiceInputButton({
   onTranscript,
   onInterimChange,
   onListeningStateChange,
+  onAudioLevelChange,
   onAutoSubmit,
   onExecuteCommand,
   onRequestApproval,
@@ -100,7 +110,11 @@ export function VoiceInputButton({
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [audioLevel, setAudioLevel] = useState<number>(0);
   const recognitionRef = useRef<any>(null);
+  const isListeningRef = useRef<boolean>(false);
   const isExplicitStopRef = useRef<boolean>(false);
+  const isRestartingRef = useRef<boolean>(false);
+  const sessionCommittedTranscriptRef = useRef<string>('');
+  const currentTurnFinalRef = useRef<string>('');
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -131,6 +145,7 @@ export function VoiceInputButton({
       audioContextRef.current = null;
     }
     setAudioLevel(0);
+    onAudioLevelChange?.(0);
   };
 
   const startAudioMeter = async () => {
@@ -158,6 +173,7 @@ export function VoiceInputButton({
         const avg = sum / dataArray.length;
         const normalized = Math.min(1.0, Math.max(0, (avg / 128) * 1.5));
         setAudioLevel(normalized);
+        onAudioLevelChange?.(normalized);
         animationFrameRef.current = requestAnimationFrame(checkVolume);
       };
       checkVolume();
@@ -168,6 +184,10 @@ export function VoiceInputButton({
 
   const stopListening = () => {
     isExplicitStopRef.current = true;
+    isListeningRef.current = false;
+    isRestartingRef.current = false;
+    sessionCommittedTranscriptRef.current = '';
+    currentTurnFinalRef.current = '';
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -181,24 +201,35 @@ export function VoiceInputButton({
     window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
   };
 
+  const toggleListeningRef = useRef<() => void>(() => {});
+
   useEffect(() => {
     const handleStopEvent = () => {
-      stopListening();
+      if (isListeningRef.current) {
+        stopListening();
+      }
+    };
+    const handleToggleEvent = () => {
+      toggleListeningRef.current();
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       // Alt+V shortcut to toggle voice typing
       if (e.altKey && e.key.toLowerCase() === 'v') {
         e.preventDefault();
-        toggleListening();
+        toggleListeningRef.current();
       }
     };
 
     window.addEventListener('manus_stop_voice_input', handleStopEvent);
+    window.addEventListener('manus_toggle_voice_input', handleToggleEvent);
     window.addEventListener('keydown', handleKeyDown);
 
     return () => {
       window.removeEventListener('manus_stop_voice_input', handleStopEvent);
+      window.removeEventListener('manus_toggle_voice_input', handleToggleEvent);
       window.removeEventListener('keydown', handleKeyDown);
+      isExplicitStopRef.current = true;
+      isListeningRef.current = false;
       stopAudioMeter();
       if (recognitionRef.current) {
         try {
@@ -206,12 +237,12 @@ export function VoiceInputButton({
         } catch {}
       }
     };
-  }, [isListening]);
+  }, []);
 
   const toggleListening = async () => {
     if (typeof window === 'undefined') return;
 
-    if (isListening) {
+    if (isListeningRef.current || isListening) {
       stopListening();
       return;
     }
@@ -252,6 +283,11 @@ export function VoiceInputButton({
 
     try {
       isExplicitStopRef.current = false;
+      isRestartingRef.current = false;
+      sessionCommittedTranscriptRef.current = '';
+      currentTurnFinalRef.current = '';
+      lastTranscriptRef.current = '';
+
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
       recognition.interimResults = true;
@@ -266,12 +302,17 @@ export function VoiceInputButton({
       recognition.lang = actualLang;
 
       recognition.onstart = () => {
+        const wasRestarting = isRestartingRef.current;
+        isRestartingRef.current = false;
+        isListeningRef.current = true;
         setIsListening(true);
-        onListeningStateChange?.(true);
-        emitRobotEvent('VOICE_LISTENING_STARTED');
-        window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'listening' }));
-        startAudioMeter();
-        toast.info('🎙️ Listening... Speak your prompt', { duration: 2500 });
+        if (!wasRestarting) {
+          onListeningStateChange?.(true);
+          emitRobotEvent('VOICE_LISTENING_STARTED');
+          window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'listening' }));
+          startAudioMeter();
+          toast.info('🎙️ Listening... Speak your prompt', { duration: 2500 });
+        }
       };
 
       recognition.onresult = async (event: any) => {
@@ -279,21 +320,38 @@ export function VoiceInputButton({
 
         if (!fullTranscript && !interimTranscript) return;
 
+        currentTurnFinalRef.current = finalTranscript;
+        const combinedFullTranscript = [
+          sessionCommittedTranscriptRef.current,
+          fullTranscript,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .trim();
+
+        const combinedFinalTranscript = [
+          sessionCommittedTranscriptRef.current,
+          finalTranscript,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .trim();
+
         // Provide real-time live transcription to input area (auto-filling)
-        if (fullTranscript) {
-          onTranscript(fullTranscript);
+        if (combinedFullTranscript) {
+          onTranscript(combinedFullTranscript);
         }
         if (onInterimChange) {
-          onInterimChange(interimTranscript || fullTranscript);
+          onInterimChange(interimTranscript || combinedFullTranscript);
         }
 
         if (finalTranscript.trim()) {
-          const transcript = finalTranscript.trim();
+          const transcript = combinedFinalTranscript || finalTranscript.trim();
           const currentSettings = getSettings();
           const policy = currentSettings.toolApprovalPolicy || 'ask_sensitive';
 
           // Check for voice/device commands
-          const cmd = matchVoiceCommand(transcript);
+          const cmd = matchVoiceCommand(finalTranscript.trim());
           if (cmd && cmd.matched) {
             const needsApproval =
               policy === 'ask_all' ||
@@ -347,6 +405,7 @@ export function VoiceInputButton({
                 toast.info('Auto-submitted prompt after 7s of silence');
                 if (recognitionRef.current) {
                   isExplicitStopRef.current = true;
+                  isListeningRef.current = false;
                   try {
                     recognitionRef.current.stop();
                   } catch {}
@@ -378,8 +437,14 @@ export function VoiceInputButton({
           emitRobotEvent('TASK_FAILED');
           window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'error' }));
         } else {
+          if (event.error === 'no-speech' && !isExplicitStopRef.current && isListeningRef.current) {
+            // Keep session alive through brief silence
+            return;
+          }
           window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
         }
+        isExplicitStopRef.current = true;
+        isListeningRef.current = false;
         stopAudioMeter();
         setIsListening(false);
         onListeningStateChange?.(false);
@@ -388,13 +453,25 @@ export function VoiceInputButton({
 
       recognition.onend = () => {
         // If the user didn't explicitly stop listening, auto-restart to prevent silent pause cutoff
-        if (!isExplicitStopRef.current && isListening) {
+        if (!isExplicitStopRef.current && isListeningRef.current) {
+          if (currentTurnFinalRef.current.trim()) {
+            sessionCommittedTranscriptRef.current = [
+              sessionCommittedTranscriptRef.current,
+              currentTurnFinalRef.current.trim(),
+            ]
+              .filter(Boolean)
+              .join(' ')
+              .trim();
+            currentTurnFinalRef.current = '';
+          }
           try {
+            isRestartingRef.current = true;
             recognition.start();
             return;
           } catch {}
         }
 
+        isListeningRef.current = false;
         stopAudioMeter();
         setIsListening(false);
         onListeningStateChange?.(false);
@@ -412,6 +489,7 @@ export function VoiceInputButton({
       } else {
         toast.error('Could not start microphone');
       }
+      isListeningRef.current = false;
       stopAudioMeter();
       setIsListening(false);
       onListeningStateChange?.(false);
@@ -420,24 +498,28 @@ export function VoiceInputButton({
     }
   };
 
+  toggleListeningRef.current = toggleListening;
+
   return (
     <>
       <button
         type="button"
+        data-testid="voice-input-button"
+        data-listening={isListening ? 'true' : 'false'}
         onClick={toggleListening}
         aria-label={isListening ? 'Stop voice recording' : 'Voice-to-text input (Speak your prompt)'}
         title={isListening ? 'Listening... click to stop' : 'Voice-to-text input: Speak your prompt instead of typing (Alt+V)'}
         className={cn(
           "relative flex items-center justify-center rounded-full transition-all cursor-pointer shrink-0 active:scale-95",
           isListening
-            ? "bg-rose-500 text-white shadow-md shadow-rose-500/30 ring-2 ring-rose-400"
-            : "hover:bg-[var(--fill-tsp-gray-main)] dark:hover:bg-accent text-[var(--icon-primary)] dark:text-foreground",
+            ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] shadow-md ring-2 ring-[#333333] dark:ring-[#E0E0E0]"
+            : "hover:bg-[#F2F2F2] dark:hover:bg-[#171717] text-[#000000] dark:text-[#FFFFFF]",
           className
         )}
       >
         {isListening && (
           <span 
-            className="absolute inset-0 rounded-full bg-rose-400/30 animate-ping pointer-events-none"
+            className="absolute inset-0 rounded-full bg-[#000000]/20 dark:bg-[#FFFFFF]/20 animate-ping pointer-events-none"
             style={{
               transform: `scale(${1 + audioLevel * 0.5})`,
               opacity: 0.3 + audioLevel * 0.7

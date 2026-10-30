@@ -328,5 +328,7 @@ export function speakCleanHumanVoice(text: string, options: SpeakOptions = {}): 
 export function stopCleanSpeech(): void {
   if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
     window.speechSynthesis.cancel();
+    emitRobotEvent('VOICE_PLAYBACK_ENDED');
+    window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
   }
 }

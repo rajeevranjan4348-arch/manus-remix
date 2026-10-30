@@ -1,4 +1,19 @@
 /** @type {import('tailwindcss').Config} */
+const monoScale = {
+  50: "#FAFAFA",
+  100: "#F2F2F2",
+  200: "#E0E0E0",
+  300: "#CCCCCC",
+  400: "#AAAAAA",
+  500: "#777777",
+  600: "#333333",
+  700: "#171717",
+  800: "#111111",
+  900: "#000000",
+  950: "#000000",
+  DEFAULT: "#000000",
+};
+
 module.exports = {
   darkMode: ["class"],
   content: [
@@ -8,6 +23,30 @@ module.exports = {
   theme: {
     extend: {
       colors: {
+        black: "#000000",
+        white: "#FFFFFF",
+        slate: monoScale,
+        gray: monoScale,
+        zinc: monoScale,
+        neutral: monoScale,
+        stone: monoScale,
+        red: monoScale,
+        orange: monoScale,
+        amber: monoScale,
+        yellow: monoScale,
+        lime: monoScale,
+        green: monoScale,
+        emerald: monoScale,
+        teal: monoScale,
+        cyan: monoScale,
+        sky: monoScale,
+        blue: monoScale,
+        indigo: monoScale,
+        violet: monoScale,
+        purple: monoScale,
+        fuchsia: monoScale,
+        pink: monoScale,
+        rose: monoScale,
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
@@ -59,9 +98,9 @@ module.exports = {
           "5": "hsl(var(--chart-5))",
         },
         manus: {
-          cream: "#FDFCFB",
-          soft: "#F8F7F5",
-          border: "#EBE9E4",
+          cream: "#FFFFFF",
+          soft: "#FAFAFA",
+          border: "#E0E0E0",
         },
       },
       borderRadius: {

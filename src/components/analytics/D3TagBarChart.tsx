@@ -29,12 +29,32 @@ export function D3TagBarChart({
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const prevCountsRef = useRef<Record<string, { count: number; percentage: number }>>({});
+  const [measuredWidth, setMeasuredWidth] = React.useState<number>(0);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const nextWidth = entries[0]?.contentRect?.width;
+      if (nextWidth && nextWidth > 0) {
+        setMeasuredWidth(Math.floor(nextWidth));
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!svgRef.current || !containerRef.current || !summaries) return;
 
-    const containerWidth = containerRef.current.clientWidth || 300;
-    const margin = { top: 8, right: 78, bottom: 8, left: 92 };
+    const containerWidth = measuredWidth || containerRef.current.clientWidth || 260;
+    const isCompact = containerWidth < 320;
+    const margin = {
+      top: 8,
+      right: isCompact ? 62 : 76,
+      bottom: 8,
+      left: isCompact ? 76 : 90,
+    };
 
     // Filter by visible tags if a filter is active, and sort descending by count
     // so D3 transitions smoothly reorder bars when rankings shift across time ranges
@@ -56,7 +76,7 @@ export function D3TagBarChart({
       .attr('width', containerWidth)
       .attr('height', dynamicHeight)
       .attr('viewBox', `0 0 ${containerWidth} ${dynamicHeight}`)
-      .attr('style', 'max-width: 100%; height: auto; overflow: visible;');
+      .attr('style', 'max-width: 100%; height: auto; overflow: hidden;');
 
     // Ensure persistent root group so updates animate in-place instead of recreating DOM
     let rootG = svg.select<SVGGElement>('g.bars-root');
@@ -284,11 +304,11 @@ export function D3TagBarChart({
           this.textContent = `${Math.round(iCount(progress))} (${Math.round(iPct(progress))}%)`;
         };
       });
-  }, [summaries, selectedTags, spotlightTag, height, onSelectTag]);
+  }, [summaries, selectedTags, spotlightTag, height, onSelectTag, measuredWidth]);
 
   return (
-    <div ref={containerRef} className="w-full select-none overflow-hidden" data-testid="d3-tag-bar-chart">
-      <svg ref={svgRef} className="w-full text-foreground overflow-visible" />
+    <div ref={containerRef} className="w-full min-w-0 select-none overflow-hidden" data-testid="d3-tag-bar-chart">
+      <svg ref={svgRef} className="w-full max-w-full text-foreground overflow-hidden" />
     </div>
   );
 }

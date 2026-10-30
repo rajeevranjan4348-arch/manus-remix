@@ -152,29 +152,29 @@ export function TagAnalyticsModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-4xl w-[95vw] p-0 flex flex-col max-h-[90vh] bg-background border-border shadow-2xl overflow-hidden rounded-3xl z-50">
+      <DialogContent className="max-w-4xl w-[calc(100vw-1rem)] sm:w-[95vw] p-0 flex flex-col max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] bg-background border-border shadow-2xl overflow-hidden rounded-2xl sm:rounded-3xl z-50">
         {/* Modal Header */}
-        <div className="p-5 pb-4 border-b border-border bg-manus-soft dark:bg-card/40 flex flex-col gap-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shadow-xs">
-                <BarChart3 size={22} />
+        <div className="p-3.5 sm:p-5 pb-3 sm:pb-4 border-b border-border bg-manus-soft dark:bg-card/40 flex flex-col gap-2.5 sm:gap-3 shrink-0 min-w-0">
+          <div className="flex items-start sm:items-center justify-between flex-wrap gap-2.5 pr-7 sm:pr-8 min-w-0">
+            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shadow-xs shrink-0">
+                <BarChart3 size={20} />
               </div>
-              <div>
-                <DialogTitle className="text-xl font-extrabold text-foreground tracking-tight flex items-center gap-2">
-                  <span>Productivity & Tag Analytics</span>
-                  <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+              <div className="min-w-0">
+                <DialogTitle className="text-base sm:text-xl font-extrabold text-foreground tracking-tight flex items-center gap-2 flex-wrap">
+                  <span className="truncate">Productivity & Tag Analytics</span>
+                  <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 shrink-0">
                     D3.js
                   </span>
                 </DialogTitle>
-                <DialogDescription className="text-xs text-muted-foreground mt-0.5">
+                <DialogDescription className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
                   Visualize category distribution and activity trends over time
                 </DialogDescription>
               </div>
             </div>
 
             {/* Time Range Selector */}
-            <div className="flex items-center gap-1 bg-white dark:bg-card border border-border p-1 rounded-2xl shadow-2xs">
+            <div className="flex items-center gap-1 bg-white dark:bg-card border border-border p-1 rounded-2xl shadow-2xs overflow-x-auto max-w-full no-scrollbar">
               {[
                 { id: '7d', label: '7 Days' },
                 { id: '30d', label: '30 Days' },
@@ -187,7 +187,7 @@ export function TagAnalyticsModal({
                   type="button"
                   onClick={() => setTimeRange(r.id as TimeRangeKey)}
                   className={cn(
-                    'px-3 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer',
+                    'px-2.5 sm:px-3 py-1 rounded-xl text-[11px] sm:text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap',
                     timeRange === r.id
                       ? 'bg-primary text-primary-foreground shadow-2xs font-bold'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
@@ -200,9 +200,9 @@ export function TagAnalyticsModal({
           </div>
 
           {/* Action Bar (Chart Mode + Export) */}
-          <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/40 flex-wrap">
+          <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-border/40 flex-wrap min-w-0">
             {/* Chart Mode Toggle */}
-            <div className="flex items-center gap-1 text-xs flex-wrap">
+            <div className="flex items-center gap-1 text-xs flex-wrap min-w-0">
               <span className="text-[11px] font-semibold text-muted-foreground mr-1 hidden sm:inline">
                 View:
               </span>
@@ -219,9 +219,9 @@ export function TagAnalyticsModal({
                     type="button"
                     onClick={() => setChartMode(m.id as any)}
                     className={cn(
-                      'flex items-center gap-1.5 px-2.5 py-1 rounded-xl font-medium transition-all cursor-pointer border text-[11px]',
+                      'flex items-center gap-1.5 px-2.5 py-1 rounded-xl font-medium transition-all cursor-pointer border text-[11px] shrink-0',
                       chartMode === m.id
-                        ? 'bg-primary/10 border-primary/40 text-primary font-bold shadow-2xs'
+                        ? 'bg-primary text-primary-foreground border-primary font-bold shadow-2xs'
                         : 'bg-white dark:bg-card border-border/60 text-muted-foreground hover:text-foreground'
                     )}
                   >
@@ -233,29 +233,29 @@ export function TagAnalyticsModal({
             </div>
 
             {/* Export Actions */}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <button
                 type="button"
                 onClick={handleExportCSV}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white dark:bg-card border border-border text-foreground hover:border-primary/40 text-xs font-semibold transition-all shadow-2xs cursor-pointer"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white dark:bg-card border border-border text-foreground hover:border-primary/40 text-xs font-semibold transition-all shadow-2xs cursor-pointer shrink-0"
                 title="Export analytics dataset to CSV"
               >
-                <FileSpreadsheet size={13} className="text-emerald-500" />
+                <FileSpreadsheet size={13} className="text-foreground" />
                 <span>Export CSV</span>
               </button>
               <button
                 type="button"
                 onClick={handleExportJSON}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white dark:bg-card border border-border text-foreground hover:border-primary/40 text-xs font-semibold transition-all shadow-2xs cursor-pointer"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white dark:bg-card border border-border text-foreground hover:border-primary/40 text-xs font-semibold transition-all shadow-2xs cursor-pointer shrink-0"
                 title="Export analytics payload to JSON"
               >
-                <FileCode size={13} className="text-blue-500" />
+                <FileCode size={13} className="text-foreground" />
                 <span>JSON</span>
               </button>
               <button
                 type="button"
                 onClick={loadData}
-                className="p-1.5 rounded-xl border border-border bg-white dark:bg-card text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                className="p-1.5 rounded-xl border border-border bg-white dark:bg-card text-muted-foreground hover:text-foreground cursor-pointer transition-colors shrink-0"
                 title="Refresh analytics data"
               >
                 <RefreshCw size={13} className={cn(isLoading && 'animate-spin')} />
@@ -265,7 +265,7 @@ export function TagAnalyticsModal({
         </div>
 
         {/* Modal Scrollable Body */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-3.5 sm:p-5 space-y-4 sm:space-y-5 custom-scrollbar min-h-0">
           {!data && isLoading ? (
             <div className="flex flex-col items-center justify-center h-64 space-y-3">
               <RefreshCw size={28} className="animate-spin text-primary" />
@@ -276,43 +276,43 @@ export function TagAnalyticsModal({
           ) : data ? (
             <>
               {/* Top KPI Cards Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 min-w-0">
                 {/* 1. Top Category */}
-                <div className="p-3.5 rounded-2xl border border-border bg-white dark:bg-card shadow-2xs space-y-1">
-                  <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium">
-                    <span>Most Productive</span>
-                    <Sparkles size={13} className="text-amber-500" />
+                <div className="p-3 sm:p-3.5 rounded-2xl border border-border bg-white dark:bg-card shadow-2xs space-y-1 min-w-0">
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium gap-1">
+                    <span className="truncate">Most Productive</span>
+                    <Sparkles size={13} className="text-foreground shrink-0" />
                   </div>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-lg font-black text-foreground truncate">
+                  <div className="flex items-baseline gap-1.5 min-w-0">
+                    <span className="text-base sm:text-lg font-black text-foreground truncate">
                       {topCategorySummary?.tag || data.topCategory}
                     </span>
-                    <span className="text-xs font-mono font-bold text-primary">
+                    <span className="text-xs font-mono font-bold text-primary shrink-0">
                       {topCategorySummary?.percentage || 0}%
                     </span>
                   </div>
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-[10px] text-muted-foreground truncate">
                     {topCategorySummary?.count || 0} tasks completed
                   </p>
                 </div>
 
                 {/* 2. Total Tasks */}
-                <div className="p-3.5 rounded-2xl border border-border bg-white dark:bg-card shadow-2xs space-y-1">
-                  <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium">
-                    <span>Total Tasks Logged</span>
-                    <Zap size={13} className="text-blue-500" />
+                <div className="p-3 sm:p-3.5 rounded-2xl border border-border bg-white dark:bg-card shadow-2xs space-y-1 min-w-0">
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium gap-1">
+                    <span className="truncate">Total Tasks Logged</span>
+                    <Zap size={13} className="text-foreground shrink-0" />
                   </div>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-lg font-black text-foreground font-mono">
+                  <div className="flex items-baseline gap-1.5 min-w-0">
+                    <span className="text-base sm:text-lg font-black text-foreground font-mono">
                       {visibleTotalTasks}
                     </span>
                     {topCategorySummary && topCategorySummary.trendPercent !== 0 && (
                       <span
                         className={cn(
-                          'text-[10px] font-bold font-mono px-1.5 py-0.2 rounded-full',
+                          'text-[10px] font-bold font-mono px-1.5 py-0.2 rounded-full border shrink-0',
                           topCategorySummary.trendPercent > 0
-                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                            : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                            ? 'bg-secondary text-foreground border-border'
+                            : 'bg-muted text-muted-foreground border-border'
                         )}
                       >
                         {topCategorySummary.trendPercent > 0 ? '+' : ''}
@@ -320,58 +320,58 @@ export function TagAnalyticsModal({
                       </span>
                     )}
                   </div>
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-[10px] text-muted-foreground truncate">
                     Across {data.daysInRange} days window
                   </p>
                 </div>
 
                 {/* 3. Daily Velocity */}
-                <div className="p-3.5 rounded-2xl border border-border bg-white dark:bg-card shadow-2xs space-y-1">
-                  <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium">
-                    <span>Daily Velocity</span>
-                    <Activity size={13} className="text-emerald-500" />
+                <div className="p-3 sm:p-3.5 rounded-2xl border border-border bg-white dark:bg-card shadow-2xs space-y-1 min-w-0">
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium gap-1">
+                    <span className="truncate">Daily Velocity</span>
+                    <Activity size={13} className="text-foreground shrink-0" />
                   </div>
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-lg font-black text-foreground font-mono">
+                  <div className="flex items-baseline gap-1 min-w-0">
+                    <span className="text-base sm:text-lg font-black text-foreground font-mono">
                       {overallAvgPerDay}
                     </span>
-                    <span className="text-xs text-muted-foreground font-medium">tasks/day</span>
+                    <span className="text-xs text-muted-foreground font-medium truncate">tasks/day</span>
                   </div>
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-[10px] text-muted-foreground truncate">
                     Average throughput rate
                   </p>
                 </div>
 
                 {/* 4. Active Categories */}
-                <div className="p-3.5 rounded-2xl border border-border bg-white dark:bg-card shadow-2xs space-y-1">
-                  <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium">
-                    <span>Visible Categories</span>
-                    <Layers size={13} className="text-purple-500" />
+                <div className="p-3 sm:p-3.5 rounded-2xl border border-border bg-white dark:bg-card shadow-2xs space-y-1 min-w-0">
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium gap-1">
+                    <span className="truncate">Visible Categories</span>
+                    <Layers size={13} className="text-foreground shrink-0" />
                   </div>
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-lg font-black text-foreground font-mono">
+                  <div className="flex items-baseline gap-1 min-w-0">
+                    <span className="text-base sm:text-lg font-black text-foreground font-mono">
                       {activeCategoryCount}
                     </span>
-                    <span className="text-xs text-muted-foreground font-medium">/ 7 tags</span>
+                    <span className="text-xs text-muted-foreground font-medium truncate">/ 7 tags</span>
                   </div>
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-[10px] text-muted-foreground truncate">
                     Active tag layers
                   </p>
                 </div>
               </div>
 
               {/* Tag Selection Filter Pills */}
-              <div className="p-3 rounded-2xl bg-muted/40 border border-border/60 space-y-2">
-                <div className="flex items-center justify-between text-xs font-semibold text-foreground px-0.5">
-                  <span className="flex items-center gap-1.5">
-                    <Filter size={13} className="text-primary" />
-                    <span>Filter & Toggle Tag Visibility (D3 Live Transitions)</span>
+              <div className="p-3 rounded-2xl bg-muted/40 border border-border/60 space-y-2 min-w-0">
+                <div className="flex items-center justify-between flex-wrap gap-1.5 text-xs font-semibold text-foreground px-0.5">
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <Filter size={13} className="text-primary shrink-0" />
+                    <span className="truncate">Filter & Toggle Tag Visibility (D3 Live Transitions)</span>
                   </span>
                   {selectedTags.length > 0 && (
                     <button
                       type="button"
                       onClick={() => setSelectedTags([])}
-                      className="text-[11px] text-primary hover:underline font-normal cursor-pointer"
+                      className="text-[11px] text-primary hover:underline font-normal cursor-pointer shrink-0"
                     >
                       Show all tags ({selectedTags.length} selected)
                     </button>
@@ -411,21 +411,21 @@ export function TagAnalyticsModal({
               </div>
 
               {/* Main Visualization Grid */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 min-w-0">
                 {/* D3 Timeline Chart (2 cols) */}
-                <div className="lg:col-span-2 p-4 rounded-3xl border border-border bg-white dark:bg-card shadow-2xs space-y-3 flex flex-col justify-between">
-                  <div className="flex items-center justify-between">
-                    <div>
+                <div className="lg:col-span-2 p-3.5 sm:p-4 rounded-2xl sm:rounded-3xl border border-border bg-white dark:bg-card shadow-2xs space-y-3 flex flex-col justify-between min-w-0 overflow-hidden">
+                  <div className="flex items-center justify-between flex-wrap gap-2 min-w-0">
+                    <div className="min-w-0">
                       <h3 className="text-sm font-bold text-foreground tracking-tight flex items-center gap-1.5">
-                        <TrendingUp size={16} className="text-primary" />
-                        <span>Category Distribution Over Time</span>
+                        <TrendingUp size={16} className="text-primary shrink-0" />
+                        <span className="truncate">Category Distribution Over Time</span>
                       </h3>
-                      <p className="text-[11px] text-muted-foreground">
+                      <p className="text-[11px] text-muted-foreground truncate">
                         D3 animated stacked bars & time-series breakdown
                       </p>
                     </div>
 
-                    <span className="text-[11px] font-mono text-muted-foreground">
+                    <span className="text-[11px] font-mono text-muted-foreground shrink-0">
                       {data.startDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} –{' '}
                       {data.endDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                     </span>
@@ -440,14 +440,14 @@ export function TagAnalyticsModal({
                 </div>
 
                 {/* Donut & D3 Category Ranking Bar Chart (1 col) */}
-                <div className="p-4 rounded-3xl border border-border bg-white dark:bg-card shadow-2xs space-y-4 flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-sm font-bold text-foreground tracking-tight flex items-center gap-1.5">
-                        <PieChart size={16} className="text-primary" />
-                        <span>Category Share</span>
+                <div className="p-3.5 sm:p-4 rounded-2xl sm:rounded-3xl border border-border bg-white dark:bg-card shadow-2xs space-y-4 flex flex-col justify-between min-w-0 overflow-hidden">
+                  <div className="min-w-0">
+                    <div className="flex items-center justify-between mb-2 gap-2">
+                      <h3 className="text-sm font-bold text-foreground tracking-tight flex items-center gap-1.5 min-w-0">
+                        <PieChart size={16} className="text-primary shrink-0" />
+                        <span className="truncate">Category Share</span>
                       </h3>
-                      <span className="text-[10px] font-mono font-bold text-muted-foreground uppercase">
+                      <span className="text-[10px] font-mono font-bold text-muted-foreground uppercase shrink-0">
                         Overall Share
                       </span>
                     </div>
@@ -463,12 +463,12 @@ export function TagAnalyticsModal({
                   </div>
 
                   {/* D3 Animated Category Ranking Bars */}
-                  <div className="space-y-2 pt-2 border-t border-border/40">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">
+                  <div className="space-y-2 pt-2 border-t border-border/40 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider truncate block">
                         Productivity Rankings (D3 Bars)
                       </span>
-                      <span className="text-[10px] font-mono text-muted-foreground">
+                      <span className="text-[10px] font-mono text-muted-foreground shrink-0">
                         Auto-reorders
                       </span>
                     </div>

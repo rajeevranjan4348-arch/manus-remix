@@ -96,13 +96,13 @@ const PROJECT_ICON_MAP: Record<string, any> = {
 };
 
 const PROJECT_COLOR_MAP: Record<string, { bg: string; text: string }> = {
-  blue: { bg: 'bg-black/10 dark:bg-white/10 text-black dark:text-white', text: 'text-black dark:text-white' },
-  indigo: { bg: 'bg-indigo-500/10 dark:bg-indigo-500/20 text-indigo-500', text: 'text-indigo-500' },
-  purple: { bg: 'bg-purple-500/10 dark:bg-purple-500/20 text-purple-500', text: 'text-purple-500' },
-  emerald: { bg: 'bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-500', text: 'text-emerald-500' },
-  amber: { bg: 'bg-amber-500/10 dark:bg-amber-500/20 text-amber-500', text: 'text-amber-500' },
-  rose: { bg: 'bg-rose-500/10 dark:bg-rose-500/20 text-rose-500', text: 'text-rose-500' },
-  cyan: { bg: 'bg-cyan-500/10 dark:bg-cyan-500/20 text-cyan-500', text: 'text-cyan-500' },
+  blue: { bg: 'bg-[#F2F2F2] dark:bg-[#171717] text-[#000000] dark:text-[#FFFFFF]', text: 'text-[#000000] dark:text-[#FFFFFF]' },
+  indigo: { bg: 'bg-[#F2F2F2] dark:bg-[#171717] text-[#000000] dark:text-[#FFFFFF]', text: 'text-[#000000] dark:text-[#FFFFFF]' },
+  purple: { bg: 'bg-[#F2F2F2] dark:bg-[#171717] text-[#000000] dark:text-[#FFFFFF]', text: 'text-[#000000] dark:text-[#FFFFFF]' },
+  emerald: { bg: 'bg-[#F2F2F2] dark:bg-[#171717] text-[#000000] dark:text-[#FFFFFF]', text: 'text-[#000000] dark:text-[#FFFFFF]' },
+  amber: { bg: 'bg-[#F2F2F2] dark:bg-[#171717] text-[#000000] dark:text-[#FFFFFF]', text: 'text-[#000000] dark:text-[#FFFFFF]' },
+  rose: { bg: 'bg-[#F2F2F2] dark:bg-[#171717] text-[#000000] dark:text-[#FFFFFF]', text: 'text-[#000000] dark:text-[#FFFFFF]' },
+  cyan: { bg: 'bg-[#F2F2F2] dark:bg-[#171717] text-[#000000] dark:text-[#FFFFFF]', text: 'text-[#000000] dark:text-[#FFFFFF]' },
 };
 
 function formatTaskTitle(task: TaskHistory): string {
@@ -385,13 +385,13 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
   // Collapsed Sidebar (Icon Mode)
   if (!isOpen) {
     return (
-      <aside className="w-16 h-screen border-r border-border/40 bg-manus-soft dark:bg-sidebar flex flex-col items-center py-6 hidden lg:flex shrink-0 transition-colors">
+      <aside className="w-16 h-screen border-r border-[#E0E0E0] dark:border-[#333333] bg-[#FFFFFF] dark:bg-[#111111] flex flex-col items-center py-6 hidden lg:flex shrink-0 transition-colors">
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
               <button 
                 onClick={onToggle}
-                className="p-2 rounded-xl hover:bg-manus-cream dark:hover:bg-accent transition-all duration-200 group relative mb-6 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 smooth-press"
+                className="p-2 rounded-xl hover:bg-[#F2F2F2] dark:hover:bg-[#171717] transition-all duration-200 group relative mb-6 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 smooth-press"
                 title="Open sidebar"
               >
                 <div className="group-hover:opacity-0 transition-opacity">
@@ -416,9 +416,11 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                     onClick={() => item.action ? item.action() : setActiveTab(item.id)}
                     className={cn(
                       "p-2.5 rounded-xl transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95",
-                      activeTab === item.id && !item.action
-                        ? "bg-white dark:bg-card border border-border text-foreground shadow-sm" 
-                        : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
+                      item.id === 'new'
+                        ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] shadow-sm"
+                        : activeTab === item.id && !item.action
+                          ? "bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] shadow-sm" 
+                          : "text-[#777777] dark:text-[#AAAAAA] hover:bg-[#F2F2F2] dark:hover:bg-[#171717] hover:text-[#000000] dark:hover:text-[#FFFFFF]"
                     )}
                   >
                     <item.icon size={23} strokeWidth={2.5} />
@@ -543,13 +545,13 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
         className="fixed inset-0 bg-black/50 z-40 lg:hidden backdrop-blur-xs transition-opacity duration-250 ease-out animate-in fade-in"
       />
 
-      <aside className="w-[82vw] max-w-[280px] sm:w-64 h-screen border-r border-border/40 bg-manus-soft dark:bg-sidebar flex flex-col fixed inset-y-0 left-0 lg:static z-50 shrink-0 transition-[transform,width,colors] duration-250 ease-[cubic-bezier(0.16,1,0.3,1)] shadow-2xl lg:shadow-none animate-in slide-in-from-left gpu-accelerated">
+      <aside className="w-[82vw] max-w-[280px] sm:w-64 h-screen border-r border-[#E0E0E0] dark:border-[#333333] bg-[#FFFFFF] dark:bg-[#111111] flex flex-col fixed inset-y-0 left-0 lg:static z-50 shrink-0 transition-[transform,width,colors] duration-250 ease-[cubic-bezier(0.16,1,0.3,1)] shadow-2xl lg:shadow-none animate-in slide-in-from-left gpu-accelerated">
         {/* Header with Logo and Close Toggle */}
         <div className="p-4 sm:p-5 flex items-center justify-between">
           <ManusLogo showBadge={true} />
           <button 
             onClick={onToggle}
-            className="p-2 text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent rounded-lg transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 smooth-press"
+            className="p-2 text-[#777777] dark:text-[#AAAAAA] hover:text-[#000000] dark:hover:text-[#FFFFFF] hover:bg-[#F2F2F2] dark:hover:bg-[#171717] rounded-lg transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 smooth-press"
             title="Collapse sidebar"
           >
             <PanelLeft size={21} strokeWidth={2.4} />
@@ -564,12 +566,24 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
               onClick={() => handleMobileSelect(() => item.action ? item.action() : setActiveTab(item.id))}
               className={cn(
                 "w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-all duration-200 font-medium text-sm cursor-pointer hover:scale-[1.02] hover:shadow-xs active:scale-[0.98]",
-                activeTab === item.id && !item.action
-                  ? "bg-white dark:bg-card border border-border text-foreground shadow-sm" 
-                  : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
+                item.id === 'new'
+                  ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] font-semibold shadow-sm"
+                  : activeTab === item.id && !item.action
+                    ? "bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] shadow-sm" 
+                    : "text-[#000000] dark:text-[#FFFFFF] hover:bg-[#F2F2F2] dark:hover:bg-[#171717]"
               )}
             >
-              <item.icon size={21} strokeWidth={2.4} />
+              <item.icon
+                size={21}
+                strokeWidth={2.4}
+                className={cn(
+                  item.id === 'new'
+                    ? "text-[#FFFFFF] dark:text-[#000000]"
+                    : activeTab === item.id && !item.action
+                      ? "text-[#000000] dark:text-[#FFFFFF]"
+                      : "text-[#777777] dark:text-[#AAAAAA]"
+                )}
+              />
               <span>{item.label}</span>
             </button>
           ))}
@@ -806,14 +820,14 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                         className={cn(
                           "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-all text-left cursor-pointer",
                           isActive
-                            ? "bg-white dark:bg-card border border-border text-foreground font-semibold shadow-xs" 
-                            : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
+                            ? "bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] font-semibold shadow-xs" 
+                            : "text-[#000000] dark:text-[#FFFFFF] hover:bg-[#F2F2F2] dark:hover:bg-[#171717]"
                         )}
                         title={task.prompt}
                       >
                         <MessageSquare size={17} strokeWidth={2.3} className={cn(
                           "shrink-0 transition-colors",
-                          isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
+                          isActive ? "text-[#000000] dark:text-[#FFFFFF]" : "text-[#777777] dark:text-[#AAAAAA] group-hover:text-[#000000] dark:group-hover:text-[#FFFFFF]"
                         )} />
                         
                         <div className="flex-1 min-w-0 pr-6">

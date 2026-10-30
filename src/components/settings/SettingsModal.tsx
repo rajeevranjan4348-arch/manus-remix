@@ -86,10 +86,10 @@ import { WorkspaceConnectButton } from '../workspace/WorkspaceConnectButton';
 import { RobotHead } from 'robot-heads';
 
 const ROBOT_THEMES = [
-  { label: 'Manus blue', shell: '#2b49a3', trim: '#93a6c8', screen: '#e8f2ff' },
-  { label: 'Graphite', shell: '#30343b', trim: '#9299a5', screen: '#e9f1ff' },
-  { label: 'Mint', shell: '#176b5b', trim: '#9bd8c7', screen: '#e2fff5' },
-  { label: 'Violet', shell: '#593c9b', trim: '#b9a7ed', screen: '#f1eaff' },
+  { label: 'Pure Black', shell: '#000000', trim: '#777777', screen: '#FAFAFA' },
+  { label: 'Graphite', shell: '#111111', trim: '#777777', screen: '#F2F2F2' },
+  { label: 'Slate Gray', shell: '#333333', trim: '#AAAAAA', screen: '#FFFFFF' },
+  { label: 'Silver Mono', shell: '#777777', trim: '#E0E0E0', screen: '#FFFFFF' },
 ];
 
 interface SettingsModalProps {
@@ -121,25 +121,31 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
   const [cameraStatus, setCameraStatus] = useState<PermissionState>('prompt');
   const [showMicHelpModal, setShowMicHelpModal] = useState(false);
   const [accentCombo, setAccentCombo] = useState(() => {
-    try { return localStorage.getItem('manus_accent_combo') || 'ocean'; } catch { return 'ocean'; }
+    try { return localStorage.getItem('manus_accent_combo_mono') || 'mono'; } catch { return 'mono'; }
   });
   const accentCombos = [
-    { id: 'ocean', label: 'Ocean', primary: '217 91% 60%', ring: '217 91% 60%', swatches: ['#2563eb', '#06b6d4'] },
-    { id: 'violet', label: 'Violet', primary: '262 83% 58%', ring: '262 83% 58%', swatches: ['#7c3aed', '#c084fc'] },
-    { id: 'emerald', label: 'Emerald', primary: '160 84% 39%', ring: '160 84% 39%', swatches: ['#059669', '#34d399'] },
-    { id: 'sunset', label: 'Sunset', primary: '25 95% 53%', ring: '25 95% 53%', swatches: ['#f97316', '#ec4899'] },
-    { id: 'rose', label: 'Rose', primary: '346 77% 50%', ring: '346 77% 50%', swatches: ['#e11d48', '#fb7185'] },
-    { id: 'mono', label: 'Graphite', primary: '220 9% 46%', ring: '220 9% 46%', swatches: ['#52525b', '#a1a1aa'] },
+    { id: 'mono', label: 'Pure Black', primary: '0 0% 0%', ring: '0 0% 0%', swatches: ['#000000', '#777777'] },
+    { id: 'ocean', label: 'Rich Black', primary: '0 0% 6.7%', ring: '0 0% 6.7%', swatches: ['#111111', '#777777'] },
+    { id: 'violet', label: 'Dark Gray', primary: '0 0% 20%', ring: '0 0% 20%', swatches: ['#333333', '#AAAAAA'] },
+    { id: 'emerald', label: 'Graphite', primary: '0 0% 9%', ring: '0 0% 9%', swatches: ['#171717', '#777777'] },
+    { id: 'sunset', label: 'Medium Gray', primary: '0 0% 46.7%', ring: '0 0% 46.7%', swatches: ['#777777', '#E0E0E0'] },
+    { id: 'rose', label: 'High Contrast', primary: '0 0% 0%', ring: '0 0% 0%', swatches: ['#000000', '#FFFFFF'] },
   ];
 
   const applyAccentCombo = (id: string) => {
     const combo = accentCombos.find((item) => item.id === id) || accentCombos[0];
     setAccentCombo(combo.id);
     const root = document.documentElement;
-    root.style.setProperty('--primary', combo.primary);
-    root.style.setProperty('--ring', combo.ring);
-    root.style.setProperty('--sidebar-primary', combo.primary);
-    try { localStorage.setItem('manus_accent_combo', combo.id); } catch {}
+    if (combo.id === 'mono') {
+      root.style.removeProperty('--primary');
+      root.style.removeProperty('--ring');
+      root.style.removeProperty('--sidebar-primary');
+    } else {
+      root.style.setProperty('--primary', combo.primary);
+      root.style.setProperty('--ring', combo.ring);
+      root.style.setProperty('--sidebar-primary', combo.primary);
+    }
+    try { localStorage.setItem('manus_accent_combo_mono', combo.id); } catch {}
   };
 
   useEffect(() => {
@@ -297,19 +303,19 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
         }}
       >
         <div 
-          className="w-full max-w-2xl h-[560px] max-h-[90vh] bg-background border border-border/70 rounded-2xl shadow-xl flex flex-col overflow-hidden text-foreground animate-in zoom-in-98 duration-150 gpu-accelerated"
+          className="w-full max-w-2xl h-[min(560px,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] bg-background border border-border/70 rounded-2xl shadow-xl flex flex-col overflow-hidden text-foreground animate-in zoom-in-98 duration-150 gpu-accelerated"
           role="dialog"
           aria-modal="true"
           aria-labelledby="settings-dialog-title"
         >
           {/* Minimal Header */}
-          <div className="px-5 py-3.5 border-b border-border/50 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-2">
-              <h2 id="settings-dialog-title" className="text-sm font-semibold tracking-tight text-foreground">
+          <div className="px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border/50 flex items-center justify-between gap-2 shrink-0 min-w-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <h2 id="settings-dialog-title" className="text-sm font-semibold tracking-tight text-foreground truncate">
                 Settings
               </h2>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
               <button
                 onClick={() => setShowAndroidView(true)}
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors cursor-pointer"
@@ -329,7 +335,7 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
           </div>
 
         {/* Content Layout */}
-        <div className="flex-1 flex flex-col sm:flex-row overflow-hidden">
+        <div className="flex-1 flex flex-col sm:flex-row overflow-hidden min-h-0 min-w-0">
           {/* Minimalist Sidebar */}
           <nav className="w-full sm:w-48 border-b sm:border-b-0 sm:border-r border-border/50 p-2 shrink-0 flex sm:flex-col gap-0.5 overflow-x-auto sm:overflow-y-auto no-scrollbar bg-muted/20">
             {tabs.map((tab) => {
@@ -340,7 +346,7 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
                   className={cn(
-                    "flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors text-left whitespace-nowrap cursor-pointer",
+                    "flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors text-left whitespace-nowrap cursor-pointer shrink-0",
                     isActive
                       ? "bg-foreground text-background font-semibold shadow-2xs"
                       : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
@@ -354,7 +360,7 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
           </nav>
 
           {/* Active Tab Panel */}
-          <div className="flex-1 overflow-y-auto p-5 sm:p-6 custom-scrollbar bg-background">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 custom-scrollbar bg-background min-h-0 min-w-0">
             {/* GENERAL TAB */}
             {activeTab === 'general' && (
               <div className="space-y-6 animate-in fade-in duration-100">

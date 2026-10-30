@@ -38,7 +38,7 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     label: 'Google Workspace (All)',
     description: 'Autonomous assistant across all Google Workspace apps',
     icon: Sparkles,
-    colorClass: 'text-purple-500 bg-purple-500/10'
+    colorClass: 'text-[#000000] dark:text-[#FFFFFF] bg-[#F2F2F2] dark:bg-[#111111]'
   },
   {
     id: 'gmail',
@@ -46,7 +46,7 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     label: 'Gmail',
     description: 'Read, search, draft, reply to, and send emails directly',
     icon: Mail,
-    colorClass: 'text-red-500 bg-red-500/10'
+    colorClass: 'text-[#000000] dark:text-[#FFFFFF] bg-[#F2F2F2] dark:bg-[#111111]'
   },
   {
     id: 'calendar',
@@ -54,7 +54,7 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     label: 'Google Calendar',
     description: 'Fetch upcoming events, schedule meetings & check availability',
     icon: Calendar,
-    colorClass: 'text-blue-500 bg-blue-500/10'
+    colorClass: 'text-[#000000] dark:text-[#FFFFFF] bg-[#F2F2F2] dark:bg-[#111111]'
   },
   {
     id: 'drive',
@@ -62,7 +62,7 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     label: 'Google Drive',
     description: 'Search files, create folders, upload and share documents',
     icon: HardDrive,
-    colorClass: 'text-emerald-500 bg-emerald-500/10'
+    colorClass: 'text-[#000000] dark:text-[#FFFFFF] bg-[#F2F2F2] dark:bg-[#111111]'
   },
   {
     id: 'docs',
@@ -70,7 +70,7 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     label: 'Google Docs',
     description: 'Create, read, write, append, and format documents',
     icon: FileText,
-    colorClass: 'text-blue-600 bg-blue-600/10'
+    colorClass: 'text-[#000000] dark:text-[#FFFFFF] bg-[#F2F2F2] dark:bg-[#111111]'
   },
   {
     id: 'sheets',
@@ -78,7 +78,7 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     label: 'Google Sheets',
     description: 'Create sheets, read rows, update cells & formulas',
     icon: FileSpreadsheet,
-    colorClass: 'text-emerald-600 bg-emerald-600/10'
+    colorClass: 'text-[#000000] dark:text-[#FFFFFF] bg-[#F2F2F2] dark:bg-[#111111]'
   },
   {
     id: 'slides',
@@ -86,7 +86,7 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     label: 'Google Slides',
     description: 'Create slide decks, read slides text & append new slides',
     icon: Presentation,
-    colorClass: 'text-amber-600 bg-amber-600/10'
+    colorClass: 'text-[#000000] dark:text-[#FFFFFF] bg-[#F2F2F2] dark:bg-[#111111]'
   },
   {
     id: 'tasks',
@@ -94,7 +94,7 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     label: 'Google Tasks',
     description: 'Fetch to-dos, create tasks, set due dates & mark complete',
     icon: CheckSquare,
-    colorClass: 'text-amber-500 bg-amber-500/10'
+    colorClass: 'text-[#000000] dark:text-[#FFFFFF] bg-[#F2F2F2] dark:bg-[#111111]'
   },
   {
     id: 'forms',
@@ -102,7 +102,7 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     label: 'Google Forms',
     description: 'Create forms/surveys, add questions & inspect respondent data',
     icon: FileCheck,
-    colorClass: 'text-purple-600 bg-purple-600/10'
+    colorClass: 'text-[#000000] dark:text-[#FFFFFF] bg-[#F2F2F2] dark:bg-[#111111]'
   },
   {
     id: 'contacts',
@@ -110,7 +110,7 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     label: 'Google Contacts',
     description: 'Search address book, create contacts & view colleague info',
     icon: Contact,
-    colorClass: 'text-cyan-600 bg-cyan-600/10'
+    colorClass: 'text-[#000000] dark:text-[#FFFFFF] bg-[#F2F2F2] dark:bg-[#111111]'
   },
   {
     id: 'chat',
@@ -118,7 +118,7 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     label: 'Google Chat',
     description: 'List spaces, post messages & collaborate in Google Chat',
     icon: MessageCircle,
-    colorClass: 'text-green-600 bg-green-600/10'
+    colorClass: 'text-[#000000] dark:text-[#FFFFFF] bg-[#F2F2F2] dark:bg-[#111111]'
   },
   {
     id: 'meet',
@@ -126,7 +126,7 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     label: 'Google Meet',
     description: 'Schedule video calls & generate instant Google Meet links',
     icon: Video,
-    colorClass: 'text-emerald-500 bg-emerald-500/10'
+    colorClass: 'text-[#000000] dark:text-[#FFFFFF] bg-[#F2F2F2] dark:bg-[#111111]'
   },
   {
     id: 'keep',
@@ -134,7 +134,7 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     label: 'Google Keep',
     description: 'Capture quick notes, memos & notes synced with your account',
     icon: StickyNote,
-    colorClass: 'text-yellow-500 bg-yellow-500/10'
+    colorClass: 'text-[#000000] dark:text-[#FFFFFF] bg-[#F2F2F2] dark:bg-[#111111]'
   },
   {
     id: 'web_search',
@@ -142,7 +142,7 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     label: 'Web Search',
     description: 'Real-time live internet search & fact verification',
     icon: Globe,
-    colorClass: 'text-indigo-500 bg-indigo-500/10'
+    colorClass: 'text-[#000000] dark:text-[#FFFFFF] bg-[#F2F2F2] dark:bg-[#111111]'
   },
   {
     id: 'code_sandbox',
@@ -150,7 +150,7 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     label: 'Python Sandbox',
     description: 'Execute code scripts, process datasets & output files',
     icon: Terminal,
-    colorClass: 'text-cyan-500 bg-cyan-500/10'
+    colorClass: 'text-[#000000] dark:text-[#FFFFFF] bg-[#F2F2F2] dark:bg-[#111111]'
   },
   {
     id: 'charts',
@@ -158,7 +158,7 @@ export const WORKSPACE_CONNECTOR_OPTIONS: WorkspaceConnectorOption[] = [
     label: 'Chart Visualizer',
     description: 'Render interactive graphs, charts & visualizers',
     icon: BarChart2,
-    colorClass: 'text-purple-500 bg-purple-500/10'
+    colorClass: 'text-[#000000] dark:text-[#FFFFFF] bg-[#F2F2F2] dark:bg-[#111111]'
   }
 ];
 
@@ -205,13 +205,13 @@ export function WorkspaceMentionPicker({ query, onSelect, selectedIndex, activeC
   if (filteredOptions.length === 0) return null;
 
   return (
-    <div className="absolute bottom-full mb-3 left-2 sm:left-4 w-80 sm:w-96 bg-white dark:bg-[#202124] border border-slate-200 dark:border-white/15 text-slate-900 dark:text-white rounded-2xl shadow-2xl overflow-hidden z-[100] p-1.5 backdrop-blur-2xl animate-in fade-in slide-in-from-bottom-2 duration-150">
-      <div className="px-3 py-2 border-b border-slate-200/80 dark:border-white/10 flex items-center justify-between bg-slate-50/80 dark:bg-white/5 rounded-t-xl">
-        <span className="flex items-center gap-1.5 text-xs font-bold text-foreground dark:text-white">
-          <Plug size={14} className="text-primary" />
+    <div className="absolute bottom-full mb-3 left-2 right-2 sm:right-auto sm:left-4 w-[calc(100vw-2rem)] max-w-80 sm:w-96 sm:max-w-96 bg-[#FFFFFF] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] rounded-2xl shadow-2xl overflow-hidden z-[100] p-1.5 backdrop-blur-2xl animate-in fade-in slide-in-from-bottom-2 duration-150">
+      <div className="px-3 py-2 border-b border-[#E0E0E0] dark:border-[#333333] flex items-center justify-between gap-2 flex-wrap bg-[#FAFAFA] dark:bg-[#111111] rounded-t-xl">
+        <span className="flex items-center gap-1.5 text-xs font-bold text-[#000000] dark:text-[#FFFFFF] shrink-0">
+          <Plug size={14} className="text-[#000000] dark:text-[#FFFFFF]" />
           Connectors ({filteredOptions.length})
         </span>
-        <span className="text-[10px] text-muted-foreground font-medium">Use ↑↓ and Enter or click to attach</span>
+        <span className="text-[10px] text-[#777777] dark:text-[#AAAAAA] font-medium truncate">Use ↑↓ and Enter or click to attach</span>
       </div>
 
       <div className="max-h-64 overflow-y-auto space-y-1 p-1 custom-scrollbar">
@@ -228,8 +228,8 @@ export function WorkspaceMentionPicker({ query, onSelect, selectedIndex, activeC
               className={cn(
                 "w-full flex items-center gap-3 p-2 rounded-xl text-left transition-all cursor-pointer group",
                 isSelected 
-                  ? "bg-primary/15 text-primary font-medium border border-primary/30" 
-                  : "hover:bg-slate-100 dark:hover:bg-white/10 text-foreground dark:text-white"
+                  ? "bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF] font-medium border border-[#000000] dark:border-[#FFFFFF]" 
+                  : "hover:bg-[#F2F2F2] dark:hover:bg-[#111111] text-[#000000] dark:text-[#FFFFFF]"
               )}
             >
               <div className={cn("p-2 rounded-xl shrink-0 transition-transform group-hover:scale-105", opt.colorClass)}>
@@ -238,17 +238,17 @@ export function WorkspaceMentionPicker({ query, onSelect, selectedIndex, activeC
 
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-1.5">
-                  <span className="font-semibold text-xs text-foreground dark:text-white truncate">{opt.label}</span>
+                  <span className="font-semibold text-xs text-[#000000] dark:text-[#FFFFFF] truncate">{opt.label}</span>
                   <div className="flex items-center gap-1 shrink-0">
                     {activeStatus && (
-                      <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full">
+                      <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-[#000000] dark:text-[#FFFFFF] bg-[#F2F2F2] dark:bg-[#111111] border border-[#E0E0E0] dark:border-[#333333] px-1.5 py-0.5 rounded-full">
                         <Check size={9} /> Enabled
                       </span>
                     )}
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-white/10 text-muted-foreground">{opt.tag}</span>
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-[#F2F2F2] dark:bg-[#111111] text-[#777777] dark:text-[#AAAAAA]">{opt.tag}</span>
                   </div>
                 </div>
-                <p className="text-[10px] text-muted-foreground truncate leading-tight mt-0.5">{opt.description}</p>
+                <p className="text-[10px] text-[#777777] dark:text-[#AAAAAA] truncate leading-tight mt-0.5">{opt.description}</p>
               </div>
             </button>
           );

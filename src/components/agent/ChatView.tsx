@@ -43,7 +43,9 @@ import { deriveContextualThinkingStages } from './WorkModeThinkingAnimation';
 import { AttachmentMenu } from '../chat/AttachmentMenu';
 import { ThoughtProcess } from './ThoughtProcess';
 import { ConversationActionBar } from './ConversationActionBar';
+import { MessageHoverReactions } from './MessageHoverReactions';
 import { VoiceInputButton, formatSpeechAutoFill } from '../voice/VoiceInputButton';
+import { VoiceTranscriptionIndicator } from '../voice/VoiceTranscriptionIndicator';
 import { SourceCitations, parseSourcesFromMarkdown, resolveMessageSourcesAndQueries } from './SourceCitations';
 import { WeatherWidgetCard } from './WeatherWidgetCard';
 import { ToolApprovalCard } from './ToolApprovalCard';
@@ -60,6 +62,7 @@ import { Step } from '@/hooks/useAgentTask';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
 import { getChatViewDraft, saveChatViewDraft, clearChatViewDraft } from '@/lib/draftStorage';
+import { ChatExportFormat } from '@/lib/chatExport';
 
 
 type ManusMapRequest =
@@ -114,7 +117,7 @@ interface ChatViewProps {
   chartData?: any;
   status: 'idle' | 'running' | 'completed' | 'error';
   onReset: () => void;
-  onExport?: () => void;
+  onExport?: (format?: ChatExportFormat) => void;
   onSubmit: (prompt: string) => void;
   onStop?: () => void;
   onReorderSteps?: (steps: Step[]) => void;
@@ -344,6 +347,7 @@ export function ChatView({
   const [mentionIndex, setMentionIndex] = useState<number>(0);
   const [isListening, setIsListening] = useState<boolean>(false);
   const [interimSpeech, setInterimSpeech] = useState<string>('');
+  const [voiceAudioLevel, setVoiceAudioLevel] = useState<number>(0);
   const dragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const chatWrapperRef = useRef<HTMLDivElement>(null);
@@ -880,7 +884,7 @@ export function ChatView({
       const attachedImageUrl = extractUserImageAttachment(msg.content);
 
       return (
-        <div key={msgId} className="flex justify-end my-2 chat-message-enter group relative px-4 sm:px-20">
+        <div key={msgId} className="flex justify-end my-2 chat-message-enter chat-message-user-enter group relative px-4 sm:px-20">
           {isEditing ? (
             <div className="bg-card border border-border p-3 rounded-2xl max-w-[90%] sm:max-w-[80%] shadow-md w-full space-y-2">
               <textarea
@@ -924,7 +928,10 @@ export function ChatView({
               >
                 <Pencil size={13} />
               </button>
-              <div className="bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium shadow-xs leading-relaxed space-y-2 overflow-hidden">
+              <div
+                data-testid="user-message-bubble"
+                className="bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium shadow-xs leading-relaxed space-y-2 overflow-hidden"
+              >
                 {attachedImageUrl && (
                   <div className="rounded-xl overflow-hidden border border-white/15 max-w-[260px] sm:max-w-[320px]">
                     <img
@@ -979,9 +986,10 @@ export function ChatView({
       }
 
       const prevUserMsg = displayMessages.slice(0, index).reverse().find((m: any) => m?.role === 'user');
+      const prevUserPromptText = prevUserMsg ? cleanUserMessage(prevUserMsg.content) : cleanUserMessage(prompt);
       const synthesizedThought = !thought && cleanedContent
         ? deriveContextualThinkingStages(
-            prevUserMsg?.content || prompt,
+            prevUserPromptText,
             isThinkHarder,
             isLatestAssistant && steps.length > 0 ? steps : undefined,
             99
@@ -992,10 +1000,20 @@ export function ChatView({
       const effectiveThought = thought || synthesizedThought;
 
       return (
-        <div key={msg.id || index} className="flex gap-4 max-w-3xl mx-auto my-3 chat-message-enter px-4 sm:px-20">
+        <div
+          key={msg.id || index}
+          data-testid={`ai-message-${msgKey}`}
+          className="group/ai-message relative flex gap-4 max-w-3xl mx-auto my-3 chat-message-enter chat-message-assistant-enter px-4 sm:px-20"
+        >
           <div className="flex-1 space-y-3 min-w-0">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center justify-between gap-3">
               <ManusLogo showBadge={true} />
+              {cleanedContent && (
+                <MessageHoverReactions
+                  messageId={msgKey}
+                  content={cleanedContent}
+                />
+              )}
             </div>
 
             {effectiveThought && (
@@ -1116,7 +1134,7 @@ export function ChatView({
                 (Object.keys(weatherMap).length > 0 ? Object.values(weatherMap)[0] : null);
               
               const isWeatherContent = /(weather|temperature|forecast|humidity|celsius|fahrenheit|open-meteo|climate)/i.test(cleanedContent || '') ||
-                (prevUserMsg && /(weather|temperature|forecast|delhi|mumbai|london|tokyo|city)/i.test(prevUserMsg.content || ''));
+                (prevUserMsg && /(weather|temperature|forecast|delhi|mumbai|london|tokyo|city)/i.test(cleanUserMessage(prevUserMsg.content)));
 
               if (wData && isWeatherContent) {
                 return <WeatherWidgetCard data={wData} className="my-3 animate-weather-card" />;
@@ -1127,7 +1145,7 @@ export function ChatView({
             {cleanedContent && (() => {
               const resolvedSources = resolveMessageSourcesAndQueries({
                 parsed: parsedSources,
-                userPrompt: prevUserMsg?.content || prompt,
+                userPrompt: prevUserPromptText,
                 assistantContent: parsedSources.cleanedContent || cleanedContent,
                 steps: isLatestAssistant ? steps : undefined,
               });
@@ -1146,6 +1164,7 @@ export function ChatView({
               <div className="pt-0.5">
                 <ConversationActionBar 
                   content={cleanedContent}
+                  messageId={msgKey}
                   onRegenerate={() => {
                     const lastUser = displayMessages.slice(0, index).reverse().find((m: any) => m.role === 'user');
                     const promptToReRun = lastUser?.content ? cleanUserMessage(lastUser.content) : prompt;
@@ -1214,8 +1233,8 @@ export function ChatView({
           <div className="flex items-center gap-3">
             <div className={cn(
               "flex items-center justify-center w-5 h-5 rounded-full border",
-              isCompleted ? "bg-green-500 border-green-500 text-white" : 
-              isRunning ? "border-primary border-t-transparent animate-spin" : "border-muted-foreground/30 text-muted-foreground/30"
+              isCompleted ? "bg-[#000000] border-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:border-[#FFFFFF] dark:text-[#000000]" : 
+              isRunning ? "border-[#000000] dark:border-[#FFFFFF] border-t-transparent animate-spin" : "border-[#E0E0E0] dark:border-[#333333] text-[#777777]"
             )}>
               {isCompleted && <Check size={12} />}
             </div>
@@ -1259,11 +1278,9 @@ export function ChatView({
                 <div key={idx} className="flex items-center gap-2">
                   <div className={cn(
                     "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border max-w-full truncate",
-                    type === 'search' ? "bg-slate-100 dark:bg-white/10 text-slate-900 dark:text-white border-slate-200 dark:border-white/10" :
-                    type === 'web' ? "bg-green-50 text-green-700 border-green-100" :
-                    type === 'file' ? "bg-orange-50 text-orange-700 border-orange-100" :
-                    type === 'action' ? "bg-purple-50 text-purple-700 border-purple-100" :
-                    "bg-muted/50 border-border/40 text-muted-foreground"
+                    type !== 'default'
+                      ? "bg-[#F2F2F2] dark:bg-[#171717] text-[#000000] dark:text-[#FFFFFF] border-[#E0E0E0] dark:border-[#333333]"
+                      : "bg-[#FAFAFA] dark:bg-[#111111] border-[#E0E0E0] dark:border-[#333333] text-[#777777] dark:text-[#AAAAAA]"
                   )}>
                     {icon}
                     <span className="truncate">{text}</span>
@@ -1383,20 +1400,33 @@ export function ChatView({
         );
       })()}
 
-      {/* Prompt-aware thinking animation */}
+      {/* Prompt-aware thinking & subtle typing lead-in animation */}
       {isAssistantWorking && !hasVisibleAssistantMessage && (
         <div className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
           <div className="flex-1 space-y-2.5 min-w-0">
             <div className="flex items-center gap-2.5">
               <ManusLogo showBadge={true} />
             </div>
-            <div className="pt-1">
+            <div className="pt-1 space-y-2">
               <ContextualThinking
                 prompt={messages.filter((message: any) => message?.role === 'user').slice(-1)[0]?.content || prompt}
                 activeStep={activeRunningStep?.label}
                 deepMode={isThinkHarder}
                 steps={steps}
               />
+              <div
+                data-testid="ai-typing-sequence"
+                className="manus-typing-sequence-lead"
+                role="status"
+                aria-live="polite"
+              >
+                <span className="manus-typing-dots-wave" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+                <span>Composing response...</span>
+              </div>
             </div>
           </div>
         </div>
@@ -1568,10 +1598,10 @@ export function ChatView({
         {(attachedFile || isThinkHarder) && (
           <div className="flex items-center gap-2 flex-wrap max-w-3xl w-full px-2">
             {isThinkHarder && (
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-600 text-white rounded-full text-xs font-semibold shadow-md animate-in fade-in zoom-in duration-200">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] rounded-full text-xs font-semibold shadow-md animate-in fade-in zoom-in duration-200">
                 <Brain size={14} className="animate-pulse" />
                 <span>Deep reasoning</span>
-                <button onClick={() => setIsThinkHarder(false)} className="p-0.5 hover:bg-white/20 rounded-full ml-1" title="Remove deep reasoning">
+                <button onClick={() => setIsThinkHarder(false)} className="p-0.5 hover:bg-white/20 dark:hover:bg-black/20 rounded-full ml-1" title="Remove deep reasoning">
                   <X size={10} />
                 </button>
               </div>
@@ -1589,14 +1619,16 @@ export function ChatView({
           </div>
         )}
         <div 
+          data-testid="manus-input-container"
+          data-listening={isListening ? "true" : "false"}
           onDragEnter={handleDragEnter}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           className={cn(
-            "w-full max-w-3xl bg-white dark:bg-[#1a1b1e] rounded-[1.75rem] sm:rounded-[2rem] shadow-xl border border-slate-200/80 dark:border-border/60 px-3.5 py-2.5 sm:px-4.5 sm:py-3 flex flex-col gap-1.5 sm:gap-2 transition-[box-shadow,border-color,background-color,transform] duration-200 ease-out focus-within:ring-2 focus-within:ring-primary/20 relative gpu-accelerated ultra-smooth-composer",
-            isDragging && "ring-2 ring-foreground border-foreground bg-slate-50 dark:bg-slate-900/30",
-            isListening && "ring-2 ring-rose-500/40 border-rose-400 dark:border-rose-500/60 shadow-lg shadow-rose-500/10"
+            "manus-input-container w-full max-w-3xl bg-[#FFFFFF] dark:bg-[#111111] rounded-[1.75rem] sm:rounded-[2rem] shadow-xl border border-[#E0E0E0] dark:border-[#333333] px-3.5 py-2.5 sm:px-4.5 sm:py-3 flex flex-col gap-1.5 sm:gap-2 transition-[box-shadow,border-color,background-color,transform] duration-200 ease-out focus-within:ring-2 focus-within:ring-[#000000]/15 dark:focus-within:ring-[#FFFFFF]/15 relative gpu-accelerated ultra-smooth-composer",
+            isDragging && "ring-2 ring-foreground border-foreground bg-[#FAFAFA] dark:bg-[#171717]",
+            isListening && "ring-2 ring-[#000000]/30 dark:ring-[#FFFFFF]/30 border-[#000000] dark:border-[#FFFFFF] shadow-lg"
           )}
         >
           {showMentionPicker && (
@@ -1626,37 +1658,23 @@ export function ChatView({
           />
 
           {/* Visual Indicator for Speech Recognition Listening State */}
-          {isListening && (
-            <div 
-              data-testid="speech-listening-indicator"
-              className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-medium animate-in fade-in slide-in-from-top-1 duration-200 select-none shadow-2xs"
-            >
-              <div className="flex items-center gap-2 min-w-0 flex-1">
-                <span className="relative flex h-2 w-2 shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
-                </span>
-                <span className="font-semibold truncate">
-                  {interimSpeech ? `"${interimSpeech}"` : "Listening... Speak your prompt..."}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                <div className="flex items-center gap-0.5">
-                  <span className="w-0.5 h-2.5 bg-rose-500 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
-                  <span className="w-0.5 h-4 bg-rose-500 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
-                  <span className="w-0.5 h-2 bg-rose-500 rounded-full animate-bounce"></span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => window.dispatchEvent(new CustomEvent('manus_stop_voice_input'))}
-                  className="px-2 py-0.5 rounded-md bg-rose-500/20 hover:bg-rose-500/30 text-rose-600 dark:text-rose-300 text-[10px] font-bold cursor-pointer transition-colors"
-                  title="Finish speech dictation"
-                >
-                  Done
-                </button>
-              </div>
-            </div>
-          )}
+          <VoiceTranscriptionIndicator
+            isListening={isListening}
+            interimSpeech={interimSpeech}
+            currentText={input}
+            audioLevel={voiceAudioLevel}
+            canSendNow={Boolean(input.trim() && status !== 'running')}
+            onClear={() => {
+              setInput('');
+              speechBaseInputRef.current = '';
+              setInterimSpeech('');
+            }}
+            onStop={() => window.dispatchEvent(new CustomEvent('manus_stop_voice_input'))}
+            onSendNow={() => {
+              window.dispatchEvent(new CustomEvent('manus_stop_voice_input'));
+              handleSend();
+            }}
+          />
 
           {/* Top Row: Textarea for typing message */}
           <div className="w-full flex flex-col min-h-[26px] sm:min-h-[28px]">
@@ -1709,7 +1727,7 @@ export function ChatView({
                     ? "Ask with deep reasoning..." 
                     : "Type a message or ask anything..."
               }
-              className="w-full bg-transparent border-none outline-none resize-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-[14px] sm:text-[15px] leading-snug p-0 focus:ring-0 focus:outline-none min-h-[22px] sm:min-h-[24px] max-h-[90px] custom-scrollbar"
+              className="w-full bg-transparent border-none outline-none resize-none text-[#000000] dark:text-[#FFFFFF] placeholder:text-[#777777] dark:placeholder:text-[#AAAAAA] text-[14px] sm:text-[15px] leading-snug p-0 focus:ring-0 focus:outline-none min-h-[22px] sm:min-h-[24px] max-h-[90px] custom-scrollbar"
               disabled={isAssistantWorking}
             />
           </div>
@@ -1730,11 +1748,11 @@ export function ChatView({
               >
                 <button 
                   type="button"
-                  className="w-9 h-9 rounded-full border border-slate-200/90 dark:border-white/15 bg-white dark:bg-[#141518] hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                  className="w-9 h-9 rounded-full border border-[#E0E0E0] dark:border-[#333333] bg-[#F2F2F2] dark:bg-[#171717] hover:bg-[#E0E0E0] dark:hover:bg-[#333333] transition-colors flex items-center justify-center text-[#000000] dark:text-[#FFFFFF] shadow-2xs cursor-pointer active:scale-95 shrink-0"
                   title="Add attachments or options"
                   aria-label="Add attachments or options"
                 >
-                  <Plus size={18} strokeWidth={2.4} className="text-slate-800 dark:text-slate-200 shrink-0" />
+                  <Plus size={18} strokeWidth={2.4} className="text-[#000000] dark:text-[#FFFFFF] shrink-0" />
                 </button>
               </AttachmentMenu>
 
@@ -1753,7 +1771,7 @@ export function ChatView({
                       <div 
                         key={tagId} 
                         onClick={() => setSelectedConfigConnectorId(tagId)}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-800/40 text-[#2563eb] dark:text-[#93c5fd] font-semibold text-xs rounded-full cursor-pointer hover:opacity-80 transition-opacity select-none shrink-0 whitespace-nowrap"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] font-semibold text-xs rounded-full cursor-pointer hover:opacity-80 transition-opacity select-none shrink-0 whitespace-nowrap"
                         title="Click to view connector parameters or details"
                       >
                         <IconComp strokeWidth={2.4} className="w-3.5 h-3.5 shrink-0" />
@@ -1785,11 +1803,13 @@ export function ChatView({
                     speechBaseInputRef.current = input.trim();
                   } else {
                     setInterimSpeech('');
+                    setVoiceAudioLevel(0);
                   }
                 }}
                 onInterimChange={(interim) => {
                   setInterimSpeech(interim);
                 }}
+                onAudioLevelChange={setVoiceAudioLevel}
                 onTranscript={(dictatedText) => {
                   const base = speechBaseInputRef.current;
                   setInput(formatSpeechAutoFill(base, dictatedText));
@@ -1802,7 +1822,7 @@ export function ChatView({
                     setInterimSpeech('');
                   }
                 }}
-                className="w-9 h-9 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer shrink-0"
+                className="w-9 h-9 rounded-full hover:bg-[#F2F2F2] dark:hover:bg-[#171717] transition-colors flex items-center justify-center text-[#000000] dark:text-[#FFFFFF] cursor-pointer shrink-0"
                 size={18}
               />
               <button 
@@ -1819,19 +1839,19 @@ export function ChatView({
                 }}
                 disabled={!isAssistantWorking && (!input.trim() && !attachedFile && activeConnectorTags.length === 0)}
                 className={cn(
-                  "w-9 h-9 rounded-full flex items-center justify-center transition-all duration-150 shadow-2xs shrink-0 cursor-pointer",
+                  "group w-9 h-9 rounded-full flex items-center justify-center transition-all duration-150 shadow-2xs shrink-0 cursor-pointer",
                   isAssistantWorking
-                    ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md"
+                    ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] hover:scale-105 active:scale-95 shadow-md"
                     : (input.trim() || attachedFile || activeConnectorTags.length > 0)
-                      ? "bg-foreground text-background dark:bg-white dark:text-black hover:scale-105 active:scale-95 shadow-md opacity-100"
-                      : "bg-[#e2e8f0]/80 dark:bg-muted text-slate-400 dark:text-muted-foreground cursor-not-allowed opacity-50"
+                      ? "manus-send-btn-ready bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] hover:scale-105 active:scale-95 shadow-md opacity-100"
+                      : "bg-[#F2F2F2] dark:bg-[#171717] text-[#777777] dark:text-[#AAAAAA] cursor-not-allowed opacity-70"
                 )}
                 title={isAssistantWorking ? "Stop response" : "Send message"}
                 aria-label={isAssistantWorking ? "Stop response" : "Send message"}
               >
                 {isAssistantWorking
                   ? <Square size={13} fill="currentColor" strokeWidth={2.5} className="shrink-0" />
-                  : <ArrowUp size={18} strokeWidth={2.6} className="font-bold shrink-0" />}
+                  : <ArrowUp size={18} strokeWidth={2.6} className="font-bold shrink-0 transition-transform duration-150 group-hover:-translate-y-0.5" />}
               </button>
             </div>
           </div>

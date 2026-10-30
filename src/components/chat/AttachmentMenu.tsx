@@ -130,7 +130,8 @@ export function AttachmentMenu({
           side="top" 
           align="start" 
           sideOffset={12}
-          className="w-72 p-2 rounded-[28px] border border-border dark:border-white/10 bg-white dark:bg-[#202124] text-foreground dark:text-white shadow-2xl overflow-hidden backdrop-blur-xl"
+          collisionPadding={12}
+          className="w-[min(18rem,calc(100vw-1.5rem))] max-w-[calc(100vw-1.5rem)] p-2 rounded-[28px] border border-[#E0E0E0] dark:border-[#333333] bg-[#FFFFFF] dark:bg-[#171717] text-[#000000] dark:text-[#FFFFFF] shadow-2xl overflow-hidden backdrop-blur-xl"
         >
           <div className="flex flex-col gap-1">
             {/* Voice Call Option */}
@@ -139,14 +140,14 @@ export function AttachmentMenu({
                 setIsOpen(false);
                 setIsVoiceCallOpen(true);
               }}
-              className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer"
+              className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-[#F2F2F2] dark:hover:bg-[#111111] transition-colors text-left group cursor-pointer"
             >
-              <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-white/10 text-slate-800 dark:text-white flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+              <div className="w-10 h-10 rounded-full bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                 <PhoneCall size={22} strokeWidth={2.4} />
               </div>
               <div className="flex flex-col">
-                <span className="font-semibold text-base text-slate-900 dark:text-white tracking-tight">Voice call</span>
-                <span className="text-[11px] text-muted-foreground leading-tight">Live interactive voice call</span>
+                <span className="font-semibold text-base text-[#000000] dark:text-[#FFFFFF] tracking-tight">Voice call</span>
+                <span className="text-[11px] text-[#777777] dark:text-[#AAAAAA] leading-tight">Live interactive voice call</span>
               </div>
             </button>
 
@@ -155,12 +156,12 @@ export function AttachmentMenu({
               onClick={() => {
                 void handleCameraClick();
               }}
-              className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer"
+              className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-[#F2F2F2] dark:hover:bg-[#111111] transition-colors text-left group cursor-pointer"
             >
-              <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform text-slate-800 dark:text-white">
+              <div className="w-10 h-10 rounded-full bg-[#F2F2F2] dark:bg-[#111111] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform text-[#000000] dark:text-[#FFFFFF]">
                 <Camera size={22} strokeWidth={2.4} />
               </div>
-              <span className="font-semibold text-base text-slate-900 dark:text-white tracking-tight">Camera</span>
+              <span className="font-semibold text-base text-[#000000] dark:text-[#FFFFFF] tracking-tight">Camera</span>
             </button>
 
             {/* Photos Option */}
@@ -169,12 +170,12 @@ export function AttachmentMenu({
                 setIsOpen(false);
                 setTimeout(() => photosInputRef.current?.click(), 0);
               }}
-              className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer"
+              className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-[#F2F2F2] dark:hover:bg-[#111111] transition-colors text-left group cursor-pointer"
             >
-              <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform text-slate-800 dark:text-white">
+              <div className="w-10 h-10 rounded-full bg-[#F2F2F2] dark:bg-[#111111] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform text-[#000000] dark:text-[#FFFFFF]">
                 <Image size={22} strokeWidth={2.4} />
               </div>
-              <span className="font-semibold text-base text-slate-900 dark:text-white tracking-tight">Photos</span>
+              <span className="font-semibold text-base text-[#000000] dark:text-[#FFFFFF] tracking-tight">Photos</span>
             </button>
 
             {/* Files Option */}
@@ -183,12 +184,12 @@ export function AttachmentMenu({
                 setIsOpen(false);
                 setTimeout(() => filesInputRef.current?.click(), 0);
               }}
-              className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer"
+              className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-[#F2F2F2] dark:hover:bg-[#111111] transition-colors text-left group cursor-pointer"
             >
-              <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform text-slate-800 dark:text-white">
+              <div className="w-10 h-10 rounded-full bg-[#F2F2F2] dark:bg-[#111111] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform text-[#000000] dark:text-[#FFFFFF]">
                 <Paperclip size={22} strokeWidth={2.4} />
               </div>
-              <span className="font-semibold text-base text-slate-900 dark:text-white tracking-tight">Files</span>
+              <span className="font-semibold text-base text-[#000000] dark:text-[#FFFFFF] tracking-tight">Files</span>
             </button>
 
             {/* Connectors Option (replaced Google Drive) */}
@@ -203,14 +204,14 @@ export function AttachmentMenu({
                   toast.info('Opening Connectors...');
                 }
               }}
-              className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-left group cursor-pointer"
+              className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-[#F2F2F2] dark:hover:bg-[#111111] transition-colors text-left group cursor-pointer"
             >
-              <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-white/10 text-slate-800 dark:text-white flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                <Plug size={22} strokeWidth={2.4} className="text-slate-800 dark:text-white" />
+              <div className="w-10 h-10 rounded-full bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <Plug size={22} strokeWidth={2.4} className="text-[#000000] dark:text-[#FFFFFF]" />
               </div>
               <div className="flex flex-col">
-                <span className="font-semibold text-base text-slate-900 dark:text-white tracking-tight">Connectors</span>
-                <span className="text-[11px] text-muted-foreground leading-tight">Google Drive & Workspace tools</span>
+                <span className="font-semibold text-base text-[#000000] dark:text-[#FFFFFF] tracking-tight">Connectors</span>
+                <span className="text-[11px] text-[#777777] dark:text-[#AAAAAA] leading-tight">Google Drive & Workspace tools</span>
               </div>
             </button>
 
@@ -227,27 +228,24 @@ export function AttachmentMenu({
               className={cn(
                 "w-full flex items-center justify-between px-3 py-2.5 rounded-2xl transition-colors text-left group cursor-pointer",
                 isThinkHarder 
-                  ? "bg-purple-500/10 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300" 
-                  : "hover:bg-slate-100 dark:hover:bg-white/10"
+                  ? "bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF]" 
+                  : "hover:bg-[#F2F2F2] dark:hover:bg-[#111111]"
               )}
             >
               <div className="flex items-center gap-3.5">
                 <div className={cn(
                   "w-10 h-10 rounded-full flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform",
                   isThinkHarder
-                    ? "bg-purple-600 text-white shadow-[0_0_12px_rgba(168,85,247,0.4)]"
-                    : "bg-slate-100 dark:bg-white/10 text-slate-800 dark:text-white"
+                    ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000]"
+                    : "bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF]"
                 )}>
                   <Brain size={22} strokeWidth={2.4} />
                 </div>
                 <div className="flex flex-col">
-                  <span className={cn(
-                    "font-semibold text-base tracking-tight",
-                    isThinkHarder ? "text-purple-700 dark:text-purple-300" : "text-slate-900 dark:text-white"
-                  )}>
+                  <span className="font-semibold text-base tracking-tight text-[#000000] dark:text-[#FFFFFF]">
                     Think harder
                   </span>
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-xs text-[#777777] dark:text-[#AAAAAA]">
                     Deep chain-of-thought & step analysis
                   </span>
                 </div>
@@ -255,8 +253,8 @@ export function AttachmentMenu({
               <div className={cn(
                 "w-5 h-5 rounded-full border flex items-center justify-center transition-colors",
                 isThinkHarder 
-                  ? "border-purple-600 bg-purple-600 text-white" 
-                  : "border-slate-300 dark:border-white/20"
+                  ? "border-[#000000] bg-[#000000] text-[#FFFFFF] dark:border-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000]" 
+                  : "border-[#E0E0E0] dark:border-[#333333]"
               )}>
                 {isThinkHarder && <Check size={12} strokeWidth={3} />}
               </div>

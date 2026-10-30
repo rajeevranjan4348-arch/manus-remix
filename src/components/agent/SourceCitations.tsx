@@ -39,19 +39,20 @@ export function extractDomain(url: string): string {
  * and inline links into structured items while cleaning metadata blocks from the prose.
  */
 export function parseSourcesFromMarkdown(content: string): ParsedSourcesResult {
-  if (!content) return { cleanedContent: '', sources: [], searchQueries: [] };
+  const safeContent = typeof content === 'string' ? content : String(content || '');
+  if (!safeContent) return { cleanedContent: '', sources: [], searchQueries: [] };
 
   const searchQueries: string[] = [];
   const seenQueries = new Set<string>();
   const addQuery = (rawQ: string) => {
-    const cleanQ = rawQ.replace(/^[-*•]\s*/, '').replace(/^["'`]+|["'`]+$/g, '').trim();
+    const cleanQ = String(rawQ || '').replace(/^[-*•]\s*/, '').replace(/^["'`]+|["'`]+$/g, '').trim();
     if (cleanQ && !seenQueries.has(cleanQ.toLowerCase())) {
       seenQueries.add(cleanQ.toLowerCase());
       searchQueries.push(cleanQ);
     }
   };
 
-  let workingContent = content;
+  let workingContent = safeContent;
 
   // 1. Extract **Search Queries** section if present
   const queriesRegex = /(?:\*\*Search Queries\*\*|###?\s*Search Queries)\s*([\s\S]*?)(?=$|\n\n\*\*Sources\*\*|\n\n#|\n\n---)/i;
@@ -72,7 +73,7 @@ export function parseSourcesFromMarkdown(content: string): ParsedSourcesResult {
   const sources: SourceCitationItem[] = [];
   const seenUrls = new Set<string>();
   const addSource = (title: string, rawUrl: string) => {
-    const url = rawUrl.trim().replace(/[).,;]+$/, '');
+    const url = String(rawUrl || '').trim().replace(/[).,;]+$/, '');
     if (!/^https?:\/\//i.test(url)) return;
     const key = url.toLowerCase();
     if (seenUrls.has(key)) return;
@@ -127,21 +128,28 @@ export function parseSourcesFromMarkdown(content: string): ParsedSourcesResult {
  * combining explicit markdown blocks, execution step traces, and contextual query/reference synthesis.
  */
 export function resolveMessageSourcesAndQueries(options: {
-  parsed: ParsedSourcesResult;
-  userPrompt?: string;
-  assistantContent?: string;
+  parsed?: Partial<ParsedSourcesResult> | null;
+  userPrompt?: any;
+  assistantContent?: any;
   steps?: Array<{ label?: string; trace?: string[] }>;
 }): { sources: SourceCitationItem[]; searchQueries: string[] } {
-  const { parsed, userPrompt = '', assistantContent = '', steps = [] } = options;
+  const parsed = options?.parsed || { cleanedContent: '', sources: [], searchQueries: [] };
+  const safeUserPrompt = typeof options?.userPrompt === 'string'
+    ? options.userPrompt
+    : String(options?.userPrompt?.text || options?.userPrompt?.content || options?.userPrompt || '');
+  const safeAssistantContent = typeof options?.assistantContent === 'string'
+    ? options.assistantContent
+    : String(options?.assistantContent || '');
+  const steps = Array.isArray(options?.steps) ? options.steps : [];
 
-  const sources: SourceCitationItem[] = [...parsed.sources];
+  const sources: SourceCitationItem[] = Array.isArray(parsed.sources) ? [...parsed.sources] : [];
   const seenUrls = new Set(sources.map(s => s.url.toLowerCase()));
 
-  const searchQueries: string[] = [...parsed.searchQueries];
+  const searchQueries: string[] = Array.isArray(parsed.searchQueries) ? [...parsed.searchQueries] : [];
   const seenQueries = new Set(searchQueries.map(q => q.toLowerCase()));
 
   const addQuery = (q: string) => {
-    const clean = q
+    const clean = String(q || '')
       .replace(/\[IMAGE_DATA_URL:[^\]]+\]\s*/gi, '')
       .replace(/\[Attached[^\]]*\]\s*/gi, '')
       .replace(/^\[MODE:[^\]]*\]\s*/i, '')
@@ -157,7 +165,7 @@ export function resolveMessageSourcesAndQueries(options: {
   };
 
   const addSource = (title: string, url: string) => {
-    const cleanUrl = url.trim().replace(/[).,;]+$/, '');
+    const cleanUrl = String(url || '').trim().replace(/[).,;]+$/, '');
     if (!/^https?:\/\//i.test(cleanUrl)) return;
     const key = cleanUrl.toLowerCase();
     if (seenUrls.has(key)) return;
@@ -188,7 +196,7 @@ export function resolveMessageSourcesAndQueries(options: {
   }
 
   // Clean user prompt to derive search query if none explicitly recorded yet
-  const cleanPrompt = userPrompt
+  const cleanPrompt = safeUserPrompt
     .replace(/\[IMAGE_DATA_URL:[^\]]+\]\s*/gi, '')
     .replace(/\[Attached[^\]]*\]\s*/gi, '')
     .replace(/^\[(?:MODE|Think Harder)[^\]]*\]\s*/gi, '')
@@ -206,9 +214,9 @@ export function resolveMessageSourcesAndQueries(options: {
 
   // If no explicit URLs were embedded in the markdown, provide specific verifiable reference URLs
   // for the query/topic so the 'Show Sources' toggle always reveals actionable URLs.
-  if (sources.length === 0 && (cleanPrompt || assistantContent.trim())) {
-    const primaryQuery = searchQueries[0] || cleanPrompt || assistantContent.slice(0, 60).trim();
-    const lowerTopic = `${cleanPrompt} ${assistantContent.slice(0, 200)}`.toLowerCase();
+  if (sources.length === 0 && (cleanPrompt || safeAssistantContent.trim())) {
+    const primaryQuery = searchQueries[0] || cleanPrompt || safeAssistantContent.slice(0, 60).trim();
+    const lowerTopic = `${cleanPrompt} ${safeAssistantContent.slice(0, 200)}`.toLowerCase();
 
     if (/\bnvidia\b/.test(lowerTopic)) {
       addSource('NVIDIA Corporation — Official Site & AI Computing', 'https://www.nvidia.com');
@@ -296,11 +304,11 @@ export function SourceCitations({
         >
           {/* Overlapping favicon stack */}
           {sources.length > 0 ? (
-            <span className="flex items-center -space-x-1.5 mr-0.5">
+            <span className="flex items-center -space-x-1.5 group-hover:-space-x-0.5 transition-all duration-200 mr-0.5">
               {sources.slice(0, 3).map((src, idx) => (
                 <span
                   key={`${src.url}-${idx}`}
-                  className="w-4 h-4 rounded-full overflow-hidden bg-muted border border-background flex items-center justify-center shrink-0"
+                  className="w-4 h-4 rounded-full overflow-hidden bg-muted border border-background flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-105"
                 >
                   {src.favicon ? (
                     <img
@@ -360,7 +368,7 @@ export function SourceCitations({
       {isExpanded && (
         <div
           data-testid="sources-panel"
-          className="mt-2.5 p-3.5 rounded-2xl border border-border/60 bg-card/60 dark:bg-card/40 backdrop-blur-xs space-y-3.5 animate-in fade-in slide-in-from-top-1 duration-200"
+          className="manus-sources-drawer-enter mt-2.5 p-3.5 rounded-2xl border border-border/60 bg-card/60 dark:bg-card/40 backdrop-blur-xs space-y-3.5"
         >
           {/* Section 1: Underlying Web Search Queries */}
           {searchQueries.length > 0 && (
@@ -373,11 +381,12 @@ export function SourceCitations({
                 {searchQueries.map((query, qIdx) => (
                   <a
                     key={`${query}-${qIdx}`}
+                    style={{ animationDelay: `${qIdx * 40}ms` }}
                     href={`https://www.google.com/search?q=${encodeURIComponent(query)}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     title={`Search Google for "${query}"`}
-                    className="group inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border/60 bg-background/80 hover:bg-background hover:border-primary/40 text-xs text-foreground/90 hover:text-primary transition-all"
+                    className="manus-source-item-enter group inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border/60 bg-background/80 hover:bg-background hover:border-primary/40 hover:-translate-y-0.5 text-xs text-foreground/90 hover:text-primary transition-all"
                   >
                     <Search size={11} className="text-muted-foreground group-hover:text-primary shrink-0" />
                     <span className="font-mono text-[11px] break-all">{query}</span>
@@ -400,7 +409,8 @@ export function SourceCitations({
                 {sources.map((src, index) => (
                   <div
                     key={`${src.url}-${index}`}
-                    className="group flex items-center justify-between gap-2.5 p-2.5 rounded-xl border border-border/60 bg-background/80 hover:bg-background hover:border-primary/40 transition-all shadow-2xs"
+                    style={{ animationDelay: `${(searchQueries.length + index) * 40}ms` }}
+                    className="manus-source-item-enter group flex items-center justify-between gap-2.5 p-2.5 rounded-xl border border-border/60 bg-background/80 hover:bg-background hover:border-primary/40 hover:-translate-y-0.5 transition-all shadow-2xs"
                   >
                     <a
                       href={src.url}

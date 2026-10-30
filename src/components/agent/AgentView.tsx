@@ -17,6 +17,8 @@ import { gsap } from 'gsap';
 import { ChartResult } from './ChartResult';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ConversationActionBar } from './ConversationActionBar';
+import { ExportChatDropdown } from './ExportChatDropdown';
+import { ChatExportFormat } from '@/lib/chatExport';
 
 interface AgentViewProps {
   prompt: string;
@@ -25,7 +27,7 @@ interface AgentViewProps {
   result?: any;
   status: 'running' | 'completed' | 'error';
   onReset: () => void;
-  onExport?: () => void;
+  onExport?: (format?: ChatExportFormat) => void;
   options: any;
   chartData?: any;
 }
@@ -77,13 +79,16 @@ export function AgentView({ prompt, steps, onReorderSteps, result, status, onRes
         <div className="flex items-center gap-3">
           {status === 'completed' && (
             <>
-              <button 
-                onClick={onExport}
-                className="flex items-center gap-2 px-4 py-2 rounded-full border border-border bg-white text-xs font-medium hover:bg-manus-soft transition-all shadow-sm hover:shadow"
-              >
-                <Download size={14} />
-                Export
-              </button>
+              <ExportChatDropdown
+                onExport={onExport ? (format) => onExport(format) : undefined}
+                sessionData={{
+                  prompt,
+                  steps,
+                  result,
+                  status,
+                  format: options?.format,
+                }}
+              />
               <button 
                 onClick={() => setShowSettings(!showSettings)}
                 className={cn(

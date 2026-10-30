@@ -20,13 +20,13 @@ export function ManusLogo({ showBadge = false, onClick }: { showBadge?: boolean;
       role="button"
       tabIndex={0}
     >
-      <div className="w-8 h-8 rounded-full bg-card border border-border/60 flex items-center justify-center shadow-xs">
+      <div className="w-8 h-8 rounded-full bg-card border border-[#E5E5E5] dark:border-neutral-800 flex items-center justify-center shadow-xs text-[#000000] dark:text-[#FFFFFF]">
         <Logo size={16} />
       </div>
       <div className="flex items-center gap-2">
-        <span className="font-serif font-bold text-foreground">manus</span>
+        <span className="font-serif font-bold text-[#000000] dark:text-[#FFFFFF]">manus</span>
         {showBadge && (
-          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-border/30 text-muted-foreground border border-border/50">
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-[#F3F4F6] dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 border border-[#E5E5E5] dark:border-neutral-700">
             Lite
           </span>
         )}

@@ -35,9 +35,10 @@ import { blink } from '@/lib/blink';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { syncTasksToLibrary, getLibraryItems } from '@/lib/libraryStore';
-import { listConversations, deleteConversation, exportAllChatHistory, recoverChatHistory, getAllMessages } from '@/lib/chatDatabase';
+import { listConversations, deleteConversation, exportAllChatHistory, recoverChatHistory, getAllMessages, getMessages } from '@/lib/chatDatabase';
 import { classifyTaskTags, getTagStyle, getAvailableTags, TaskTag } from '@/lib/taskTaggingService';
 import { getTagColorHex, TagSummaryMetric } from '@/lib/tagAnalyticsService';
+import { generateSessionSummary, getStoredSessionSummaries, removeSessionSummary } from '@/lib/sessionSummaryService';
 import { D3TagBarChart } from '@/components/analytics/D3TagBarChart';
 import { TagAnalyticsModal } from '@/components/analytics/TagAnalyticsModal';
 import { TaskQuickPreviewCard } from './TaskQuickPreviewCard';
@@ -84,6 +85,7 @@ export interface TaskHistoryItem {
   mode?: string;
   content?: string;
   tags?: string[];
+  summary?: string;
 }
 
 export interface VoiceHistoryRecord {
@@ -285,6 +287,7 @@ export function filterTasks(
     const title = (task.title || '').toLowerCase();
     const prompt = (task.prompt || '').toLowerCase();
     const content = (task.content || '').toLowerCase();
+    const summary = (task.summary || '').toLowerCase();
     const status = (task.status || '').toLowerCase();
     const mode = ((task as any).mode || '').toLowerCase();
     const tagsStr = (Array.isArray(task.tags) ? task.tags.join(' ') : '').toLowerCase();
@@ -302,6 +305,7 @@ export function filterTasks(
       title.includes(q) ||
       prompt.includes(q) ||
       content.includes(q) ||
+      summary.includes(q) ||
       status.includes(q) ||
       mode.includes(q) ||
       tagsStr.includes(q) ||
@@ -374,10 +378,26 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+  const [sessionSummaries, setSessionSummaries] = useState<Record<string, string>>(() => getStoredSessionSummaries());
+  const [summarizingIds, setSummarizingIds] = useState<Record<string, boolean>>({});
+  const [copiedSummaryId, setCopiedSummaryId] = useState<string | null>(null);
+  const [collapsedSummaryIds, setCollapsedSummaryIds] = useState<Record<string, boolean>>({});
+  const [isBatchSummarizing, setIsBatchSummarizing] = useState(false);
+  const [batchSummaryProgress, setBatchSummaryProgress] = useState<{ completed: number; total: number } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const handleSummariesUpdated = () => {
+      setSessionSummaries(getStoredSessionSummaries());
+    };
+    window.addEventListener('manus_session_summaries_updated', handleSummariesUpdated);
+    return () => {
+      window.removeEventListener('manus_session_summaries_updated', handleSummariesUpdated);
+    };
+  }, []);
 
   // Load library & task data whenever panel opens; reset selection when closed
   useEffect(() => {
@@ -385,6 +405,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
       if (initialTab) {
         setActiveTab(initialTab);
       }
+      setSessionSummaries(getStoredSessionSummaries());
       loadLibraryData();
     } else {
       setSelectedTaskIds(new Set());
@@ -611,6 +632,133 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
     onClose();
   };
 
+  const handleGenerateSessionSummary = async (task: TaskHistoryItem, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    if (summarizingIds[task.id]) return;
+
+    setSummarizingIds((prev) => ({ ...prev, [task.id]: true }));
+    try {
+      let messages: Array<{ role: string; content: string }> = [];
+      try {
+        const storedMsgs = await getMessages(task.id);
+        if (Array.isArray(storedMsgs) && storedMsgs.length > 0) {
+          messages = storedMsgs.map((m) => ({
+            role: m.role,
+            content: m.content,
+          }));
+        }
+      } catch {}
+
+      const summary = await generateSessionSummary({
+        id: task.id,
+        title: formatTitle(task),
+        prompt: task.prompt,
+        content: task.content,
+        messages,
+      });
+
+      setSessionSummaries((prev) => ({ ...prev, [task.id]: summary }));
+      setCollapsedSummaryIds((prev) => ({ ...prev, [task.id]: false }));
+      setTasks((prev) =>
+        prev.map((t) => (t.id === task.id ? { ...t, summary } : t))
+      );
+      try {
+        await (blink.db as any).tasks.update(task.id, { summary });
+      } catch {}
+      toast.success('Generated session summary');
+    } catch (err) {
+      console.error('Failed to generate session summary:', err);
+      toast.error('Failed to generate summary');
+    } finally {
+      setSummarizingIds((prev) => ({ ...prev, [task.id]: false }));
+    }
+  };
+
+  const handleCopySessionSummary = (taskId: string, summaryText: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    navigator.clipboard.writeText(summaryText);
+    setCopiedSummaryId(taskId);
+    toast.success('Summary copied to clipboard');
+    setTimeout(() => {
+      setCopiedSummaryId((prev) => (prev === taskId ? null : prev));
+    }, 1800);
+  };
+
+  const handleClearSessionSummary = (taskId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const updated = removeSessionSummary(taskId);
+    setSessionSummaries(updated);
+    setTasks((prev) =>
+      prev.map((t) => (t.id === taskId ? { ...t, summary: undefined } : t))
+    );
+    toast.info('Session summary cleared');
+  };
+
+  const handleToggleCollapseSummary = (taskId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setCollapsedSummaryIds((prev) => ({
+      ...prev,
+      [taskId]: !prev[taskId],
+    }));
+  };
+
+  const handleBatchSummarizeTasks = async (targetTasks: TaskHistoryItem[]) => {
+    if (isBatchSummarizing || targetTasks.length === 0) return;
+    const unsummarized = targetTasks.filter((t) => !(sessionSummaries[t.id] || t.summary));
+    const queue = unsummarized.length > 0 ? unsummarized : targetTasks;
+
+    setIsBatchSummarizing(true);
+    setBatchSummaryProgress({ completed: 0, total: queue.length });
+
+    let completedCount = 0;
+    try {
+      for (const task of queue) {
+        setSummarizingIds((prev) => ({ ...prev, [task.id]: true }));
+        try {
+          let messages: Array<{ role: string; content: string }> = [];
+          try {
+            const storedMsgs = await getMessages(task.id);
+            if (Array.isArray(storedMsgs) && storedMsgs.length > 0) {
+              messages = storedMsgs.map((m) => ({ role: m.role, content: m.content }));
+            }
+          } catch {}
+
+          const summary = await generateSessionSummary({
+            id: task.id,
+            title: formatTitle(task),
+            prompt: task.prompt,
+            content: task.content,
+            messages,
+          });
+          setSessionSummaries((prev) => ({ ...prev, [task.id]: summary }));
+          setCollapsedSummaryIds((prev) => ({ ...prev, [task.id]: false }));
+          setTasks((prev) =>
+            prev.map((t) => (t.id === task.id ? { ...t, summary } : t))
+          );
+          try {
+            await (blink.db as any).tasks.update(task.id, { summary });
+          } catch {}
+        } finally {
+          setSummarizingIds((prev) => ({ ...prev, [task.id]: false }));
+          completedCount += 1;
+          setBatchSummaryProgress({ completed: completedCount, total: queue.length });
+        }
+      }
+      toast.success(`Generated summaries for ${completedCount} session(s)`);
+    } catch (err) {
+      toast.error('Failed to summarize some sessions');
+    } finally {
+      setIsBatchSummarizing(false);
+      setBatchSummaryProgress(null);
+    }
+  };
+
   const handleDeleteTask = (taskId: string, e?: React.MouseEvent, title?: string) => {
     if (e) e.stopPropagation();
     const targetTask = tasks.find(t => t.id === taskId);
@@ -832,9 +980,16 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
     });
   }, [libraryItems, searchQuery, activeTab, dateFilter, startDate, endDate]);
 
+  const tasksWithSummaries = useMemo(() => {
+    return tasks.map((t) => ({
+      ...t,
+      summary: sessionSummaries[t.id] || t.summary,
+    }));
+  }, [tasks, sessionSummaries]);
+
   const filteredTasks = useMemo(() => {
-    return filterTasks(tasks, searchQuery, dateFilter, startDate, endDate, new Date(), selectedTagFilter);
-  }, [tasks, searchQuery, dateFilter, startDate, endDate, selectedTagFilter]);
+    return filterTasks(tasksWithSummaries, searchQuery, dateFilter, startDate, endDate, new Date(), selectedTagFilter);
+  }, [tasksWithSummaries, searchQuery, dateFilter, startDate, endDate, selectedTagFilter]);
 
   // Compute tag summaries for the D3 visualization bars based on active date range & search filter
   const inlineTagSummaries: TagSummaryMetric[] = useMemo(() => {
@@ -906,28 +1061,28 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
     <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <SheetContent 
         side="right" 
-        className="w-full sm:max-w-xl p-0 flex flex-col h-full bg-background border-l border-border shadow-2xl z-50 overflow-hidden"
+        className="w-full max-w-[100vw] sm:max-w-xl p-0 flex flex-col h-full h-[100dvh] max-h-[100dvh] bg-background border-l border-border shadow-2xl z-50 overflow-hidden"
       >
         {/* Top Header - History & Library */}
-        <div className="p-5 pb-3 border-b border-border bg-manus-soft dark:bg-card/40">
+        <div className="p-3.5 sm:p-5 pb-3 border-b border-border bg-manus-soft dark:bg-card/40 shrink-0">
           <SheetHeader className="text-left space-y-1">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center shadow-xs">
-                  <Clock size={20} />
+            <div className="flex items-center justify-between gap-2 pr-7 sm:pr-8">
+              <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center shadow-xs shrink-0">
+                  <Clock size={18} />
                 </div>
-                <div>
-                  <SheetTitle className="text-lg font-bold text-foreground tracking-tight">
+                <div className="min-w-0">
+                  <SheetTitle className="text-base sm:text-lg font-bold text-foreground tracking-tight truncate">
                     History & Library
                   </SheetTitle>
-                  <SheetDescription className="text-xs text-muted-foreground">
+                  <SheetDescription className="text-[11px] sm:text-xs text-muted-foreground line-clamp-1">
                     Search and filter past tasks, chat sessions & media
                   </SheetDescription>
                 </div>
               </div>
 
               {/* Upload to Library Button */}
-              <div className="mr-8 sm:mr-9 mt-1.5">
+              <div className="shrink-0">
                 <input 
                   type="file" 
                   ref={fileInputRef}
@@ -938,7 +1093,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary text-primary-foreground font-medium text-xs shadow-xs hover:opacity-90 transition-all cursor-pointer"
+                  className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-primary text-primary-foreground font-medium text-xs shadow-xs hover:opacity-90 transition-all cursor-pointer shrink-0"
                 >
                   <Plus size={14} />
                   <span>Add File</span>
@@ -1323,21 +1478,21 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
             onValueChange={(val: any) => setActiveTab(val)} 
             className="flex-1 flex flex-col min-h-0"
           >
-            <div className="px-5 pt-3 pb-2 flex items-center justify-between border-b border-border/60 gap-2">
-              <TabsList className="bg-manus-soft dark:bg-muted/50 p-1 rounded-xl h-9 gap-1 overflow-x-auto">
-                <TabsTrigger value="sessions" className="text-xs px-2.5 py-1 rounded-lg font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
+            <div className="px-3.5 sm:px-5 pt-2.5 sm:pt-3 pb-2 flex items-center justify-between border-b border-border/60 gap-2 min-w-0">
+              <TabsList className="bg-manus-soft dark:bg-muted/50 p-1 rounded-xl h-9 gap-1 overflow-x-auto no-scrollbar max-w-full justify-start">
+                <TabsTrigger value="sessions" className="text-xs px-2 sm:px-2.5 py-1 rounded-lg font-medium shrink-0 data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
                   Past Tasks ({tasks.length})
                 </TabsTrigger>
-                <TabsTrigger value="all" className="text-xs px-2.5 py-1 rounded-lg font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
+                <TabsTrigger value="all" className="text-xs px-2 sm:px-2.5 py-1 rounded-lg font-medium shrink-0 data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
                   All Items
                 </TabsTrigger>
-                <TabsTrigger value="photos" className="text-xs px-2.5 py-1 rounded-lg font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
+                <TabsTrigger value="photos" className="text-xs px-2 sm:px-2.5 py-1 rounded-lg font-medium shrink-0 data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
                   Photos
                 </TabsTrigger>
-                <TabsTrigger value="videos" className="text-xs px-2.5 py-1 rounded-lg font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
+                <TabsTrigger value="videos" className="text-xs px-2 sm:px-2.5 py-1 rounded-lg font-medium shrink-0 data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
                   Videos
                 </TabsTrigger>
-                <TabsTrigger value="docs" className="text-xs px-2.5 py-1 rounded-lg font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
+                <TabsTrigger value="docs" className="text-xs px-2 sm:px-2.5 py-1 rounded-lg font-medium shrink-0 data-[state=active]:bg-white dark:data-[state=active]:bg-card shadow-2xs">
                   Docs & Files
                 </TabsTrigger>
               </TabsList>
@@ -1642,6 +1797,34 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
 
                     <div className="flex items-center gap-1.5">
                       <button
+                        type="button"
+                        data-testid="summarize-selected-sessions-btn"
+                        onClick={() =>
+                          handleBatchSummarizeTasks(
+                            filteredTasks.filter((t) => selectedTaskIds.has(t.id))
+                          )
+                        }
+                        disabled={selectedTaskIds.size === 0 || isBatchSummarizing}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary text-primary-foreground hover:opacity-90 text-[11px] font-semibold transition-all cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed"
+                        title="Generate AI summaries for selected sessions"
+                      >
+                        {isBatchSummarizing ? (
+                          <>
+                            <Loader2 size={12} className="animate-spin" />
+                            <span>
+                              {batchSummaryProgress
+                                ? `${batchSummaryProgress.completed}/${batchSummaryProgress.total}`
+                                : 'Summarizing...'}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={12} />
+                            <span>Summarize ({selectedTaskIds.size})</span>
+                          </>
+                        )}
+                      </button>
+                      <button
                         onClick={() => setShowBulkDeleteDialog(true)}
                         disabled={selectedTaskIds.size === 0}
                         className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-500 hover:bg-red-600 text-white text-[11px] font-semibold transition-all cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1673,13 +1856,39 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                         )}
                       </span>
                     </div>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                      {filteredTasks.length > 0 && (
+                        <button
+                          type="button"
+                          data-testid="summarize-all-sessions-btn"
+                          onClick={() => handleBatchSummarizeTasks(filteredTasks)}
+                          disabled={isBatchSummarizing}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary hover:text-primary-foreground text-primary border border-primary/20 text-[11px] font-semibold transition-all cursor-pointer shadow-2xs disabled:opacity-60 disabled:cursor-wait"
+                          title="Generate one-sentence summaries for visible sessions"
+                        >
+                          {isBatchSummarizing ? (
+                            <>
+                              <Loader2 size={12} className="animate-spin" />
+                              <span>
+                                {batchSummaryProgress
+                                  ? `Summarizing ${batchSummaryProgress.completed}/${batchSummaryProgress.total}`
+                                  : 'Summarizing...'}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles size={12} />
+                              <span>Summarize All</span>
+                            </>
+                          )}
+                        </button>
+                      )}
                       {filteredTasks.length > 0 && (
                         <button
                           type="button"
                           onClick={() => setIsSelectionMode(true)}
                           className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-background hover:bg-muted text-foreground border border-border/60 text-[11px] font-semibold transition-all cursor-pointer shadow-2xs"
-                          title="Select multiple tasks to delete"
+                          title="Select multiple tasks to summarize or delete"
                         >
                           <CheckSquare size={12} className="text-primary" />
                           <span>Select</span>
@@ -1773,6 +1982,8 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                       <div className="space-y-2">
                         {group.tasks.map((task) => {
                           const isSelected = selectedTaskIds.has(task.id);
+                          const isSummarizing = Boolean(summarizingIds[task.id]);
+                          const activeSummary = sessionSummaries[task.id] || task.summary;
                           const cardContent = (
                             <div
                               onClick={(e) => {
@@ -1834,6 +2045,62 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                                   <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
                                     {task.prompt}
                                   </p>
+
+                                  {activeSummary && (
+                                    <div
+                                      data-testid={`session-summary-${task.id}`}
+                                      data-no-swipe
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="mt-1.5 p-2 rounded-xl bg-primary/5 dark:bg-primary/10 border border-primary/20 text-[11px] text-foreground leading-relaxed animate-in fade-in duration-200"
+                                    >
+                                      <div className="flex items-center justify-between gap-2 mb-1">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => handleToggleCollapseSummary(task.id, e)}
+                                          className="inline-flex items-center gap-1 text-[10px] font-semibold text-primary hover:underline cursor-pointer"
+                                          title={collapsedSummaryIds[task.id] ? 'Show summary' : 'Hide summary'}
+                                        >
+                                          <Sparkles size={11} className="text-primary shrink-0" />
+                                          <span>AI Summary</span>
+                                          <span className="text-[9px] text-muted-foreground font-normal">
+                                            ({collapsedSummaryIds[task.id] ? 'Expand' : 'Hide'})
+                                          </span>
+                                        </button>
+                                        <div className="flex items-center gap-1">
+                                          <button
+                                            type="button"
+                                            data-testid={`copy-summary-btn-${task.id}`}
+                                            onClick={(e) => handleCopySessionSummary(task.id, activeSummary, e)}
+                                            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-background/80 transition-colors cursor-pointer"
+                                            title="Copy summary"
+                                            aria-label="Copy summary"
+                                          >
+                                            {copiedSummaryId === task.id ? (
+                                              <Check size={11} className="text-emerald-500" />
+                                            ) : (
+                                              <Copy size={11} />
+                                            )}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            data-testid={`clear-summary-btn-${task.id}`}
+                                            onClick={(e) => handleClearSessionSummary(task.id, e)}
+                                            className="p-1 rounded-md text-muted-foreground hover:text-rose-500 hover:bg-background/80 transition-colors cursor-pointer"
+                                            title="Clear summary"
+                                            aria-label="Clear summary"
+                                          >
+                                            <X size={11} />
+                                          </button>
+                                        </div>
+                                      </div>
+                                      {!collapsedSummaryIds[task.id] && (
+                                        <p className="text-[11px] text-foreground/90 leading-relaxed">
+                                          {activeSummary}
+                                        </p>
+                                      )}
+                                    </div>
+                                  )}
+
                                   {searchQuery.trim() && task.content && !formatTitle(task).toLowerCase().includes(searchQuery.toLowerCase().trim()) && !task.prompt?.toLowerCase().includes(searchQuery.toLowerCase().trim()) && (
                                     <div className="text-[10px] text-primary bg-primary/5 dark:bg-primary/10 border border-primary/20 rounded-lg px-2 py-0.5 line-clamp-1 font-mono">
                                       <span className="font-semibold">Match in content:</span> "{getContentSnippet(task.content, searchQuery)}"
@@ -1841,15 +2108,46 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                                   )}
                                 </div>
 
-                                {/* Delete single session button - only when not in selection mode */}
+                                {/* Session Actions: Generate Summary & Delete */}
                                 {!isSelectionMode && (
-                                  <button
-                                    onClick={(e) => handleDeleteTask(task.id, e, formatTitle(task))}
-                                    className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
-                                    title="Delete session"
-                                  >
-                                    <Trash2 size={13} />
-                                  </button>
+                                  <div className="flex items-center gap-1 shrink-0" data-no-swipe>
+                                    <button
+                                      type="button"
+                                      data-testid={`generate-summary-btn-${task.id}`}
+                                      data-action="generate-summary"
+                                      disabled={isSummarizing}
+                                      onClick={(e) => handleGenerateSessionSummary(task, e)}
+                                      className={cn(
+                                        "inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[10px] font-semibold transition-all cursor-pointer shadow-2xs disabled:opacity-60 disabled:cursor-wait",
+                                        activeSummary
+                                          ? "bg-primary/10 border-primary/30 text-primary hover:bg-primary/15"
+                                          : "bg-background hover:bg-primary/10 border-border/80 hover:border-primary/40 text-foreground hover:text-primary"
+                                      )}
+                                      title="Generate a one-sentence AI summary of this session"
+                                      aria-label="Generate Summary"
+                                    >
+                                      {isSummarizing ? (
+                                        <>
+                                          <Loader2 size={11} className="animate-spin text-primary shrink-0" />
+                                          <span>Summarizing...</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Sparkles size={11} className="text-primary shrink-0" />
+                                          <span>Generate Summary</span>
+                                        </>
+                                      )}
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleDeleteTask(task.id, e, formatTitle(task))}
+                                      className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
+                                      title="Delete session"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  </div>
                                 )}
                               </div>
                             </div>

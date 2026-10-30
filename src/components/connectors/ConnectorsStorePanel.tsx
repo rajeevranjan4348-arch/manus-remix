@@ -64,7 +64,7 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
     desc: 'Read, search, draft, reply to, and send emails directly with Gmail',
     category: 'workspace',
     icon: Mail,
-    iconBg: 'bg-red-500/10 text-red-500',
+    iconBg: 'bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF]',
     isWorkspaceAuth: true,
   },
   {
@@ -73,7 +73,7 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
     desc: 'Fetch schedule, search events, check availability, and schedule meetings',
     category: 'workspace',
     icon: Calendar,
-    iconBg: 'bg-blue-500/10 text-blue-500',
+    iconBg: 'bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF]',
     isWorkspaceAuth: true,
   },
   {
@@ -82,7 +82,7 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
     desc: 'Browse, search, upload, create folders, share, and manage Google Drive files',
     category: 'workspace',
     icon: HardDrive,
-    iconBg: 'bg-emerald-500/10 text-emerald-500',
+    iconBg: 'bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF]',
     isWorkspaceAuth: true,
   },
   {
@@ -91,7 +91,7 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
     desc: 'Read, create, format, write, and append text to Google Docs documents',
     category: 'workspace',
     icon: FileText,
-    iconBg: 'bg-blue-600/10 text-blue-600',
+    iconBg: 'bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF]',
     isWorkspaceAuth: true,
   },
   {
@@ -100,7 +100,7 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
     desc: 'Create, read, append data, and update cells and formulas in Google Sheets',
     category: 'workspace',
     icon: FileSpreadsheet,
-    iconBg: 'bg-emerald-600/10 text-emerald-600',
+    iconBg: 'bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF]',
     isWorkspaceAuth: true,
   },
   {
@@ -109,7 +109,7 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
     desc: 'Create slide decks, read presentation text, and append new slides',
     category: 'workspace',
     icon: Presentation,
-    iconBg: 'bg-amber-600/10 text-amber-600',
+    iconBg: 'bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF]',
     isWorkspaceAuth: true,
   },
   {
@@ -118,7 +118,7 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
     desc: 'Track to-dos, create tasks, set due dates, and mark tasks completed',
     category: 'workspace',
     icon: CheckSquare,
-    iconBg: 'bg-amber-500/10 text-amber-500',
+    iconBg: 'bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF]',
     isWorkspaceAuth: true,
   },
   {
@@ -127,7 +127,7 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
     desc: 'Create surveys and forms, add questions, and inspect respondent submissions',
     category: 'workspace',
     icon: FileCheck,
-    iconBg: 'bg-purple-600/10 text-purple-600',
+    iconBg: 'bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF]',
     isWorkspaceAuth: true,
   },
   {
@@ -136,7 +136,7 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
     desc: 'Search address book, create contacts, and manage colleagues details',
     category: 'workspace',
     icon: Contact,
-    iconBg: 'bg-cyan-600/10 text-cyan-600',
+    iconBg: 'bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF]',
     isWorkspaceAuth: true,
   },
   {
@@ -145,7 +145,7 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
     desc: 'List spaces and rooms, and post messages directly to Google Chat',
     category: 'workspace',
     icon: MessageCircle,
-    iconBg: 'bg-green-600/10 text-green-600',
+    iconBg: 'bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF]',
     isWorkspaceAuth: true,
   },
   {
@@ -154,7 +154,7 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
     desc: 'Schedule video calls and generate instant Google Meet links',
     category: 'workspace',
     icon: Video,
-    iconBg: 'bg-emerald-500/10 text-emerald-500',
+    iconBg: 'bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF]',
     isWorkspaceAuth: true,
   },
   {
@@ -163,7 +163,7 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
     desc: 'Capture quick notes, thoughts, and memos synced with your account',
     category: 'workspace',
     icon: StickyNote,
-    iconBg: 'bg-yellow-500/10 text-yellow-500',
+    iconBg: 'bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF]',
     isWorkspaceAuth: true,
   },
   {
@@ -172,7 +172,7 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
     desc: 'Real-time live internet search & fact verification',
     category: 'agent',
     icon: Globe,
-    iconBg: 'bg-indigo-500/10 text-indigo-500',
+    iconBg: 'bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF]',
     defaultEnabled: true,
   },
   {
@@ -181,7 +181,7 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
     desc: 'Execute code scripts, process datasets, and generate output files',
     category: 'agent',
     icon: Terminal,
-    iconBg: 'bg-cyan-500/10 text-cyan-500',
+    iconBg: 'bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF]',
     defaultEnabled: true,
   },
   {
@@ -190,7 +190,7 @@ export const CONNECTOR_CATALOG: ConnectorItem[] = [
     desc: 'Render interactive graphs, charts, and data visualizers',
     category: 'agent',
     icon: BarChart2,
-    iconBg: 'bg-purple-500/10 text-purple-500',
+    iconBg: 'bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF]',
     defaultEnabled: true,
   }
 ];
@@ -281,23 +281,23 @@ export function ConnectorsStorePanel({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl bg-card border-border/80 text-foreground p-0 overflow-hidden shadow-2xl rounded-3xl h-[85vh] flex flex-col">
+      <DialogContent className="max-w-2xl w-[calc(100vw-1rem)] sm:w-full bg-card border-border/80 text-foreground p-0 overflow-hidden shadow-2xl rounded-2xl sm:rounded-3xl h-[min(85dvh,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] flex flex-col">
         {/* Header */}
-        <div className="p-5 border-b border-border/60 bg-muted/20 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
+        <div className="p-3.5 sm:p-5 pr-10 border-b border-border/60 bg-muted/20 flex flex-wrap items-center justify-between gap-2.5 shrink-0 min-w-0">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
             <button 
               onClick={onClose}
-              className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
+              className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors shrink-0"
               title="Back"
             >
               <ArrowLeft size={18} />
             </button>
-            <div>
-              <DialogTitle className="text-lg font-bold flex items-center gap-2">
-                <Plug className="text-primary" size={20} />
-                <span>Connectors & Plugins</span>
+            <div className="min-w-0">
+              <DialogTitle className="text-base sm:text-lg font-bold flex items-center gap-2 truncate">
+                <Plug className="text-primary shrink-0" size={18} />
+                <span className="truncate">Connectors & Plugins</span>
               </DialogTitle>
-              <DialogDescription className="text-xs text-muted-foreground">
+              <DialogDescription className="text-xs text-muted-foreground line-clamp-2">
                 Connect Google Workspace, agent capabilities, and third-party tools
               </DialogDescription>
             </div>
@@ -305,10 +305,10 @@ export function ConnectorsStorePanel({
 
           {/* Google Connection Status Banner */}
           {workspaceConnected ? (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
-              <ShieldCheck size={14} />
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#F2F2F2] dark:bg-[#111111] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] text-xs font-medium max-w-full">
+              <ShieldCheck size={14} className="shrink-0" />
               <span className="truncate max-w-[130px] sm:max-w-[180px]">{userEmail || 'Google Connected'}</span>
-              <button onClick={handleDisconnectGoogleWorkspace} className="p-1 hover:bg-emerald-500/20 rounded-md" title="Disconnect Google">
+              <button onClick={handleDisconnectGoogleWorkspace} className="p-1 hover:bg-[#E0E0E0] dark:hover:bg-[#333333] rounded-md shrink-0" title="Disconnect Google">
                 <LogOut size={12} />
               </button>
             </div>
@@ -316,16 +316,16 @@ export function ConnectorsStorePanel({
             <button
               onClick={handleConnectGoogleWorkspace}
               disabled={isConnectingGoogle}
-              className="gsi-material-button inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-foreground text-background font-semibold text-xs hover:opacity-90 transition-opacity cursor-pointer shadow-xs"
+              className="gsi-material-button inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] font-semibold text-xs hover:opacity-90 transition-opacity cursor-pointer shadow-xs shrink-0"
             >
               {isConnectingGoogle ? (
                 <RefreshCw size={13} className="animate-spin" />
               ) : (
-                <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-3.5 h-3.5">
-                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
+                <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-3.5 h-3.5 shrink-0">
+                  <path fill="currentColor" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
+                  <path fill="currentColor" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
+                  <path fill="currentColor" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
+                  <path fill="currentColor" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
                 </svg>
               )}
               <span>Connect Google Workspace</span>
@@ -334,7 +334,7 @@ export function ConnectorsStorePanel({
         </div>
 
         {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-3.5 sm:p-5 space-y-5 sm:space-y-6 custom-scrollbar min-h-0">
           {/* INSTALLED / ENABLED CONNECTORS ROW (Matches Reference Image 2) */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -399,7 +399,7 @@ export function ConnectorsStorePanel({
                         <div className="flex items-center gap-1.5">
                           <h4 className="font-semibold text-sm text-foreground truncate">{item.name}</h4>
                           {item.isWorkspaceAuth && workspaceConnected && (
-                            <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[9px] font-semibold border border-emerald-500/20">
+                            <span className="px-1.5 py-0.2 rounded-full bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF] text-[9px] font-semibold border border-[#E0E0E0] dark:border-[#333333]">
                               Synced
                             </span>
                           )}

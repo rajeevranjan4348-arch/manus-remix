@@ -52,15 +52,15 @@ export function formatDateKey(date: Date): string {
  */
 export function getTagColorHex(tag: TaskTag): string {
   const map: Record<TaskTag, string> = {
-    Research: '#3b82f6', // blue
-    Coding: '#10b981',   // emerald
-    Analysis: '#a855f7', // purple
-    Design: '#f43f5e',   // rose
-    Writing: '#f59e0b',  // amber
-    Automation: '#06b6d4',// cyan
-    General: '#64748b',  // slate
+    Research: '#000000',
+    Coding: '#111111',
+    Analysis: '#333333',
+    Design: '#555555',
+    Writing: '#777777',
+    Automation: '#999999',
+    General: '#AAAAAA',
   };
-  return map[tag] || '#64748b';
+  return map[tag] || '#777777';
 }
 
 /**

@@ -1,17 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { ChevronDown, PanelLeft, Check, Sparkles, Zap, Brain, Cpu, MessageSquare, Briefcase, Settings2, SquarePen, MoreVertical, FileText, History } from 'lucide-react';
+import { ChevronDown, PanelLeft, Check, Sparkles, Zap, Brain, Cpu, MessageSquare, Briefcase, Settings2, SquarePen, MoreVertical, FileText, FileCode, Braces, History } from 'lucide-react';
 import { RobotHead } from 'robot-heads';
 import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
 import { getSettings } from '@/lib/settingsStore';
+import { ChatExportFormat } from '@/lib/chatExport';
 
 interface TopbarProps {
   onToggleSidebar?: () => void;
   onOpenHistory?: () => void;
   onNewTask?: () => void;
   onOpenSettings?: () => void;
-  onExport?: () => void;
+  onExport?: (format?: ChatExportFormat) => void;
   showNewTask?: boolean;
 }
 
@@ -167,21 +167,21 @@ export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistor
         <div className="absolute left-1/2 -translate-x-1/2 z-20 flex items-center gap-2.5" ref={dropdownRef}>
           <button
             onClick={() => setIsOpen(!isOpen)}
-            className="flex items-center gap-2 bg-white/80 dark:bg-card/90 backdrop-blur-md border border-border/80 hover:border-foreground/20 px-3.5 py-1.5 rounded-full shadow-xs hover:shadow-md hover:scale-[1.03] active:scale-[0.98] transition-all duration-200 cursor-pointer text-foreground group"
+            className="flex items-center gap-2 bg-[#FFFFFF] dark:bg-[#171717] backdrop-blur-md border border-[#E0E0E0] dark:border-[#333333] hover:border-[#000000] dark:hover:border-[#FFFFFF] px-3.5 py-1.5 rounded-full shadow-xs hover:shadow-md hover:scale-[1.03] active:scale-[0.98] transition-all duration-200 cursor-pointer text-[#000000] dark:text-[#FFFFFF] group"
             title="Select AI Model"
           >
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+            <span className="w-2 h-2 rounded-full bg-[#000000] dark:bg-[#FFFFFF] animate-pulse shrink-0" />
             <span className="text-sm font-semibold tracking-tight">{currentModel.name}</span>
-            <ChevronDown size={16} strokeWidth={2.4} className={`text-muted-foreground transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+            <ChevronDown size={16} strokeWidth={2.4} className={`text-[#777777] dark:text-[#AAAAAA] transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
           </button>
 
           {/* Subtle Typing Indicator Chip */}
           {isGenerating && (
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-500/10 dark:bg-emerald-950/60 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 rounded-full text-xs font-medium animate-in fade-in zoom-in-95 duration-200 shadow-xs backdrop-blur-sm shrink-0">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] rounded-full text-xs font-medium animate-in fade-in zoom-in-95 duration-200 shadow-xs backdrop-blur-sm shrink-0">
               <span className="flex items-center gap-1 shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.3s]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.15s]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" />
+                <span className="w-1.5 h-1.5 rounded-full bg-[#000000] dark:bg-[#FFFFFF] animate-bounce [animation-delay:-0.3s]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-[#000000] dark:bg-[#FFFFFF] animate-bounce [animation-delay:-0.15s]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-[#000000] dark:bg-[#FFFFFF] animate-bounce" />
               </span>
               <span className="text-[11.5px] font-semibold tracking-tight whitespace-nowrap">
                 {generationText}
@@ -251,11 +251,11 @@ export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistor
 
           {/* Subtle Typing Indicator Chip */}
           {isGenerating && (
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-500/10 dark:bg-emerald-950/60 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 rounded-full text-xs font-medium animate-in fade-in zoom-in-95 duration-200 shadow-xs backdrop-blur-sm shrink-0">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] rounded-full text-xs font-medium animate-in fade-in zoom-in-95 duration-200 shadow-xs backdrop-blur-sm shrink-0">
               <span className="flex items-center gap-1 shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.3s]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.15s]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" />
+                <span className="w-1.5 h-1.5 rounded-full bg-[#000000] dark:bg-[#FFFFFF] animate-bounce [animation-delay:-0.3s]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-[#000000] dark:bg-[#FFFFFF] animate-bounce [animation-delay:-0.15s]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-[#000000] dark:bg-[#FFFFFF] animate-bounce" />
               </span>
               <span className="text-[11.5px] font-semibold tracking-tight whitespace-nowrap">
                 {generationText}
@@ -265,9 +265,10 @@ export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistor
         </div>
       )}
 
-      {/* Right section: New Chat and Options buttons on upper right corner - only visible on chat page */}
-      {isChatPage && (
-        <div className="flex items-center gap-2 z-20 shrink-0">
+      {/* Right section: New Chat and Options buttons on chat page */}
+      <div className="flex items-center gap-2 z-20 shrink-0">
+        {isChatPage && (
+          <>
           <button
             type="button"
             onClick={() => {
@@ -299,7 +300,7 @@ export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistor
             </button>
 
             {showOverflowMenu && (
-              <div className="absolute right-0 top-12 min-w-48 rounded-2xl border border-border/80 bg-white/95 dark:bg-[#242424]/95 backdrop-blur-md p-1.5 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100">
+              <div className="absolute right-0 top-12 min-w-52 rounded-2xl border border-border/80 bg-white/95 dark:bg-[#242424]/95 backdrop-blur-md p-1.5 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100">
                 <button
                   type="button"
                   onClick={() => {
@@ -318,17 +319,53 @@ export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistor
                 </button>
 
                 {onExport && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowOverflowMenu(false);
-                      onExport();
-                    }}
-                    className="w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-foreground cursor-pointer"
-                  >
-                    <FileText size={16} />
-                    <span>Export conversation</span>
-                  </button>
+                  <div className="my-1 pt-1 border-t border-border/50">
+                    <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Export Conversation
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowOverflowMenu(false);
+                        onExport('pdf');
+                      }}
+                      className="w-full flex items-center justify-between gap-2.5 rounded-lg px-3 py-1.5 text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-foreground cursor-pointer"
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <FileText size={15} />
+                        <span>Export as PDF</span>
+                      </span>
+                      <span className="text-[10px] font-mono text-muted-foreground">.pdf</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowOverflowMenu(false);
+                        onExport('markdown');
+                      }}
+                      className="w-full flex items-center justify-between gap-2.5 rounded-lg px-3 py-1.5 text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-foreground cursor-pointer"
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <FileCode size={15} />
+                        <span>Export as Markdown</span>
+                      </span>
+                      <span className="text-[10px] font-mono text-muted-foreground">.md</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowOverflowMenu(false);
+                        onExport('json');
+                      }}
+                      className="w-full flex items-center justify-between gap-2.5 rounded-lg px-3 py-1.5 text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-foreground cursor-pointer"
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <Braces size={15} />
+                        <span>Export as JSON</span>
+                      </span>
+                      <span className="text-[10px] font-mono text-muted-foreground">.json</span>
+                    </button>
+                  </div>
                 )}
 
                 {onOpenHistory && (
@@ -361,8 +398,9 @@ export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistor
               </div>
             )}
           </div>
-        </div>
-      )}
+          </>
+        )}
+      </div>
     </header>
   );
 });

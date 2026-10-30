@@ -89,6 +89,7 @@ if (typeof globalThis.document === 'undefined') {
 
 import { centerElementInContainer, findSearchContentElement, evaluateAutoScrollState } from '@/components/agent/ChatView';
 import { parseSourcesFromMarkdown, resolveMessageSourcesAndQueries } from '@/components/agent/SourceCitations';
+import { computeTypingSequenceState } from '@/components/agent/MarkdownRenderer';
 import { deriveContextualThinkingStages } from '@/components/agent/WorkModeThinkingAnimation';
 import { getSettings, saveSettings, DEFAULT_SETTINGS, resetSettings } from '@/lib/settingsStore';
 
@@ -459,6 +460,39 @@ describe('Auto-scroll to Results Feature', () => {
 
       expect(resolved.searchQueries).toContain('Nvidia GPU architecture overview');
       expect(resolved.sources.some(s => s.url === 'https://developer.nvidia.com/cuda-zone')).toBe(true);
+    });
+  });
+
+  describe('Typing Animation Sequence Transitions (lead-in -> typing -> settled)', () => {
+    it('starts in lead-in phase when typewriter begins and transitions through typing to settled', () => {
+      const leadInState = computeTypingSequenceState({
+        totalLength: 120,
+        displayedLength: 8,
+        animateTypewriter: true,
+        inLeadIn: true,
+      });
+      expect(leadInState.phase).toBe('lead-in');
+      expect(leadInState.isComplete).toBe(false);
+
+      const typingState = computeTypingSequenceState({
+        totalLength: 120,
+        displayedLength: 60,
+        animateTypewriter: true,
+        inLeadIn: false,
+      });
+      expect(typingState.phase).toBe('typing');
+      expect(typingState.progress).toBeCloseTo(0.5);
+      expect(typingState.isComplete).toBe(false);
+
+      const settledState = computeTypingSequenceState({
+        totalLength: 120,
+        displayedLength: 120,
+        animateTypewriter: true,
+        inLeadIn: false,
+      });
+      expect(settledState.phase).toBe('settled');
+      expect(settledState.progress).toBe(1);
+      expect(settledState.isComplete).toBe(true);
     });
   });
 });

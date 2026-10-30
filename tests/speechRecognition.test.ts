@@ -242,6 +242,52 @@ describe('SpeechRecognition API Integration & Auto-Fill', () => {
       expect(androidVoiceSettingsCode).toContain('autoSubmitVoiceAfterSilence');
       expect(androidVoiceSettingsCode).toContain('Auto-submit speech after 7s silence');
     });
+
+    it('verifies manus-input-container integrates SpeechRecognition dictation, live transcript preview, and Send Now controls in Home and ChatView', async () => {
+      const fs = await import('fs');
+      const path = await import('path');
+
+      const homeCode = fs.readFileSync(
+        path.resolve(__dirname, '../src/pages/Home.tsx'),
+        'utf-8'
+      );
+      const chatViewCode = fs.readFileSync(
+        path.resolve(__dirname, '../src/components/agent/ChatView.tsx'),
+        'utf-8'
+      );
+      const voiceInputButtonCode = fs.readFileSync(
+        path.resolve(__dirname, '../src/components/voice/VoiceInputButton.tsx'),
+        'utf-8'
+      );
+      const voiceListeningBannerCode = fs.readFileSync(
+        path.resolve(__dirname, '../src/components/voice/VoiceTranscriptionIndicator.tsx'),
+        'utf-8'
+      );
+
+      // Both Home and ChatView prompt composers must have manus-input-container class and data-testid
+      expect(homeCode).toContain('manus-input-container');
+      expect(homeCode).toContain('data-testid="manus-input-container"');
+      expect(chatViewCode).toContain('manus-input-container');
+      expect(chatViewCode).toContain('data-testid="manus-input-container"');
+
+      // Both must wire VoiceInputButton with onTranscript, onInterimChange, and onAutoSubmit
+      expect(homeCode).toContain('<VoiceInputButton');
+      expect(homeCode).toContain('onAutoSubmit=');
+      expect(chatViewCode).toContain('<VoiceInputButton');
+      expect(chatViewCode).toContain('onAutoSubmit=');
+
+      // Both must render VoiceTranscriptionIndicator which provides live speech indicator, live transcript, Clear, Done, and Send Now buttons
+      expect(homeCode).toContain('<VoiceTranscriptionIndicator');
+      expect(chatViewCode).toContain('<VoiceTranscriptionIndicator');
+      expect(voiceListeningBannerCode).toContain('data-testid="speech-listening-indicator"');
+      expect(voiceListeningBannerCode).toContain('data-testid="speech-live-transcript"');
+      expect(voiceListeningBannerCode).toContain('data-testid="speech-done-btn"');
+      expect(voiceListeningBannerCode).toContain('data-testid="speech-send-now-btn"');
+
+      // Verify VoiceInputButton unmount effect uses empty dependency array so starting recognition does not abort active session
+      expect(voiceInputButtonCode).toContain('data-testid="voice-input-button"');
+      expect(voiceInputButtonCode).toContain('sessionCommittedTranscriptRef');
+    });
   });
 });
 

@@ -236,22 +236,22 @@ export function GoogleDriveFileExplorer({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl w-[95vw] h-[85vh] bg-card border-border/80 text-foreground p-0 overflow-hidden shadow-2xl rounded-2xl flex flex-col">
+      <DialogContent className="max-w-4xl w-[calc(100vw-1rem)] sm:w-[95vw] h-[min(85dvh,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] bg-card border-border/80 text-foreground p-0 overflow-hidden shadow-2xl rounded-2xl flex flex-col">
         
         {/* Header */}
-        <DialogHeader className="p-4 sm:p-5 pb-3 border-b border-border/60 bg-muted/20 flex flex-row items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-500 shadow-2xs">
-              <HardDrive size={22} />
+        <DialogHeader className="p-3.5 sm:p-5 pr-10 pb-3 border-b border-border/60 bg-muted/20 flex flex-row items-center justify-between shrink-0 min-w-0">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="p-2 sm:p-2.5 rounded-xl bg-secondary text-foreground shadow-2xs shrink-0">
+              <HardDrive size={20} />
             </div>
-            <div>
-              <DialogTitle className="text-base font-semibold text-foreground flex items-center gap-2">
-                <span>{title}</span>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-semibold border border-emerald-500/20">
+            <div className="min-w-0">
+              <DialogTitle className="text-sm sm:text-base font-semibold text-foreground flex items-center gap-2 flex-wrap">
+                <span className="truncate">{title}</span>
+                <span className="px-2 py-0.5 rounded-full bg-secondary text-foreground text-[10px] font-semibold border border-border shrink-0">
                   Google Drive API Connected
                 </span>
               </DialogTitle>
-              <DialogDescription className="text-xs text-muted-foreground">
+              <DialogDescription className="text-xs text-muted-foreground line-clamp-2">
                 Browse Google Drive documents, inspect contents, and attach text directly as context for AI agents
               </DialogDescription>
             </div>
@@ -608,15 +608,15 @@ export function GoogleDriveFileExplorer({
 
           {/* Side Drawer: Document Context Text Preview */}
           {previewFile && (
-            <div className="w-80 sm:w-96 border-l border-border/60 bg-card flex flex-col h-full shrink-0 shadow-lg animate-in slide-in-from-right-5 duration-200">
+            <div className="absolute inset-0 sm:static sm:w-80 md:w-96 z-30 border-l border-border/60 bg-card flex flex-col h-full shrink-0 shadow-lg animate-in slide-in-from-right-5 duration-200">
               <div className="p-4 border-b border-border/60 flex items-center justify-between bg-muted/20 shrink-0">
                 <div className="flex items-center gap-2 min-w-0 pr-2">
-                  <Eye size={16} className="text-blue-500 shrink-0" />
+                  <Eye size={16} className="text-foreground shrink-0" />
                   <span className="font-semibold text-xs text-foreground truncate">{previewFile.name}</span>
                 </div>
                 <button
                   onClick={() => setPreviewFile(null)}
-                  className="p-1 text-muted-foreground hover:text-foreground rounded-lg hover:bg-muted"
+                  className="p-1 text-muted-foreground hover:text-foreground rounded-lg hover:bg-muted shrink-0"
                 >
                   <X size={14} />
                 </button>

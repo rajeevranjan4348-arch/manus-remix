@@ -22,14 +22,31 @@ export function D3TagTimelineChart({
   const svgRef = useRef<SVGSVGElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [hoveredPoint, setHoveredPoint] = useState<TagTimePoint | null>(null);
+  const [measuredWidth, setMeasuredWidth] = useState<number>(0);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const nextWidth = entries[0]?.contentRect?.width;
+      if (nextWidth && nextWidth > 0) {
+        setMeasuredWidth(Math.floor(nextWidth));
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!svgRef.current || !containerRef.current || !timePoints || timePoints.length === 0) return;
 
     const svg = d3.select(svgRef.current);
-    const containerWidth = containerRef.current.clientWidth || 600;
-    const margin = { top: 20, right: 24, bottom: 35, left: 40 };
-    const width = Math.max(120, containerWidth - margin.left - margin.right);
+    const containerWidth = measuredWidth || containerRef.current.clientWidth || 320;
+    const isCompact = containerWidth < 380;
+    const margin = isCompact
+      ? { top: 16, right: 12, bottom: 28, left: 28 }
+      : { top: 20, right: 24, bottom: 35, left: 40 };
+    const width = Math.max(100, containerWidth - margin.left - margin.right);
     const chartHeight = Math.max(120, height - margin.top - margin.bottom);
 
     const allTags = getAvailableTags();
@@ -425,9 +442,10 @@ export function D3TagTimelineChart({
         if (tooltipRef.current) {
           const tooltip = tooltipRef.current;
           tooltip.style.opacity = '1';
-          const leftPos = Math.min(cx + margin.left + 15, containerWidth - 180);
+          const tooltipWidth = Math.min(184, Math.max(140, containerWidth - 16));
+          const leftPos = Math.max(8, Math.min(cx + margin.left + 12, containerWidth - tooltipWidth - 8));
           tooltip.style.left = `${leftPos}px`;
-          tooltip.style.top = `${margin.top + 10}px`;
+          tooltip.style.top = `${margin.top + 8}px`;
         }
       }
     });
@@ -441,16 +459,16 @@ export function D3TagTimelineChart({
         tooltipRef.current.style.opacity = '0';
       }
     });
-  }, [timePoints, selectedTags, chartMode, height, onHoverTimePoint]);
+  }, [timePoints, selectedTags, chartMode, height, onHoverTimePoint, measuredWidth]);
 
   return (
-    <div ref={containerRef} className="relative w-full overflow-hidden select-none">
-      <svg ref={svgRef} className="w-full text-foreground/80 overflow-visible" />
+    <div ref={containerRef} className="relative w-full min-w-0 overflow-hidden select-none">
+      <svg ref={svgRef} className="w-full max-w-full text-foreground/80 overflow-hidden" />
 
       {/* Floating Interactive Tooltip Card */}
       <div
         ref={tooltipRef}
-        className="absolute pointer-events-none transition-opacity duration-150 p-2.5 rounded-xl bg-popover/95 backdrop-blur-md border border-border shadow-xl z-30 text-xs w-48 space-y-1.5 opacity-0"
+        className="absolute pointer-events-none transition-opacity duration-150 p-2.5 rounded-xl bg-popover/95 backdrop-blur-md border border-border shadow-xl z-30 text-xs w-44 max-w-[calc(100%-1rem)] space-y-1.5 opacity-0"
       >
         {hoveredPoint && (
           <>

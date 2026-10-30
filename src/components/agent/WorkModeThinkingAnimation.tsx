@@ -149,8 +149,8 @@ export function WorkModeThinkingAnimation({
     <div
       data-testid="thinking-stage-card"
       className={cn(
-        "p-3.5 sm:p-4 rounded-2xl border border-primary/20 bg-primary/5 dark:bg-primary/10 backdrop-blur-xs space-y-3 my-2 animate-in fade-in duration-200 shadow-2xs",
-        deepMode && "border-purple-500/30 bg-purple-500/5 dark:bg-purple-950/20",
+        "p-3.5 sm:p-4 rounded-2xl border border-[#E0E0E0] dark:border-[#333333] bg-[#FFFFFF] dark:bg-[#171717] backdrop-blur-xs space-y-3 my-2 animate-in fade-in duration-200 shadow-2xs",
+        deepMode && "border-[#000000]/30 dark:border-[#FFFFFF]/30 bg-[#FAFAFA] dark:bg-[#111111]",
         className
       )}
     >
@@ -163,23 +163,20 @@ export function WorkModeThinkingAnimation({
             className={cn(
               "relative flex items-center justify-center w-7 h-7 rounded-full shrink-0",
               deepMode
-                ? "bg-purple-500/20 text-purple-600 dark:text-purple-300"
-                : "bg-primary/15 text-primary"
+                ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000]"
+                : "bg-[#F2F2F2] text-[#000000] dark:bg-[#111111] dark:text-[#FFFFFF]"
             )}
           >
             {getStageIcon()}
             <span
-              className={cn(
-                "absolute inset-0 rounded-full animate-ping opacity-75",
-                deepMode ? "bg-purple-500/20" : "bg-primary/20"
-              )}
+              className="absolute inset-0 rounded-full animate-ping opacity-40 bg-[#000000]/20 dark:bg-[#FFFFFF]/20"
             />
           </div>
           <div className="min-w-0">
-            <div className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+            <div className="text-xs font-semibold text-[#000000] dark:text-[#FFFFFF] flex items-center gap-1.5">
               <span>{deepMode ? 'Manus Deep Thinking Stage' : 'Manus AI is thinking'}</span>
-              <Sparkles size={13} className="text-amber-500 animate-spin" style={{ animationDuration: '3s' }} />
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-background/70 border border-border/50 text-muted-foreground">
+              <Sparkles size={13} className="text-[#000000] dark:text-[#FFFFFF] animate-spin" style={{ animationDuration: '3s' }} />
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-[#F2F2F2] dark:bg-[#111111] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF]">
                 Stage {Math.min((stages.findIndex(s => s.status === 'running') + 1) || stages.length, stages.length)}/{stages.length}
               </span>
             </div>
@@ -208,7 +205,7 @@ export function WorkModeThinkingAnimation({
               e.stopPropagation();
               setIsExpanded(prev => !prev);
             }}
-            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-background/50 transition-colors"
+            className="p-1 rounded-md text-[#000000] dark:text-[#FFFFFF] hover:bg-[#F2F2F2] dark:hover:bg-[#111111] transition-colors"
             aria-label={isExpanded ? 'Collapse thinking stages' : 'Expand thinking stages'}
           >
             {isExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
@@ -217,7 +214,7 @@ export function WorkModeThinkingAnimation({
       </div>
 
       {isExpanded && stages.length > 0 && (
-        <div className="pt-2.5 border-t border-border/40 space-y-2 text-xs">
+        <div className="pt-2.5 border-t border-[#E0E0E0] dark:border-[#333333] space-y-2 text-xs">
           {stages.map((stage, idx) => {
             const isDone = stage.status === 'completed';
             const isRunning = stage.status === 'running';
@@ -228,22 +225,22 @@ export function WorkModeThinkingAnimation({
                 className={cn(
                   "flex items-start gap-2.5 px-2.5 py-1.5 rounded-xl transition-all duration-200",
                   isRunning
-                    ? "bg-background/80 dark:bg-card/70 border border-border/50 shadow-2xs"
+                    ? "bg-[#FAFAFA] dark:bg-[#111111] border border-[#E0E0E0] dark:border-[#333333] shadow-2xs"
                     : "opacity-80"
                 )}
               >
                 <div className="mt-0.5 shrink-0">
                   {isDone ? (
-                    <div className="w-4 h-4 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center justify-center">
+                    <div className="w-4 h-4 rounded-full bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] border border-[#000000] dark:border-[#FFFFFF] flex items-center justify-center">
                       <Check size={10} strokeWidth={3} />
                     </div>
                   ) : isRunning ? (
-                    <div className="w-4 h-4 rounded-full bg-primary/15 text-primary flex items-center justify-center">
+                    <div className="w-4 h-4 rounded-full bg-[#F2F2F2] text-[#000000] dark:bg-[#111111] dark:text-[#FFFFFF] flex items-center justify-center">
                       <Loader2 size={11} className="animate-spin" />
                     </div>
                   ) : (
-                    <div className="w-4 h-4 rounded-full border border-muted-foreground/30 flex items-center justify-center">
-                      <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/30" />
+                    <div className="w-4 h-4 rounded-full border border-[#E0E0E0] dark:border-[#333333] flex items-center justify-center">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#777777] dark:bg-[#AAAAAA]" />
                     </div>
                   )}
                 </div>

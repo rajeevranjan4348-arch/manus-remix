@@ -41,13 +41,13 @@ const ICON_OPTIONS: { id: ProjectIconType; label: string; icon: any }[] = [
 ];
 
 const COLOR_OPTIONS: { id: ProjectColorType; label: string; bg: string; border: string; ring: string; badgeText: string }[] = [
-  { id: 'blue', label: 'Classic Black', bg: 'bg-black', border: 'border-black', ring: 'ring-black', badgeText: 'text-black dark:text-white' },
-  { id: 'indigo', label: 'Deep Indigo', bg: 'bg-indigo-500', border: 'border-indigo-500', ring: 'ring-indigo-500', badgeText: 'text-indigo-500' },
-  { id: 'purple', label: 'Royal Purple', bg: 'bg-purple-500', border: 'border-purple-500', ring: 'ring-purple-500', badgeText: 'text-purple-500' },
-  { id: 'emerald', label: 'Emerald Green', bg: 'bg-emerald-500', border: 'border-emerald-500', ring: 'ring-emerald-500', badgeText: 'text-emerald-500' },
-  { id: 'amber', label: 'Amber Gold', bg: 'bg-amber-500', border: 'border-amber-500', ring: 'ring-amber-500', badgeText: 'text-amber-500' },
-  { id: 'rose', label: 'Rose Red', bg: 'bg-rose-500', border: 'border-rose-500', ring: 'ring-rose-500', badgeText: 'text-rose-500' },
-  { id: 'cyan', label: 'Cyan Sky', bg: 'bg-cyan-500', border: 'border-cyan-500', ring: 'ring-cyan-500', badgeText: 'text-cyan-500' },
+  { id: 'blue', label: 'Pure Black', bg: 'bg-[#000000]', border: 'border-[#000000]', ring: 'ring-[#000000]', badgeText: 'text-[#000000] dark:text-[#FFFFFF]' },
+  { id: 'indigo', label: 'Rich Black', bg: 'bg-[#111111]', border: 'border-[#111111]', ring: 'ring-[#111111]', badgeText: 'text-[#111111] dark:text-[#FAFAFA]' },
+  { id: 'purple', label: 'Dark Gray', bg: 'bg-[#333333]', border: 'border-[#333333]', ring: 'ring-[#333333]', badgeText: 'text-[#333333] dark:text-[#E0E0E0]' },
+  { id: 'emerald', label: 'Medium Gray', bg: 'bg-[#777777]', border: 'border-[#777777]', ring: 'ring-[#777777]', badgeText: 'text-[#777777] dark:text-[#CCCCCC]' },
+  { id: 'amber', label: 'Charcoal', bg: 'bg-[#222222]', border: 'border-[#222222]', ring: 'ring-[#222222]', badgeText: 'text-[#222222] dark:text-[#F2F2F2]' },
+  { id: 'rose', label: 'Slate Mono', bg: 'bg-[#444444]', border: 'border-[#444444]', ring: 'ring-[#444444]', badgeText: 'text-[#444444] dark:text-[#E0E0E0]' },
+  { id: 'cyan', label: 'Steel Mono', bg: 'bg-[#555555]', border: 'border-[#555555]', ring: 'ring-[#555555]', badgeText: 'text-[#555555] dark:text-[#F2F2F2]' },
 ];
 
 export function ProjectModal({ isOpen, onClose, projectToEdit, onSuccess }: ProjectModalProps) {
@@ -120,23 +120,23 @@ export function ProjectModal({ isOpen, onClose, projectToEdit, onSuccess }: Proj
   return (
     <div 
       onClick={onClose}
-      className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs animate-in fade-in"
+      className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-2.5 sm:p-4 backdrop-blur-xs animate-in fade-in"
     >
       <div 
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg bg-white dark:bg-[#18191c] rounded-3xl border border-border shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150"
+        className="w-full max-w-lg max-h-[calc(100dvh-1.25rem)] flex flex-col bg-white dark:bg-[#18191c] rounded-2xl sm:rounded-3xl border border-border shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150"
       >
         {/* Header */}
-        <div className="p-6 pb-4 border-b border-border/60 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className={cn("w-11 h-11 rounded-2xl flex items-center justify-center text-white shadow-md transition-all", COLOR_OPTIONS.find(c => c.id === color)?.bg || 'bg-indigo-500')}>
-              <SelectedIconComp size={22} />
+        <div className="p-4 sm:p-6 pb-3 sm:pb-4 border-b border-border/60 flex items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className={cn("w-10 h-10 sm:w-11 sm:h-11 rounded-2xl flex items-center justify-center text-white shadow-md transition-all shrink-0", COLOR_OPTIONS.find(c => c.id === color)?.bg || 'bg-[#000000]')}>
+              <SelectedIconComp size={20} />
             </div>
-            <div>
-              <h2 className="text-lg font-bold text-foreground tracking-tight">
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-lg font-bold text-foreground tracking-tight truncate">
                 {projectToEdit ? 'Edit Project' : 'Create New Project'}
               </h2>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground line-clamp-2">
                 Group chat sessions, files, and custom AI agent instructions.
               </p>
             </div>
@@ -144,14 +144,14 @@ export function ProjectModal({ isOpen, onClose, projectToEdit, onSuccess }: Proj
 
           <button 
             onClick={onClose}
-            className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+            className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer shrink-0"
           >
             <X size={18} />
           </button>
         </div>
 
         {/* Form Content */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-5 max-h-[75vh] overflow-y-auto custom-scrollbar">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 sm:space-y-5 flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar min-h-0">
           {/* Name Field */}
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-foreground uppercase tracking-wider">

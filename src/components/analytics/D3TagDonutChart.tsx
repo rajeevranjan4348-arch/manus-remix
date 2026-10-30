@@ -151,9 +151,9 @@ export function D3TagDonutChart({
       : displayMetrics?.percentage || 0;
 
   return (
-    <div className="flex flex-col items-center justify-center relative select-none">
-      <div className="relative" style={{ width: size, height: size }}>
-        <svg ref={svgRef} className="overflow-visible" />
+    <div className="flex flex-col items-center justify-center relative select-none max-w-full overflow-hidden">
+      <div className="relative max-w-full" style={{ width: size, height: size }}>
+        <svg ref={svgRef} className="w-full h-full max-w-full overflow-visible" />
 
         {/* Center Callout Overlay */}
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none p-4">

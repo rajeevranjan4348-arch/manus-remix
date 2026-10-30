@@ -29,7 +29,7 @@ const MOCK_DATA = [
   { name: 'Jul', value: 349, other: 430, x: 130, y: 150, z: 300 },
 ];
 
-const COLORS = ['#18181B', '#52525B', '#71717A', '#A1A1AA', '#D4D4D8', '#E4E4E7'];
+const COLORS = ['#000000', '#111111', '#333333', '#777777', '#AAAAAA', '#E0E0E0'];
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {

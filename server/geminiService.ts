@@ -390,3 +390,137 @@ export async function* streamOpenRouterResponse(
     throw lastOrError;
   }
 }
+
+export interface SessionSummaryOptions {
+  title?: string;
+  prompt?: string;
+  content?: string;
+  messages?: Array<{ role: string; content: string }>;
+}
+
+export function formatSingleSentenceSummary(rawText: string, fallbackTopic = 'the conversation'): string {
+  const cleaned = String(rawText || '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, ' ')
+    .replace(/^(?:summary|one-sentence summary|session summary)\s*:\s*/i, '')
+    .replace(/\[(?:Attached|Think Harder|MODE)[^\]]*\]\s*/gi, ' ')
+    .replace(/[*_`#>-]+/g, ' ')
+    .replace(/^["'\s]+|["'\s]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned) {
+    const cleanTopic = String(fallbackTopic || 'the conversation')
+      .replace(/\[(?:Attached|Think Harder|MODE)[^\]]*\]\s*/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 90);
+    return `This session explored ${cleanTopic || 'the user request'} and synthesized actionable insights.`;
+  }
+
+  const sentenceMatch = cleaned.match(/^(.+?[.!?])(?:\s|$)/);
+  let sentence = sentenceMatch ? sentenceMatch[1].trim() : cleaned;
+  if (sentence.length > 220) {
+    sentence = sentence.slice(0, 217).trimEnd().replace(/[,;:\s]+$/, '') + '.';
+  }
+  if (!/[.!?]$/.test(sentence)) {
+    sentence += '.';
+  }
+  return sentence;
+}
+
+export async function summarizeSessionHistory(options: SessionSummaryOptions): Promise<string> {
+  const title = (options.title || '').trim();
+  const prompt = (options.prompt || '').trim();
+  const content = (options.content || '').trim();
+  const messages = Array.isArray(options.messages) ? options.messages : [];
+
+  const conversationExcerpts: string[] = [];
+  if (title) conversationExcerpts.push(`Session Title: ${title}`);
+  if (messages.length > 0) {
+    for (const msg of messages.slice(0, 12)) {
+      if (msg && typeof msg.content === 'string' && msg.content.trim()) {
+        const cleanMsg = msg.content
+          .replace(/\[IMAGE_DATA_URL:[^\]]+\]\s*/gi, '[Image] ')
+          .replace(/<think>[\s\S]*?<\/think>/gi, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 500);
+        conversationExcerpts.push(`${msg.role === 'assistant' ? 'Assistant' : 'User'}: ${cleanMsg}`);
+      }
+    }
+  } else {
+    if (prompt) conversationExcerpts.push(`User Prompt: ${prompt.slice(0, 800)}`);
+    if (content) conversationExcerpts.push(`Assistant Response: ${content.slice(0, 1200)}`);
+  }
+
+  const fallbackTopic = title || prompt || content || messages[0]?.content || 'the conversation';
+  const transcript = conversationExcerpts.join('\n').trim();
+
+  if (!transcript) {
+    return formatSingleSentenceSummary('', fallbackTopic);
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (apiKey) {
+    try {
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
+        },
+      });
+
+      const candidateModels = ['gemini-3.8-flash', 'gemini-3-flash-preview', 'gemini-2.5-flash'];
+      for (const model of candidateModels) {
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents: `Write a concise, descriptive one-sentence summary of the following conversation history. Capture the user's primary goal and what was accomplished or discussed. Return ONLY that single sentence with no bullet points, prefixes, or markdown formatting.\n\n${transcript}`,
+          });
+
+          const text = response.text?.trim();
+          if (text) {
+            return formatSingleSentenceSummary(text, fallbackTopic);
+          }
+        } catch (modelErr: any) {
+          const msg = String(modelErr?.message || '');
+          if (modelErr?.status === 401 || modelErr?.status === 403 || msg.includes('API_KEY_INVALID')) {
+            break;
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Session Summary] Gemini summarization fallback:', err?.message || err);
+    }
+  }
+
+  const cleanTopic = String(fallbackTopic)
+    .replace(/\[(?:Attached|Think Harder|MODE)[^\]]*\]\s*/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 95);
+
+  const assistantMsg = messages.find(m => m.role === 'assistant')?.content || content;
+  if (assistantMsg) {
+    const cleanOutcome = assistantMsg
+      .replace(/<think>[\s\S]*?<\/think>/gi, ' ')
+      .replace(/[#*_`>-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const firstClause = cleanOutcome.split(/[.!?\n]/)[0]?.trim()?.slice(0, 90);
+    if (firstClause && firstClause.toLowerCase() !== cleanTopic.toLowerCase()) {
+      return formatSingleSentenceSummary(
+        `Discussed "${cleanTopic}" and provided guidance on ${firstClause.charAt(0).toLowerCase() + firstClause.slice(1)}.`,
+        cleanTopic
+      );
+    }
+  }
+
+  return formatSingleSentenceSummary(
+    `Focused on "${cleanTopic}" and delivered a structured response addressing the request.`,
+    cleanTopic
+  );
+}
+

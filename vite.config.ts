@@ -1,7 +1,7 @@
 import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { streamGeminiResponse } from './server/geminiService';
+import { streamGeminiResponse, summarizeSessionHistory } from './server/geminiService';
 import { generateOAuthUrl, handleOAuthCallback, executeServerConnectorTool, isSafeUrl } from './server/connectorsService';
 import { GoogleGenAI } from '@google/genai';
 
@@ -185,6 +185,29 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
               res.end(JSON.stringify({ tags: [] }));
             } catch (err: any) {
               res.end(JSON.stringify({ tags: [] }));
+            }
+          });
+          return;
+        }
+
+        // Server-Side Session Conversation History Summary Endpoint (Gemini API)
+        if ((url === '/api/summarize-session' || url === '/api/gemini/summarize-session') && req.method === 'POST') {
+          res.setHeader('Content-Type', 'application/json');
+          let bodyStr = '';
+          req.on('data', chunk => { bodyStr += chunk; });
+          req.on('end', async () => {
+            try {
+              const body = bodyStr ? JSON.parse(bodyStr) : {};
+              const summary = await summarizeSessionHistory({
+                title: typeof body?.title === 'string' ? body.title : undefined,
+                prompt: typeof body?.prompt === 'string' ? body.prompt : undefined,
+                content: typeof body?.content === 'string' ? body.content : undefined,
+                messages: Array.isArray(body?.messages) ? body.messages : undefined,
+              });
+              res.end(JSON.stringify({ summary }));
+            } catch (err: any) {
+              res.statusCode = 500;
+              res.end(JSON.stringify({ error: err?.message || 'Failed to generate session summary' }));
             }
           });
           return;

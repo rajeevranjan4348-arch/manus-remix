@@ -2,7 +2,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { ArrowLeft, Mic, MicOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatSpokenPunctuation } from '@/components/voice/VoiceInputButton';
+import { VoiceTranscriptionIndicator } from '@/components/voice/VoiceTranscriptionIndicator';
 import { getSettings } from '@/lib/settingsStore';
+import { speakCleanHumanVoice } from '@/lib/speechSynthesis';
+import { MessageHoverReactions } from '../agent/MessageHoverReactions';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -18,6 +21,7 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
   const [input, setInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [interimSpeech, setInterimSpeech] = useState('');
   const [silenceCountdown, setSilenceCountdown] = useState<number | null>(null);
   const recognitionRef = useRef<any>(null);
   const baseInputRef = useRef<string>('');
@@ -118,6 +122,7 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
         } catch (_) {}
       }
       setIsListening(false);
+      setInterimSpeech('');
       return;
     }
 
@@ -160,7 +165,10 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
           baseInputRef.current = [baseInputRef.current.trim(), formattedFinal].filter(Boolean).join(' ');
         }
 
-        const liveText = [baseInputRef.current.trim(), interimTranscript].filter(Boolean).join(' ');
+        const formattedInterim = formatSpokenPunctuation(interimTranscript);
+        setInterimSpeech(formattedInterim);
+
+        const liveText = [baseInputRef.current.trim(), formattedInterim].filter(Boolean).join(' ');
         setInput(liveText);
 
         if (textareaRef.current) {
@@ -189,10 +197,12 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
           toast.error(`Voice input error: ${event.error}`);
         }
         setIsListening(false);
+        setInterimSpeech('');
       };
 
       recognition.onend = () => {
         setIsListening(false);
+        setInterimSpeech('');
         if (textareaRef.current) {
           textareaRef.current.focus();
         }
@@ -350,6 +360,15 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
           next[next.length - 1] = { role: 'assistant', content: 'No response received.' };
           return next;
         });
+      } else if (accumulated && activeRequestIdRef.current === reqId) {
+        const curSettings = getSettings();
+        if (curSettings.autoPlayAudio) {
+          speakCleanHumanVoice(accumulated, {
+            voicePersona: curSettings.voicePersona,
+            rate: curSettings.speechSpeed,
+            pitch: curSettings.voicePitch,
+          });
+        }
       }
     } catch (err) {
       if (activeRequestIdRef.current === reqId) {
@@ -419,22 +438,32 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
               <div
                 key={index}
                 className={`flex w-full animate-in fade-in duration-200 ${
-                  msg.role === 'user' ? 'justify-end' : 'justify-start'
+                  msg.role === 'user' ? 'justify-end' : 'justify-start group/ai-message relative'
                 }`}
               >
-                <div
-                  className={`max-w-[88%] sm:max-w-[82%] px-4 py-3 rounded-[18px] text-[15px] leading-relaxed break-words whitespace-pre-wrap ${
-                    msg.role === 'user'
-                      ? 'bg-muted/80 dark:bg-card border border-border text-foreground rounded-br-xs'
-                      : 'bg-transparent text-foreground rounded-bl-xs'
-                  }`}
-                >
-                  {msg.content || (
-                    <span className="inline-flex items-center gap-1 text-muted-foreground">
-                      <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce [animation-delay:-0.3s]" />
-                      <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce [animation-delay:-0.15s]" />
-                      <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce" />
-                    </span>
+                <div className="flex flex-col items-start max-w-[88%] sm:max-w-[82%] gap-1">
+                  <div
+                    className={`w-full px-4 py-3 rounded-[18px] text-[15px] leading-relaxed break-words whitespace-pre-wrap ${
+                      msg.role === 'user'
+                        ? 'bg-muted/80 dark:bg-card border border-border text-foreground rounded-br-xs'
+                        : 'bg-transparent text-foreground rounded-bl-xs'
+                    }`}
+                  >
+                    {msg.content || (
+                      <span className="inline-flex items-center gap-1 text-muted-foreground">
+                        <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce [animation-delay:-0.3s]" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce [animation-delay:-0.15s]" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce" />
+                      </span>
+                    )}
+                  </div>
+                  {msg.role === 'assistant' && msg.content && (
+                    <div className="pl-3">
+                      <MessageHoverReactions
+                        messageId={`myai-msg-${index}`}
+                        content={msg.content}
+                      />
+                    </div>
                   )}
                 </div>
               </div>
@@ -448,54 +477,62 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
       <div className="shrink-0 px-3.5 py-2.5 pb-[max(12px,env(safe-area-inset-bottom,12px))] bg-background">
         <form
           onSubmit={handleSubmit}
-          className="max-w-[760px] mx-auto flex items-end gap-2.5 border border-border rounded-[24px] px-3.5 py-2 shadow-xs bg-background focus-within:ring-1 focus-within:ring-foreground/20"
+          data-testid="manus-input-container"
+          data-listening={isListening ? 'true' : 'false'}
+          className="manus-input-container max-w-[760px] mx-auto flex flex-col gap-2 border border-border rounded-[24px] px-3.5 py-2 shadow-xs bg-background focus-within:ring-1 focus-within:ring-foreground/20"
         >
-          <textarea
-            ref={textareaRef}
-            rows={1}
-            value={input}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            placeholder="Message your AI..."
-            aria-label="Message your AI"
-            className="flex-1 min-w-0 max-h-[120px] resize-none border-0 outline-none bg-transparent text-foreground text-base leading-[1.45] py-1.5 custom-scrollbar"
-            required
+          <VoiceTranscriptionIndicator
+            isListening={isListening}
+            interimSpeech={interimSpeech}
+            currentText={input}
+            silenceCountdown={silenceCountdown}
+            canSendNow={Boolean(input.trim() && !isGenerating)}
+            onClear={() => {
+              clearSilenceTimer();
+              setInput('');
+              baseInputRef.current = '';
+              setInterimSpeech('');
+            }}
+            onStop={toggleListening}
+            onSendNow={() => handleSubmit()}
           />
-          {/* Voice Input Button (Web Speech API) */}
-          <button
-            type="button"
-            onClick={toggleListening}
-            aria-label={isListening ? "Stop listening" : "Voice input - speak your prompt"}
-            title={isListening ? "Listening... Click to stop" : "Speak prompt (Web Speech API)"}
-            className={`shrink-0 w-[38px] h-[38px] rounded-full flex items-center justify-center transition-all cursor-pointer ${
-              isListening
-                ? 'bg-rose-500 text-white animate-pulse shadow-md ring-2 ring-rose-400/40 scale-105'
-                : 'text-muted-foreground hover:text-foreground hover:bg-neutral-200/60 dark:hover:bg-neutral-800'
-            }`}
-          >
-            {isListening ? <MicOff size={19} /> : <Mic size={19} />}
-          </button>
+          <div className="flex items-end gap-2.5 w-full">
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              value={input}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              placeholder={isListening ? "Listening... speak now to auto-fill prompt..." : "Message your AI..."}
+              aria-label="Message your AI"
+              className="flex-1 min-w-0 max-h-[120px] resize-none border-0 outline-none bg-transparent text-foreground text-base leading-[1.45] py-1.5 custom-scrollbar"
+              required
+            />
+            {/* Voice Input Button (Web Speech API) */}
+            <button
+              type="button"
+              onClick={toggleListening}
+              aria-label={isListening ? "Stop listening" : "Voice input - speak your prompt"}
+              title={isListening ? "Listening... Click to stop" : "Speak prompt (Web Speech API)"}
+              className={`shrink-0 w-[38px] h-[38px] rounded-full flex items-center justify-center transition-all cursor-pointer ${
+                isListening
+                  ? 'bg-rose-500 text-white animate-pulse shadow-md ring-2 ring-rose-400/40 scale-105'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-neutral-200/60 dark:hover:bg-neutral-800'
+              }`}
+            >
+              {isListening ? <MicOff size={19} /> : <Mic size={19} />}
+            </button>
 
-          <button
-            type="submit"
-            aria-label="Send message"
-            disabled={!input.trim() || isGenerating}
-            className="shrink-0 w-[38px] h-[38px] rounded-full bg-foreground text-background flex items-center justify-center text-lg font-bold disabled:opacity-35 disabled:cursor-default hover:scale-105 active:scale-95 transition-all cursor-pointer"
-          >
-            ↑
-          </button>
-        </form>
-        {isListening && (
-          <div className="flex items-center justify-center gap-2 text-xs text-rose-500 font-medium mt-2 animate-in fade-in duration-200">
-            <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
-            <span>Listening... Speak your prompt</span>
-            {silenceCountdown !== null && (
-              <span className="text-neutral-400 font-normal">
-                (auto-submitting in {silenceCountdown}s)
-              </span>
-            )}
+            <button
+              type="submit"
+              aria-label="Send message"
+              disabled={!input.trim() || isGenerating}
+              className="shrink-0 w-[38px] h-[38px] rounded-full bg-foreground text-background flex items-center justify-center text-lg font-bold disabled:opacity-35 disabled:cursor-default hover:scale-105 active:scale-95 transition-all cursor-pointer"
+            >
+              ↑
+            </button>
           </div>
-        )}
+        </form>
         <div className="text-center text-muted-foreground text-[11px] mt-2">
           AI can make mistakes. Check important information.
         </div>
