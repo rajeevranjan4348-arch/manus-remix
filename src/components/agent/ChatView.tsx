@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { 
   ArrowUp, 
   Plus, 
@@ -33,6 +33,14 @@ import { gsap } from 'gsap';
 import { toast } from 'sonner';
 import { listenForSpeech } from '@/lib/voiceInput';
 import { speakCleanHumanVoice } from '@/lib/speechSynthesis';
+
+// Memoized markdown wrapper so completed (unchanged) messages skip re-parsing
+// their markdown while a new message is streaming token-by-token.
+const MemoizedMarkdown = React.memo(
+  ({ content }: { content: string }) => <MarkdownRenderer content={content} />,
+  (prev, next) => prev.content === next.content
+);
+MemoizedMarkdown.displayName = 'MemoizedMarkdown';
 
 interface ChatViewProps {
   prompt: string;
@@ -190,9 +198,18 @@ export function ChatView({
     setAttachedFile(null);
   };
 
-  // Auto-scroll to bottom
+  // Auto-scroll to bottom (throttled with rAF so streaming updates don't
+  // queue dozens of concurrent smooth scrolls, which janks the main thread)
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    let raf = 0;
+    const onScrollFrame = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      });
+    };
+    onScrollFrame();
+    return () => cancelAnimationFrame(raf);
   }, [messages, steps, result, isLoading, status]);
 
   // Initial animation
@@ -210,9 +227,9 @@ export function ChatView({
   }, []);
 
   // Toggle step expansion
-  const toggleStep = (id: string) => {
+  const toggleStep = useCallback((id: string) => {
     setExpandedSteps(prev => ({ ...prev, [id]: !prev[id] }));
-  };
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -225,7 +242,7 @@ export function ChatView({
   };
 
   // Helper to clean message content (hide raw JSON outputs that are rendered as UI)
-  const cleanMessageContent = (content: any) => {
+  const cleanMessageContent = useCallback((content: any) => {
     if (!content) return '';
     const text = typeof content === 'string' ? content : (typeof content === 'object' ? JSON.stringify(content) : String(content));
     return text.replace(/```(json)?\n[\s\S]*?\n```/g, (match) => {
@@ -239,10 +256,10 @@ export function ChatView({
       }
       return match;
     }).trim();
-  };
+  }, []);
 
   // Helper to extract AI thought process (<think>...</think> or [THOUGHTS]...[/THOUGHTS])
-  const extractThoughtProcess = (rawContent: any) => {
+  const extractThoughtProcess = useCallback((rawContent: any) => {
     if (!rawContent) return { thought: '', content: '' };
     const rawText = typeof rawContent === 'string' ? rawContent : (typeof rawContent === 'object' ? JSON.stringify(rawContent) : String(rawContent));
     if (!rawText) return { thought: '', content: '' };
@@ -277,10 +294,10 @@ export function ChatView({
     content = content.replace(/^\[MODE:\s*THINK HARDER[^\]]*\]\s*/gi, '').trim();
 
     return { thought, content };
-  };
+  }, []);
 
   // Helper to strip internal prompt instructions or wrappers from user bubbles
-  const cleanUserMessage = (raw: any) => {
+  const cleanUserMessage = useCallback((raw: any) => {
     if (!raw) return '';
     let text = typeof raw === 'string' ? raw : (typeof raw === 'object' ? JSON.stringify(raw) : String(raw));
 
@@ -304,10 +321,10 @@ export function ChatView({
     }
 
     return text || (typeof raw === 'string' ? raw : '');
-  };
+  }, []);
 
   // Render a single step (Task Progress Item)
-  const renderStep = (step: Step) => {
+  const renderStep = useCallback((step: Step) => {
     const isCompleted = step.status === 'completed';
     const isRunning = step.status === 'running';
     const isExpanded = expandedSteps[step.id] || isRunning;
@@ -382,10 +399,113 @@ export function ChatView({
         )}
       </div>
     );
-  };
+  }, [expandedSteps, toggleStep]);
 
+  // Memoized derived values: these regex-heavy message transforms previously
+  // re-ran on every render (including every streamed token), even when the
+  // message list was unchanged. useMemo keeps them computed only when inputs
+  // actually change.
   const isAssistantWorking = isLoading || status === 'running';
-  const activeRunningStep = steps.find(s => s.status === 'running');
+
+  const dedupedMessages = useMemo(() => {
+    const list: any[] = [];
+    const seenIds = new Set<string>();
+    for (const msg of messages) {
+      if (!msg) continue;
+      if (msg.id && seenIds.has(msg.id)) continue;
+      const prev = list[list.length - 1];
+      if (
+        prev &&
+        prev.role === msg.role &&
+        cleanUserMessage(prev.content || '').trim().toLowerCase() === cleanUserMessage(msg.content || '').trim().toLowerCase()
+      ) {
+        continue;
+      }
+      if (msg.id) seenIds.add(msg.id);
+      list.push(msg);
+    }
+    return list;
+  }, [messages]);
+
+  const renderedMessages = useMemo(() => {
+    return dedupedMessages.map((msg, i) => {
+      if (msg.role === 'user') {
+        return (
+          <div key={msg.id || i} className="flex justify-end my-2">
+            <div className="bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium max-w-[80%] shadow-xs leading-relaxed">
+              {cleanUserMessage(msg.content)}
+            </div>
+          </div>
+        );
+      }
+
+      if (msg.role === 'assistant') {
+        const raw = msg.content || '';
+        const { thought, content: extracted } = extractThoughtProcess(raw);
+        const cleanedContent = cleanMessageContent(extracted || raw);
+        // While a response is streaming, the hook may include an empty assistant placeholder.
+        // Do not render its Manus header alongside the dedicated thinking indicator.
+        if (!cleanedContent && !thought && isAssistantWorking) return null;
+        if (!cleanedContent && !thought && raw && (result || chartData)) return null;
+
+        return (
+          <div key={msg.id || i} className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-1">
+            <div className="flex-1 space-y-3 min-w-0">
+              <div className="flex items-center gap-3">
+                <ManusLogo showBadge={true} />
+              </div>
+
+              {thought && (
+                <ThoughtProcess
+                  thoughtText={thought}
+                  defaultExpanded={false}
+                />
+              )}
+
+              {cleanedContent ? (
+                <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
+                  <MemoizedMarkdown content={cleanedContent} />
+                </div>
+              ) : null}
+
+              {cleanedContent ? (
+                <div className="pt-0.5">
+                  <ConversationActionBar 
+                    content={cleanedContent}
+                    onRegenerate={() => {
+                      const lastUser = dedupedMessages.slice(0, i).reverse().find((m: any) => m.role === 'user');
+                      const promptToReRun = lastUser?.content ? cleanUserMessage(lastUser.content) : prompt;
+                      if (promptToReRun) onSubmit(promptToReRun);
+                    }}
+                  />
+                </div>
+              ) : null}
+            </div>
+          </div>
+        );
+      }
+      return null;
+    });
+  }, [dedupedMessages, extractThoughtProcess, cleanMessageContent, isAssistantWorking, result, chartData, prompt, onSubmit]);
+
+  const activeRunningStep = useMemo(
+    () => steps.find(s => s.status === 'running'),
+    [steps]
+  );
+
+  const lastUserMessageContent = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (message?.role === 'user') return message.content;
+    }
+    return undefined;
+  }, [messages]);
+
+  const hasAssistantMessage = useMemo(
+    () => messages.some((m: any) => m?.role === 'assistant'),
+    [messages]
+  );
+
   const typingStatus = activeRunningStep 
     ? activeRunningStep.label 
     : isThinkHarder 
@@ -398,83 +518,7 @@ export function ChatView({
       <div ref={containerRef} className="flex-1 overflow-y-auto px-4 sm:px-20 py-6 space-y-8 custom-scrollbar scroll-smooth">
         
         {/* Render Conversation Messages in Chronological Order */}
-        {(() => {
-          const list: any[] = [];
-          const seenIds = new Set<string>();
-          for (const msg of messages) {
-            if (!msg) continue;
-            if (msg.id && seenIds.has(msg.id)) continue;
-            const prev = list[list.length - 1];
-            if (
-              prev &&
-              prev.role === msg.role &&
-              cleanUserMessage(prev.content || '').trim().toLowerCase() === cleanUserMessage(msg.content || '').trim().toLowerCase()
-            ) {
-              continue;
-            }
-            if (msg.id) seenIds.add(msg.id);
-            list.push(msg);
-          }
-
-          return list.map((msg, i) => {
-            if (msg.role === 'user') {
-              return (
-                <div key={msg.id || i} className="flex justify-end my-2">
-                  <div className="bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium max-w-[80%] shadow-xs leading-relaxed">
-                    {cleanUserMessage(msg.content)}
-                  </div>
-                </div>
-              );
-            }
-
-            if (msg.role === 'assistant') {
-              const raw = msg.content || '';
-              const { thought, content: extracted } = extractThoughtProcess(raw);
-              const cleanedContent = cleanMessageContent(extracted || raw);
-              // While a response is streaming, the hook may include an empty assistant placeholder.
-              // Do not render its Manus header alongside the dedicated thinking indicator.
-              if (!cleanedContent && !thought && isAssistantWorking) return null;
-              if (!cleanedContent && !thought && raw && (result || chartData)) return null;
-
-              return (
-                <div key={msg.id || i} className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-1">
-                  <div className="flex-1 space-y-3 min-w-0">
-                    <div className="flex items-center gap-3">
-                      <ManusLogo showBadge={true} />
-                    </div>
-
-                    {thought && (
-                      <ThoughtProcess
-                        thoughtText={thought}
-                        defaultExpanded={false}
-                      />
-                    )}
-
-                    {cleanedContent ? (
-                      <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
-                        <MarkdownRenderer content={cleanedContent} />
-                      </div>
-                    ) : null}
-
-                    {cleanedContent ? (
-                      <div className="pt-0.5">
-                        <ConversationActionBar 
-                          content={cleanedContent}
-                          onRegenerate={() => {
-                            const lastUser = list.slice(0, i).reverse().find((m: any) => m.role === 'user');
-                            const promptToReRun = lastUser?.content ? cleanUserMessage(lastUser.content) : prompt;
-                            if (promptToReRun) onSubmit(promptToReRun);
-                          }}
-                        />
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              );
-            }
-            return null;
-          });
-        })()}
+        {renderedMessages}
 
         {/* Steps / Task Progress */}
         {steps.length > 0 && (
@@ -527,7 +571,7 @@ export function ChatView({
                   )}
 
                   {/* Action bar after standalone result */}
-                  {!messages.some((m: any) => m?.role === 'assistant') && (
+                  {!hasAssistantMessage && (
                     <div className="pt-3 mt-3 border-t border-border/40">
                       <ConversationActionBar
                         content={result?.summary || result?.content || result?.text || `${result.detectedChartType || 'Visual'} analysis generated`}
@@ -550,7 +594,7 @@ export function ChatView({
               </div>
               <div className="pt-1">
                 <ContextualThinking
-                  prompt={messages.filter((message: any) => message?.role === 'user').slice(-1)[0]?.content || prompt}
+                  prompt={lastUserMessageContent || prompt}
                   activeStep={activeRunningStep?.label}
                   deepMode={isThinkHarder}
                 />
