@@ -1,5 +1,5 @@
 /**
- * RTIE â Real-Time Intelligence Engine public entry point.
+ * RTIE — Real-Time Intelligence Engine public entry point.
  * Backend-only module used by netlify/functions/agent.ts.
  */
 export { routeQuery } from './queryRouter';

@@ -1,5 +1,5 @@
 /**
- * Intelligent Query Router â classifies incoming questions and decides
+ * Intelligent Query Router — classifies incoming questions and decides
  * whether live research is required. Avoids unnecessary searches for
  * greetings, small talk, math and stable historical knowledge.
  */
@@ -9,7 +9,7 @@ const CONVERSATION_RE =
   /^(hi|hello|hey|hiya|howdy|thanks|thank you|ok|okay|bye|good\s+(morning|afternoon|evening|day)|how are you|who are you|what is manus|which model|what model|what llm|which llm|model are you|who built you|your architecture|what can you do)\b/i;
 
 const MATH_RE =
-  /^[\s\d+\-*/^%().,eÃÃ·]+$/;
+  /^[\s\d+\-*/^%().,e×÷]+$/;
 
 const MATH_WORD_RE =
   /\b(calculate|compute|what is|solve|sum of|product of|square root|percentage of)\b.*\d/i;
@@ -24,7 +24,7 @@ const CURRENT_RE =
   /\b(latest|today|current|currently|right now|breaking|live|real[\s-]?time|recent|this week|this month|yesterday|update[sd]?|newest)\b/i;
 
 const NEWS_RE =
-  /\b(news|headlines|what happened|what's happening|whats happening|election|press conference|announcee today)\b/i;
+  /\b(news|headlines|what happened|what's happening|whats happening|election|press conference|announced today)\b/i;
 
 const AI_MODELS_RE =
   /\b(gemini|gpt|claude|llama|anthropic|openai|deepseek|qwen|midjourney|sora|copilot|model release|ai model|foundation model)\b/i;

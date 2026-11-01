@@ -1,5 +1,5 @@
 /**
- * Knowledge freshness service â category-based expiration policies.
+ * Knowledge freshness service — category-based expiration policies.
  * Old cached information is never presented as current; expired records
  * must be re-verified or refreshed before reuse.
  */

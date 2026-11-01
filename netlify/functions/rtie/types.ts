@@ -1,5 +1,5 @@
 /**
- * Real-Time Intelligence Engine (RTIE) â shared types.
+ * Real-Time Intelligence Engine (RTIE) — shared types.
  * Backend-only. No UI dependencies.
  */
 
