@@ -206,6 +206,7 @@ export const ConversationActionBar = memo(function ConversationActionBar({
 
   return (
     <div 
+      data-testid="conversation-action-bar"
       className={cn(
         "flex items-center gap-2.5 sm:gap-3 py-1.5 text-[#000000] dark:text-[#FFFFFF] select-none relative animate-in fade-in duration-200",
         className
@@ -215,6 +216,7 @@ export const ConversationActionBar = memo(function ConversationActionBar({
       <button
         type="button"
         onClick={handleCopy}
+        data-testid="action-bar-copy"
         title={copied ? "Copied" : "Copy to clipboard"}
         aria-label="Copy to clipboard"
         className="p-1.5 rounded-lg hover:bg-[#F2F2F2] dark:hover:bg-[#171717] active:scale-95 transition-all text-[#000000] dark:text-[#FFFFFF] cursor-pointer"
@@ -230,6 +232,7 @@ export const ConversationActionBar = memo(function ConversationActionBar({
       <button
         type="button"
         onClick={handleThumbsUp}
+        data-testid="action-bar-like"
         data-active={feedback === 'up' ? 'true' : 'false'}
         data-popping={poppingReaction === 'up' ? 'true' : 'false'}
         aria-pressed={feedback === 'up'}
@@ -263,6 +266,7 @@ export const ConversationActionBar = memo(function ConversationActionBar({
       <button
         type="button"
         onClick={handleThumbsDown}
+        data-testid="action-bar-dislike"
         data-active={feedback === 'down' ? 'true' : 'false'}
         data-popping={poppingReaction === 'down' ? 'true' : 'false'}
         aria-pressed={feedback === 'down'}
@@ -296,6 +300,7 @@ export const ConversationActionBar = memo(function ConversationActionBar({
       <button
         type="button"
         onClick={handleToggleSpeech}
+        data-testid="action-bar-speaker"
         title={isSpeaking ? "Stop reading" : "Read aloud"}
         aria-label={isSpeaking ? "Stop reading" : "Read aloud"}
         className={cn(
@@ -316,6 +321,7 @@ export const ConversationActionBar = memo(function ConversationActionBar({
       <button
         type="button"
         onClick={handleShare}
+        data-testid="action-bar-share"
         title="Share response"
         aria-label="Share response"
         className="p-1.5 rounded-lg hover:bg-[#F2F2F2] dark:hover:bg-[#171717] active:scale-95 transition-all text-[#000000] dark:text-[#FFFFFF] cursor-pointer"
@@ -328,6 +334,7 @@ export const ConversationActionBar = memo(function ConversationActionBar({
         <button
           type="button"
           onClick={() => setShowMenu(prev => !prev)}
+          data-testid="action-bar-more"
           title="More options"
           aria-label="More options"
           className={cn(

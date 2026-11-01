@@ -35,13 +35,21 @@ import { VoiceTranscriptionIndicator } from '@/components/voice/VoiceTranscripti
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
 import { validateFile, formatFileSize, compressImageForAI } from '@/lib/fileValidation';
 import { ConnectorsPopupMenu } from '@/components/chat/ConnectorsPopupMenu';
-import { ConnectorsStorePanel, CONNECTOR_CATALOG } from '@/components/connectors/ConnectorsStorePanel';
-import { ConnectorConfigModal } from '@/components/connectors/ConnectorConfigModal';
-import { GoogleDrivePickerModal } from '@/components/workspace/GoogleDrivePickerModal';
 import { WorkspaceMentionPicker, WORKSPACE_CONNECTOR_OPTIONS, WorkspaceConnectorOption } from '@/components/chat/WorkspaceMentionPicker';
 import { GoogleDriveFileItem } from '@/lib/workspaceTools';
 import { getSettings } from '@/lib/settingsStore';
 import { getDraftPrompt, saveDraftPrompt, clearDraftPrompt } from '@/lib/draftStorage';
+import { getActivePerformanceProfile } from '@/lib/performanceEngine';
+
+const ConnectorsStorePanel = React.lazy(() =>
+  import('@/components/connectors/ConnectorsStorePanel').then((m) => ({ default: m.ConnectorsStorePanel }))
+);
+const ConnectorConfigModal = React.lazy(() =>
+  import('@/components/connectors/ConnectorConfigModal').then((m) => ({ default: m.ConnectorConfigModal }))
+);
+const GoogleDrivePickerModal = React.lazy(() =>
+  import('@/components/workspace/GoogleDrivePickerModal').then((m) => ({ default: m.GoogleDrivePickerModal }))
+);
 
 export type PersonalityMode = 'chat' | 'work';
 
@@ -377,6 +385,9 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   };
 
   React.useEffect(() => {
+    if (getActivePerformanceProfile() === 'ultra-lite') {
+      return;
+    }
     if (containerRef.current) {
       const ctx = gsap.context(() => {
         gsap.fromTo(
@@ -616,10 +627,10 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
               trimColor={ROBOT_THEMES[robotTheme]?.trim || ROBOT_THEMES[0].trim}
               screenColor={ROBOT_THEMES[robotTheme]?.screen || ROBOT_THEMES[0].screen}
               speed={robotSpeed}
-              paused={robotPaused}
+              paused={robotPaused || (getActivePerformanceProfile() === 'ultra-lite' && robotState === 'idle' && !isExtracting && !isHappyExpression)}
               interactive={robotInteractive}
               antenna={robotAntenna}
-              floorShadow={robotFloorShadow}
+              floorShadow={robotFloorShadow && getActivePerformanceProfile() !== 'ultra-lite'}
               seed={robotSeed}
               aria-label={`Manus AI robot assistant, ${isHappyExpression ? 'happy' : robotState}`}
               className={`shrink-0 transform transition-transform ${showIndiaClock ? 'opacity-20' : ''}`}
@@ -804,10 +815,9 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                 {activeConnectorTags.length > 0 && (
                   <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap">
                     {activeConnectorTags.map((tagId) => {
-                      const opt = WORKSPACE_CONNECTOR_OPTIONS.find(o => o.id === tagId) || CONNECTOR_CATALOG.find(c => c.id === tagId);
-                      if (!opt) return null;
+                      const opt = WORKSPACE_CONNECTOR_OPTIONS.find(o => o.id === tagId) || { id: tagId, label: tagId.replace(/_/g, ' '), icon: Plug };
                       const IconComp = opt.icon;
-                      const rawName = 'label' in opt ? opt.label : ('name' in opt ? opt.name : tagId);
+                      const rawName = opt.label || tagId;
                       const cleanName = rawName.replace(/^Google\s+/, '').replace(/^@/, '');
                       const displayName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
 
@@ -1096,35 +1106,47 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
       </div>
 
       {/* Google Drive Picker Modal */}
-      <GoogleDrivePickerModal
-        isOpen={isDrivePickerOpen}
-        onClose={() => setIsDrivePickerOpen(false)}
-        onSelectFile={handleDriveFileSelect}
-      />
+      {isDrivePickerOpen && (
+        <React.Suspense fallback={null}>
+          <GoogleDrivePickerModal
+            isOpen={isDrivePickerOpen}
+            onClose={() => setIsDrivePickerOpen(false)}
+            onSelectFile={handleDriveFileSelect}
+          />
+        </React.Suspense>
+      )}
 
       {/* Connectors & Plugins Store Panel */}
-      <ConnectorsStorePanel
-        isOpen={isConnectorsStoreOpen}
-        onClose={() => setIsConnectorsStoreOpen(false)}
-        activeConnectors={activePlugins}
-        onToggleConnector={handleTogglePlugin}
-      />
+      {isConnectorsStoreOpen && (
+        <React.Suspense fallback={null}>
+          <ConnectorsStorePanel
+            isOpen={isConnectorsStoreOpen}
+            onClose={() => setIsConnectorsStoreOpen(false)}
+            activeConnectors={activePlugins}
+            onToggleConnector={handleTogglePlugin}
+          />
+        </React.Suspense>
+      )}
 
       {/* Interactive Connector Details & Configuration Modal */}
-      <ConnectorConfigModal
-        connectorId={selectedConfigConnectorId}
-        isOpen={!!selectedConfigConnectorId}
-        onClose={() => setSelectedConfigConnectorId(null)}
-        onRemoveConnector={(id) => {
-          removeConnectorTag(id);
-          if (activePlugins.includes(id)) {
-            handleTogglePlugin(id);
-          }
-        }}
-        onInsertPrompt={(promptText) => {
-          setPrompt(prev => prev ? `${prev} ${promptText}` : promptText);
-        }}
-      />
+      {selectedConfigConnectorId && (
+        <React.Suspense fallback={null}>
+          <ConnectorConfigModal
+            connectorId={selectedConfigConnectorId}
+            isOpen={!!selectedConfigConnectorId}
+            onClose={() => setSelectedConfigConnectorId(null)}
+            onRemoveConnector={(id) => {
+              removeConnectorTag(id);
+              if (activePlugins.includes(id)) {
+                handleTogglePlugin(id);
+              }
+            }}
+            onInsertPrompt={(promptText) => {
+              setPrompt(prev => prev ? `${prev} ${promptText}` : promptText);
+            }}
+          />
+        </React.Suspense>
+      )}
     </div>
   );
 }

@@ -158,6 +158,8 @@ function openDatabase(): Promise<IDBDatabase> {
 // Fallback in-memory/localStorage stores to ensure 100% resilience even in strict privacy modes
 const FALLBACK_CONV_KEY = 'manus_fallback_conversations';
 const FALLBACK_MSG_KEY = 'manus_fallback_messages';
+const MAX_FALLBACK_CONVERSATIONS = 120;
+const MAX_FALLBACK_MESSAGES = 400;
 
 function getFallbackConversations(): StoredConversation[] {
   try {
@@ -170,7 +172,11 @@ function getFallbackConversations(): StoredConversation[] {
 
 function saveFallbackConversations(convs: StoredConversation[]): void {
   try {
-    localStorage.setItem(FALLBACK_CONV_KEY, JSON.stringify(convs));
+    const bounded =
+      convs.length > MAX_FALLBACK_CONVERSATIONS
+        ? convs.slice(-MAX_FALLBACK_CONVERSATIONS)
+        : convs;
+    localStorage.setItem(FALLBACK_CONV_KEY, JSON.stringify(bounded));
   } catch {}
 }
 
@@ -185,7 +191,11 @@ function getFallbackMessages(): StoredMessage[] {
 
 function saveFallbackMessages(msgs: StoredMessage[]): void {
   try {
-    localStorage.setItem(FALLBACK_MSG_KEY, JSON.stringify(msgs));
+    const bounded =
+      msgs.length > MAX_FALLBACK_MESSAGES
+        ? msgs.slice(-MAX_FALLBACK_MESSAGES)
+        : msgs;
+    localStorage.setItem(FALLBACK_MSG_KEY, JSON.stringify(bounded));
   } catch {}
 }
 

@@ -29,7 +29,11 @@ import {
 import { tagTaskAfterCompletion } from '@/lib/taskTaggingService';
 import { taskTagger } from '@/services/taskTagger';
 import { exportChatSession, ChatExportFormat } from '@/lib/chatExport';
-// Removed import chatAutoSave
+import {
+  createAdaptiveStreamBatcher,
+  getActivePerformanceProfile,
+  loadAIProviderIntegrationOnDemand,
+} from '@/lib/performanceEngine';
 
 export type AgentTaskPhase = 'idle' | 'tool-calling' | 'text-generation' | 'completed' | 'error';
 
@@ -138,6 +142,65 @@ export interface Step {
   trace?: string[];
 }
 
+export function createInitialWorkflowSteps(isImageFile = false): Step[] {
+  return [
+    {
+      id: 'think_1',
+      label: isImageFile ? 'Inspecting attached image' : 'Understanding intent & context',
+      status: 'running',
+      trace: [isImageFile ? 'Scanning visual features & question context...' : 'Analyzing prompt semantics...'],
+    },
+    {
+      id: 'think_2',
+      label: 'Synthesizing final response',
+      status: 'pending',
+      trace: [],
+    },
+  ];
+}
+
+export function advanceWorkflowSteps(
+  prevSteps: Step[],
+  target: 'understanding' | 'synthesizing' | 'completed' | 'error'
+): Step[] {
+  if (!Array.isArray(prevSteps) || prevSteps.length === 0) return prevSteps;
+
+  if (target === 'completed') {
+    if (prevSteps.every(s => s.status === 'completed')) return prevSteps;
+    return prevSteps.map(s => ({ ...s, status: 'completed' as const }));
+  }
+
+  if (target === 'error') {
+    return prevSteps.map(s =>
+      s.status === 'running' || s.status === 'pending'
+        ? { ...s, status: 'error' as const }
+        : s
+    );
+  }
+
+  if (target === 'understanding') {
+    return prevSteps.map((s, idx) => ({
+      ...s,
+      status: idx === 0 ? ('running' as const) : ('pending' as const),
+    }));
+  }
+
+  // target === 'synthesizing': complete Stage 1..N-2 and activate the final synthesis stage
+  const lastIdx = prevSteps.length - 1;
+  return prevSteps.map((s, idx) => {
+    if (idx < lastIdx) {
+      return s.status === 'completed' ? s : { ...s, status: 'completed' as const };
+    }
+    return s.status === 'completed'
+      ? s
+      : {
+          ...s,
+          status: 'running' as const,
+          trace: s.trace && s.trace.length > 0 ? s.trace : ['Composing structured response...'],
+        };
+  });
+}
+
 export interface ChartData {
   labels: string[];
   datasets: {
@@ -203,9 +266,29 @@ export function useAgentTask() {
   }, []);
 
   // Listen to real-time SSE stream deltas from blink.ts and coalesce React state updates
-  // to display refresh frames (60-120 FPS) so rapid token bursts never block the main thread.
+  // using the Ultra-Lite Adaptive Stream Batcher so rapid token bursts never block the main thread.
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    let synthesizedMarked = false;
+    const streamBatcher = createAdaptiveStreamBatcher<string>((batchedText) => {
+      if (!finalizedRequestIdsRef.current.has(activeRequestIdRef.current)) {
+        setLiveStreamText(batchedText);
+      }
+    });
+
+    const handleStreamStarted = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail?.requestId && activeStreamRequestIdRef.current && detail.requestId !== activeStreamRequestIdRef.current) {
+        return;
+      }
+      if (finalizedRequestIdsRef.current.has(activeRequestIdRef.current)) {
+        return;
+      }
+      synthesizedMarked = false;
+      clearStepTimers();
+      setPhase('text-generation');
+      setSteps(prev => advanceWorkflowSteps(prev, 'synthesizing'));
+    };
     const handleDelta = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
       if (detail?.requestId && activeStreamRequestIdRef.current && detail.requestId !== activeStreamRequestIdRef.current) {
@@ -216,29 +299,19 @@ export function useAgentTask() {
       }
       if (typeof detail?.text === 'string') {
         liveStreamTextRef.current = detail.text;
-        // Once real response tokens begin arriving, stop synthetic step timers and complete active step banners
+        // Once real response tokens begin arriving, stop synthetic step timers and transition to Stage 2 once
         if (stepTimersRef.current.length > 0) {
           for (const timer of stepTimersRef.current) {
             clearTimeout(timer);
           }
           stepTimersRef.current = [];
         }
-        setSteps(prev => prev.some(s => s.status === 'running')
-          ? prev.map(s => s.status === 'running' ? { ...s, status: 'completed' as const } : s)
-          : prev
-        );
-        if (typeof window.requestAnimationFrame === 'function') {
-          if (streamRafRef.current === null) {
-            streamRafRef.current = window.requestAnimationFrame(() => {
-              streamRafRef.current = null;
-              if (!finalizedRequestIdsRef.current.has(activeRequestIdRef.current)) {
-                setLiveStreamText(liveStreamTextRef.current);
-              }
-            });
-          }
-        } else {
-          setLiveStreamText(detail.text);
+        if (!synthesizedMarked) {
+          synthesizedMarked = true;
+          setPhase('text-generation');
+          setSteps(prev => advanceWorkflowSteps(prev, 'synthesizing'));
         }
+        streamBatcher.schedule(detail.text);
       }
     };
     const handleStreamDone = (e: Event) => {
@@ -247,12 +320,15 @@ export function useAgentTask() {
         return;
       }
       clearStepTimers();
+      synthesizedMarked = false;
+      streamBatcher.flushNow();
       if (detail?.finishReason === 'error' || detail?.finishReason === 'stop') {
         lastStreamFinishReasonRef.current = detail.finishReason;
       }
       if (typeof detail?.error === 'string' && detail.error.trim()) {
         lastStreamErrorRef.current = detail.error.trim();
       }
+      setSteps(prev => advanceWorkflowSteps(prev, detail?.finishReason === 'error' ? 'error' : 'completed'));
       if (!finalizedRequestIdsRef.current.has(activeRequestIdRef.current)) {
         if (typeof detail?.text === 'string' && detail.text) {
           liveStreamTextRef.current = detail.text;
@@ -262,11 +338,14 @@ export function useAgentTask() {
         }
       }
     };
+    window.addEventListener('manus_stream_started', handleStreamStarted);
     window.addEventListener('manus_stream_delta', handleDelta);
     window.addEventListener('manus_stream_done', handleStreamDone);
     return () => {
+      window.removeEventListener('manus_stream_started', handleStreamStarted);
       window.removeEventListener('manus_stream_delta', handleDelta);
       window.removeEventListener('manus_stream_done', handleStreamDone);
+      streamBatcher.cancel();
       if (streamRafRef.current !== null && typeof window.cancelAnimationFrame === 'function') {
         window.cancelAnimationFrame(streamRafRef.current);
         streamRafRef.current = null;
@@ -289,10 +368,11 @@ export function useAgentTask() {
     };
   }, [clearStepTimers]);
 
-  // Initialize sandbox
+  // Lazy sandbox initialization: skip eager sandbox creation on 2GB RAM Ultra-Lite devices unless Work Mode is active
   useEffect(() => {
     let mounted = true;
-    if (isAuthenticated && !sandbox) {
+    const isWorkMode = typeof localStorage !== 'undefined' && localStorage.getItem('manus_chat_work_mode') === 'work';
+    if (isAuthenticated && !sandbox && (isWorkMode || getActivePerformanceProfile() !== 'ultra-lite')) {
       blink.sandbox.create({ template: 'devtools-base' }).then(sb => {
         if (mounted) setSandbox(sb);
       }).catch(err => console.error('Failed to create sandbox:', err));
@@ -371,10 +451,16 @@ export function useAgentTask() {
       'claude-3.5-sonnet': 'anthropic/claude-3.5-sonnet',
     };
     const activeModel = modelMap[selectedModelId] || 'google/gemini-3.8-flash';
+    void loadAIProviderIntegrationOnDemand(activeModel.startsWith('anthropic/') ? 'anthropic' : 'gemini');
 
     return new Agent({
       model: activeModel,
       system: `You are Manus, a premium AI workspace agent. Your goal is to turn prompts, file uploads (CSV, Excel, PDF), or URLs into actionable data analyses, charts, and reports.
+
+    VERIFIED MODEL & APPLICATION IDENTITY:
+    - Application / Workspace Agent Name: Manus
+    - Active Underlying LLM Model: ${activeModel.replace(/^google\//, '')} (Provider: ${activeModel.startsWith('anthropic/') ? 'Anthropic' : 'Google Gemini'})
+    - When asked which model you are, what LLM you use, or about your architecture, always identify your actual underlying model (${activeModel.replace(/^google\//, '')}) and clearly distinguish between the application/agent name (Manus) and the underlying LLM model. Never invent model names, providers, or architectures.
     
     Guidelines:
     1. When given file content or CSV data, ALWAYS parse it, analyze the context, compute statistics if numeric, and identify insights.
@@ -1044,10 +1130,8 @@ export function useAgentTask() {
     setPhase('tool-calling');
     emitRobotEvent('USER_SUBMITTED');
     setResult(null);
-    setSteps([
-      { id: 'think_1', label: 'Understanding intent & context', status: 'running', trace: ['Analyzing prompt & conversation history...'] },
-      { id: 'think_2', label: 'Synthesizing response', status: 'pending', trace: [] },
-    ]);
+    const hasImageAttachment = content.includes('[IMAGE_DATA_URL:') || content.includes('[Attached Image');
+    setSteps(createInitialWorkflowSteps(hasImageAttachment));
 
     const activeId = currentTaskIdRef.current || taskId;
     const userMsgId = 'msg_' + now + '_' + Math.random().toString(36).substring(2, 8);
@@ -1145,6 +1229,8 @@ export function useAgentTask() {
 
         const preparedPrompt = await preparePromptWithConnectors(targetPrompt);
         if (activeRequestIdRef.current !== reqId) return;
+        setPhase('text-generation');
+        setSteps(prev => advanceWorkflowSteps(prev, 'synthesizing'));
         await agentSendMessage(preparedPrompt);
       } catch (error) {
         if (activeRequestIdRef.current !== reqId) return;
@@ -1358,20 +1444,7 @@ export function useAgentTask() {
     let initialSteps: Step[] = [];
 
     if (isSimple) {
-      initialSteps = [
-        {
-          id: 'think_1',
-          label: isImageFile ? 'Inspecting attached image' : 'Understanding intent & context',
-          status: 'running',
-          trace: [isImageFile ? 'Scanning visual features & question context...' : 'Analyzing prompt semantics...'],
-        },
-        {
-          id: 'think_2',
-          label: 'Synthesizing final response',
-          status: 'pending',
-          trace: [],
-        },
-      ];
+      initialSteps = createInitialWorkflowSteps(isImageFile);
     } else {
       initialSteps.push({ id: '1', label: 'Analyzing Request', status: 'running', trace: ['Parsing intent...', `Output: ${options.format}`, `Chart: ${options.chartType || 'auto'}`] });
 
@@ -1421,7 +1494,7 @@ export function useAgentTask() {
           },
           {
             id: 'think_harder_2',
-            label: '🔍 Extended Multi-Angle Chain-of-Thought',
+            label: '🔍 Structured Reasoning & Verification',
             status: 'pending',
             trace: ['Synthesizing alternative approaches...', 'Testing edge cases and stress-testing logic']
           }
@@ -1476,26 +1549,11 @@ export function useAgentTask() {
       }).catch(console.error);
     }
 
-    if (!isSimple) {
-      stepTimersRef.current.push(
-        setTimeout(() => {
-          if (activeRequestIdRef.current !== reqId || !isSubmittingRef.current || liveStreamTextRef.current) return;
-          setSteps(prev => prev.length > 0 ? prev.map((s, i) => i === 0 ? { ...s, status: 'completed' } : i === 1 ? { ...s, status: 'running' } : s) : prev);
-        }, 1500),
-        setTimeout(() => {
-          if (activeRequestIdRef.current !== reqId || !isSubmittingRef.current || liveStreamTextRef.current) return;
-          setSteps(prev => prev.length > 1 ? prev.map((s, i) => i === 1 ? { ...s, status: 'completed' } : i === 2 ? { ...s, status: 'running' } : s) : prev);
-        }, 3500),
-        setTimeout(() => {
-          if (activeRequestIdRef.current !== reqId || !isSubmittingRef.current || liveStreamTextRef.current) return;
-          setSteps(prev => prev.length > 2 ? prev.map((s, i) => i === 2 ? { ...s, status: 'completed' } : i === 3 ? { ...s, status: 'running' } : s) : prev);
-        }, 6000)
-      );
-    }
-
     try {
       const preparedPrompt = await preparePromptWithConnectors(enhancedPrompt);
       if (activeRequestIdRef.current === reqId) {
+        setPhase('text-generation');
+        setSteps(prev => advanceWorkflowSteps(prev, 'synthesizing'));
         await agentSendMessage(preparedPrompt);
       }
     } catch (error) {

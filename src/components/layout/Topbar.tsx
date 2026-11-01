@@ -248,20 +248,6 @@ export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistor
               />
             </div>
           </button>
-
-          {/* Subtle Typing Indicator Chip */}
-          {isGenerating && (
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] rounded-full text-xs font-medium animate-in fade-in zoom-in-95 duration-200 shadow-xs backdrop-blur-sm shrink-0">
-              <span className="flex items-center gap-1 shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#000000] dark:bg-[#FFFFFF] animate-bounce [animation-delay:-0.3s]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-[#000000] dark:bg-[#FFFFFF] animate-bounce [animation-delay:-0.15s]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-[#000000] dark:bg-[#FFFFFF] animate-bounce" />
-              </span>
-              <span className="text-[11.5px] font-semibold tracking-tight whitespace-nowrap">
-                {generationText}
-              </span>
-            </div>
-          )}
         </div>
       )}
 

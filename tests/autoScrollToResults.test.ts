@@ -420,7 +420,7 @@ describe('Auto-scroll to Results Feature', () => {
       expect(stages[0].status).toBe('completed');
       expect(stages[1].label).toContain('Inspecting visual content');
       expect(stages[1].status).toBe('running');
-      expect(stages[2].label).toContain('Multi-angle chain-of-thought');
+      expect(stages[2].label).toContain('Structured reasoning & verification');
       expect(stages[3].status).toBe('pending');
     });
   });

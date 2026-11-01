@@ -11,6 +11,66 @@ export interface D3TagTimelineChartProps {
   onHoverTimePoint?: (point: TagTimePoint | null) => void;
 }
 
+export function getSafeLocalPointerX(
+  event: any,
+  target: Element | null,
+  chartWidth: number
+): number | null {
+  if (!event || !target || !Number.isFinite(chartWidth) || chartWidth <= 0) {
+    return null;
+  }
+
+  let rawEvent = event;
+  while (rawEvent?.sourceEvent) {
+    rawEvent = rawEvent.sourceEvent;
+  }
+
+  let clientX: number | undefined;
+  let clientY: number | undefined;
+
+  if (Number.isFinite(rawEvent?.clientX) && Number.isFinite(rawEvent?.clientY)) {
+    clientX = rawEvent.clientX;
+    clientY = rawEvent.clientY;
+  } else if (rawEvent?.touches && rawEvent.touches.length > 0) {
+    clientX = rawEvent.touches[0]?.clientX;
+    clientY = rawEvent.touches[0]?.clientY;
+  } else if (rawEvent?.changedTouches && rawEvent.changedTouches.length > 0) {
+    clientX = rawEvent.changedTouches[0]?.clientX;
+    clientY = rawEvent.changedTouches[0]?.clientY;
+  }
+
+  if (
+    typeof clientX !== 'number' ||
+    typeof clientY !== 'number' ||
+    !Number.isFinite(clientX) ||
+    !Number.isFinite(clientY)
+  ) {
+    return null;
+  }
+
+  if (typeof target.getBoundingClientRect === 'function') {
+    const rect = target.getBoundingClientRect();
+    if (rect && Number.isFinite(rect.left) && Number.isFinite(rect.width) && rect.width > 0) {
+      const ratio = (clientX - rect.left) / rect.width;
+      const localX = ratio * chartWidth;
+      if (Number.isFinite(localX)) {
+        return Math.max(0, Math.min(chartWidth, localX));
+      }
+    }
+  }
+
+  try {
+    const [px] = d3.pointer({ clientX, clientY }, target);
+    if (typeof px === 'number' && Number.isFinite(px)) {
+      return Math.max(0, Math.min(chartWidth, px));
+    }
+  } catch {
+    // Ignore SVGPoint / CTM transformation errors
+  }
+
+  return null;
+}
+
 export function D3TagTimelineChart({
   timePoints,
   selectedTags,
@@ -415,8 +475,10 @@ export function D3TagTimelineChart({
     const bisectDate = d3.bisector<TagTimePoint, Date>((d) => d.date).left;
 
     overlay.on('mousemove touchmove', function (event) {
-      const [mouseX] = d3.pointer(event);
+      const mouseX = getSafeLocalPointerX(event, this, width);
+      if (mouseX === null) return;
       const x0 = xScale.invert(mouseX);
+      if (!x0 || Number.isNaN(x0.getTime())) return;
       const index = bisectDate(timePoints, x0, 1);
       const d0 = timePoints[index - 1];
       const d1 = timePoints[index];
@@ -430,14 +492,17 @@ export function D3TagTimelineChart({
         setHoveredPoint(d);
         if (onHoverTimePoint) onHoverTimePoint(d);
 
-        const cx =
+        const rawCx =
           chartMode === 'bar'
             ? (xBandScale(d.dateStr) ?? xScale(d.date)) + xBandScale.bandwidth() / 2
             : xScale(d.date);
+        const cx = Number.isFinite(rawCx) ? rawCx : 0;
         const visibleTotal = d3.sum(activeTags, (tag) => d.tags[tag] || 0);
+        const rawCy = yScale(visibleTotal);
+        const cy = Number.isFinite(rawCy) ? rawCy : chartHeight;
 
         crosshair.attr('x1', cx).attr('x2', cx).attr('opacity', 0.6);
-        focusCircle.attr('cx', cx).attr('cy', yScale(visibleTotal)).attr('opacity', 1);
+        focusCircle.attr('cx', cx).attr('cy', cy).attr('opacity', 1);
 
         if (tooltipRef.current) {
           const tooltip = tooltipRef.current;

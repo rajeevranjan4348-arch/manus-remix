@@ -5,7 +5,7 @@ import { formatSpokenPunctuation } from '@/components/voice/VoiceInputButton';
 import { VoiceTranscriptionIndicator } from '@/components/voice/VoiceTranscriptionIndicator';
 import { getSettings } from '@/lib/settingsStore';
 import { speakCleanHumanVoice } from '@/lib/speechSynthesis';
-import { MessageHoverReactions } from '../agent/MessageHoverReactions';
+import { ConversationActionBar } from '../agent/ConversationActionBar';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -459,7 +459,7 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
                   </div>
                   {msg.role === 'assistant' && msg.content && (
                     <div className="pl-3">
-                      <MessageHoverReactions
+                      <ConversationActionBar
                         messageId={`myai-msg-${index}`}
                         content={msg.content}
                       />

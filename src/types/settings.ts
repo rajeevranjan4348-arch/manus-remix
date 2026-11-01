@@ -59,6 +59,8 @@ export interface UserSettings {
   enablePhoneCommands?: boolean;
 
   // Performance & Rendering
+  ultraLiteMode?: boolean; // Manual toggle for 2GB RAM Android Ultra-Lite Performance Engine
+  performanceProfile?: 'auto' | 'ultra-lite' | 'saver' | 'balanced'; // Automatic or manual profile selection
   experimentalFrameRateBoost?: boolean; // Unlocks 120 FPS+ high refresh rate WebGL rendering and canvas visualizers
   frameRateTarget?: number; // Target frame rate (e.g., 60, 90, 120, 144)
 

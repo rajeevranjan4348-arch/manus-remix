@@ -1,25 +1,43 @@
-import React, { useEffect, useCallback, useMemo } from 'react';
+import React, { useEffect, useCallback, useMemo, Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { Sidebar } from './components/layout/Sidebar';
 import { Topbar } from './components/layout/Topbar';
 import { Home } from './pages/Home';
 import { ChatView } from './components/agent/ChatView';
-import { WebsiteBuilderView } from './components/agent/WebsiteBuilderView';
-import { HistoryPanel } from './components/history/HistoryPanel';
-import { SettingsModal } from './components/settings/SettingsModal';
-import { AndroidVoiceSettings } from './components/settings/AndroidVoiceSettings';
-import { AndroidConnectorsSettings } from './components/settings/AndroidConnectorsSettings';
-import { MyAIChat } from './components/chat/MyAIChat';
 import { useAgentTask } from './hooks/useAgentTask';
 import { useWebsiteBuilder } from './hooks/useWebsiteBuilder';
 import { BlinkProvider, BlinkAuthProvider, useBlinkAuth } from '@blinkdotnew/react';
 import { FirebaseProvider } from './context/FirebaseContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { Toaster } from './components/ui/sonner';
-import { blink } from './lib/blink';
 import { configureHighQualityTTS } from './lib/audioPipeline';
+import {
+  startPerformanceMonitoring,
+  getActivePerformanceProfile,
+  applyPerformanceProfileToDOM,
+} from './lib/performanceEngine';
 
 import { ErrorBoundary } from './components/common/ErrorBoundary';
+
+// Lazy-load Work Mode, E2B sandbox preview, editors, and heavy secondary panels
+const WebsiteBuilderView = lazy(() =>
+  import('./components/agent/WebsiteBuilderView').then((m) => ({ default: m.WebsiteBuilderView }))
+);
+const HistoryPanel = lazy(() =>
+  import('./components/history/HistoryPanel').then((m) => ({ default: m.HistoryPanel }))
+);
+const SettingsModal = lazy(() =>
+  import('./components/settings/SettingsModal').then((m) => ({ default: m.SettingsModal }))
+);
+const AndroidVoiceSettings = lazy(() =>
+  import('./components/settings/AndroidVoiceSettings').then((m) => ({ default: m.AndroidVoiceSettings }))
+);
+const AndroidConnectorsSettings = lazy(() =>
+  import('./components/settings/AndroidConnectorsSettings').then((m) => ({ default: m.AndroidConnectorsSettings }))
+);
+const MyAIChat = lazy(() =>
+  import('./components/chat/MyAIChat').then((m) => ({ default: m.MyAIChat }))
+);
 
 const PROJECT_ID = (import.meta as any).env?.VITE_BLINK_PROJECT_ID || 'manus-agent-clone-tkzhogvs';
 const PUBLISHABLE_KEY = (import.meta as any).env?.VITE_BLINK_PUBLISHABLE_KEY || '';
@@ -33,13 +51,13 @@ function TaskView({
   onReset: () => void 
 }) {
   const { taskId } = useParams();
-  const { loadTask, resetTask, stopTask, currentTask, messages, steps, reorderSteps, result, chartData, taskStatus, exportToPDF, sendMessage, isLoading } = useAgentTaskResult;
+  const { loadTask, resetTask, stopTask, currentTask, messages, steps, reorderSteps, result, chartData, taskStatus, phase, exportToPDF, sendMessage, isLoading } = useAgentTaskResult;
 
   useEffect(() => {
     if (taskId) {
       loadTask(taskId);
     }
-  }, [taskId]); // Remove loadTask dependency to avoid infinite loop if it's not stable, but it is useCallback
+  }, [taskId]);
 
   if (!currentTask && !taskId) return null;
 
@@ -57,6 +75,7 @@ function TaskView({
         result={result}
         chartData={chartData}
         status={isLoading && taskStatus === 'idle' ? 'running' : taskStatus as any}
+        phase={phase}
         onReset={onReset}
         onExport={exportToPDF}
         onSubmit={sendMessage}
@@ -75,7 +94,7 @@ function AppContent() {
   const [settingsInitialTab, setSettingsInitialTab] = React.useState<'general' | 'robot' | 'ai' | 'personalization' | 'voice' | 'data' | 'about'>('general');
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, isLoading: isAuthLoading } = useBlinkAuth();
+  useBlinkAuth();
   
   // Data analysis hook
   const agentTask = useAgentTask();
@@ -86,37 +105,34 @@ function AppContent() {
     if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
       (window as any).requestIdleCallback(() => configureHighQualityTTS());
     } else {
-      setTimeout(() => configureHighQualityTTS(), 150);
+      setTimeout(() => configureHighQualityTTS(), 250);
     }
   }, []);
 
-  // Adaptive rendering: preserve the current UI while reducing unnecessary work on low battery.
+  // Initialize Ultra-Lite Performance Engine (2GB RAM Android Target) & adaptive battery/visibility hooks
   React.useEffect(() => {
+    const stopMonitoring = startPerformanceMonitoring();
     let batteryManager: any = null;
     let disposed = false;
 
     const updatePerformanceMode = () => {
       if (disposed) return;
-      const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+      const activeProfile = getActivePerformanceProfile();
       const batteryLow = Boolean(batteryManager && !batteryManager.charging && batteryManager.level <= 0.2);
-      const nav = navigator as any;
-      const lowEndHardware =
-        (typeof nav.deviceMemory === 'number' && nav.deviceMemory > 0 && nav.deviceMemory <= 4) ||
-        (typeof nav.hardwareConcurrency === 'number' && nav.hardwareConcurrency > 0 && nav.hardwareConcurrency <= 4) ||
-        Boolean(nav.connection?.saveData);
       const hidden = document.visibilityState === 'hidden';
-      const mode = reducedMotion || batteryLow || lowEndHardware ? 'saver' : 'balanced';
-      document.documentElement.dataset.perfMode = mode;
+      const effectiveMode = activeProfile === 'ultra-lite' ? 'ultra-lite' : batteryLow ? 'saver' : activeProfile;
+      applyPerformanceProfileToDOM(effectiveMode);
       document.documentElement.dataset.pageHidden = hidden ? 'true' : 'false';
     };
 
     const onVisibilityChange = () => updatePerformanceMode();
     const onMotionPreferenceChange = () => updatePerformanceMode();
+    const onPerfProfileChange = () => updatePerformanceMode();
     const motionPreference = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-    document.addEventListener('visibilitychange', onVisibilityChange);
+    document.addEventListener('visibilitychange', onVisibilityChange, { passive: true });
     motionPreference?.addEventListener?.('change', onMotionPreferenceChange);
+    window.addEventListener('manus_performance_profile_changed', onPerfProfileChange);
 
-    // The Battery Status API is optional and unsupported in many browsers; gracefully ignore it.
     const batteryApi = (navigator as any).getBattery;
     if (typeof batteryApi === 'function') {
       batteryApi.call(navigator).then((battery: any) => {
@@ -132,38 +148,43 @@ function AppContent() {
 
     return () => {
       disposed = true;
+      stopMonitoring();
       document.removeEventListener('visibilitychange', onVisibilityChange);
       motionPreference?.removeEventListener?.('change', onMotionPreferenceChange);
+      window.removeEventListener('manus_performance_profile_changed', onPerfProfileChange);
       batteryManager?.removeEventListener?.('levelchange', updatePerformanceMode);
       batteryManager?.removeEventListener?.('chargingchange', updatePerformanceMode);
-      delete document.documentElement.dataset.perfMode;
-      delete document.documentElement.dataset.pageHidden;
     };
   }, []);
 
-
-  // Global keyboard shortcuts (Ctrl+H: History, Ctrl+, : Settings)
+  // Global keyboard shortcuts (Ctrl+H: History, Ctrl+, : Settings) with mutual exclusion of heavy panels
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'h') {
         e.preventDefault();
         setHistoryInitialTab('sessions');
+        setIsSettingsOpen(false);
         setIsHistoryOpen(prev => !prev);
       }
       if ((e.ctrlKey || e.metaKey) && (e.key === ',' || e.key.toLowerCase() === 'p')) {
         e.preventDefault();
         setSettingsInitialTab('general');
+        setIsHistoryOpen(false);
         setIsSettingsOpen(prev => !prev);
       }
     };
     const handleOpenSettings = (e: any) => {
       const tab = e?.detail?.tab || 'general';
       setSettingsInitialTab(tab);
+      setIsHistoryOpen(false);
+      setIsSidebarOpen(false);
       setIsSettingsOpen(true);
     };
     const handleOpenHistory = (e?: any) => {
       const tab = e?.detail?.tab || 'sessions';
       setHistoryInitialTab(tab);
+      setIsSettingsOpen(false);
+      setIsSidebarOpen(false);
       setIsHistoryOpen(true);
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -190,7 +211,6 @@ function AppContent() {
 
   const handleStartTask = async (prompt: string, options: any = {}) => {
     if (options?.format === 'website') {
-      // Extract website name from prompt or use default
       const websiteName = options.websiteName || prompt.split(' ').slice(0, 3).join(' ') + ' Website';
       startBuilding(prompt, websiteName);
     } else {
@@ -222,10 +242,14 @@ function AppContent() {
 
   const handleOpenHistory = useCallback(() => {
     setHistoryInitialTab('sessions');
+    setIsSettingsOpen(false);
+    setIsSidebarOpen(false);
     setIsHistoryOpen(true);
   }, []);
 
   const handleOpenSettings = useCallback(() => {
+    setIsHistoryOpen(false);
+    setIsSidebarOpen(false);
     setIsSettingsOpen(true);
   }, []);
 
@@ -273,84 +297,96 @@ function AppContent() {
         <main className="flex-1 overflow-hidden relative transition-all duration-300 ease-out">
           {isWebsiteActive ? (
             <div className="w-full h-full manus-transition-enter gpu-accelerated">
-              <WebsiteBuilderView
-                websiteName={websiteTask?.websiteName || 'Website'}
-                steps={websiteSteps}
-                status={websiteStatus === 'idle' ? 'running' : websiteStatus as any}
-                onReset={handleReset}
-                previewUrl={previewUrl}
-                isLoading={isBuilding || isInitializing}
-              />
+              <Suspense fallback={null}>
+                <WebsiteBuilderView
+                  websiteName={websiteTask?.websiteName || 'Website'}
+                  steps={websiteSteps}
+                  status={websiteStatus === 'idle' ? 'running' : websiteStatus as any}
+                  onReset={handleReset}
+                  previewUrl={previewUrl}
+                  isLoading={isBuilding || isInitializing}
+                />
+              </Suspense>
             </div>
           ) : (
             <div key={location.pathname} className="w-full h-full manus-transition-enter gpu-accelerated">
               <ErrorBoundary>
-                <Routes>
-                  <Route path="/" element={<Home onStartTask={handleStartTask} />} />
-                  <Route 
-                    path="/task/:taskId" 
-                    element={
-                      <TaskView 
-                        useAgentTaskResult={agentTask} 
-                        onReset={handleReset} 
-                      />
-                    } 
-                  />
-                  <Route 
-                    path="/settings" 
-                    element={
-                      <SettingsModal isOpen={true} onClose={() => navigate('/')} onBack={() => navigate('/')} />
-                    } 
-                  />
-                  <Route 
-                    path="/settings/voice" 
-                    element={
-                      <AndroidVoiceSettings onBack={() => navigate('/settings')} />
-                    } 
-                  />
-                  <Route 
-                    path="/settings/connectors" 
-                    element={
-                      <AndroidConnectorsSettings onBack={() => navigate('/settings')} />
-                    } 
-                  />
-                  <Route 
-                    path="/chat" 
-                    element={
-                      <MyAIChat onBack={() => navigate('/')} />
-                    } 
-                  />
-                  <Route 
-                    path="/my-ai" 
-                    element={
-                      <MyAIChat onBack={() => navigate('/')} />
-                    } 
-                  />
-                </Routes>
+                <Suspense fallback={null}>
+                  <Routes>
+                    <Route path="/" element={<Home onStartTask={handleStartTask} />} />
+                    <Route 
+                      path="/task/:taskId" 
+                      element={
+                        <TaskView 
+                          useAgentTaskResult={agentTask} 
+                          onReset={handleReset} 
+                        />
+                      } 
+                    />
+                    <Route 
+                      path="/settings" 
+                      element={
+                        <SettingsModal isOpen={true} onClose={() => navigate('/')} onBack={() => navigate('/')} />
+                      } 
+                    />
+                    <Route 
+                      path="/settings/voice" 
+                      element={
+                        <AndroidVoiceSettings onBack={() => navigate('/settings')} />
+                      } 
+                    />
+                    <Route 
+                      path="/settings/connectors" 
+                      element={
+                        <AndroidConnectorsSettings onBack={() => navigate('/settings')} />
+                      } 
+                    />
+                    <Route 
+                      path="/chat" 
+                      element={
+                        <MyAIChat onBack={() => navigate('/')} />
+                      } 
+                    />
+                    <Route 
+                      path="/my-ai" 
+                      element={
+                        <MyAIChat onBack={() => navigate('/')} />
+                      } 
+                    />
+                  </Routes>
+                </Suspense>
               </ErrorBoundary>
             </div>
           )}
         </main>
       </div>
 
-      {/* Slide-out Activity & History Panel */}
-      <HistoryPanel 
-        isOpen={isHistoryOpen} 
-        onClose={() => setIsHistoryOpen(false)}
-        initialTab={historyInitialTab}
-        onSelectTask={(id) => {
-          setIsHistoryOpen(false);
-          navigate(`/task/${id}`);
-        }}
-      />
+      {/* Lazy Slide-out Activity & History Panel — only mounted when opened */}
+      {isHistoryOpen && (
+        <Suspense fallback={null}>
+          <HistoryPanel 
+            isOpen={isHistoryOpen} 
+            onClose={() => setIsHistoryOpen(false)}
+            initialTab={historyInitialTab}
+            onSelectTask={(id) => {
+              setIsHistoryOpen(false);
+              navigate(`/task/${id}`);
+            }}
+          />
+        </Suspense>
+      )}
 
-      {/* Global Settings & Preferences Modal */}
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        initialTab={settingsInitialTab}
-        activeTaskInfo={activeTaskInfo}
-      />
+      {/* Lazy Global Settings & Preferences Modal — only mounted when opened */}
+      {isSettingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsModal
+            isOpen={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+            initialTab={settingsInitialTab}
+            activeTaskInfo={activeTaskInfo}
+          />
+        </Suspense>
+      )}
 
       <Toaster />
     </div>

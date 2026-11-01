@@ -124,8 +124,28 @@ export function parseSourcesFromMarkdown(content: string): ParsedSourcesResult {
 }
 
 /**
+ * Checks whether a URL is a meaningful external source rather than an empty or synthetic search page.
+ */
+export function isMeaningfulExternalSourceUrl(rawUrl: string): boolean {
+  const cleanUrl = String(rawUrl || '').trim().replace(/[).,;]+$/, '');
+  if (!/^https?:\/\//i.test(cleanUrl)) return false;
+  try {
+    const parsed = new URL(cleanUrl);
+    const host = parsed.hostname.toLowerCase();
+    const full = cleanUrl.toLowerCase();
+    if (host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local')) return false;
+    // Exclude synthetic search query pages that are not actual content sources
+    if (full.includes('wikipedia.org/w/index.php?search=')) return false;
+    if ((host === 'www.google.com' || host === 'google.com') && parsed.pathname === '/search') return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Resolves the complete list of web search queries and specific URLs for a ChatView message bubble,
- * combining explicit markdown blocks, execution step traces, and contextual query/reference synthesis.
+ * combining explicit markdown blocks and actual execution step traces without fabricating fallback sources.
  */
 export function resolveMessageSourcesAndQueries(options: {
   parsed?: Partial<ParsedSourcesResult> | null;
@@ -134,19 +154,13 @@ export function resolveMessageSourcesAndQueries(options: {
   steps?: Array<{ label?: string; trace?: string[] }>;
 }): { sources: SourceCitationItem[]; searchQueries: string[] } {
   const parsed = options?.parsed || { cleanedContent: '', sources: [], searchQueries: [] };
-  const safeUserPrompt = typeof options?.userPrompt === 'string'
-    ? options.userPrompt
-    : String(options?.userPrompt?.text || options?.userPrompt?.content || options?.userPrompt || '');
-  const safeAssistantContent = typeof options?.assistantContent === 'string'
-    ? options.assistantContent
-    : String(options?.assistantContent || '');
   const steps = Array.isArray(options?.steps) ? options.steps : [];
 
-  const sources: SourceCitationItem[] = Array.isArray(parsed.sources) ? [...parsed.sources] : [];
-  const seenUrls = new Set(sources.map(s => s.url.toLowerCase()));
+  const sources: SourceCitationItem[] = [];
+  const seenUrls = new Set<string>();
 
-  const searchQueries: string[] = Array.isArray(parsed.searchQueries) ? [...parsed.searchQueries] : [];
-  const seenQueries = new Set(searchQueries.map(q => q.toLowerCase()));
+  const searchQueries: string[] = [];
+  const seenQueries = new Set<string>();
 
   const addQuery = (q: string) => {
     const clean = String(q || '')
@@ -166,7 +180,7 @@ export function resolveMessageSourcesAndQueries(options: {
 
   const addSource = (title: string, url: string) => {
     const cleanUrl = String(url || '').trim().replace(/[).,;]+$/, '');
-    if (!/^https?:\/\//i.test(cleanUrl)) return;
+    if (!isMeaningfulExternalSourceUrl(cleanUrl)) return;
     const key = cleanUrl.toLowerCase();
     if (seenUrls.has(key)) return;
     seenUrls.add(key);
@@ -179,7 +193,23 @@ export function resolveMessageSourcesAndQueries(options: {
     });
   };
 
-  // Extract from step traces (`Searching for: ...` and `Fetching: ...`)
+  // 1. Add explicitly parsed sources from markdown
+  if (Array.isArray(parsed.sources)) {
+    for (const src of parsed.sources) {
+      if (src?.url) {
+        addSource(src.title, src.url);
+      }
+    }
+  }
+
+  // 2. Add explicitly parsed search queries from markdown
+  if (Array.isArray(parsed.searchQueries)) {
+    for (const q of parsed.searchQueries) {
+      addQuery(q);
+    }
+  }
+
+  // 3. Extract from actual step traces (`Searching for: ...` and `Fetching: ...`)
   for (const step of steps) {
     if (!Array.isArray(step?.trace)) continue;
     for (const line of step.trace) {
@@ -188,64 +218,19 @@ export function resolveMessageSourcesAndQueries(options: {
         addQuery(line.replace('Searching for:', '').trim());
       } else if (line.startsWith('Fetching:')) {
         const fetchedUrl = line.replace('Fetching:', '').trim();
-        if (/^https?:\/\//i.test(fetchedUrl)) {
+        if (isMeaningfulExternalSourceUrl(fetchedUrl)) {
           addSource(extractDomain(fetchedUrl), fetchedUrl);
         }
       }
     }
   }
 
-  // Clean user prompt to derive search query if none explicitly recorded yet
-  const cleanPrompt = safeUserPrompt
-    .replace(/\[IMAGE_DATA_URL:[^\]]+\]\s*/gi, '')
-    .replace(/\[Attached[^\]]*\]\s*/gi, '')
-    .replace(/^\[(?:MODE|Think Harder)[^\]]*\]\s*/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  if (searchQueries.length === 0 && cleanPrompt) {
-    addQuery(cleanPrompt);
-    // Add a focused secondary query for multi-word topics
-    const words = cleanPrompt.replace(/[?!.,;:]/g, '').split(/\s+/).filter(Boolean);
-    if (words.length >= 2 && words.length <= 12) {
-      addQuery(`${words.slice(0, 6).join(' ')} overview & key facts`);
-    }
-  }
-
-  // If no explicit URLs were embedded in the markdown, provide specific verifiable reference URLs
-  // for the query/topic so the 'Show Sources' toggle always reveals actionable URLs.
-  if (sources.length === 0 && (cleanPrompt || safeAssistantContent.trim())) {
-    const primaryQuery = searchQueries[0] || cleanPrompt || safeAssistantContent.slice(0, 60).trim();
-    const lowerTopic = `${cleanPrompt} ${safeAssistantContent.slice(0, 200)}`.toLowerCase();
-
-    if (/\bnvidia\b/.test(lowerTopic)) {
-      addSource('NVIDIA Corporation — Official Site & AI Computing', 'https://www.nvidia.com');
-      addSource('Nvidia — Wikipedia Encyclopedia', 'https://en.wikipedia.org/wiki/Nvidia');
-    } else if (/techno\s*gamerz|ujjwal\s*chaurasia/.test(lowerTopic)) {
-      addSource('Techno Gamerz — Official YouTube Channel', 'https://www.youtube.com/@TechnoGamerzOfficial');
-      addSource('Ujjwal Chaurasia (Techno Gamerz) — Wikipedia', 'https://en.wikipedia.org/wiki/Techno_Gamerz');
-    } else if (/\b(react|typescript|javascript|html|css|tailwind|vite)\b/.test(lowerTopic)) {
-      addSource('MDN Web Docs — Developer Reference', 'https://developer.mozilla.org');
-      addSource('React Official Documentation', 'https://react.dev/reference/react');
-    } else if (/\b(weather|temperature|forecast|humidity)\b/.test(lowerTopic)) {
-      addSource('Open-Meteo Weather Forecast API', 'https://open-meteo.com');
-    }
-
-    const encodedQuery = encodeURIComponent(primaryQuery);
-    const wikiSlug = encodeURIComponent(
-      primaryQuery
-        .replace(/^(what is|who is|tell me about|explain|how does|define)\s+/i, '')
-        .replace(/[?!.,]/g, '')
-        .trim()
-        .slice(0, 60)
-    );
-
-    if (sources.length === 0 && wikiSlug) {
-      addSource(`Wikipedia Search: ${primaryQuery.slice(0, 48)}`, `https://en.wikipedia.org/w/index.php?search=${wikiSlug}`);
-    }
-    if (encodedQuery) {
-      addSource(`Google Web Search: ${primaryQuery.slice(0, 48)}`, `https://www.google.com/search?q=${encodedQuery}`);
-    }
+  // Only surface search queries if meaningful external source URLs were actually used
+  if (sources.length === 0) {
+    return {
+      sources: [],
+      searchQueries: [],
+    };
   }
 
   return {
@@ -263,7 +248,12 @@ export function SourceCitations({
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
 
-  if ((!sources || sources.length === 0) && (!searchQueries || searchQueries.length === 0)) {
+  const validSources = React.useMemo(
+    () => (Array.isArray(sources) ? sources.filter(s => s && isMeaningfulExternalSourceUrl(s.url)) : []),
+    [sources]
+  );
+
+  if (validSources.length === 0) {
     return null;
   }
 
@@ -279,7 +269,7 @@ export function SourceCitations({
     }
   };
 
-  const previewDomains = Array.from(new Set(sources.map(s => s.domain))).slice(0, 3);
+  const previewDomains = Array.from(new Set(validSources.map(s => s.domain))).slice(0, 3);
 
   return (
     <div
@@ -303,9 +293,9 @@ export function SourceCitations({
           )}
         >
           {/* Overlapping favicon stack */}
-          {sources.length > 0 ? (
+          {validSources.length > 0 ? (
             <span className="flex items-center -space-x-1.5 group-hover:-space-x-0.5 transition-all duration-200 mr-0.5">
-              {sources.slice(0, 3).map((src, idx) => (
+              {validSources.slice(0, 3).map((src, idx) => (
                 <span
                   key={`${src.url}-${idx}`}
                   className="w-4 h-4 rounded-full overflow-hidden bg-muted border border-background flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-105"
@@ -334,7 +324,7 @@ export function SourceCitations({
           </span>
 
           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-muted/80 text-[11px] font-mono text-muted-foreground">
-            {sources.length} {sources.length === 1 ? 'URL' : 'URLs'}
+            {validSources.length} {validSources.length === 1 ? 'URL' : 'URLs'}
             {searchQueries.length > 0 && (
               <span>· {searchQueries.length} {searchQueries.length === 1 ? 'query' : 'queries'}</span>
             )}
@@ -398,15 +388,15 @@ export function SourceCitations({
           )}
 
           {/* Section 2: Specific Referenced URLs */}
-          {sources.length > 0 && (
+          {validSources.length > 0 && (
             <div data-testid="sources-url-list" className="space-y-2">
               <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                <CheckCircle2 size={12} className="text-emerald-500" />
-                <span>Specific URLs & Citations ({sources.length})</span>
+                <CheckCircle2 size={12} className="text-foreground" />
+                <span>Specific URLs & Citations ({validSources.length})</span>
               </div>
 
               <div className="grid grid-cols-1 gap-2">
-                {sources.map((src, index) => (
+                {validSources.map((src, index) => (
                   <div
                     key={`${src.url}-${index}`}
                     style={{ animationDelay: `${(searchQueries.length + index) * 40}ms` }}
@@ -459,7 +449,7 @@ export function SourceCitations({
                         className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors cursor-pointer"
                       >
                         {copiedUrl === src.url ? (
-                          <Check size={13} className="text-emerald-500" />
+                          <Check size={13} className="text-foreground" />
                         ) : (
                           <Copy size={13} />
                         )}

@@ -190,4 +190,44 @@ describe('HistoryPanel Search & Date Filtering', () => {
     expect(glassmorphismResults.length).toBe(1);
     expect(glassmorphismResults[0].id).toBe('task-b');
   });
+
+  it('implements a single primary vertical scrolling container, collapsible Tag Distribution defaulting to compact view, and pure monochrome styling', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const source = fs.readFileSync(
+      path.resolve(__dirname, '../src/components/history/HistoryPanel.tsx'),
+      'utf-8'
+    );
+
+    // 1. Header title & short subtitle
+    expect(source).toContain('History & Library');
+    expect(source).toContain('Your past tasks, chats and files');
+    expect(source).toContain('Add File');
+    expect(source).toContain('Close History & Library');
+    expect(source).toContain('hideCloseButton');
+
+    // 2. Single primary vertical scroll container with touch-pan-y and bottom safe padding
+    expect(source).toContain('data-testid="history-panel-scroll-container"');
+    expect(source).toContain('flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain touch-pan-y');
+    expect(source).toContain('pb-24 sm:pb-12');
+
+    // Ensure no nested overflow-y-auto inside TabsContent
+    expect(source).not.toMatch(/<TabsContent[^>]*overflow-y-auto/);
+
+    // 3. Collapsible Tag Distribution defaults to compact view (false) and removes "D3 Transitions" / "Visible:" clutter
+    expect(source).toContain('const [showTagBars, setShowTagBars] = useState(false);');
+    expect(source).not.toContain('D3 Transitions');
+    expect(source).toContain('data-testid="tag-distribution-card"');
+    expect(source).toContain('data-testid="toggle-tag-distribution-btn"');
+
+    // 4. Pure Black & White Monochrome palette (no colorful emerald/purple/amber/indigo/cyan/rose classes)
+    expect(source).not.toMatch(/emerald-|purple-|amber-|indigo-|cyan-|rose-|red-/);
+
+    // 5. All existing actions preserved
+    expect(source).toContain('Summarize All');
+    expect(source).toContain('Select');
+    expect(source).toContain('Backup');
+    expect(source).toContain('Recover');
+  });
 });
+

@@ -59,6 +59,14 @@ import { Slider } from '@/components/ui/slider';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { speakCleanHumanVoice, stopCleanSpeech } from '@/lib/speechSynthesis';
+import {
+  measurePerformanceSnapshot,
+  runUltraLiteBenchmark,
+  trimAllManagedCaches,
+  getActivePerformanceProfile,
+  PerformanceProfileSetting,
+  PerformanceMeasurementSnapshot,
+} from '@/lib/performanceEngine';
 
 const VOICE_LANGUAGE_OPTIONS = [
   { code: 'en-US', name: 'English (United States)', flag: '🇺🇸' },
@@ -573,6 +581,78 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
                   </button>
                 </div>
 
+                {/* Ultra-Lite Performance Engine (2GB RAM Android Target) */}
+                <div className="pt-4 border-t border-border/50 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-xs font-semibold text-foreground">Ultra-Lite Mode (2GB RAM Android)</p>
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-foreground text-background">
+                          {getActivePerformanceProfile().toUpperCase()}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        Minimizes JS heap, batches SSE streams, bounds caches, and disables expensive GPU blurs
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const next = !(settings.ultraLiteMode ?? true);
+                        updateSetting('ultraLiteMode', next);
+                        updateSetting('performanceProfile', next ? 'ultra-lite' : 'balanced');
+                        toast.success(next ? 'Ultra-Lite 2GB RAM Engine enabled' : 'Switched to Balanced performance profile');
+                      }}
+                      role="switch"
+                      aria-checked={settings.ultraLiteMode ?? true}
+                      aria-label="Toggle Ultra-Lite Mode"
+                      className={cn(
+                        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                        (settings.ultraLiteMode ?? true) ? "bg-foreground" : "bg-muted"
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-xs transform transition duration-200 ease-in-out",
+                          (settings.ultraLiteMode ?? true) ? "translate-x-4" : "translate-x-0"
+                        )}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {(
+                      [
+                        { id: 'auto', label: 'Auto (2GB)' },
+                        { id: 'ultra-lite', label: 'Ultra-Lite' },
+                        { id: 'saver', label: 'Saver' },
+                        { id: 'balanced', label: 'Balanced' },
+                      ] as { id: PerformanceProfileSetting; label: string }[]
+                    ).map((prof) => {
+                      const currentProf = settings.performanceProfile || 'auto';
+                      const isSelected = currentProf === prof.id;
+                      return (
+                        <button
+                          key={prof.id}
+                          type="button"
+                          onClick={() => {
+                            updateSetting('performanceProfile', prof.id);
+                            updateSetting('ultraLiteMode', prof.id === 'ultra-lite' || prof.id === 'auto');
+                            toast.success(`Performance profile set to ${prof.label}`);
+                          }}
+                          className={cn(
+                            "py-1.5 px-2 rounded-lg border text-[11px] font-medium transition-colors cursor-pointer text-center",
+                            isSelected
+                              ? "bg-foreground text-background border-foreground font-semibold"
+                              : "border-border/60 text-muted-foreground hover:text-foreground bg-card/40"
+                          )}
+                        >
+                          {prof.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {/* Google Workspace Account */}
                 <div className="pt-4 border-t border-border/50 flex items-center justify-between">
                   <div>
@@ -854,8 +934,110 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
 
             {/* DIAGNOSTICS TAB */}
             {activeTab === 'diagnostics' && (
-              <div className="space-y-6 animate-in fade-in duration-100">
-                {/* <DiagnosticPanel activeTaskInfo={activeTaskInfo} /> */}
+              <div className="space-y-5 animate-in fade-in duration-100">
+                {(() => {
+                  const snap: PerformanceMeasurementSnapshot = measurePerformanceSnapshot();
+                  return (
+                    <>
+                      <div className="flex items-center justify-between gap-2 pb-3 border-b border-border/50">
+                        <div>
+                          <h3 className="text-sm font-semibold text-foreground">Ultra-Lite Performance Engine</h3>
+                          <p className="text-[11px] text-muted-foreground">
+                            Target Device Profile: 2GB RAM Android ({snap.activeProfile.toUpperCase()} active)
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const evicted = trimAllManagedCaches(0.25);
+                              setSettings({ ...getSettings() });
+                              toast.success(`Trimmed caches (${evicted} entries released)`);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg border border-border text-[11px] font-medium hover:bg-muted transition-colors cursor-pointer"
+                          >
+                            Trim RAM
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const report = runUltraLiteBenchmark();
+                              setSettings({ ...getSettings() });
+                              toast.success(
+                                `Benchmark passed: ${report.renderReductionRatio}% stream render reduction, P95 scroll ${report.simulatedScrollP95FrameMs}ms`
+                              );
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-foreground text-background text-[11px] font-semibold hover:opacity-90 transition-opacity cursor-pointer"
+                          >
+                            Run Benchmark
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                        <div className="p-3 rounded-xl border border-border/60 bg-muted/20">
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">JS Heap Usage</p>
+                          <p className="text-base font-bold font-mono text-foreground mt-0.5">
+                            {snap.memory.usedJSHeapMB} MB
+                          </p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">
+                            {snap.memory.heapUtilizationPercent}% of {snap.memory.jsHeapLimitMB} MB budget
+                          </p>
+                        </div>
+
+                        <div className="p-3 rounded-xl border border-border/60 bg-muted/20">
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">DOM & Caches</p>
+                          <p className="text-base font-bold font-mono text-foreground mt-0.5">
+                            {snap.memory.domNodeCount} nodes
+                          </p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">
+                            {snap.memory.managedCacheEntries} cached · {snap.memory.activeObjectUrls} blobs
+                          </p>
+                        </div>
+
+                        <div className="p-3 rounded-xl border border-border/60 bg-muted/20">
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Scroll & Frame Time</p>
+                          <p className="text-base font-bold font-mono text-foreground mt-0.5">
+                            {snap.scrolling.averageFps} FPS
+                          </p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">
+                            P95: {snap.scrolling.p95FrameTimeMs}ms · {snap.scrolling.droppedFrames} drops
+                          </p>
+                        </div>
+
+                        <div className="p-3 rounded-xl border border-border/60 bg-muted/20">
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Long Tasks (&gt;50ms)</p>
+                          <p className="text-base font-bold font-mono text-foreground mt-0.5">
+                            {snap.longTasks.count} tasks
+                          </p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">
+                            TBT: {snap.longTasks.totalBlockingTimeMs}ms · Max: {snap.longTasks.maxDurationMs}ms
+                          </p>
+                        </div>
+
+                        <div className="p-3 rounded-xl border border-border/60 bg-muted/20">
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">SSE Stream Batching</p>
+                          <p className="text-base font-bold font-mono text-foreground mt-0.5">
+                            {snap.streaming.renderReductionPercent}% saved
+                          </p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">
+                            {snap.streaming.batchedCommitsFlushed} flushes / {snap.streaming.rawChunksReceived} chunks
+                          </p>
+                        </div>
+
+                        <div className="p-3 rounded-xl border border-border/60 bg-muted/20">
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">DB & Network Dedup</p>
+                          <p className="text-base font-bold font-mono text-foreground mt-0.5">
+                            {snap.networkAndDb.deduplicatedRequestsSaved + snap.networkAndDb.firestoreReadsSaved + snap.networkAndDb.firestoreWritesCoalesced} saved
+                          </p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">
+                            Mount: {snap.timing.appMountDurationMs}ms · HW: {snap.hardware.deviceMemoryGB}GB/{snap.hardware.hardwareConcurrency}C
+                          </p>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             )}
 

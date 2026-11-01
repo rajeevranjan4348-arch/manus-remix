@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Sparkles, Brain, Cpu, Check, ChevronDown, ChevronUp, Loader2, Search, Image as ImageIcon, Code2, BarChart3 } from 'lucide-react';
+import { Brain, Cpu, Check, ChevronDown, ChevronUp, Loader2, Search, Image as ImageIcon, Code2, BarChart3, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import LatticeLoader from '../ui/LatticeLoader';
+import { sanitizeReasoningSummary } from './ThoughtProcess';
 
 export interface ThinkingStageItem {
   id: string;
   label: string;
   detail?: string;
-  status: 'completed' | 'running' | 'pending';
+  status: 'completed' | 'running' | 'pending' | 'error';
   trace?: string[];
 }
 
@@ -22,22 +22,35 @@ export interface WorkModeThinkingAnimationProps {
 
 export function deriveContextualThinkingStages(
   rawPrompt = '',
-  deepMode = false,
+  deepMode: boolean | string = false,
   explicitSteps?: { id?: string; label: string; status?: string; trace?: string[] }[],
-  activeStageIndex = 0
+  isLiveOrActiveStageIndex: boolean | number = true
 ): ThinkingStageItem[] {
+  const isDeep = deepMode === true || deepMode === 'work' || deepMode === 'deep';
+  const isLive = typeof isLiveOrActiveStageIndex === 'boolean' ? isLiveOrActiveStageIndex : true;
+  const activeStageIndex = typeof isLiveOrActiveStageIndex === 'number' ? isLiveOrActiveStageIndex : 0;
+
   if (explicitSteps && explicitSteps.length > 0) {
-    return explicitSteps.map((s, idx) => ({
-      id: s.id || `step-${idx}`,
-      label: s.label,
-      status:
-        s.status === 'completed'
-          ? 'completed'
-          : s.status === 'running'
-          ? 'running'
-          : 'pending',
-      trace: s.trace,
-    }));
+    return explicitSteps.map((s, idx) => {
+      const sanitizedTraces = Array.isArray(s.trace)
+        ? s.trace.flatMap(item => sanitizeReasoningSummary(String(item || ''))).slice(-2)
+        : [];
+      const rawStatus = (!isLive || activeStageIndex >= explicitSteps.length) && s.status !== 'error'
+        ? 'completed'
+        : s.status === 'completed'
+        ? 'completed'
+        : s.status === 'error'
+        ? 'error'
+        : s.status === 'running'
+        ? 'running'
+        : 'pending';
+      return {
+        id: s.id || `step-${idx}`,
+        label: s.label,
+        status: rawStatus,
+        trace: sanitizedTraces,
+      };
+    });
   }
 
   const text = String(rawPrompt || '').toLowerCase();
@@ -75,17 +88,12 @@ export function deriveContextualThinkingStages(
       label: 'Profiling data & metrics',
       detail: 'Extracting patterns, comparisons, and structured insights',
     });
-  } else {
-    stages.push({
-      label: 'Analyzing key concepts',
-      detail: 'Structuring core knowledge and relevant examples',
-    });
   }
 
-  if (deepMode) {
+  if (isDeep) {
     stages.push({
-      label: 'Multi-angle chain-of-thought reasoning',
-      detail: 'Stress-testing assumptions and evaluating trade-offs',
+      label: 'Structured reasoning & verification',
+      detail: 'Evaluating key factors and verifying conclusions',
     });
   }
 
@@ -94,6 +102,16 @@ export function deriveContextualThinkingStages(
     detail: 'Formatting clear, structured output',
   });
 
+  if (!isLive || activeStageIndex >= stages.length) {
+    return stages.map((stage, idx) => ({
+      id: `auto-stage-${idx}`,
+      label: stage.label,
+      detail: stage.detail,
+      status: 'completed',
+      trace: [],
+    }));
+  }
+
   const clampedActive = Math.min(Math.max(0, activeStageIndex), stages.length - 1);
 
   return stages.map((stage, idx) => ({
@@ -101,104 +119,119 @@ export function deriveContextualThinkingStages(
     label: stage.label,
     detail: stage.detail,
     status: idx < clampedActive ? 'completed' : idx === clampedActive ? 'running' : 'pending',
+    trace: [],
   }));
 }
 
 export function WorkModeThinkingAnimation({
   prompt = '',
-  activeStep,
   isLive = true,
   deepMode = false,
   steps = [],
   className,
 }: WorkModeThinkingAnimationProps) {
-  const [activeStageIdx, setActiveStageIdx] = useState(0);
   const [isExpanded, setIsExpanded] = useState(true);
-
-  useEffect(() => {
-    if (!isLive) return;
-    setActiveStageIdx(0);
-    const t1 = setTimeout(() => setActiveStageIdx(1), 950);
-    const t2 = setTimeout(() => setActiveStageIdx(2), 2200);
-    const t3 = setTimeout(() => setActiveStageIdx(3), 3800);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-    };
-  }, [prompt, isLive]);
+  const [elapsedTenths, setElapsedTenths] = useState(0);
 
   const stages = useMemo(
-    () => deriveContextualThinkingStages(prompt, deepMode, steps, activeStageIdx),
-    [prompt, deepMode, steps, activeStageIdx]
+    () => deriveContextualThinkingStages(prompt, deepMode, steps, isLive),
+    [prompt, deepMode, steps, isLive]
   );
 
-  const runningStage = stages.find(s => s.status === 'running') || stages[stages.length - 1];
-  const currentStatusText = activeStep || runningStage?.label || 'Thinking';
+  const hasError = stages.some(s => s.status === 'error');
+  const allCompleted = stages.length > 0 && stages.every(s => s.status === 'completed');
+  const isActivelyProcessing = isLive && !allCompleted && !hasError;
+
+  useEffect(() => {
+    setElapsedTenths(0);
+  }, [prompt]);
+
+  useEffect(() => {
+    if (!isActivelyProcessing) return;
+    const interval = window.setInterval(() => {
+      setElapsedTenths(prev => prev + 1);
+    }, 100);
+    return () => window.clearInterval(interval);
+  }, [isActivelyProcessing]);
+
+  const runningIndex = stages.findIndex(s => s.status === 'running');
+  const completedCount = stages.filter(s => s.status === 'completed').length;
+  const currentStageNumber = runningIndex >= 0
+    ? runningIndex + 1
+    : Math.min(Math.max(completedCount, 1), Math.max(stages.length, 1));
+
+  const headerTitle = hasError
+    ? 'Processing interrupted'
+    : allCompleted || !isLive
+    ? 'Response completed'
+    : deepMode
+    ? 'Manus Deep Reasoning'
+    : 'Manus AI is thinking';
 
   const getStageIcon = () => {
+    if (hasError) {
+      return <AlertCircle size={14} />;
+    }
+    if (allCompleted || !isLive) {
+      return <Check size={14} strokeWidth={2.5} />;
+    }
+    if (!isExpanded && isActivelyProcessing) {
+      return <Loader2 size={14} className="animate-spin" />;
+    }
     const lower = String(prompt || '').toLowerCase();
-    if (lower.includes('[image_data_url:') || lower.includes('[attached image')) return <ImageIcon size={15} className="animate-pulse" />;
-    if (/\b(search|news|latest|weather)\b/.test(lower)) return <Search size={15} className="animate-pulse" />;
-    if (/\b(code|react|typescript|python|bug)\b/.test(lower)) return <Code2 size={15} className="animate-pulse" />;
-    if (/\b(chart|graph|csv|data)\b/.test(lower)) return <BarChart3 size={15} className="animate-pulse" />;
-    return <Brain size={16} className="animate-pulse" />;
+    if (lower.includes('[image_data_url:') || lower.includes('[attached image')) return <ImageIcon size={14} />;
+    if (/\b(search|news|latest|weather)\b/.test(lower)) return <Search size={14} />;
+    if (/\b(code|react|typescript|python|bug)\b/.test(lower)) return <Code2 size={14} />;
+    if (/\b(chart|graph|csv|data)\b/.test(lower)) return <BarChart3 size={14} />;
+    return <Brain size={15} />;
   };
 
   return (
     <div
       data-testid="thinking-stage-card"
       className={cn(
-        "p-3.5 sm:p-4 rounded-2xl border border-[#E0E0E0] dark:border-[#333333] bg-[#FFFFFF] dark:bg-[#171717] backdrop-blur-xs space-y-3 my-2 animate-in fade-in duration-200 shadow-2xs",
+        "w-full max-w-full min-w-0 overflow-hidden px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-2xl border border-[#E0E0E0] dark:border-[#333333] bg-[#FFFFFF] dark:bg-[#171717] space-y-2 my-1.5 transition-colors duration-200 shadow-2xs",
         deepMode && "border-[#000000]/30 dark:border-[#FFFFFF]/30 bg-[#FAFAFA] dark:bg-[#111111]",
         className
       )}
     >
       <div
         onClick={() => setIsExpanded(prev => !prev)}
-        className="flex items-center justify-between gap-3 flex-wrap cursor-pointer select-none"
+        className="flex items-center justify-between gap-2 cursor-pointer select-none min-w-0"
       >
-        <div className="flex items-center gap-2.5 min-w-0">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
           <div
             className={cn(
-              "relative flex items-center justify-center w-7 h-7 rounded-full shrink-0",
+              "relative flex items-center justify-center w-6 h-6 rounded-full shrink-0",
               deepMode
                 ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000]"
                 : "bg-[#F2F2F2] text-[#000000] dark:bg-[#111111] dark:text-[#FFFFFF]"
             )}
           >
             {getStageIcon()}
-            <span
-              className="absolute inset-0 rounded-full animate-ping opacity-40 bg-[#000000]/20 dark:bg-[#FFFFFF]/20"
-            />
           </div>
-          <div className="min-w-0">
-            <div className="text-xs font-semibold text-[#000000] dark:text-[#FFFFFF] flex items-center gap-1.5">
-              <span>{deepMode ? 'Manus Deep Thinking Stage' : 'Manus AI is thinking'}</span>
-              <Sparkles size={13} className="text-[#000000] dark:text-[#FFFFFF] animate-spin" style={{ animationDuration: '3s' }} />
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-[#F2F2F2] dark:bg-[#111111] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF]">
-                Stage {Math.min((stages.findIndex(s => s.status === 'running') + 1) || stages.length, stages.length)}/{stages.length}
-              </span>
-            </div>
+          <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+            <span className="text-xs font-semibold text-[#000000] dark:text-[#FFFFFF] truncate">
+              {headerTitle}
+            </span>
+            <span
+              data-testid="thinking-stage-badge"
+              className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-[#F2F2F2] dark:bg-[#111111] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] shrink-0"
+            >
+              {allCompleted || !isLive
+                ? 'Completed'
+                : `Stage ${currentStageNumber}/${stages.length}`}
+            </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <LatticeLoader
-            label={currentStatusText}
-            doneLabel="Completed in"
-            errorLabel="Failed after"
-            status={isLive ? 'working' : 'done'}
-            pattern="orbit"
-            grid={3}
-            shape="round"
-            cellSize={5}
-            gap={2}
-            fontSize={12}
-            glow={true}
-            showTimer={true}
-            className="shrink-0"
-          />
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span
+            data-testid="thinking-elapsed-timer"
+            className="text-[11px] font-mono text-[#777777] dark:text-[#AAAAAA] tabular-nums"
+          >
+            {(elapsedTenths / 10).toFixed(1)}s
+          </span>
           <button
             type="button"
             onClick={(e) => {
@@ -208,31 +241,38 @@ export function WorkModeThinkingAnimation({
             className="p-1 rounded-md text-[#000000] dark:text-[#FFFFFF] hover:bg-[#F2F2F2] dark:hover:bg-[#111111] transition-colors"
             aria-label={isExpanded ? 'Collapse thinking stages' : 'Expand thinking stages'}
           >
-            {isExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+            {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </button>
         </div>
       </div>
 
       {isExpanded && stages.length > 0 && (
-        <div className="pt-2.5 border-t border-[#E0E0E0] dark:border-[#333333] space-y-2 text-xs">
+        <div className="pt-2 border-t border-[#E0E0E0] dark:border-[#333333] space-y-1.5 text-xs">
           {stages.map((stage, idx) => {
             const isDone = stage.status === 'completed';
-            const isRunning = stage.status === 'running';
+            const isRunning = stage.status === 'running' && isActivelyProcessing;
+            const isError = stage.status === 'error';
 
             return (
               <div
                 key={stage.id || idx}
+                data-testid={`thinking-stage-row-${idx}`}
+                data-stage-status={stage.status}
                 className={cn(
-                  "flex items-start gap-2.5 px-2.5 py-1.5 rounded-xl transition-all duration-200",
+                  "flex items-start gap-2 px-2.5 py-1.5 rounded-xl transition-colors duration-150 min-w-0",
                   isRunning
-                    ? "bg-[#FAFAFA] dark:bg-[#111111] border border-[#E0E0E0] dark:border-[#333333] shadow-2xs"
-                    : "opacity-80"
+                    ? "bg-[#FAFAFA] dark:bg-[#111111] border border-[#E0E0E0] dark:border-[#333333]"
+                    : "opacity-85"
                 )}
               >
                 <div className="mt-0.5 shrink-0">
                   {isDone ? (
                     <div className="w-4 h-4 rounded-full bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] border border-[#000000] dark:border-[#FFFFFF] flex items-center justify-center">
                       <Check size={10} strokeWidth={3} />
+                    </div>
+                  ) : isError ? (
+                    <div className="w-4 h-4 rounded-full bg-[#F2F2F2] text-[#000000] dark:bg-[#111111] dark:text-[#FFFFFF] border border-[#000000] dark:border-[#FFFFFF] flex items-center justify-center">
+                      <AlertCircle size={10} />
                     </div>
                   ) : isRunning ? (
                     <div className="w-4 h-4 rounded-full bg-[#F2F2F2] text-[#000000] dark:bg-[#111111] dark:text-[#FFFFFF] flex items-center justify-center">
@@ -246,38 +286,38 @@ export function WorkModeThinkingAnimation({
                 </div>
 
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center justify-between gap-2 min-w-0">
                     <span
                       className={cn(
                         "font-medium truncate text-[11.5px]",
                         isRunning
-                          ? "text-foreground font-semibold"
+                          ? "text-[#000000] dark:text-[#FFFFFF] font-semibold"
                           : isDone
-                          ? "text-foreground/80"
-                          : "text-muted-foreground"
+                          ? "text-[#333333] dark:text-[#CCCCCC]"
+                          : "text-[#777777] dark:text-[#888888]"
                       )}
                     >
                       {stage.label}
                     </span>
-                    <span className="text-[10px] font-mono text-muted-foreground shrink-0">
-                      {isDone ? 'Done' : isRunning ? 'Active' : 'Queued'}
+                    <span className="text-[10px] font-mono text-[#777777] dark:text-[#AAAAAA] shrink-0">
+                      {isDone ? 'Done' : isError ? 'Failed' : isRunning ? 'Active' : 'Queued'}
                     </span>
                   </div>
 
-                  {stage.detail && isRunning && (
-                    <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+                  {stage.detail && isRunning && (!stage.trace || stage.trace.length === 0) && (
+                    <p className="text-[10.5px] text-[#777777] dark:text-[#AAAAAA] truncate mt-0.5">
                       {stage.detail}
                     </p>
                   )}
 
-                  {stage.trace && stage.trace.length > 0 && (isRunning || isDone) && (
-                    <div className="flex items-center gap-1.5 flex-wrap mt-1">
-                      {stage.trace.slice(-2).map((traceItem, tIdx) => (
+                  {stage.trace && stage.trace.length > 0 && isRunning && (
+                    <div className="flex items-center gap-1.5 flex-wrap mt-1 min-w-0">
+                      {stage.trace.slice(-1).map((traceItem, tIdx) => (
                         <span
                           key={tIdx}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted/60 border border-border/40 text-[10px] font-mono text-muted-foreground truncate max-w-full"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#F2F2F2] dark:bg-[#1A1A1A] border border-[#E0E0E0] dark:border-[#333333] text-[10px] font-mono text-[#333333] dark:text-[#CCCCCC] truncate max-w-full"
                         >
-                          <Cpu size={10} className="text-primary/70 shrink-0" />
+                          <Cpu size={10} className="text-[#000000] dark:text-[#FFFFFF] shrink-0" />
                           <span className="truncate">{traceItem}</span>
                         </span>
                       ))}
@@ -292,3 +332,4 @@ export function WorkModeThinkingAnimation({
     </div>
   );
 }
+

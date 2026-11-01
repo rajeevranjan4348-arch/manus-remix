@@ -88,10 +88,13 @@ describe('AI Message Hover Reactions (Thumbs Up/Down)', () => {
     expect(cssSource).toContain('@keyframes reaction-icon-spring-pop');
     expect(cssSource).toContain('cubic-bezier(0.34, 1.56, 0.64, 1)');
 
-    expect(chatViewSource).toContain('MessageHoverReactions');
+    // Verify ChatView and MyAIChat render a single ConversationActionBar per assistant message (no duplicate MessageHoverReactions)
+    expect(chatViewSource).toContain('<ConversationActionBar');
+    expect(chatViewSource).not.toContain('<MessageHoverReactions');
     expect(chatViewSource).toContain('group/ai-message');
 
-    expect(myAiChatSource).toContain('MessageHoverReactions');
+    expect(myAiChatSource).toContain('<ConversationActionBar');
+    expect(myAiChatSource).not.toContain('<MessageHoverReactions');
     expect(myAiChatSource).toContain('group/ai-message');
   });
 });

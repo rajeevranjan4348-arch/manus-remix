@@ -1,8 +1,19 @@
 import { describe, it, expect, vi } from 'vitest';
-import { isSimpleConversationalPrompt } from '../src/hooks/useAgentTask';
+import fs from 'fs';
+import path from 'path';
+import {
+  isSimpleConversationalPrompt,
+  createInitialWorkflowSteps,
+  advanceWorkflowSteps,
+} from '../src/hooks/useAgentTask';
 import { generateResilientResponse, needsLiveSearch, parseMultimodalMessageParts } from '../server/geminiService';
 import { createAutonomousStreamResponse, setActiveStreamContext } from '../src/lib/blink';
-import { cleanUserMessage, extractUserImageAttachment } from '../src/components/agent/ChatView';
+import {
+  cleanUserMessage,
+  extractUserImageAttachment,
+  shouldShowComposingIndicator,
+} from '../src/components/agent/ChatView';
+import { deriveContextualThinkingStages } from '../src/components/agent/WorkModeThinkingAnimation';
 
 describe('AI Response Streaming and Loading State Regression Tests', () => {
   it('correctly filters empty assistant turns so request ends with a valid user turn', () => {
@@ -393,4 +404,113 @@ describe('AI Response Streaming and Loading State Regression Tests', () => {
     expect(parts[1].text).toContain('Explain this diagram step by step.');
     expect(cleanText).not.toContain('IMAGE_DATA_URL');
   });
+
+  it('implements a deterministic 3-stage state-driven workflow (Understanding -> Synthesizing -> Completed) based on backend events', () => {
+    // Stage 1: Understanding intent & context (Active), Synthesizing final response (Queued)
+    const stage1 = createInitialWorkflowSteps(false);
+    expect(stage1).toHaveLength(2);
+    expect(stage1[0].label).toBe('Understanding intent & context');
+    expect(stage1[0].status).toBe('running');
+    expect(stage1[1].label).toBe('Synthesizing final response');
+    expect(stage1[1].status).toBe('pending');
+
+    // Stage 2: Backend stream starts / synthesizing final response begins
+    const stage2 = advanceWorkflowSteps(stage1, 'synthesizing');
+    expect(stage2[0].status).toBe('completed');
+    expect(stage2[1].status).toBe('running');
+
+    // Stage 3: Response completed
+    const stage3 = advanceWorkflowSteps(stage2, 'completed');
+    expect(stage3[0].status).toBe('completed');
+    expect(stage3[1].status).toBe('completed');
+
+    // Error state transitions active/queued stages to error cleanly
+    const errored = advanceWorkflowSteps(stage1, 'error');
+    expect(errored[0].status).toBe('error');
+    expect(errored[1].status).toBe('error');
+  });
+
+  it('never displays "Composing response..." while Synthesizing final response is still queued', () => {
+    const stage1Steps = createInitialWorkflowSteps(false); // think_1: running, think_2: pending (queued)
+
+    // While Stage 1 is active and Stage 2 is queued, composing indicator MUST be hidden
+    expect(
+      shouldShowComposingIndicator({
+        isAssistantWorking: true,
+        hasVisibleAssistantMessage: false,
+        phase: 'thinking',
+        steps: stage1Steps,
+      })
+    ).toBe(false);
+
+    // Once backend transitions to Stage 2 (Synthesizing final response: running), composing indicator is allowed
+    const stage2Steps = advanceWorkflowSteps(stage1Steps, 'synthesizing');
+    expect(
+      shouldShowComposingIndicator({
+        isAssistantWorking: true,
+        hasVisibleAssistantMessage: false,
+        phase: 'text-generation',
+        steps: stage2Steps,
+      })
+    ).toBe(true);
+
+    // Once assistant message text becomes visible, composing indicator hides immediately
+    expect(
+      shouldShowComposingIndicator({
+        isAssistantWorking: true,
+        hasVisibleAssistantMessage: true,
+        phase: 'text-generation',
+        steps: stage2Steps,
+      })
+    ).toBe(false);
+
+    // Once task completes, composing indicator is false
+    const stage3Steps = advanceWorkflowSteps(stage2Steps, 'completed');
+    expect(
+      shouldShowComposingIndicator({
+        isAssistantWorking: false,
+        hasVisibleAssistantMessage: false,
+        phase: 'complete',
+        steps: stage3Steps,
+      })
+    ).toBe(false);
+  });
+
+  it('derives contextual thinking stages from live step state and sanitizes reasoning traces', () => {
+    const stage1Steps = createInitialWorkflowSteps(false);
+    const derivedStage1 = deriveContextualThinkingStages('Which model are you', 'chat', stage1Steps, true);
+    expect(derivedStage1).toHaveLength(2);
+    expect(derivedStage1[0].label).toBe('Understanding intent & context');
+    expect(derivedStage1[0].status).toBe('running');
+    expect(derivedStage1[1].label).toBe('Synthesizing final response');
+    expect(derivedStage1[1].status).toBe('pending');
+
+    const stage2Steps = advanceWorkflowSteps(stage1Steps, 'synthesizing');
+    const derivedStage2 = deriveContextualThinkingStages('Which model are you', 'chat', stage2Steps, true);
+    expect(derivedStage2[0].status).toBe('completed');
+    expect(derivedStage2[1].status).toBe('running');
+
+    // When isLive is false, all stages are marked completed so animations stop
+    const derivedCompleted = deriveContextualThinkingStages('Which model are you', 'chat', stage2Steps, false);
+    expect(derivedCompleted.every((s) => s.status === 'completed')).toBe(true);
+  });
+
+  it('eliminates duplicate status banners and artificial timers in ChatView and WorkModeThinkingAnimation', () => {
+    const chatViewSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/components/agent/ChatView.tsx'),
+      'utf-8'
+    );
+    const thinkingAnimSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/components/agent/WorkModeThinkingAnimation.tsx'),
+      'utf-8'
+    );
+
+    // ChatView must not render the duplicate top-level "Working" status banner above manus Lite
+    expect(chatViewSource).not.toContain('Live tool-call progress');
+    // WorkModeThinkingAnimation must not use artificial setTimeout timers or duplicate LatticeLoader in header
+    expect(thinkingAnimSource).not.toContain('setTimeout');
+    expect(thinkingAnimSource).not.toContain('LatticeLoader');
+    expect(thinkingAnimSource).not.toContain('animate-ping');
+  });
 });
+

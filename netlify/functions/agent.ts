@@ -52,10 +52,31 @@ export default async (req: Request) => {
     ? body.requestId.trim().slice(0, 120)
     : `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-  function buildFallbackAnswer(promptText: string): string {
+  function normalizeModel(modelName?: string): string {
+    if (!modelName || typeof modelName !== 'string') return 'gemini-3-flash-preview';
+    const sanitized = modelName.slice(0, 100).replace(/[^a-zA-Z0-9_\-./:]/g, '');
+    const clean = sanitized.replace(/^google\//, '').trim();
+    if (clean === 'gemini-3.8-flash' || clean === 'gemini-2.5-flash' || clean === 'gemini-3-flash' || clean === 'gemini-3.0-flash') {
+      return 'gemini-3-flash-preview';
+    }
+    if (clean === 'gemini-3.1-flash-lite' || clean === 'manus-1.6-lite') {
+      return 'gemini-3.1-flash-lite-preview';
+    }
+    if (clean === 'manus-1.6-max') {
+      return 'gemini-3.1-pro-preview';
+    }
+    return clean || 'gemini-3-flash-preview';
+  }
+
+  const configuredModelId = normalizeModel(body.model);
+
+  function buildFallbackAnswer(promptText: string, modelId = configuredModelId): string {
     const clean = promptText.trim().toLowerCase();
     if (/^(hi|hello|hey|hiya|howdy|good\s+(morning|afternoon|evening|day))[!?.\s]*$/i.test(clean)) {
       return 'Hello! How can I help you today?';
+    }
+    if (/which model|what model|what llm|which llm|underlying model|what ai model|model are you|who built you|your architecture/i.test(clean)) {
+      return `I am operating inside **Manus** (the AI workspace agent and application), powered by the **${modelId}** large language model from **Google Gemini**.\n\n- **Application / Agent:** Manus\n- **Underlying LLM Model:** \`${modelId}\`\n- **Model Provider:** Google Gemini`;
     }
     if (/techno\s*gamerz|ujjwal\s*chaurasia/i.test(clean)) {
       return '**Techno Gamerz** (real name **Ujjwal Chaurasia**) is one of India\'s most popular gaming YouTubers and content creators. Based in New Delhi, he is widely known for his Hindi gaming commentary and series on *GTA V*, *Minecraft*, *Red Dead Redemption 2*, and *Resident Evil*.';
@@ -67,7 +88,7 @@ export default async (req: Request) => {
       return 'The Prime Minister of India is **Narendra Modi**.';
     }
     if (/who are you|what can you do|what is manus/i.test(clean)) {
-      return 'I am **Manus**, your AI assistant. I can answer questions, research topics, write and debug code, analyze data, and help with everyday tasks.';
+      return `I am **Manus**, your AI workspace agent powered by the **${modelId}** model (Google Gemini). I can answer questions, research topics, write and debug code, analyze data, and help with everyday tasks.`;
     }
     return `Here is a direct response regarding **${promptText.trim() || 'your request'}**:\n\nI have processed your question. Let me know if you would like more specific details, examples, or a deeper breakdown.`;
   }
@@ -133,22 +154,8 @@ export default async (req: Request) => {
       });
     }
 
-    function normalizeModel(modelName?: string): string {
-      if (!modelName || typeof modelName !== 'string') return 'gemini-3-flash-preview';
-      // Sanitize model string: allow only alphanumeric, dashes, dots, underscores, slashes
-      const sanitized = modelName.slice(0, 100).replace(/[^a-zA-Z0-9_\-./:]/g, '');
-      const clean = sanitized.replace(/^google\//, '').trim();
-      if (clean === 'gemini-3.8-flash' || clean === 'gemini-2.5-flash' || clean === 'gemini-3-flash' || clean === 'gemini-3.0-flash') {
-        return 'gemini-3-flash-preview';
-      }
-      if (clean === 'gemini-3.1-flash-lite') {
-        return 'gemini-3.1-flash-lite-preview';
-      }
-      return clean || 'gemini-3-flash-preview';
-    }
-
     const candidateModels = Array.from(new Set([
-      normalizeModel(body.model),
+      configuredModelId,
       'gemini-3-flash-preview',
       'gemini-2.5-flash',
       'gemini-flash-latest',
@@ -157,7 +164,14 @@ export default async (req: Request) => {
     ]));
 
     let systemInstruction = body.systemInstruction ||
-      'You are Manus, an intelligent AI assistant. Provide direct, helpful, and high-quality responses. Answer factual questions directly. Do not generate fake reports or fake charts unless specifically asked for them.';
+      'You are Manus, an intelligent AI workspace agent. Provide direct, helpful, and high-quality responses. Answer factual questions directly. Do not generate fake reports or fake charts unless specifically asked for them. Never expose private internal chain-of-thought.';
+
+    systemInstruction +=
+      `\n\n[VERIFIED MODEL & APPLICATION IDENTITY]\n` +
+      `- Application / Workspace Agent Name: Manus\n` +
+      `- Active Underlying LLM Model ID: ${configuredModelId}\n` +
+      `- Model Provider: Google Gemini\n` +
+      `- Strict Rule: When asked "which model are you", "what LLM are you running on", "who built you", or about your model/architecture, clearly distinguish between the application/agent name (Manus) and the actual underlying LLM model (${configuredModelId} by Google Gemini). Never invent model names, providers, or architectures.`;
 
     if (body.thinkHarder) {
       systemInstruction += `\n\n[EXTENDED REASONING MODE ACTIVE]\nReason carefully internally, then provide a concise answer without revealing private chain-of-thought.`;
@@ -168,6 +182,9 @@ export default async (req: Request) => {
     const needsLiveSearch = (text: string) => {
       const q = text.toLowerCase().trim();
       if (/^(hi|hello|hey|hiya|howdy|thanks|thank you|ok|okay)\b/i.test(q) && q.split(/\s+/).length <= 5) {
+        return false;
+      }
+      if (/which model|what model|what llm|which llm|underlying model|what ai model|model are you|who built you|who are you|what is manus/i.test(q)) {
         return false;
       }
       return /\b(latest|today|current|currently|right now|breaking|live|real[\s-]?time|news|headlines|recent|this week|yesterday|weather|stock price|share price|exchange rate|world news|india news|tech news|latest updates|election results|box office|release date|latest version|price today|score|standings|forecast|who won|who is (the )?(prime minister|president|chief minister|ceo)|who are the (current|latest)\b)\b/i.test(q)

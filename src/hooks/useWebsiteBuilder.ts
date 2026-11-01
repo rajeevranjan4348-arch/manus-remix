@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useAgent, Agent, sandboxTools, webSearch, useBlinkAuth } from '@blinkdotnew/react';
 import type { Sandbox } from '@blinkdotnew/react';
 import { blink } from '@/lib/blink';
+import { createManagedObjectUrl, revokeManagedObjectUrl } from '@/lib/performanceEngine';
 
 export interface WebsiteStep {
   id: string;
@@ -153,8 +154,11 @@ Be efficient, create clean code, and ensure the preview works perfectly.`,
 </html>`;
 
       const previewBlob = new Blob([mockHtml], { type: 'text/html' });
-      const blobUrl = URL.createObjectURL(previewBlob);
-      setPreviewUrl(blobUrl);
+      const blobUrl = createManagedObjectUrl(previewBlob, 'website_preview');
+      setPreviewUrl((prev) => {
+        if (prev) revokeManagedObjectUrl(prev);
+        return blobUrl;
+      });
       setTaskStatus('completed');
       setSteps(prev => prev.map(s => ({ ...s, status: 'completed' as const })));
       const activeId = workTaskIdRef.current;
@@ -218,8 +222,11 @@ Be efficient, create clean code, and ensure the preview works perfectly.`,
 </html>`;
 
       const previewBlob = new Blob([mockHtml], { type: 'text/html' });
-      const blobUrl = URL.createObjectURL(previewBlob);
-      setPreviewUrl(blobUrl);
+      const blobUrl = createManagedObjectUrl(previewBlob, 'website_preview_fallback');
+      setPreviewUrl((prev) => {
+        if (prev) revokeManagedObjectUrl(prev);
+        return blobUrl;
+      });
       setTaskStatus('completed');
       const errorSteps = STEP_ORDER.map((label, idx) => ({ id: String(idx + 1), label, status: 'completed' as const, trace: [`Verified: ${label}`] }));
       setSteps(errorSteps);
@@ -330,7 +337,10 @@ Be efficient, create clean code, and ensure the preview works perfectly.`,
     } catch (error) {
       console.error('Failed to create Work-mode history entry:', error);
     }
-    setPreviewUrl(''); // Reset preview URL
+    setPreviewUrl((prev) => {
+      if (prev) revokeManagedObjectUrl(prev);
+      return '';
+    }); // Reset preview URL
     setSandboxError(null);
     
     // Initial steps
@@ -389,7 +399,10 @@ The website should be production-ready, responsive, and beautiful. Use Tailwind 
     workTaskIdRef.current = null;
     setTaskStatus('idle');
     setSteps([]);
-    setPreviewUrl('');
+    setPreviewUrl((prev) => {
+      if (prev) revokeManagedObjectUrl(prev);
+      return '';
+    });
     completedStepsRef.current = new Set();
     hasVerifiedRef.current = false;
   }, []);

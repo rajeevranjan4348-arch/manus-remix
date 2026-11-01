@@ -1,4 +1,5 @@
 import { UserSettings } from '@/types/settings';
+import { setPerformanceProfileConfiguration, getActivePerformanceProfile } from '@/lib/performanceEngine';
 
 const SETTINGS_KEY = 'manus_user_settings';
 
@@ -56,9 +57,11 @@ export const DEFAULT_SETTINGS: UserSettings = {
   enableBackgroundNotifications: true,
   enablePhoneCommands: true,
 
-  // Performance & Rendering
-  experimentalFrameRateBoost: true,
-  frameRateTarget: 120,
+  // Performance & Rendering (Target Device Profile: 2GB RAM Android)
+  ultraLiteMode: true,
+  performanceProfile: 'auto',
+  experimentalFrameRateBoost: false,
+  frameRateTarget: 60,
 
   lastUpdated: new Date().toISOString(),
 };
@@ -99,6 +102,14 @@ export function saveSettings(updates: Partial<UserSettings>): UserSettings {
     cachedSettings = updated;
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
 
+    // Sync Ultra-Lite Performance Engine configuration if updated
+    if (typeof updates.ultraLiteMode === 'boolean' || updates.performanceProfile) {
+      setPerformanceProfileConfiguration({
+        ultraLiteMode: updated.ultraLiteMode,
+        performanceProfile: updated.performanceProfile,
+      });
+    }
+
     // Also sync selected model if updated
     if (updates.defaultModel) {
       localStorage.setItem('selected_manus_model', updates.defaultModel);
@@ -124,6 +135,10 @@ export function resetSettings(): UserSettings {
     const defaults = { ...DEFAULT_SETTINGS };
     cachedSettings = defaults;
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(defaults));
+    setPerformanceProfileConfiguration({
+      ultraLiteMode: defaults.ultraLiteMode,
+      performanceProfile: defaults.performanceProfile,
+    });
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('manus_settings_updated', { detail: defaults }));
     }
@@ -140,18 +155,37 @@ export const settingsStore = {
   reset: resetSettings,
 };
 
+let sharedAudioContext: AudioContext | null = null;
+
+function getSharedAudioContext(): AudioContext | null {
+  if (typeof window === 'undefined') return null;
+  if (sharedAudioContext && sharedAudioContext.state !== 'closed') {
+    if (sharedAudioContext.state === 'suspended') {
+      sharedAudioContext.resume().catch(() => {});
+    }
+    return sharedAudioContext;
+  }
+  const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+  if (!AudioContextClass) return null;
+  sharedAudioContext = new AudioContextClass();
+  return sharedAudioContext;
+}
+
 /**
- * Play gentle synthesized chime using Web Audio API (zero audio file dependencies)
+ * Play gentle synthesized chime using a single shared Web Audio API context
+ * (prevents AudioContext native thread/heap leaks on 2GB RAM Android WebViews)
  */
 export function playNotificationSound(type: 'success' | 'send' | 'pop' | 'error' = 'pop') {
   try {
     const settings = getSettings();
     if (!settings.soundEffects) return;
+    // Skip nonessential decorative sound synthesis in ultra-lite mode when document is hidden
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    if (getActivePerformanceProfile() === 'ultra-lite' && type === 'pop') return;
 
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContextClass) return;
+    const ctx = getSharedAudioContext();
+    if (!ctx) return;
 
-    const ctx = new AudioContextClass();
     const now = ctx.currentTime;
 
     const osc = ctx.createOscillator();
@@ -159,6 +193,14 @@ export function playNotificationSound(type: 'success' | 'send' | 'pop' | 'error'
 
     osc.connect(gain);
     gain.connect(ctx.destination);
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        gain.disconnect();
+      } catch {
+        // ignore
+      }
+    };
 
     if (type === 'error') {
       osc.type = 'sawtooth';

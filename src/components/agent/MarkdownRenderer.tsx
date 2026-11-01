@@ -2,6 +2,64 @@ import React, { useState, useEffect, useRef, useMemo, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
+import { useUltraLiteImage } from '@/hooks/useUltraLiteImage';
+
+const UltraLiteMarkdownImage = memo(function UltraLiteMarkdownImage(
+  props: React.ImgHTMLAttributes<HTMLImageElement>
+) {
+  const { src, alt, className, ...rest } = props;
+  const {
+    src: resolvedSrc,
+    isOptimized,
+    isPlaceholder,
+    loadFullResolution,
+    imgProps,
+  } = useUltraLiteImage(typeof src === 'string' ? src : undefined, {
+    label: alt || 'Image',
+  });
+
+  if (!resolvedSrc) return null;
+
+  return (
+    <span className="inline-block max-w-full my-2">
+      <img
+        {...rest}
+        {...imgProps}
+        src={resolvedSrc}
+        alt={alt || 'Image'}
+        onClick={(e) => {
+          if (isOptimized) {
+            e.stopPropagation();
+            loadFullResolution();
+          }
+          rest.onClick?.(e);
+        }}
+        title={isOptimized ? 'Tap to load full-resolution image' : rest.title}
+        className={cn(
+          'max-w-full h-auto rounded-xl border border-border/60',
+          isOptimized && 'cursor-pointer',
+          className
+        )}
+      />
+      {isPlaceholder && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            loadFullResolution();
+          }}
+          className="mt-1 block text-[11px] font-medium text-muted-foreground hover:text-foreground underline cursor-pointer"
+        >
+          Load full resolution image
+        </button>
+      )}
+    </span>
+  );
+});
+
+const MARKDOWN_COMPONENTS = {
+  img: UltraLiteMarkdownImage,
+};
 
 export type TypingSequencePhase = 'lead-in' | 'typing' | 'settled';
 
@@ -162,11 +220,13 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   };
 
   useEffect(() => {
+    const perfMode = typeof document !== 'undefined' ? document.documentElement.dataset.perfMode : undefined;
     const prefersReducedMotion =
       typeof window !== 'undefined' &&
       ((typeof window.matchMedia === 'function' &&
         window.matchMedia('(prefers-reduced-motion: reduce)').matches) ||
-        document.documentElement.dataset.perfMode === 'saver');
+        perfMode === 'saver' ||
+        perfMode === 'ultra-lite');
 
     if (!animateTypewriter || prefersReducedMotion) {
       setInLeadIn(false);
@@ -286,7 +346,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
           <span>Manus is typing</span>
         </div>
       )}
-      <ReactMarkdown remarkPlugins={remarkPlugins}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} components={MARKDOWN_COMPONENTS}>
         {visibleContent}
       </ReactMarkdown>
       {isTyping && (

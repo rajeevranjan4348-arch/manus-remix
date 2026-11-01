@@ -333,25 +333,10 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
   const navItems = [
     { id: 'new', label: 'New Chat', icon: MessageSquarePlus, action: onNewTask },
     { 
-      id: 'my-ai', 
-      label: 'My AI Chat', 
-      icon: MessageSquare, 
-      action: () => navigate('/chat') 
-    },
-    { 
       id: 'connectors', 
       label: 'Connectors & Plugins', 
       icon: Plug, 
       action: () => setIsConnectorsOpen(true) 
-    },
-    { 
-      id: 'search', 
-      label: 'Search', 
-      icon: Search, 
-      action: () => {
-        if (!isOpen) onToggle();
-        setIsSearchOpen(true);
-      } 
     },
     { id: 'library', label: 'Library', icon: Library, action: onOpenHistory },
     {

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import { getSafeLocalPointerX } from '../src/components/analytics/D3TagTimelineChart';
 
 const readWorkspaceFile = (relPath: string): string => {
   return fs.readFileSync(path.resolve(__dirname, '..', relPath), 'utf-8');
@@ -82,6 +83,28 @@ describe('Global Mobile Responsiveness & UI Overflow Fixes', () => {
       expect(tagModal).toContain('max-h-[calc(100dvh-1rem)]');
       expect(timelineChart).toContain('ResizeObserver');
       expect(barChart).toContain('ResizeObserver');
+    });
+
+    it('safely extracts pointer X coordinates across mouse, touch, and non-finite events without SVGPoint errors', () => {
+      const mockTarget = {
+        getBoundingClientRect: () => ({ left: 20, top: 10, width: 200, height: 150 }),
+      } as unknown as Element;
+
+      // Standard mouse event
+      expect(getSafeLocalPointerX({ clientX: 120, clientY: 50 }, mockTarget, 400)).toBe(200);
+
+      // TouchEvent where clientX is undefined at top level and present on touches[0]
+      expect(
+        getSafeLocalPointerX(
+          { touches: [{ clientX: 70, clientY: 60 }] },
+          mockTarget,
+          400
+        )
+      ).toBe(100);
+
+      // Non-finite / empty touch event must return null instead of throwing SVGPoint TypeError
+      expect(getSafeLocalPointerX({ touches: [] }, mockTarget, 400)).toBeNull();
+      expect(getSafeLocalPointerX({ clientX: NaN, clientY: undefined }, mockTarget, 400)).toBeNull();
     });
 
     it('ensures SettingsModal, ConnectorsStorePanel, ProjectModals, and WorkspaceMentionPicker fit mobile screens', () => {

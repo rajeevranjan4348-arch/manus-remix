@@ -59,7 +59,10 @@ export function SwipeableHistoryItem({
     }, 280);
   }, [isDeleting, onDelete]);
 
-  // Touch handlers
+  // Touch handlers: only enter dragging state when horizontal intent is confirmed
+  // so vertical touch scrolling on Android/mobile is never interrupted.
+  const isTouchActiveRef = useRef(false);
+
   const handleTouchStart = (e: React.TouchEvent) => {
     if (disabled || isDeleting || e.touches.length > 1) return;
     const touch = e.touches[0];
@@ -67,11 +70,11 @@ export function SwipeableHistoryItem({
     startOffsetRef.current = isOpen ? -revealedWidth : 0;
     directionRef.current = null;
     hasMovedRef.current = false;
-    setIsDragging(true);
+    isTouchActiveRef.current = true;
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isDragging || disabled || isDeleting) return;
+    if (!isTouchActiveRef.current || disabled || isDeleting) return;
     const touch = e.touches[0];
     const deltaX = touch.clientX - startPosRef.current.x;
     const deltaY = touch.clientY - startPosRef.current.y;
@@ -79,17 +82,17 @@ export function SwipeableHistoryItem({
     if (!directionRef.current) {
       if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > 5) {
         directionRef.current = 'vertical';
+        isTouchActiveRef.current = false;
         return;
       }
-      if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 5) {
+      if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 8) {
         directionRef.current = 'horizontal';
+        setIsDragging(true);
       }
     }
 
     if (directionRef.current === 'horizontal') {
       hasMovedRef.current = true;
-      if (e.cancelable) e.preventDefault();
-
       let targetOffset = startOffsetRef.current + deltaX;
       // Resistance on right swipe
       if (targetOffset > 0) {
@@ -100,7 +103,8 @@ export function SwipeableHistoryItem({
   };
 
   const handleTouchEnd = () => {
-    if (!isDragging || disabled || isDeleting) return;
+    if (!isTouchActiveRef.current && !isDragging) return;
+    isTouchActiveRef.current = false;
     setIsDragging(false);
 
     if (directionRef.current === 'horizontal') {
@@ -183,7 +187,6 @@ export function SwipeableHistoryItem({
   };
 
   const isPastConfirm = offsetX <= -confirmThreshold;
-  const isPastReveal = offsetX <= -revealThreshold;
 
   return (
     <div
@@ -192,51 +195,45 @@ export function SwipeableHistoryItem({
         maxHeight: isDeleting ? '0px' : itemHeight ? `${itemHeight + 30}px` : undefined,
         opacity: isDeleting ? 0 : 1,
         marginBottom: isDeleting ? '0px' : undefined,
-        transform: isDeleting ? 'scale(0.92)' : 'none',
+        transform: isDeleting ? 'scale(0.96)' : 'none',
       }}
       className={cn(
-        "relative overflow-hidden transition-all duration-300 ease-out select-none",
+        "relative overflow-hidden transition-all duration-200 ease-out",
         isDeleting && "pointer-events-none",
         className
       )}
     >
       {/* Background action revealed on swipe */}
-      <div 
-        className={cn(
-          "absolute inset-0 rounded-2xl flex items-center justify-end px-4 text-white overflow-hidden transition-colors duration-200 z-0",
-          isPastConfirm
-            ? "bg-gradient-to-l from-red-600 via-rose-600 to-rose-700 shadow-inner"
-            : "bg-gradient-to-l from-rose-500 via-red-500 to-rose-600"
-        )}
-        style={{
-          opacity: offsetX < 0 ? Math.min(1, Math.max(0.2, Math.abs(offsetX) / 50)) : 0
-        }}
-      >
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            triggerDelete();
-          }}
+      {offsetX < 0 && (
+        <div
           className={cn(
-            "flex items-center gap-1.5 font-semibold text-xs py-2 px-3 rounded-xl transition-all cursor-pointer",
-            isPastConfirm ? "scale-105 bg-white/20 text-white font-bold" : "text-white/95 hover:bg-white/10"
+            "absolute inset-0 rounded-xl flex items-center justify-end px-4 text-[#FFFFFF] dark:text-[#000000] overflow-hidden transition-colors duration-150 z-0",
+            isPastConfirm
+              ? "bg-[#000000] dark:bg-[#FFFFFF]"
+              : "bg-[#262626] dark:bg-[#E0E0E0]"
           )}
-          title={deleteLabel}
-          aria-label={deleteLabel}
+          style={{
+            opacity: Math.min(1, Math.max(0.25, Math.abs(offsetX) / 50)),
+          }}
         >
-          <Trash2 
-            size={16} 
-            className={cn(
-              "transition-all duration-200",
-              isPastConfirm && "scale-125 animate-pulse text-white drop-shadow-sm"
-            )} 
-          />
-          <span className="text-[11px] uppercase tracking-wider font-bold">
-            {isPastConfirm ? 'Release to delete' : deleteLabel}
-          </span>
-        </button>
-      </div>
+          <button
+            type="button"
+            data-size="icon"
+            onClick={(e) => {
+              e.stopPropagation();
+              triggerDelete();
+            }}
+            className="flex items-center gap-1.5 font-semibold text-xs py-1.5 px-2.5 rounded-lg transition-all cursor-pointer"
+            title={deleteLabel}
+            aria-label={deleteLabel}
+          >
+            <Trash2 size={14} />
+            <span className="text-[11px] uppercase tracking-wider font-bold">
+              {isPastConfirm ? 'Release' : deleteLabel}
+            </span>
+          </button>
+        </div>
+      )}
 
       {/* Foreground sliding card content */}
       <div
@@ -246,13 +243,11 @@ export function SwipeableHistoryItem({
         onTouchCancel={handleTouchEnd}
         onMouseDown={handleMouseDown}
         onClickCapture={(e) => {
-          // If we were swiping/dragging, prevent clicking child elements
           if (hasMovedRef.current) {
             e.stopPropagation();
             e.preventDefault();
             hasMovedRef.current = false;
           } else if (isOpen) {
-            // Tapping open item snaps it back shut
             e.stopPropagation();
             e.preventDefault();
             setIsOpen(false);
@@ -260,8 +255,9 @@ export function SwipeableHistoryItem({
           }
         }}
         style={{
-          transform: `translateX(${offsetX}px)`,
-          transition: isDragging ? 'none' : 'transform 0.28s cubic-bezier(0.16, 1, 0.3, 1)',
+          transform: offsetX !== 0 ? `translateX(${offsetX}px)` : undefined,
+          transition: isDragging ? 'none' : 'transform 0.24s cubic-bezier(0.16, 1, 0.3, 1)',
+          touchAction: 'pan-y',
         }}
         className={cn(
           "relative z-10 w-full touch-pan-y",

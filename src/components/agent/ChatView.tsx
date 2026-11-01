@@ -28,22 +28,17 @@ import {
   Pencil
 } from 'lucide-react';
 import { ConnectorsPopupMenu } from '../chat/ConnectorsPopupMenu';
-import { ConnectorsStorePanel, CONNECTOR_CATALOG } from '../connectors/ConnectorsStorePanel';
-import { ConnectorConfigModal } from '../connectors/ConnectorConfigModal';
+import { CONNECTOR_CATALOG } from '../connectors/ConnectorsStorePanel';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
 import { readFileForAI, formatFileSize } from '@/lib/fileValidation';
 import { cn } from '@/lib/utils';
-import { Logo, ManusLogo } from '../layout/Logo';
+import { ManusLogo } from '../layout/Logo';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { ChartResult } from './ChartResult';
 import { FileAttachments } from './FileAttachments';
 import { ContextualThinking } from './ContextualThinking';
-import { deriveContextualThinkingStages } from './WorkModeThinkingAnimation';
 import { AttachmentMenu } from '../chat/AttachmentMenu';
-import { ThoughtProcess } from './ThoughtProcess';
 import { ConversationActionBar } from './ConversationActionBar';
-import { MessageHoverReactions } from './MessageHoverReactions';
 import { VoiceInputButton, formatSpeechAutoFill } from '../voice/VoiceInputButton';
 import { VoiceTranscriptionIndicator } from '../voice/VoiceTranscriptionIndicator';
 import { SourceCitations, parseSourcesFromMarkdown, resolveMessageSourcesAndQueries } from './SourceCitations';
@@ -51,10 +46,7 @@ import { WeatherWidgetCard } from './WeatherWidgetCard';
 import { ToolApprovalCard } from './ToolApprovalCard';
 import { extractWeatherQuery, fetchWeatherByCity, WeatherData } from '@/lib/weatherService';
 import { executeOpenUrl, executeDeviceCommand, VoiceCommandResult } from '@/lib/voiceCommands';
-import { GoogleDrivePickerModal } from '../workspace/GoogleDrivePickerModal';
 import { WorkspaceToolCard } from '../workspace/WorkspaceToolCard';
-import { GoogleMapWidgetCard } from '../maps/GoogleMapWidgetCard';
-import { RoutePlannerCard } from '../maps/RoutePlannerCard';
 import { GoogleDriveFileItem } from '@/lib/workspaceTools';
 import { WorkspaceMentionPicker, WORKSPACE_CONNECTOR_OPTIONS, WorkspaceConnectorOption } from '../chat/WorkspaceMentionPicker';
 import { fetchWorkspaceContextSummary } from '@/lib/workspaceContextService';
@@ -63,6 +55,78 @@ import { gsap } from 'gsap';
 import { toast } from 'sonner';
 import { getChatViewDraft, saveChatViewDraft, clearChatViewDraft } from '@/lib/draftStorage';
 import { ChatExportFormat } from '@/lib/chatExport';
+import {
+  BoundedLRUCache,
+  deduplicateInFlightRequest,
+  getActivePerformanceProfile,
+  getVirtualizationBudget,
+  recordScrollFrameDuration,
+  scheduleDebouncedStorageWrite,
+} from '@/lib/performanceEngine';
+import { useUltraLiteImage } from '@/hooks/useUltraLiteImage';
+
+// Lazy-load heavy chart, map, Drive picker, and connector store modals
+const ChartResult = React.lazy(() =>
+  import('./ChartResult').then((m) => ({ default: m.ChartResult }))
+);
+const GoogleDrivePickerModal = React.lazy(() =>
+  import('../workspace/GoogleDrivePickerModal').then((m) => ({ default: m.GoogleDrivePickerModal }))
+);
+const ConnectorsStorePanel = React.lazy(() =>
+  import('../connectors/ConnectorsStorePanel').then((m) => ({ default: m.ConnectorsStorePanel }))
+);
+const ConnectorConfigModal = React.lazy(() =>
+  import('../connectors/ConnectorConfigModal').then((m) => ({ default: m.ConnectorConfigModal }))
+);
+const GoogleMapWidgetCard = React.lazy(() =>
+  import('../maps/GoogleMapWidgetCard').then((m) => ({ default: m.GoogleMapWidgetCard }))
+);
+const RoutePlannerCard = React.lazy(() =>
+  import('../maps/RoutePlannerCard').then((m) => ({ default: m.RoutePlannerCard }))
+);
+
+const boundedWeatherCache = new BoundedLRUCache<string, WeatherData>({
+  maxSize: 15,
+  ttlMs: 10 * 60 * 1000,
+});
+
+const UserAttachedImagePreview = React.memo(function UserAttachedImagePreview({
+  imageUrl,
+}: {
+  imageUrl: string;
+}) {
+  const { src, isOptimized, isPlaceholder, loadFullResolution, imgProps } = useUltraLiteImage(
+    imageUrl,
+    { label: 'Attached Upload' }
+  );
+  if (!src) return null;
+  return (
+    <div className="rounded-xl overflow-hidden border border-white/15 max-w-[260px] sm:max-w-[320px]">
+      <img
+        {...imgProps}
+        src={src}
+        alt="Attached upload"
+        onClick={() => {
+          if (isOptimized) loadFullResolution();
+        }}
+        title={isOptimized ? 'Tap to load full resolution' : undefined}
+        className={cn(
+          'w-full max-h-[240px] object-cover block',
+          isOptimized && 'cursor-pointer'
+        )}
+      />
+      {isPlaceholder && (
+        <button
+          type="button"
+          onClick={loadFullResolution}
+          className="w-full py-1 px-2 text-[10px] font-mono bg-black/80 text-white hover:bg-black text-center cursor-pointer"
+        >
+          Tap to load full-res image
+        </button>
+      )}
+    </div>
+  );
+});
 
 
 type ManusMapRequest =
@@ -116,12 +180,44 @@ interface ChatViewProps {
   result: any;
   chartData?: any;
   status: 'idle' | 'running' | 'completed' | 'error';
+  phase?: string;
   onReset: () => void;
   onExport?: (format?: ChatExportFormat) => void;
   onSubmit: (prompt: string) => void;
   onStop?: () => void;
   onReorderSteps?: (steps: Step[]) => void;
   isLoading: boolean;
+}
+
+export function shouldShowComposingIndicator({
+  isAssistantWorking,
+  hasVisibleAssistantMessage,
+  phase,
+  steps,
+}: {
+  isAssistantWorking: boolean;
+  hasVisibleAssistantMessage: boolean;
+  phase?: string;
+  steps?: { id?: string; label: string; status?: string }[];
+}): boolean {
+  if (!isAssistantWorking || hasVisibleAssistantMessage) return false;
+
+  if (Array.isArray(steps) && steps.length > 0) {
+    const synthesisStep =
+      steps.find(s => /synthesiz|generating output|generating analysis|composing/i.test(s.label)) ||
+      steps[steps.length - 1];
+
+    // Never display "Composing response..." while the synthesis stage is still queued (pending)
+    if (synthesisStep?.status === 'pending') {
+      return false;
+    }
+
+    if (synthesisStep?.status === 'running') {
+      return true;
+    }
+  }
+
+  return phase === 'text-generation';
 }
 
 // Extract embedded image Data URL from user message if present
@@ -278,6 +374,7 @@ export function ChatView({
   result, 
   chartData,
   status, 
+  phase,
   onReset, 
   onExport, 
   onSubmit,
@@ -285,10 +382,22 @@ export function ChatView({
   isLoading 
 }: ChatViewProps) {
   const [input, setInput] = React.useState<string>(() => getChatViewDraft());
+  const [perfProfile, setPerfProfile] = React.useState(() => getActivePerformanceProfile());
 
-  // Local storage persistence: save ChatView draft prompt automatically
   React.useEffect(() => {
-    saveChatViewDraft(input);
+    const onPerfChange = () => setPerfProfile(getActivePerformanceProfile());
+    window.addEventListener('manus_performance_profile_changed', onPerfChange);
+    return () => window.removeEventListener('manus_performance_profile_changed', onPerfChange);
+  }, []);
+
+  const virtualizationBudget = React.useMemo(
+    () => getVirtualizationBudget(perfProfile),
+    [perfProfile]
+  );
+
+  // Non-blocking debounced draft persistence: prevents synchronous localStorage blocking on every keystroke
+  React.useEffect(() => {
+    scheduleDebouncedStorageWrite('chat_view_draft', () => saveChatViewDraft(input), 220);
   }, [input]);
   const [expandedSteps, setExpandedSteps] = React.useState<Record<string, boolean>>({});
   const [isThinkHarder, setIsThinkHarder] = useState(false);
@@ -296,7 +405,7 @@ export function ChatView({
   const [activePlugins, setActivePlugins] = useState<string[]>(['web_search', 'code_sandbox', 'charts']);
   const [isDragging, setIsDragging] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<VoiceCommandResult | null>(null);
-  const [weatherMap, setWeatherMap] = useState<Record<string, WeatherData>>({});
+  const [weatherMap, setWeatherMap] = useState<Record<string, WeatherData>>(() => boundedWeatherCache.toRecord());
   // Prevent duplicate weather requests when streaming updates re-render the message list.
   const weatherRequestsRef = useRef<Set<string>>(new Set());
   const [completedTypewriters, setCompletedTypewriters] = useState<Record<string, boolean>>({});
@@ -436,25 +545,35 @@ export function ChatView({
     toast.success(`Sent "${driveFile.name}" as context to AI Agent`);
   };
 
-  // Check new messages for live weather data without duplicating in-flight requests.
+  // Check only the latest messages for live weather data with bounded LRU cache & in-flight deduplication
   useEffect(() => {
-    messages.forEach(async (m) => {
-      const msgKey = String(m.id || m.content || '');
+    const recentSlice = messages.slice(-3);
+    recentSlice.forEach(async (m) => {
+      const msgKey = String(m?.id || m?.content || '');
       if (!msgKey || weatherRequestsRef.current.has(msgKey)) return;
 
       const query = extractWeatherQuery(m.content || '');
       if (!query.isWeather || !query.city) return;
 
+      const cityKey = query.city.toLowerCase();
+      const cachedCity = boundedWeatherCache.get(cityKey);
+      if (cachedCity) {
+        weatherRequestsRef.current.add(msgKey);
+        boundedWeatherCache.set(msgKey, cachedCity);
+        setWeatherMap(boundedWeatherCache.toRecord());
+        return;
+      }
+
       weatherRequestsRef.current.add(msgKey);
       try {
-        const data = await fetchWeatherByCity(query.city);
+        const data = await deduplicateInFlightRequest(`weather_${cityKey}`, () =>
+          fetchWeatherByCity(query.city!)
+        );
         if (data) {
-          setWeatherMap(prev => prev[msgKey] ? prev : ({
-            ...prev,
-            [msgKey]: data,
-            [query.city!.toLowerCase()]: data,
-            [data.locationName.toLowerCase()]: data,
-          }));
+          boundedWeatherCache.set(msgKey, data);
+          boundedWeatherCache.set(cityKey, data);
+          boundedWeatherCache.set(data.locationName.toLowerCase(), data);
+          setWeatherMap(boundedWeatherCache.toRecord());
         } else {
           weatherRequestsRef.current.delete(msgKey);
         }
@@ -462,7 +581,7 @@ export function ChatView({
         weatherRequestsRef.current.delete(msgKey);
       }
     });
-  }, [messages]);
+  }, [messages.length]);
 
   const handleApproveTool = async () => {
     if (!pendingApproval) return;
@@ -671,8 +790,15 @@ export function ChatView({
       if (msg.id) seenIds.add(msg.id);
       list.push(msg);
     }
+    if (!list.some((m) => m.role === 'assistant') && (result?.summary || result?.content || result?.text)) {
+      list.push({
+        id: 'result-assistant-fallback',
+        role: 'assistant',
+        content: String(result.summary || result.content || result.text),
+      });
+    }
     return list;
-  }, [messages]);
+  }, [messages, result]);
 
   // Determine if the agent is actively streaming a response
   const isStreamingResponse = React.useMemo(() => {
@@ -716,7 +842,17 @@ export function ChatView({
     }
   }, [isStreamingResponse]);
 
+  const lastScrollEventTimeRef = React.useRef<number>(0);
   const handleConversationScroll = React.useCallback(() => {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (lastScrollEventTimeRef.current > 0) {
+      const deltaMs = now - lastScrollEventTimeRef.current;
+      if (deltaMs > 4 && deltaMs < 120) {
+        recordScrollFrameDuration(deltaMs);
+      }
+    }
+    lastScrollEventTimeRef.current = now;
+
     const container = containerRef.current;
     if (!container) return;
     const nextState = evaluateAutoScrollState({
@@ -807,9 +943,9 @@ export function ChatView({
     };
   }, [messages, steps, result, isStreamingResponse]);
 
-  // Initial animation on outer wrapper (NEVER clearProps:'all' on Virtuoso's scrollerRef,
-  // because Virtuoso relies on inline style="height: 100%; overflow-y: auto; position: relative;" to scroll!)
+  // Initial animation on outer wrapper (skipped in ultra-lite mode to save CPU/GPU on 2GB RAM Android)
   useEffect(() => {
+    if (getActivePerformanceProfile() === 'ultra-lite') return;
     if (chatWrapperRef.current) {
       const ctx = gsap.context(() => {
         gsap.fromTo(
@@ -933,14 +1069,7 @@ export function ChatView({
                 className="bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium shadow-xs leading-relaxed space-y-2 overflow-hidden"
               >
                 {attachedImageUrl && (
-                  <div className="rounded-xl overflow-hidden border border-white/15 max-w-[260px] sm:max-w-[320px]">
-                    <img
-                      src={attachedImageUrl}
-                      alt="Attached upload"
-                      className="w-full max-h-[240px] object-cover block"
-                      loading="lazy"
-                    />
-                  </div>
+                  <UserAttachedImagePreview imageUrl={attachedImageUrl} />
                 )}
                 {cleanedText && <div className="whitespace-pre-wrap break-words">{cleanedText}</div>}
               </div>
@@ -964,21 +1093,21 @@ export function ChatView({
           cleanedContent: cleaned,
           parsedSources: sources,
         };
-        if (messageParseCacheRef.current.size > 200) {
+        if (messageParseCacheRef.current.size >= virtualizationBudget.maxRenderedMessagesWindow) {
           const oldestKey = messageParseCacheRef.current.keys().next().value;
           if (oldestKey) messageParseCacheRef.current.delete(oldestKey);
         }
         messageParseCacheRef.current.set(cacheKey, cached);
       }
-      const { thought, cleanedContent, parsedSources } = cached;
-      if (!cleanedContent && !thought && isAssistantWorking) return null;
-      if (!cleanedContent && !thought && raw && (result || chartData)) return null;
+      const { cleanedContent, parsedSources } = cached;
+      if (!cleanedContent && isAssistantWorking) return null;
+      if (!cleanedContent && raw && (result || chartData)) return null;
+      if (!cleanedContent) return null;
 
       const msgKey = msg.id || `msg-${index}-${cleanedContent.slice(0, 20)}`;
       const isCompleted = Boolean(completedTypewriters[msgKey]);
       const isLatestAssistant = index === displayMessages.length - 1 || (index === displayMessages.length - 2 && displayMessages[displayMessages.length - 1]?.role !== 'assistant');
       const shouldAnimate = !isCompleted && isLatestAssistant;
-      const isThoughtStreaming = Boolean(isLatestAssistant && isAssistantWorking && thought && !cleanedContent);
 
       if (cleanedContent && !thoughtDurationsRef.current[msgKey]) {
         const elapsedSec = Math.max(0.8, Math.min(24, (Date.now() - thinkingStartRef.current) / 1000));
@@ -987,17 +1116,6 @@ export function ChatView({
 
       const prevUserMsg = displayMessages.slice(0, index).reverse().find((m: any) => m?.role === 'user');
       const prevUserPromptText = prevUserMsg ? cleanUserMessage(prevUserMsg.content) : cleanUserMessage(prompt);
-      const synthesizedThought = !thought && cleanedContent
-        ? deriveContextualThinkingStages(
-            prevUserPromptText,
-            isThinkHarder,
-            isLatestAssistant && steps.length > 0 ? steps : undefined,
-            99
-          )
-            .map((s, sIdx) => `Step ${sIdx + 1}: ${s.label}${s.detail ? ` — ${s.detail}` : ''}`)
-            .join('\n')
-        : '';
-      const effectiveThought = thought || synthesizedThought;
 
       return (
         <div
@@ -1008,22 +1126,7 @@ export function ChatView({
           <div className="flex-1 space-y-3 min-w-0">
             <div className="flex items-center justify-between gap-3">
               <ManusLogo showBadge={true} />
-              {cleanedContent && (
-                <MessageHoverReactions
-                  messageId={msgKey}
-                  content={cleanedContent}
-                />
-              )}
             </div>
-
-            {effectiveThought && (
-              <ThoughtProcess
-                thoughtText={effectiveThought}
-                isLive={isThoughtStreaming}
-                durationSeconds={thoughtDurationsRef.current[msgKey] || 1.4}
-                defaultExpanded={isThoughtStreaming}
-              />
-            )}
 
             {cleanedContent ? (
               <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
@@ -1121,9 +1224,17 @@ export function ChatView({
               const mapRequest = extractManusMapRequest(String(latestUserPrompt));
               if (!mapRequest) return null;
               if (mapRequest.kind === 'route') {
-                return <RoutePlannerCard key={`route-${mapRequest.origin}-${mapRequest.destination}`} initialOrigin={mapRequest.origin} initialDestination={mapRequest.destination} autoCalculate />;
+                return (
+                  <React.Suspense fallback={null}>
+                    <RoutePlannerCard key={`route-${mapRequest.origin}-${mapRequest.destination}`} initialOrigin={mapRequest.origin} initialDestination={mapRequest.destination} autoCalculate />
+                  </React.Suspense>
+                );
               }
-              return <GoogleMapWidgetCard key={`location-${mapRequest.location}`} locationName={mapRequest.location} zoom={12} />;
+              return (
+                <React.Suspense fallback={null}>
+                  <GoogleMapWidgetCard key={`location-${mapRequest.location}`} locationName={mapRequest.location} zoom={12} />
+                </React.Suspense>
+              );
             })()}
 
             {(() => {
@@ -1149,7 +1260,7 @@ export function ChatView({
                 assistantContent: parsedSources.cleanedContent || cleanedContent,
                 steps: isLatestAssistant ? steps : undefined,
               });
-              if (resolvedSources.sources.length === 0 && resolvedSources.searchQueries.length === 0) {
+              if (resolvedSources.sources.length === 0) {
                 return null;
               }
               return (
@@ -1300,54 +1411,23 @@ export function ChatView({
     lastDisplayMessage.role === 'assistant' &&
     (() => {
       const raw = lastDisplayMessage.content || '';
-      const { thought, content: extracted } = extractThoughtProcess(raw);
+      const { content: extracted } = extractThoughtProcess(raw);
       const cleanedContent = cleanMessageContent(extracted || raw);
-      return Boolean(cleanedContent || thought);
+      return Boolean(cleanedContent);
     })()
   );
   const activeRunningStep = steps.find(s => s.status === 'running');
-  const latestUserMsg = [...displayMessages].reverse().find((m: any) => m?.role === 'user')?.content || prompt;
-  const weatherQuery = extractWeatherQuery(latestUserMsg);
-
-  let typingStatus = activeRunningStep?.label;
-  if (!typingStatus && isAssistantWorking) {
-    if (weatherQuery.isWeather && weatherQuery.city) {
-      typingStatus = `Searching weather data for ${weatherQuery.city}...`;
-    } else if (weatherQuery.isWeather) {
-      typingStatus = 'Searching weather data...';
-    } else if (/(search|google|news|latest|breaking|fact|verify)/i.test(latestUserMsg)) {
-      typingStatus = 'Searching live web sources...';
-    } else if (/@[\w_]+/.test(latestUserMsg)) {
-      typingStatus = 'Connecting to workspace tools...';
-    } else if (isThinkHarder) {
-      typingStatus = 'Manus is reasoning deeply...';
-    } else {
-      typingStatus = 'Manus is thinking...';
-    }
-  }
+  const showComposingStatus = shouldShowComposingIndicator({
+    isAssistantWorking,
+    hasVisibleAssistantMessage,
+    phase,
+    steps,
+  });
 
   const footerRenderRef = useRef<() => React.ReactNode>(() => null);
   const footerSubscribersRef = useRef<Set<() => void>>(new Set());
   footerRenderRef.current = () => (
-    <div className="px-4 sm:px-20 space-y-4 pb-28 pt-4">
-      {/* Live tool-call progress */}
-      {isAssistantWorking && activeRunningStep && !hasVisibleAssistantMessage && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="flex items-center gap-3 max-w-3xl mx-auto my-2 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm animate-in fade-in slide-in-from-bottom-2"
-        >
-          <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
-            <span className="absolute inline-flex h-full w-full rounded-full bg-primary/20 animate-ping" />
-            <span className="relative h-2.5 w-2.5 rounded-full bg-primary" />
-          </span>
-          <span className="font-medium text-foreground truncate flex-1">
-            {typingStatus}
-          </span>
-          <span className="text-xs text-muted-foreground font-mono shrink-0">Working</span>
-        </div>
-      )}
-
+    <div className="px-4 sm:px-20 space-y-3 pb-28 pt-2">
       {/* Final Result */}
       {(() => {
         const hasChart = Boolean(
@@ -1372,10 +1452,12 @@ export function ChatView({
                       </span>
                     </div>
                     <div className="h-[320px] w-full pt-2">
-                      <ChartResult 
-                        type={result.detectedChartType || result.type || 'bar'} 
-                        data={result.chartData || chartData} 
-                      />
+                      <React.Suspense fallback={null}>
+                        <ChartResult 
+                          type={result.detectedChartType || result.type || 'bar'} 
+                          data={result.chartData || chartData} 
+                        />
+                      </React.Suspense>
                     </div>
                   </div>
                 )}
@@ -1385,48 +1467,41 @@ export function ChatView({
                     <FileAttachments files={result.files} />
                   </div>
                 )}
-
-                {!messages.some((m: any) => m?.role === 'assistant') && (
-                  <div className="pt-3 mt-3 border-t border-border/40">
-                    <ConversationActionBar
-                      content={result?.summary || result?.content || result?.text || `${result.detectedChartType || 'Visual'} analysis generated`}
-                      onRegenerate={() => onSubmit(cleanUserMessage(prompt))}
-                    />
-                  </div>
-                )}
               </div>
             </div>
           </div>
         );
       })()}
 
-      {/* Prompt-aware thinking & subtle typing lead-in animation */}
+      {/* Synchronized thinking stage card & active response composition indicator */}
       {isAssistantWorking && !hasVisibleAssistantMessage && (
-        <div className="flex gap-4 max-w-3xl mx-auto my-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
-          <div className="flex-1 space-y-2.5 min-w-0">
+        <div className="flex gap-4 max-w-3xl mx-auto my-2 animate-in fade-in duration-200">
+          <div className="flex-1 space-y-2 min-w-0">
             <div className="flex items-center gap-2.5">
               <ManusLogo showBadge={true} />
             </div>
-            <div className="pt-1 space-y-2">
+            <div className="pt-0.5 space-y-1.5">
               <ContextualThinking
                 prompt={messages.filter((message: any) => message?.role === 'user').slice(-1)[0]?.content || prompt}
                 activeStep={activeRunningStep?.label}
                 deepMode={isThinkHarder}
+                isLive={isAssistantWorking}
                 steps={steps}
               />
-              <div
-                data-testid="ai-typing-sequence"
-                className="manus-typing-sequence-lead"
-                role="status"
-                aria-live="polite"
-              >
-                <span className="manus-typing-dots-wave" aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
-                </span>
-                <span>Composing response...</span>
-              </div>
+              {showComposingStatus && (
+                <div
+                  data-testid="ai-typing-sequence"
+                  className="manus-typing-sequence-lead"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <span
+                    className="w-1.5 h-1.5 rounded-full bg-[#000000] dark:bg-[#FFFFFF] shrink-0"
+                    aria-hidden="true"
+                  />
+                  <span>Composing response...</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1485,7 +1560,7 @@ export function ChatView({
     activeRunningStepLabel: activeRunningStep?.label,
     activeRunningStepStatus: activeRunningStep?.status,
     hasVisibleAssistantMessage,
-    typingStatus,
+    showComposingStatus,
     result,
     chartData,
     messagesCount: displayMessages.length,
@@ -1496,7 +1571,7 @@ export function ChatView({
     activeRunningStep?.label,
     activeRunningStep?.status,
     hasVisibleAssistantMessage,
-    typingStatus,
+    showComposingStatus,
     result,
     chartData,
     displayMessages.length,
@@ -1557,10 +1632,13 @@ export function ChatView({
           data={displayMessages}
           context={virtuosoContext}
           computeItemKey={(index, item) => item?.id || `msg-${index}`}
-          increaseViewportBy={{ top: 280, bottom: 360 }}
+          increaseViewportBy={{
+            top: virtualizationBudget.overscanTopPx,
+            bottom: virtualizationBudget.overscanBottomPx,
+          }}
           atBottomThreshold={64}
           className="h-full w-full overflow-y-auto relative touch-pan-y custom-scrollbar overscroll-contain"
-          followOutput={isStreamingResponse && !isAutoScrollPaused && shouldAutoScrollRef.current ? 'smooth' : false}
+          followOutput={isStreamingResponse && !isAutoScrollPaused && shouldAutoScrollRef.current ? (perfProfile === 'ultra-lite' ? 'auto' : 'smooth') : false}
           atBottomStateChange={(atBottom) => {
             if (atBottom) {
               resumeAutoScroll();
@@ -1858,36 +1936,48 @@ export function ChatView({
         </div>
       </div>
 
-      {/* Google Drive Picker Modal */}
-      <GoogleDrivePickerModal
-        isOpen={isDrivePickerOpen}
-        onClose={() => setIsDrivePickerOpen(false)}
-        onSelectFile={handleDriveFileSelect}
-      />
+      {/* Google Drive Picker Modal — lazy-mounted only when opened */}
+      {isDrivePickerOpen && (
+        <React.Suspense fallback={null}>
+          <GoogleDrivePickerModal
+            isOpen={isDrivePickerOpen}
+            onClose={() => setIsDrivePickerOpen(false)}
+            onSelectFile={handleDriveFileSelect}
+          />
+        </React.Suspense>
+      )}
 
-      {/* Connectors & Plugins Store Panel */}
-      <ConnectorsStorePanel
-        isOpen={isConnectorsStoreOpen}
-        onClose={() => setIsConnectorsStoreOpen(false)}
-        activeConnectors={activePlugins}
-        onToggleConnector={handleTogglePlugin}
-      />
+      {/* Connectors & Plugins Store Panel — lazy-mounted only when opened */}
+      {isConnectorsStoreOpen && (
+        <React.Suspense fallback={null}>
+          <ConnectorsStorePanel
+            isOpen={isConnectorsStoreOpen}
+            onClose={() => setIsConnectorsStoreOpen(false)}
+            activeConnectors={activePlugins}
+            onToggleConnector={handleTogglePlugin}
+          />
+        </React.Suspense>
+      )}
 
-      {/* Interactive Connector Details & Configuration Modal */}
-      <ConnectorConfigModal
-        connectorId={selectedConfigConnectorId}
-        isOpen={!!selectedConfigConnectorId}
-        onClose={() => setSelectedConfigConnectorId(null)}
-        onRemoveConnector={(id) => {
-          removeConnectorTag(id);
-          if (activePlugins.includes(id)) {
-            handleTogglePlugin(id);
-          }
-        }}
-        onInsertPrompt={(promptText) => {
-          setInput(prev => prev ? `${prev} ${promptText}` : promptText);
-        }}
-      />
+      {/* Interactive Connector Details & Configuration Modal — lazy-mounted only when opened */}
+      {selectedConfigConnectorId && (
+        <React.Suspense fallback={null}>
+          <ConnectorConfigModal
+            connectorId={selectedConfigConnectorId}
+            isOpen={!!selectedConfigConnectorId}
+            onClose={() => setSelectedConfigConnectorId(null)}
+            onRemoveConnector={(id) => {
+              removeConnectorTag(id);
+              if (activePlugins.includes(id)) {
+                handleTogglePlugin(id);
+              }
+            }}
+            onInsertPrompt={(promptText) => {
+              setInput(prev => prev ? `${prev} ${promptText}` : promptText);
+            }}
+          />
+        </React.Suspense>
+      )}
     </div>
   );
 }

@@ -262,6 +262,13 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
         }
 
         if (res.ok && res.body) {
+          if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+            window.dispatchEvent(
+              new CustomEvent('manus_stream_started', {
+                detail: { requestId },
+              })
+            );
+          }
           const reader = res.body.getReader();
           const decoder = new TextDecoder();
           let lineBuffer = '';
