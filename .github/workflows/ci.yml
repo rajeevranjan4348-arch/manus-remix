@@ -28,6 +28,9 @@ jobs:
       - name: TypeScript validation
         run: bun run lint
 
+      - name: Run automated regression tests
+        run: bun run test
+
       - name: Production build
         run: bun run build
 
