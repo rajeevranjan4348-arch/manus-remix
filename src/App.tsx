@@ -57,7 +57,7 @@ function TaskView({
     if (taskId) {
       loadTask(taskId);
     }
-  }, [taskId]);
+  }, [taskId, loadTask]);
 
   if (!currentTask && !taskId) return null;
 
