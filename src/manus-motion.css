@@ -75,3 +75,32 @@ body,
     transition-duration: 0.01ms !important;
   }
 }
+
+
+/* Adaptive motion budget: keep interactions responsive without forcing every
+   low-memory Android device to animate every streamed/virtualized message. */
+html[data-perf-mode="saver"] :where(button, a, [role="button"]) {
+  transition-property: transform, opacity, background-color, border-color;
+  transition-duration: 130ms;
+}
+
+html[data-perf-mode="saver"] :where([data-message], .chat-message, .message-bubble, .message-item) {
+  animation-duration: 140ms;
+  will-change: auto;
+}
+
+html[data-perf-mode="ultra-lite"] :where(button, a, [role="button"]) {
+  transition-property: transform, opacity;
+  transition-duration: 110ms;
+  box-shadow: none;
+}
+
+html[data-perf-mode="ultra-lite"] :where([data-message], .chat-message, .message-bubble, .message-item) {
+  animation: none !important;
+  will-change: auto !important;
+}
+
+/* Do not spend GPU/compositor work on decorative transitions while backgrounded. */
+html[data-page-hidden="true"] :where(button, a, [role="button"]) {
+  transition: none !important;
+}
