@@ -83,7 +83,7 @@ export async function fetchCalendarEvents(timeMin?: string, timeMax?: string): P
     }));
   } catch (err) {
     console.warn('Failed to fetch calendar events:', err);
-    return [];
+    throw err instanceof Error ? err : new Error('Unable to read Google Calendar. Check the connection and API permissions.');
   }
 }
 
@@ -135,7 +135,7 @@ export async function fetchRecentEmails(query: string = 'in:inbox', maxResults: 
     return results;
   } catch (err) {
     console.warn('Failed to fetch recent emails:', err);
-    return [];
+    throw err instanceof Error ? err : new Error('Unable to read Gmail. Check the connection and API permissions.');
   }
 }
 
@@ -149,7 +149,10 @@ export async function fetchGoogleTasks(): Promise<GoogleTaskSummary[]> {
       headers: { Authorization: `Bearer ${token}` }
     });
 
-    if (!res.ok) return [];
+    if (!res.ok) {
+      const detail = await res.text();
+      throw new Error(`Google Tasks API Error (${res.status}): ${detail}`);
+    }
 
     const data = await res.json();
     return (data.items || []).map((t: any) => ({
@@ -161,7 +164,7 @@ export async function fetchGoogleTasks(): Promise<GoogleTaskSummary[]> {
     }));
   } catch (err) {
     console.warn('Failed to fetch tasks:', err);
-    return [];
+    throw err instanceof Error ? err : new Error('Unable to read Google Tasks. Check the connection and API permissions.');
   }
 }
 
@@ -169,7 +172,9 @@ export async function fetchGoogleTasks(): Promise<GoogleTaskSummary[]> {
  * Master service component to aggregate context from Google Workspace apps based on user tags.
  */
 export async function fetchWorkspaceContextSummary(tags: string[]): Promise<string> {
-  const normalizedTags = tags.map(t => t.toLowerCase().replace('@', ''));
+  // Validate OAuth first so a disconnected account is never misreported as an empty inbox/calendar.
+  await ensureToken();
+  const normalizedTags = tags.map(t => t.toLowerCase().replace(/^@/, ''));
   const includeAll = normalizedTags.includes('workspace') || normalizedTags.includes('all');
   
   const sections: string[] = [];
@@ -209,8 +214,9 @@ export async function fetchWorkspaceContextSummary(tags: string[]): Promise<stri
         const fileLines = driveFiles.slice(0, 5).map(f => `- **${f.name}** (${f.mimeType.split('.').pop() || 'file'})`);
         sections.push(`📁 **Google Drive Files (${driveFiles.length} recent files):**\n${fileLines.join('\n')}`);
       }
-    } catch {
-      // Ignore if drive fails
+    } catch (err) {
+      console.warn('Failed to fetch Drive context:', err);
+      throw err instanceof Error ? err : new Error('Unable to read Google Drive. Check the connection and API permissions.');
     }
   }
 
@@ -220,6 +226,8 @@ export async function fetchWorkspaceContextSummary(tags: string[]): Promise<stri
     if (tasks.length > 0) {
       const taskLines = tasks.map(t => `- [ ] **${t.title}**${t.due ? ` (Due: ${new Date(t.due).toLocaleDateString()})` : ''}`);
       sections.push(`☑️ **Google Tasks (${tasks.length} pending tasks):**\n${taskLines.join('\n')}`);
+    } else {
+      sections.push('☑️ **Google Tasks:** No pending tasks were returned by Google.');
     }
   }
 
