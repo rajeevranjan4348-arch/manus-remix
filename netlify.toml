@@ -3,6 +3,25 @@
   publish = "dist"
   functions = "netlify/functions"
 
+# Baseline browser security headers. Keep CSP in a separately tested change:
+# this app uses Google sign-in, Firebase, maps, streaming, and external APIs.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(self), microphone=(self), geolocation=()"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"
+
+# Prevent shared/proxy caches from storing private API responses.
+[[headers]]
+  for = "/.netlify/functions/*"
+  [headers.values]
+    Cache-Control = "no-store"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
+
 [[redirects]]
   from = "/api/gemini/*"
   to = "/.netlify/functions/agent"
