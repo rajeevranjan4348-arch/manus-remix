@@ -191,27 +191,28 @@ export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistor
 
           {/* Dropdown Menu */}
           {isOpen && (
-            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-72 sm:w-80 bg-white dark:bg-[#18191c] border border-border rounded-2xl shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+            <div className="manus-dropdown-spring absolute top-full left-1/2 -translate-x-1/2 mt-2 w-72 sm:w-80 bg-white dark:bg-[#18191c] border border-border rounded-2xl shadow-2xl p-2 z-50">
               <div className="px-3 py-2 border-b border-border/60 mb-1">
                 <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Select Intelligence Model</p>
               </div>
 
               <div className="space-y-1">
-                {MODELS.map((model) => {
+                {MODELS.map((model, modelIdx) => {
                   const Icon = model.icon;
                   const isSelected = model.id === selectedModel;
                   return (
                     <button
                       key={model.id}
+                      style={{ animationDelay: `${modelIdx * 35}ms` }}
                       onClick={() => handleSelectModel(model.id, model.name)}
-                      className={`w-full flex items-start gap-3 p-2.5 rounded-xl transition-all cursor-pointer text-left ${
+                      className={`manus-source-item-enter group w-full flex items-start gap-3 p-2.5 rounded-xl transition-all cursor-pointer text-left ${
                         isSelected 
                           ? 'bg-primary/10 border border-primary/20 text-foreground' 
                           : 'hover:bg-manus-soft dark:hover:bg-accent/60 text-muted-foreground hover:text-foreground'
                       }`}
                     >
                       <div className={`p-2 rounded-lg shrink-0 ${isSelected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
-                        <Icon size={18} strokeWidth={2.3} />
+                        <Icon size={18} strokeWidth={2.3} className="manus-icon-spring" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-1">
@@ -223,7 +224,7 @@ export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistor
                         <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">{model.desc}</p>
                       </div>
                       {isSelected && (
-                        <Check size={18} strokeWidth={2.5} className="text-primary shrink-0 self-center ml-1" />
+                        <Check size={18} strokeWidth={2.5} className="manus-tag-pop text-primary shrink-0 self-center ml-1" />
                       )}
                     </button>
                   );
@@ -286,7 +287,7 @@ export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistor
             </button>
 
             {showOverflowMenu && (
-              <div className="absolute right-0 top-12 min-w-52 rounded-2xl border border-border/80 bg-white/95 dark:bg-[#242424]/95 backdrop-blur-md p-1.5 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100">
+              <div className="manus-dropdown-spring absolute right-0 top-12 min-w-52 rounded-2xl border border-border/80 bg-white/95 dark:bg-[#242424]/95 backdrop-blur-md p-1.5 shadow-2xl z-50">
                 <button
                   type="button"
                   onClick={() => {

@@ -511,12 +511,14 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
             {/* Voice Input Button (Web Speech API) */}
             <button
               type="button"
+              data-testid="voice-input-button"
+              data-listening={isListening ? 'true' : 'false'}
               onClick={toggleListening}
               aria-label={isListening ? "Stop listening" : "Voice input - speak your prompt"}
               title={isListening ? "Listening... Click to stop" : "Speak prompt (Web Speech API)"}
-              className={`shrink-0 w-[38px] h-[38px] rounded-full flex items-center justify-center transition-all cursor-pointer ${
+              className={`manus-mic-button shrink-0 w-[38px] h-[38px] rounded-full flex items-center justify-center transition-all cursor-pointer ${
                 isListening
-                  ? 'bg-rose-500 text-white animate-pulse shadow-md ring-2 ring-rose-400/40 scale-105'
+                  ? 'bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] shadow-md ring-2 ring-[#333333] dark:ring-[#E0E0E0]'
                   : 'text-muted-foreground hover:text-foreground hover:bg-neutral-200/60 dark:hover:bg-neutral-800'
               }`}
             >

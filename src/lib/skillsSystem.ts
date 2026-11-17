@@ -364,6 +364,65 @@ class SkillsRegistryService {
         }
       },
     });
+
+    // 6. Real-Time Data & Live Information Skill
+    this.registerSkill({
+      id: 'skill_realtime_data',
+      name: 'Real-Time Data & Live Feed Engine',
+      description: 'Provides live world clocks, current date/time, and real-time weather, currency FX, crypto prices, and news snapshots.',
+      version: '1.0.0',
+      author: 'Manus Core',
+      category: 'utilities',
+      permissions: ['read_input', 'network_fetch'],
+      enabled: true,
+      isBuiltIn: true,
+      inputSchema: {
+        query: { type: 'string', description: 'User query requesting live or current information', required: true },
+      },
+      handler: async (input) => {
+        const query = String(input.query || '').trim();
+        const now = new Date();
+        const utc = now.toISOString();
+        const ist = new Intl.DateTimeFormat('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          dateStyle: 'full',
+          timeStyle: 'long',
+        }).format(now);
+        const localTime = new Intl.DateTimeFormat('en-US', {
+          dateStyle: 'full',
+          timeStyle: 'long',
+        }).format(now);
+
+        if (typeof window !== 'undefined' && typeof fetch === 'function') {
+          try {
+            const res = await fetch(`/api/realtime?q=${encodeURIComponent(query)}`, {
+              method: 'GET',
+              headers: { Accept: 'application/json' },
+              signal: AbortSignal.timeout(3500),
+            });
+            if (res.ok) {
+              const payload = await res.json();
+              return {
+                success: true,
+                output: payload,
+                summary: `Fetched live real-time data snapshot as of ${ist}`,
+              };
+            }
+          } catch {}
+        }
+
+        return {
+          success: true,
+          output: {
+            utc,
+            ist,
+            localTime,
+            timestampMs: now.getTime(),
+          },
+          summary: `Live temporal context synchronized (${ist})`,
+        };
+      },
+    });
   }
 
   /**
@@ -389,8 +448,14 @@ class SkillsRegistryService {
       });
     }
 
+    // 3. Live time / date / world clock intent
+    if (/\b(what time is it|current time|time right now|what is the date|today'?s date|what day is today|current date|time in india|time in utc|world clock)\b/i.test(p)) {
+      return this.executeSkill('skill_realtime_data', { query: prompt });
+    }
+
     return null;
   }
 }
 
 export const skillsRegistry = new SkillsRegistryService();
+

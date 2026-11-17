@@ -295,11 +295,11 @@
 }
 
 .manus-pill {
-  @apply rounded-full border border-border bg-white dark:bg-card px-4 py-2 text-sm font-medium transition-all duration-300 ease-out hover:bg-secondary/50 dark:hover:bg-accent hover:shadow-sm hover:-translate-y-0.5 active:translate-y-0 active:scale-95 cursor-pointer;
+  @apply rounded-full border border-border bg-white dark:bg-card px-4 py-2 text-sm font-medium transition-[transform,box-shadow,background-color,border-color,color,opacity] duration-200 ease-out hover:bg-secondary/50 dark:hover:bg-accent hover:shadow-sm hover:-translate-y-0.5 active:translate-y-0 active:scale-95 cursor-pointer;
 }
 
 .manus-input-container {
-  @apply relative flex w-full rounded-[1.75rem] border border-[#E0E0E0] dark:border-[#333333] bg-[#FFFFFF] dark:bg-[#111111] shadow-lg transition-all duration-200 ease-out hover:border-primary/30 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20;
+  @apply relative flex w-full rounded-[1.75rem] border border-[#E0E0E0] dark:border-[#333333] bg-[#FFFFFF] dark:bg-[#111111] shadow-lg transition-[transform,box-shadow,border-color,background-color] duration-200 ease-out hover:border-primary/30 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20;
 }
 
 .manus-input-container[data-listening="true"] {
@@ -307,7 +307,7 @@
 }
 
 .manus-card {
-  @apply rounded-2xl border border-border bg-white p-6 shadow-sm hover:shadow-md transition-all duration-300 ease-out hover:-translate-y-0.5;
+  @apply rounded-2xl border border-border bg-white p-6 shadow-sm hover:shadow-md transition-[transform,box-shadow,border-color,background-color] duration-200 ease-out hover:-translate-y-0.5;
 }
 
 .animate-fade-in {
@@ -1247,6 +1247,39 @@ html {
   }
 }
 
+/* Visual pulse animation on the microphone button triggered by .manus-input-container listening state */
+.manus-input-container[data-listening="true"] .manus-mic-button,
+.manus-input-container[data-listening="true"] [data-testid="voice-input-button"] {
+  animation: manus-mic-listening-pulse 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.dark .manus-input-container[data-listening="true"] .manus-mic-button,
+.dark .manus-input-container[data-listening="true"] [data-testid="voice-input-button"] {
+  animation-name: manus-mic-listening-pulse-dark;
+}
+
+@keyframes manus-mic-listening-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(0, 0, 0, 0.45);
+  }
+  50% {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 7px rgba(0, 0, 0, 0);
+  }
+}
+
+@keyframes manus-mic-listening-pulse-dark {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.5);
+  }
+  50% {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 7px rgba(255, 255, 255, 0);
+  }
+}
+
 .manus-voice-banner-enter {
   animation: manus-voice-banner-spring 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
   transform-origin: top center;
@@ -1422,6 +1455,112 @@ html {
   }
 }
 
+/* Tag / pill attachment spring pop-in */
+.manus-tag-pop {
+  animation: manus-tag-pop-in 260ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes manus-tag-pop-in {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 4px, 0) scale(0.88);
+  }
+  70% {
+    opacity: 1;
+    transform: translate3d(0, -1px, 0) scale(1.03);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+/* Dropdown & popover spring unfold */
+.manus-dropdown-spring {
+  transform-origin: top center;
+  animation: manus-dropdown-unfold 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes manus-dropdown-unfold {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -6px, 0) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+/* Work mode cards & gallery staggered cascade entrance */
+.manus-card-stagger {
+  animation: manus-card-cascade-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes manus-card-cascade-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+/* Interactive card 3D hover lift */
+.manus-hover-lift {
+  transition:
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 180ms ease,
+    background-color 180ms ease;
+}
+
+.manus-hover-lift:hover {
+  transform: translate3d(0, -2px, 0) scale(1.01);
+}
+
+.manus-hover-lift:active {
+  transform: translate3d(0, 0, 0) scale(0.985);
+}
+
+/* Icon spring micro-interaction on parent group hover */
+.manus-icon-spring {
+  transition: transform 240ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.group:hover .manus-icon-spring {
+  transform: scale(1.12) rotate(-4deg);
+}
+
+/* Plus attachment button 90-degree spring rotation */
+.manus-plus-rotate {
+  transition: transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.group:hover .manus-plus-rotate,
+button:hover > .manus-plus-rotate {
+  transform: rotate(90deg) scale(1.08);
+}
+
+/* Sidebar item smooth slide micro-interaction */
+.manus-sidebar-item-slide {
+  transition:
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.manus-sidebar-item-slide:hover {
+  transform: translate3d(2px, 0, 0);
+}
+
+.manus-sidebar-item-slide:active {
+  transform: translate3d(0, 0, 0) scale(0.985);
+}
+
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   button:active,
@@ -1429,14 +1568,24 @@ html {
   .manus-transition-enter,
   .manus-hero-float,
   .manus-chip-stagger,
+  .manus-tag-pop,
+  .manus-dropdown-spring,
+  .manus-card-stagger,
   .chat-message-user-enter,
   .chat-message-assistant-enter,
   .manus-sources-drawer-enter,
   .manus-source-item-enter,
   .manus-thought-step-enter,
   .manus-voice-banner-enter,
-  .manus-input-container[data-listening="true"] { animation: none; }
-  .ultra-smooth-composer:focus-within { transform: none; }
+  .manus-input-container[data-listening="true"],
+  .manus-input-container[data-listening="true"] .manus-mic-button,
+  .manus-input-container[data-listening="true"] [data-testid="voice-input-button"] { animation: none; }
+  .ultra-smooth-composer:focus-within,
+  .manus-hover-lift:hover,
+  .manus-sidebar-item-slide:hover,
+  .group:hover .manus-icon-spring,
+  .group:hover .manus-plus-rotate,
+  button:hover > .manus-plus-rotate { transform: none; }
 }
 
 
@@ -1624,6 +1773,9 @@ select,
 
 [data-perf-mode="ultra-lite"] .manus-hero-float,
 [data-perf-mode="ultra-lite"] .manus-chip-stagger,
+[data-perf-mode="ultra-lite"] .manus-tag-pop,
+[data-perf-mode="ultra-lite"] .manus-dropdown-spring,
+[data-perf-mode="ultra-lite"] .manus-card-stagger,
 [data-perf-mode="ultra-lite"] .manus-orb-core,
 [data-perf-mode="ultra-lite"] .manus-orb-ring,
 [data-perf-mode="ultra-lite"] .manus-shimmer-sweep,
@@ -1633,12 +1785,49 @@ select,
 }
 
 [data-perf-mode="ultra-lite"] .gpu-accelerated,
-[data-perf-mode="ultra-lite"] .ultra-smooth-composer {
+[data-perf-mode="ultra-lite"] .ultra-smooth-composer,
+[data-perf-mode="ultra-lite"] .manus-hover-lift:hover,
+[data-perf-mode="ultra-lite"] .manus-sidebar-item-slide:hover {
   will-change: auto !important;
   transform: none !important;
 }
 
 [data-perf-mode="ultra-lite"] .manus-message-block {
   contain: layout style;
+}
+
+/* Smooth 60/120fps collapsible grid container for expandable panels & stages */
+.manus-collapsible-grid {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.manus-collapsible-grid[data-expanded="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.manus-collapsible-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* High-refresh-rate touch & momentum scrolling optimizations */
+.custom-scrollbar,
+[data-virtuoso-scroller="true"] {
+  -webkit-overflow-scrolling: touch;
+  overflow-anchor: auto;
+  scroll-behavior: smooth;
+}
+
+[data-perf-mode="ultra-lite"] .custom-scrollbar,
+[data-perf-mode="ultra-lite"] [data-virtuoso-scroller="true"],
+[data-perf-mode="saver"] .custom-scrollbar,
+[data-perf-mode="saver"] [data-virtuoso-scroller="true"] {
+  scroll-behavior: auto;
 }
 

@@ -471,7 +471,7 @@ export function ChatView({
   React.useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
-    if (!input) {
+    if (!input || (input.length < 44 && !input.includes('\n'))) {
       if (lastTextareaHeightRef.current !== 22) {
         lastTextareaHeightRef.current = 22;
         el.style.height = '22px';
@@ -479,12 +479,13 @@ export function ChatView({
       return;
     }
     const rafId = window.requestAnimationFrame(() => {
-      if (!textareaRef.current) return;
-      textareaRef.current.style.height = 'auto';
-      const scrollHeight = textareaRef.current.scrollHeight;
+      const node = textareaRef.current;
+      if (!node) return;
+      node.style.height = 'auto';
+      const scrollHeight = node.scrollHeight;
       const targetHeight = Math.max(Math.min(scrollHeight, 90), 22);
       lastTextareaHeightRef.current = targetHeight;
-      textareaRef.current.style.height = `${targetHeight}px`;
+      node.style.height = `${targetHeight}px`;
     });
     return () => window.cancelAnimationFrame(rafId);
   }, [input]);
@@ -918,22 +919,19 @@ export function ChatView({
   }, [isStreamingResponse, displayMessages, resumeAutoScroll]);
 
   // Keep scroll position at the bottom during active streaming token/step updates ONLY if user hasn't scrolled up.
-  // Synchronously align and coalesce frame updates via requestAnimationFrame for 60/120fps smoothness.
+  // Coalesce frame updates via requestAnimationFrame for 60/120fps smoothness without double synchronous reflows.
   const scrollRafRef = useRef<number | null>(null);
   useEffect(() => {
     if (isStreamingResponse && shouldAutoScrollRef.current && !userScrolledUpRef.current && containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight;
-      lastScrollTopRef.current = containerRef.current.scrollTop;
-      if (scrollRafRef.current !== null) {
-        cancelAnimationFrame(scrollRafRef.current);
+      if (scrollRafRef.current === null) {
+        scrollRafRef.current = requestAnimationFrame(() => {
+          scrollRafRef.current = null;
+          if (containerRef.current && shouldAutoScrollRef.current && !userScrolledUpRef.current) {
+            containerRef.current.scrollTop = containerRef.current.scrollHeight;
+            lastScrollTopRef.current = containerRef.current.scrollTop;
+          }
+        });
       }
-      scrollRafRef.current = requestAnimationFrame(() => {
-        scrollRafRef.current = null;
-        if (containerRef.current && shouldAutoScrollRef.current && !userScrolledUpRef.current) {
-          containerRef.current.scrollTop = containerRef.current.scrollHeight;
-          lastScrollTopRef.current = containerRef.current.scrollTop;
-        }
-      });
     }
     return () => {
       if (scrollRafRef.current !== null) {
@@ -1010,8 +1008,8 @@ export function ChatView({
     parsedSources: ReturnType<typeof parseSourcesFromMarkdown>;
   }>>(new Map());
 
-  // Helper to render each message item in the virtualized list
-  const renderMessageItem = (index: number, msg: any) => {
+  // Helper to render each message item in the virtualized list (memoized so typing in composer doesn't re-render messages)
+  const renderMessageItem = React.useCallback((index: number, msg: any) => {
     if (!msg) return null;
     if (msg.role === 'user') {
       const msgId = msg.id || String(index);
@@ -1289,7 +1287,22 @@ export function ChatView({
       );
     }
     return null;
-  };
+  }, [
+    editingMessageId,
+    editInputContent,
+    onSubmit,
+    virtualizationBudget.maxRenderedMessagesWindow,
+    isAssistantWorking,
+    result,
+    chartData,
+    completedTypewriters,
+    displayMessages,
+    prompt,
+    handleTypewriterComplete,
+    messages,
+    weatherMap,
+    steps,
+  ]);
 
   // Helper to extract AI thought process (<think>...</think> or [THOUGHTS]...[/THOUGHTS])
   const extractThoughtProcess = (rawContent: any) => {
@@ -1386,7 +1399,11 @@ export function ChatView({
               }
 
               return (
-                <div key={idx} className="flex items-center gap-2">
+                <div
+                  key={idx}
+                  style={{ animationDelay: `${Math.min(idx * 35, 240)}ms` }}
+                  className="manus-thought-step-enter flex items-center gap-2"
+                >
                   <div className={cn(
                     "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border max-w-full truncate",
                     type !== 'default'
@@ -1676,7 +1693,7 @@ export function ChatView({
         {(attachedFile || isThinkHarder) && (
           <div className="flex items-center gap-2 flex-wrap max-w-3xl w-full px-2">
             {isThinkHarder && (
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] rounded-full text-xs font-semibold shadow-md animate-in fade-in zoom-in duration-200">
+              <div className="manus-tag-pop inline-flex items-center gap-1.5 px-3 py-1 bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] rounded-full text-xs font-semibold shadow-md">
                 <Brain size={14} className="animate-pulse" />
                 <span>Deep reasoning</span>
                 <button onClick={() => setIsThinkHarder(false)} className="p-0.5 hover:bg-white/20 dark:hover:bg-black/20 rounded-full ml-1" title="Remove deep reasoning">
@@ -1685,7 +1702,7 @@ export function ChatView({
               </div>
             )}
             {attachedFile && (
-              <div className="inline-flex items-center gap-2 px-3 py-1 bg-white dark:bg-card border border-border rounded-full text-xs font-medium shadow-md animate-in fade-in zoom-in duration-200">
+              <div className="manus-tag-pop inline-flex items-center gap-2 px-3 py-1 bg-white dark:bg-card border border-border rounded-full text-xs font-medium shadow-md">
                 <FileText size={13} className="text-primary" />
                 <span className="truncate max-w-[150px] font-semibold">{attachedFile.name}</span>
                 <span className="text-[10px] text-muted-foreground uppercase">({formatFileSize(attachedFile.size)})</span>
@@ -1826,11 +1843,11 @@ export function ChatView({
               >
                 <button 
                   type="button"
-                  className="w-9 h-9 rounded-full border border-[#E0E0E0] dark:border-[#333333] bg-[#F2F2F2] dark:bg-[#171717] hover:bg-[#E0E0E0] dark:hover:bg-[#333333] transition-colors flex items-center justify-center text-[#000000] dark:text-[#FFFFFF] shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                  className="group w-9 h-9 rounded-full border border-[#E0E0E0] dark:border-[#333333] bg-[#F2F2F2] dark:bg-[#171717] hover:bg-[#E0E0E0] dark:hover:bg-[#333333] transition-colors flex items-center justify-center text-[#000000] dark:text-[#FFFFFF] shadow-2xs cursor-pointer active:scale-95 shrink-0"
                   title="Add attachments or options"
                   aria-label="Add attachments or options"
                 >
-                  <Plus size={18} strokeWidth={2.4} className="text-[#000000] dark:text-[#FFFFFF] shrink-0" />
+                  <Plus size={18} strokeWidth={2.4} className="manus-plus-rotate text-[#000000] dark:text-[#FFFFFF] shrink-0" />
                 </button>
               </AttachmentMenu>
 
@@ -1849,7 +1866,7 @@ export function ChatView({
                       <div 
                         key={tagId} 
                         onClick={() => setSelectedConfigConnectorId(tagId)}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] font-semibold text-xs rounded-full cursor-pointer hover:opacity-80 transition-opacity select-none shrink-0 whitespace-nowrap"
+                        className="manus-tag-pop inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] font-semibold text-xs rounded-full cursor-pointer hover:opacity-80 transition-opacity select-none shrink-0 whitespace-nowrap"
                         title="Click to view connector parameters or details"
                       >
                         <IconComp strokeWidth={2.4} className="w-3.5 h-3.5 shrink-0" />

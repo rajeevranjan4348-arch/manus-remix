@@ -12,6 +12,7 @@ import { fetchWorkspaceContextSummary } from '@/lib/workspaceContextService';
 import { toast } from 'sonner';
 import { longTermMemory } from '@/lib/longTermMemory';
 import { knowledgeBase } from '@/lib/knowledgeBase';
+import { persistentKnowledgeStore } from '@/lib/persistentKnowledgeStore';
 import { captureExplicitMemory } from '@/lib/agentMemory';
 import { taskCheckpoint } from '@/lib/taskCheckpoint';
 import { notificationDispatcher } from '@/lib/notificationDispatcher';
@@ -338,13 +339,44 @@ export function useAgentTask() {
         }
       }
     };
+    const handleResearchStage = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail?.requestId && activeStreamRequestIdRef.current && detail.requestId !== activeStreamRequestIdRef.current) {
+        return;
+      }
+      if (finalizedRequestIdsRef.current.has(activeRequestIdRef.current)) {
+        return;
+      }
+      const label = typeof detail?.label === 'string' ? detail.label.trim() : '';
+      const stageDetail = typeof detail?.detail === 'string' ? detail.detail.trim() : '';
+      const traceLine = stageDetail ? `${label}: ${stageDetail}` : label;
+      if (!traceLine) return;
+
+      if (detail?.stage === 'preparing_answer') {
+        setSteps(prev => advanceWorkflowSteps(prev, 'synthesizing'));
+        return;
+      }
+
+      setSteps(prev =>
+        prev.map((s, idx) => {
+          if (idx === 0 && s.status === 'running') {
+            const existing = s.trace || [];
+            if (existing.includes(traceLine)) return s;
+            return { ...s, trace: [...existing.slice(-4), traceLine] };
+          }
+          return s;
+        })
+      );
+    };
     window.addEventListener('manus_stream_started', handleStreamStarted);
     window.addEventListener('manus_stream_delta', handleDelta);
     window.addEventListener('manus_stream_done', handleStreamDone);
+    window.addEventListener('manus_research_stage', handleResearchStage);
     return () => {
       window.removeEventListener('manus_stream_started', handleStreamStarted);
       window.removeEventListener('manus_stream_delta', handleDelta);
       window.removeEventListener('manus_stream_done', handleStreamDone);
+      window.removeEventListener('manus_research_stage', handleResearchStage);
       streamBatcher.cancel();
       if (streamRafRef.current !== null && typeof window.cancelAnimationFrame === 'function') {
         window.cancelAnimationFrame(streamRafRef.current);
@@ -716,6 +748,38 @@ export function useAgentTask() {
 
       taskTagger.processTaskTags(activeId, activeTask?.prompt || cleanedText, cleanedText).catch(() => {});
       taskCheckpoint.clearCheckpoint(activeId);
+
+      // Persist verified research knowledge if response includes cited sources
+      if (cleanedText.includes('**Sources**')) {
+        const sourceLinks: Array<{ title: string; url: string; credibilityScore: number; provider: string }> = [];
+        const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+        let m: RegExpExecArray | null;
+        while ((m = linkRegex.exec(cleanedText)) !== null) {
+          sourceLinks.push({
+            title: m[1].trim(),
+            url: m[2].trim(),
+            credibilityScore: 0.9,
+            provider: 'rtie-verified',
+          });
+        }
+        if (sourceLinks.length > 0) {
+          const lastUserPrompt =
+            [...persistentMessagesRef.current].reverse().find(msg => msg?.role === 'user')?.content ||
+            activeTask?.prompt ||
+            '';
+          if (lastUserPrompt) {
+            persistentKnowledgeStore
+              .saveKnowledgeRecord({
+                userId: user?.id || 'usr_manus_default',
+                query: lastUserPrompt,
+                category: 'verified_research',
+                summary: cleanedText.split('**Sources**')[0].trim().slice(0, 2000),
+                sources: sourceLinks,
+              })
+              .catch(() => {});
+          }
+        }
+      }
     }
 
     const curSettings = getSettings();
@@ -963,6 +1027,20 @@ export function useAgentTask() {
           enriched += `\n\n[WORKSPACE KNOWLEDGE BASE PASSAGES]:\n${textPassages}\n[INSTRUCTION: Ground your answer in the provided workspace documents and cite sources.]`;
         }
       } catch {}
+
+      // 2b. Check Persistent Knowledge Store for fresh verified research records
+      if (!simplePrompt) {
+        try {
+          const cachedResearch = await persistentKnowledgeStore.findFreshRecord(activeUserId, prompt);
+          if (cachedResearch && cachedResearch.sources.length > 0) {
+            const srcList = cachedResearch.sources
+              .slice(0, 5)
+              .map(s => `- [${s.title}](${s.url})`)
+              .join('\n');
+            enriched += `\n\n[FRESH VERIFIED KNOWLEDGE CACHE (Verified at ${cachedResearch.lastVerifiedAt})]:\n${cachedResearch.summary.slice(0, 1200)}\nSources:\n${srcList}`;
+          }
+        } catch {}
+      }
 
       // 3. Inject Live Google Workspace Context ONLY when explicit @mentions are present
       const detectedMentions = prompt.match(/@[\w_]+/g) || [];

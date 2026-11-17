@@ -250,7 +250,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
     }
     const el = textareaRef.current;
     if (!el) return;
-    if (!prompt) {
+    if (!prompt || (prompt.length < 44 && !prompt.includes('\n'))) {
       if (lastTextareaHeightRef.current !== 28) {
         lastTextareaHeightRef.current = 28;
         el.style.height = '28px';
@@ -258,13 +258,14 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
       return;
     }
     const rafId = window.requestAnimationFrame(() => {
-      if (!textareaRef.current) return;
-      textareaRef.current.style.height = 'auto';
-      const scrollHeight = textareaRef.current.scrollHeight;
+      const node = textareaRef.current;
+      if (!node) return;
+      node.style.height = 'auto';
+      const scrollHeight = node.scrollHeight;
       const maxHeight = isExpanded ? 460 : 280;
       const targetHeight = Math.max(Math.min(scrollHeight, maxHeight), 28);
       lastTextareaHeightRef.current = targetHeight;
-      textareaRef.current.style.height = `${targetHeight}px`;
+      node.style.height = `${targetHeight}px`;
     });
     return () => window.cancelAnimationFrame(rafId);
   }, [prompt, wordCount, isExpanded]);
@@ -637,7 +638,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
             />
             {showIndiaClock && (
               <div
-                className="absolute inset-x-3 top-1/2 -translate-y-1/2 z-10 rounded-xl border border-[#333333] bg-[#000000] text-[#FFFFFF] px-2 py-3 text-center shadow-lg pointer-events-none"
+                className="manus-dropdown-spring absolute inset-x-3 top-1/2 -translate-y-1/2 z-10 rounded-xl border border-[#333333] bg-[#000000] text-[#FFFFFF] px-2 py-3 text-center shadow-lg pointer-events-none"
                 aria-live="off"
               >
                 <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-[#AAAAAA]">INDIA · IST</div>
@@ -653,7 +654,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
           {/* File Upload indicators */}
           {uploadedFile && (
             <div className="flex gap-2 justify-center flex-wrap">
-              <div className="flex items-center gap-2 px-3 py-2 bg-white rounded-full border border-primary/20 shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <div className="manus-tag-pop flex items-center gap-2 px-3 py-2 bg-white rounded-full border border-primary/20 shadow-sm">
                 <FileText size={18} strokeWidth={2.4} className="text-primary" />
                 <span className="text-sm font-medium">{uploadedFile.name}</span>
                 {isExtracting ? (
@@ -803,11 +804,11 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                   <button 
                     type="button"
                     disabled={isExtracting}
-                    className="w-9 h-9 rounded-full border border-[#E0E0E0] dark:border-[#333333] bg-[#F2F2F2] dark:bg-[#171717] hover:bg-[#E0E0E0] dark:hover:bg-[#333333] transition-colors flex items-center justify-center text-[#000000] dark:text-[#FFFFFF] shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                    className="group w-9 h-9 rounded-full border border-[#E0E0E0] dark:border-[#333333] bg-[#F2F2F2] dark:bg-[#171717] hover:bg-[#E0E0E0] dark:hover:bg-[#333333] transition-colors flex items-center justify-center text-[#000000] dark:text-[#FFFFFF] shadow-2xs cursor-pointer active:scale-95 shrink-0"
                     title="Add attachments or connectors"
                     aria-label="Add attachments or options"
                   >
-                    <Plus size={18} strokeWidth={2.4} className="text-[#000000] dark:text-[#FFFFFF] shrink-0"/>
+                    <Plus size={18} strokeWidth={2.4} className="manus-plus-rotate text-[#000000] dark:text-[#FFFFFF] shrink-0"/>
                   </button>
                 </AttachmentMenu>
 
@@ -825,7 +826,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                         <div 
                           key={tagId} 
                           onClick={() => setSelectedConfigConnectorId(tagId)}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] font-semibold text-xs rounded-full cursor-pointer hover:opacity-80 transition-opacity select-none shrink-0 whitespace-nowrap"
+                          className="manus-tag-pop inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] font-semibold text-xs rounded-full cursor-pointer hover:opacity-80 transition-opacity select-none shrink-0 whitespace-nowrap"
                           title="Click to view connector parameters or details"
                         >
                           <IconComp strokeWidth={2.4} className="w-3.5 h-3.5 shrink-0" />
@@ -849,7 +850,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
 
                 {/* Badges for active intent or deep reasoning */}
                 {activeIntent && (
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] border border-[#000000] dark:border-[#FFFFFF] rounded-full text-xs font-medium shrink-0 max-w-full select-none whitespace-nowrap animate-in fade-in zoom-in duration-200 shadow-2xs">
+                  <div className="manus-tag-pop inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] border border-[#000000] dark:border-[#FFFFFF] rounded-full text-xs font-medium shrink-0 max-w-full select-none whitespace-nowrap shadow-2xs">
                     <activeIntent.icon size={14} strokeWidth={2.4} className="shrink-0 text-current" />
                     <span className="shrink-0 truncate">{activeIntent.label}</span>
                     <button 
@@ -874,7 +875,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                 )}
 
                 {isThinkHarder && (
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] border border-[#000000] dark:border-[#FFFFFF] rounded-full text-xs font-semibold shrink-0 max-w-full select-none whitespace-nowrap animate-in fade-in zoom-in duration-200">
+                  <div className="manus-tag-pop inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] border border-[#000000] dark:border-[#FFFFFF] rounded-full text-xs font-semibold shrink-0 max-w-full select-none whitespace-nowrap">
                     <Brain size={14} strokeWidth={2.4} className="text-current animate-pulse shrink-0" />
                     <span className="shrink-0">Deep reasoning</span>
                     <button 
@@ -967,17 +968,17 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                       title={mode.desc}
                       aria-checked={active}
                       className={cn(
-                        "relative z-10 inline-flex items-center justify-center gap-2 px-4 py-2 sm:px-5 sm:py-2 rounded-full text-xs sm:text-sm font-semibold transition-all duration-200 cursor-pointer whitespace-nowrap shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-[#000000]",
+                        "group relative z-10 inline-flex items-center justify-center gap-2 px-4 py-2 sm:px-5 sm:py-2 rounded-full text-xs sm:text-sm font-semibold transition-all duration-200 cursor-pointer whitespace-nowrap shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-[#000000]",
                         active
                           ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] shadow-sm"
                           : "bg-transparent text-[#000000] dark:text-[#FFFFFF] hover:bg-[#F2F2F2] dark:hover:bg-[#111111]"
                       )}
                     >
-                      <Icon size={16} strokeWidth={2.2} className="shrink-0" />
+                      <Icon size={16} strokeWidth={2.2} className="manus-icon-spring shrink-0" />
                       <span className="shrink-0 leading-none">{mode.label}</span>
                       {active && (
                         <span 
-                          className="w-1.5 h-1.5 rounded-full bg-[#FFFFFF] dark:bg-[#000000] shrink-0 ml-0.5" 
+                          className="manus-tag-pop w-1.5 h-1.5 rounded-full bg-[#FFFFFF] dark:bg-[#000000] shrink-0 ml-0.5" 
                           aria-hidden="true" 
                         />
                       )}
@@ -1046,15 +1047,16 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
             <div className="space-y-4">
               <h3 className="text-xs font-bold text-slate-500 dark:text-muted-foreground uppercase tracking-widest px-1">Choose output format</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {OUTPUT_FORMATS.map((format) => (
+                {OUTPUT_FORMATS.map((format, formatIdx) => (
                   <button
                     key={format.id}
+                    style={{ animationDelay: `${formatIdx * 55}ms` }}
                     onClick={() => setSelectedFormat(format.id)}
                     className={cn(
-                      "flex items-start gap-4 p-4 rounded-2xl border transition-all text-left group cursor-pointer",
+                      "manus-card-stagger manus-hover-lift flex items-start gap-4 p-4 rounded-2xl border text-left group cursor-pointer",
                       selectedFormat === format.id 
                         ? "bg-white dark:bg-card border-primary shadow-md ring-1 ring-primary/10 -translate-y-0.5" 
-                        : "bg-white dark:bg-card border-slate-200 dark:border-border hover:border-primary/40 dark:hover:border-primary/50 hover:-translate-y-0.5 shadow-xs"
+                        : "bg-white dark:bg-card border-slate-200 dark:border-border hover:border-primary/40 dark:hover:border-primary/50 shadow-xs"
                     )}
                   >
                     <div className={cn(
@@ -1063,7 +1065,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                         ? "bg-primary text-primary-foreground" 
                         : "bg-slate-100 dark:bg-muted text-slate-700 dark:text-foreground group-hover:bg-slate-200 dark:group-hover:bg-accent"
                     )}>
-                      <format.icon size={23} strokeWidth={2.4} />
+                      <format.icon size={23} strokeWidth={2.4} className="manus-icon-spring" />
                     </div>
                     <div>
                       <div className="font-bold text-sm tracking-tight text-foreground">{format.label}</div>
@@ -1077,15 +1079,16 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
             <div className="space-y-4">
               <h3 className="text-xs font-bold text-slate-500 dark:text-muted-foreground uppercase tracking-widest px-1">Preferred charts gallery</h3>
               <div className="grid grid-cols-3 gap-3">
-                {CHART_TYPES.map((chart) => (
+                {CHART_TYPES.map((chart, chartIdx) => (
                   <button
                     key={chart.id}
+                    style={{ animationDelay: `${chartIdx * 45}ms` }}
                     onClick={() => setSelectedChart(chart.id)}
                     className={cn(
-                      "flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border bg-white dark:bg-card transition-all group cursor-pointer",
+                      "manus-card-stagger manus-hover-lift flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border bg-white dark:bg-card group cursor-pointer",
                       selectedChart === chart.id 
                         ? "border-primary shadow-md ring-1 ring-primary/10 -translate-y-0.5" 
-                        : "border-slate-200 dark:border-border hover:border-primary/40 dark:hover:border-primary/50 hover:-translate-y-0.5 shadow-xs"
+                        : "border-slate-200 dark:border-border hover:border-primary/40 dark:hover:border-primary/50 shadow-xs"
                     )}
                   >
                     <div className={cn(
@@ -1094,7 +1097,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                         ? "bg-primary/10 text-primary" 
                         : "text-slate-700 dark:text-muted-foreground group-hover:text-foreground"
                     )}>
-                      <chart.icon size={25} strokeWidth={2.4} />
+                      <chart.icon size={25} strokeWidth={2.4} className="manus-icon-spring" />
                     </div>
                     <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-muted-foreground group-hover:text-foreground">{chart.label}</span>
                   </button>

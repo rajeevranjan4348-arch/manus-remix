@@ -1,4 +1,15 @@
 import { GoogleGenAI } from '@google/genai';
+import {
+  buildRealtimeTemporalSystemBlock,
+  getLiveTemporalContext,
+  isRealtimeOrLiveFactQuery,
+} from '../../server/realtimeDataService';
+import {
+  knowledgeCacheService,
+  orchestrateRealtimeResearch,
+  ResearchOrchestrationResult,
+  ResearchProgressEvent,
+} from '../../server/rtie';
 
 const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -13,6 +24,18 @@ const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(da
 export default async (req: Request) => {
   if (req.method !== 'POST') {
     return jsonResponse({ error: 'Method not allowed. Use POST.', code: 'METHOD_NOT_ALLOWED' }, 405);
+  }
+
+  const clientIp =
+    req.headers.get('x-nf-client-connection-ip') ||
+    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    'netlify-agent';
+  const rateCheck = knowledgeCacheService.checkRateLimit(clientIp, 45);
+  if (!rateCheck.allowed) {
+    return jsonResponse(
+      { error: 'Too many requests. Please wait a moment and try again.', code: 'RATE_LIMITED' },
+      429
+    );
   }
 
   // Request size limit check: enforce max 2MB payload
@@ -70,13 +93,34 @@ export default async (req: Request) => {
 
   const configuredModelId = normalizeModel(body.model);
 
-  function buildFallbackAnswer(promptText: string, modelId = configuredModelId): string {
+  function buildFallbackAnswer(
+    promptText: string,
+    modelId = configuredModelId,
+    realtimeSnapshot?: ResearchOrchestrationResult | null
+  ): string {
+    if (realtimeSnapshot?.directFallbackMarkdown) {
+      return realtimeSnapshot.directFallbackMarkdown;
+    }
     const clean = promptText.trim().toLowerCase();
     if (/^(hi|hello|hey|hiya|howdy|good\s+(morning|afternoon|evening|day))[!?.\s]*$/i.test(clean)) {
       return 'Hello! How can I help you today?';
     }
     if (/which model|what model|what llm|which llm|underlying model|what ai model|model are you|who built you|your architecture/i.test(clean)) {
       return `I am operating inside **Manus** (the AI workspace agent and application), powered by the **${modelId}** large language model from **Google Gemini**.\n\n- **Application / Agent:** Manus\n- **Underlying LLM Model:** \`${modelId}\`\n- **Model Provider:** Google Gemini`;
+    }
+    if (/\b(what time is it|current time|time right now|what is the date|today'?s date|what day is today|current date|time in india|time in utc|world clock)\b/i.test(clean)) {
+      const temporal = getLiveTemporalContext();
+      return (
+        `### Live Real-Time Date & Clock\n\n` +
+        `- **India Standard Time (IST):** ${temporal.istFormatted} (\`${temporal.istTime24} IST\`)\n` +
+        `- **UTC Time:** ${temporal.utcFormatted}\n` +
+        `- **Current Date:** ${temporal.istDate}\n\n` +
+        `#### Global World Clocks\n` +
+        `- **New York:** ${temporal.worldClocks.newYorkEst}\n` +
+        `- **London:** ${temporal.worldClocks.londonGmt}\n` +
+        `- **Tokyo:** ${temporal.worldClocks.tokyoJst}\n` +
+        `- **San Francisco:** ${temporal.worldClocks.sanFranciscoPst}`
+      );
     }
     if (/techno\s*gamerz|ujjwal\s*chaurasia/i.test(clean)) {
       return '**Techno Gamerz** (real name **Ujjwal Chaurasia**) is one of India\'s most popular gaming YouTubers and content creators. Based in New Delhi, he is widely known for his Hindi gaming commentary and series on *GTA V*, *Minecraft*, *Red Dead Redemption 2*, and *Resident Evil*.';
@@ -93,11 +137,20 @@ export default async (req: Request) => {
     return `Here is a direct response regarding **${promptText.trim() || 'your request'}**:\n\nI have processed your question. Let me know if you would like more specific details, examples, or a deeper breakdown.`;
   }
 
-  function createFallbackSseResponse(text: string, finishReason: 'stop' | 'error' = 'stop') {
+  function createFallbackSseResponse(
+    text: string,
+    finishReason: 'stop' | 'error' = 'stop',
+    stageEvents: ResearchProgressEvent[] = []
+  ) {
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       start(controller) {
         try {
+          for (const st of stageEvents) {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ type: 'research-stage', ...st, requestId })}\n\n`)
+            );
+          }
           if (text) {
             controller.enqueue(
               encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: text, textDelta: text, requestId })}\n\n`)
@@ -138,8 +191,33 @@ export default async (req: Request) => {
       .replace(/\[Attached Image:[^\]]*\]\s*/gi, '')
       .trim();
 
+    const collectedStages: ResearchProgressEvent[] = [];
+    let realtimeSnapshot: ResearchOrchestrationResult | null = null;
+    const externalSources = new Map<string, string>();
+
+    try {
+      realtimeSnapshot = await orchestrateRealtimeResearch(latestUserText, {
+        onProgress: (ev) => collectedStages.push(ev),
+      });
+      for (const src of realtimeSnapshot.sources) {
+        if (src.url && /^https?:\/\//i.test(src.url)) {
+          externalSources.set(src.url, src.title || src.url);
+        }
+      }
+    } catch (rtErr) {
+      console.warn('[Netlify RTIE] Research orchestration notice:', rtErr);
+    }
+
+    const useGoogleSearch = Boolean(
+      realtimeSnapshot?.route.requiresLiveResearch || isRealtimeOrLiveFactQuery(latestUserText)
+    );
+
     if (!apiKey && openRouterKeys.length === 0) {
-      return createFallbackSseResponse(buildFallbackAnswer(latestUserText), 'stop');
+      return createFallbackSseResponse(
+        buildFallbackAnswer(latestUserText, configuredModelId, realtimeSnapshot),
+        'stop',
+        collectedStages
+      );
     }
 
     let ai: GoogleGenAI | null = null;
@@ -173,28 +251,16 @@ export default async (req: Request) => {
       `- Model Provider: Google Gemini\n` +
       `- Strict Rule: When asked "which model are you", "what LLM are you running on", "who built you", or about your model/architecture, clearly distinguish between the application/agent name (Manus) and the actual underlying LLM model (${configuredModelId} by Google Gemini). Never invent model names, providers, or architectures.`;
 
+    if (realtimeSnapshot) {
+      systemInstruction += realtimeSnapshot.systemContextBlock;
+    } else {
+      systemInstruction += buildRealtimeTemporalSystemBlock();
+    }
+
     if (body.thinkHarder) {
       systemInstruction += `\n\n[EXTENDED REASONING MODE ACTIVE]\nReason carefully internally, then provide a concise answer without revealing private chain-of-thought.`;
     }
 
-    // Keep greetings and ordinary conversation on the fast, non-search path.
-    // Enable Google Search grounding for queries whose answers can change over time.
-    const needsLiveSearch = (text: string) => {
-      const q = text.toLowerCase().trim();
-      if (/^(hi|hello|hey|hiya|howdy|thanks|thank you|ok|okay)\b/i.test(q) && q.split(/\s+/).length <= 5) {
-        return false;
-      }
-      if (/which model|what model|what llm|which llm|underlying model|what ai model|model are you|who built you|who are you|what is manus/i.test(q)) {
-        return false;
-      }
-      return /\b(latest|today|current|currently|right now|breaking|live|real[\s-]?time|news|headlines|recent|this week|yesterday|weather|stock price|share price|exchange rate|world news|india news|tech news|latest updates|election results|box office|release date|latest version|price today|score|standings|forecast|who won|who is (the )?(prime minister|president|chief minister|ceo)|who are the (current|latest)\b)\b/i.test(q)
-        || /\b(202[5-9]|203\d)\b/.test(q)
-        || /\b(what happened|what's happening|whats happening|tell me about the latest|latest on)\b/i.test(q);
-    };
-    const useGoogleSearch = needsLiveSearch(latestUserText);
-    // External search enriches the model context only for fresh/live questions.
-    // Search snippets are untrusted data, never instructions.
-    const externalSources = new Map<string, string>();
     if (useGoogleSearch && latestUserText.trim()) {
       const searchJobs: Promise<void>[] = [];
       const firecrawlKey = process.env.FIRECRAWL_API_KEY;
@@ -247,7 +313,7 @@ export default async (req: Request) => {
 
     if (useGoogleSearch) {
       systemInstruction +=
-        '\n\nLIVE WEB SEARCH IS ENABLED. Use Google Search grounding to answer current-events, news, and other changing-fact questions. ' +
+        '\n\nLIVE WEB SEARCH IS ENABLED. Use Google Search grounding and the live real-time data feed above to answer current-events, news, weather, exchange rate, crypto, and other changing-fact questions. ' +
         'Prioritize recent, reliable sources. Clearly distinguish confirmed information from uncertainty. Include useful source links and publication dates when available. ' +
         'Never invent sources, URLs, dates, headlines, or live facts. If search results are insufficient, say so.';
     }
@@ -343,7 +409,7 @@ export default async (req: Request) => {
             }
 
             if (!hasEmittedText) {
-              const fallback = buildFallbackAnswer(latestUserText);
+              const fallback = buildFallbackAnswer(latestUserText, configuredModelId, realtimeSnapshot);
               controller.enqueue(
                 encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: fallback, textDelta: fallback, requestId })}\n\n`)
               );
@@ -366,7 +432,7 @@ export default async (req: Request) => {
           } catch (err: any) {
             try {
               if (!hasEmittedText) {
-                const fallback = buildFallbackAnswer(latestUserText);
+                const fallback = buildFallbackAnswer(latestUserText, configuredModelId, realtimeSnapshot);
                 controller.enqueue(
                   encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: fallback, textDelta: fallback, requestId })}\n\n`)
                 );
@@ -449,7 +515,7 @@ export default async (req: Request) => {
                       if (!trimmed || trimmed.startsWith(':')) continue;
                       if (trimmed === 'data: [DONE]') {
                         if (!hasEmittedText) {
-                          const fallback = buildFallbackAnswer(latestUserText);
+                          const fallback = buildFallbackAnswer(latestUserText, configuredModelId, realtimeSnapshot);
                           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: fallback, textDelta: fallback, requestId })}\n\n`));
                         }
                         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId })}\n\n`));
@@ -469,7 +535,7 @@ export default async (req: Request) => {
                     }
                   }
                   if (!hasEmittedText) {
-                    const fallback = buildFallbackAnswer(latestUserText);
+                    const fallback = buildFallbackAnswer(latestUserText, configuredModelId, realtimeSnapshot);
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: fallback, textDelta: fallback, requestId })}\n\n`));
                   }
                   controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId })}\n\n`));
@@ -499,7 +565,7 @@ export default async (req: Request) => {
       }
     }
 
-    return createFallbackSseResponse(buildFallbackAnswer(latestUserText), 'stop');
+    return createFallbackSseResponse(buildFallbackAnswer(latestUserText, configuredModelId, realtimeSnapshot), 'stop');
   } catch (error: any) {
     return jsonResponse({
       error: error?.message || 'Internal server error',

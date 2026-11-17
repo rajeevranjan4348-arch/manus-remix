@@ -74,4 +74,21 @@ describe('Real-Time Voice-to-Text Transcription & Input Container Indicator', ()
     expect(myAiChatSource).toContain('data-testid="manus-input-container"');
     expect(myAiChatSource).toContain('<VoiceTranscriptionIndicator');
   });
+
+  it('triggers a visual pulse animation on the microphone button via .manus-input-container[data-listening="true"]', () => {
+    const cssSource = readFileSync(
+      resolve(__dirname, '../src/index.css'),
+      'utf-8'
+    );
+    const voiceBtnSource = readFileSync(
+      resolve(__dirname, '../src/components/voice/VoiceInputButton.tsx'),
+      'utf-8'
+    );
+
+    expect(voiceBtnSource).toContain('manus-mic-button');
+    expect(voiceBtnSource).toContain('data-testid="voice-input-button"');
+    expect(cssSource).toContain('.manus-input-container[data-listening="true"] .manus-mic-button');
+    expect(cssSource).toContain('.manus-input-container[data-listening="true"] [data-testid="voice-input-button"]');
+    expect(cssSource).toContain('@keyframes manus-mic-listening-pulse');
+  });
 });

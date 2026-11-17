@@ -1,4 +1,14 @@
 import { GoogleGenAI } from '@google/genai';
+import {
+  buildRealtimeTemporalSystemBlock,
+  getLiveTemporalContext,
+  isRealtimeOrLiveFactQuery,
+} from './realtimeDataService';
+import {
+  orchestrateRealtimeResearch,
+  ResearchProgressEvent,
+  routeQueryIntent,
+} from './rtie';
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -11,6 +21,8 @@ export interface StreamChatOptions {
   model?: string;
   thinkHarder?: boolean;
   mode?: 'chat' | 'work';
+  signal?: AbortSignal;
+  onResearchProgress?: (event: ResearchProgressEvent) => void;
 }
 
 export interface VerifiedModelConfig {
@@ -76,16 +88,8 @@ export function buildModelIdentityInstruction(modelId: string, providerOverride?
 }
 
 export function needsLiveSearch(text: string): boolean {
-  const clean = text.trim();
-  if (/^(hi|hello|hey|hiya|howdy|yo|namaste|greetings|good\s+(morning|afternoon|evening|night)|thanks|thank you|ok|okay)[!?.\s]*$/i.test(clean)) {
-    return false;
-  }
-  if (/which model|what model|what llm|which llm|underlying model|what ai model|model are you|who built you|who are you|what is manus/i.test(clean)) {
-    return false;
-  }
-  return /\b(latest|today|current|currently|right now|breaking|live|real[\s-]?time|news|headlines|recent|this week|yesterday|weather|stock price|share price|exchange rate|world news|india news|tech news|latest updates|election results|box office|release date|latest version|price today|score|standings|forecast|who won|who is (the )?(prime minister|president|chief minister|ceo)|who are the (current|latest)\b)\b/i.test(clean)
-    || /\b(202[5-9]|203\d)\b/.test(clean)
-    || /\b(what happened|what's happening|whats happening|tell me about the latest|latest on)\b/i.test(clean);
+  const decision = routeQueryIntent(text);
+  return decision.requiresLiveResearch || isRealtimeOrLiveFactQuery(text);
 }
 
 export function parseMultimodalMessageParts(content: string): { parts: any[]; cleanText: string } {
@@ -125,6 +129,7 @@ export function generateResilientResponse(
     .trim();
   const clean = raw.toLowerCase();
   const verified = resolveVerifiedModelConfig(activeModel);
+  const temporal = getLiveTemporalContext();
 
   if (/^(hi|hello|hey|hiya|howdy|yo|namaste|greetings|good\s+(morning|afternoon|evening|day|night))[!?.\s]*$/i.test(clean)) {
     return "Hello! How can I help you today?";
@@ -136,6 +141,20 @@ export function generateResilientResponse(
 
   if (/which model|what model|what llm|which llm|underlying model|what ai model|model are you|who built you|your architecture/i.test(clean)) {
     return `I am operating inside **${verified.applicationName}** (the AI workspace agent and application), powered by the **${verified.modelId}** large language model from **${verified.provider}**.\n\n- **Application / Agent:** ${verified.applicationName}\n- **Underlying LLM Model:** \`${verified.modelId}\`\n- **Model Provider:** ${verified.provider}`;
+  }
+
+  if (/\b(what\s+time\s+is\s+it|current\s+time|time\s+right\s+now|time\s+in\s+india|ist\s+time|utc\s+time|what\s+is\s+the\s+date|what's\s+the\s+date|todays?\s+date|what\s+day\s+is\s+(it|today))\b/i.test(clean)) {
+    return (
+      `### Live Real-Time Date & Clock\n\n` +
+      `- **India Standard Time (IST):** ${temporal.istFormatted} (\`${temporal.istTime24} IST\`)\n` +
+      `- **UTC Time:** ${temporal.utcFormatted}\n` +
+      `- **Current Date:** ${temporal.istDate}\n\n` +
+      `#### Global World Clocks\n` +
+      `- **New York:** ${temporal.worldClocks.newYorkEst}\n` +
+      `- **London:** ${temporal.worldClocks.londonGmt}\n` +
+      `- **Tokyo:** ${temporal.worldClocks.tokyoJst}\n` +
+      `- **San Francisco:** ${temporal.worldClocks.sanFranciscoPst}`
+    );
   }
 
   if (/techno\s*gamerz|ujjwal\s*chaurasia/i.test(clean)) {
@@ -155,7 +174,7 @@ export function generateResilientResponse(
   }
 
   if (/who are you|what can you do|what is manus/i.test(clean)) {
-    return `I am **${verified.applicationName}**, an AI workspace agent powered by the **${verified.modelId}** model (${verified.provider}).\n\nHere is what I can do for you:\n- **Direct Q&A & Knowledge**: Answer questions clearly and concisely across science, technology, culture, and everyday topics.\n- **Full-Stack Engineering**: Build, modify, debug, and preview web applications and interactive systems.\n- **Autonomous Web Research**: Synthesize deep insights, gather current facts, and verify real-time data.\n- **Data Analysis & Processing**: Compute metrics, summarize complex records, and generate actionable reports.\n\nTell me what you'd like to know or work on!`;
+    return `I am **${verified.applicationName}**, an AI workspace agent powered by the **${verified.modelId}** model (${verified.provider}).\n\nHere is what I can do for you:\n- **Direct Q&A & Knowledge**: Answer questions clearly and concisely across science, technology, culture, and everyday topics.\n- **Real-Time Data & Search**: Retrieve live weather, air quality, currency exchange rates, crypto prices, world clocks, and current news headlines.\n- **Full-Stack Engineering**: Build, modify, debug, and preview web applications and interactive systems.\n- **Data Analysis & Processing**: Compute metrics, summarize complex records, and generate actionable reports.\n\nTell me what you'd like to know or work on!`;
   }
 
   // Check if code or technical architecture was requested
@@ -165,7 +184,7 @@ export function generateResilientResponse(
 
   // Concise, natural response for general questions
   const previousTurns = messages.filter(m => m.role === 'user').length;
-  return `Here is a direct answer regarding **${raw || 'your question'}**:\n\n- **Summary:** ${raw || 'Your request'} is a topic I can help explain, break down, or research in detail.${previousTurns > 1 ? ' Following up on our conversation, I can tailor this to your specific context.' : ''}\n- **How we can proceed:** Ask a specific follow-up question, or let me know if you want a deeper breakdown, examples, or step-by-step details.`;
+  return `Here is a direct answer regarding **${raw || 'your question'}** *(as of ${temporal.istDate})*:\n\n- **Summary:** ${raw || 'Your request'} is a topic I can help explain, break down, or research in detail.${previousTurns > 1 ? ' Following up on our conversation, I can tailor this to your specific context.' : ''}\n- **How we can proceed:** Ask a specific follow-up question, or let me know if you want a deeper breakdown, examples, or step-by-step details.`;
 }
 
 export async function* streamGeminiResponse(options: StreamChatOptions) {
@@ -175,6 +194,22 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     .find(m => m.role === 'user')?.content || '')
     .replace(/\[IMAGE_DATA_URL:[^\]]+\]\s*/gi, '')
     .trim();
+
+  const rtieResult = await orchestrateRealtimeResearch(latestUserText, {
+    signal: options.signal,
+    onProgress: options.onResearchProgress,
+  });
+  const useGoogleSearch = rtieResult.route.requiresLiveResearch || isRealtimeOrLiveFactQuery(latestUserText);
+  const realtimeSnapshot = {
+    temporal: getLiveTemporalContext(),
+    hasLiveDomainData: rtieResult.sources.length > 0 || Boolean(rtieResult.directFallbackMarkdown),
+    sources: rtieResult.sources.map(s => ({ title: s.title, url: s.url })),
+    systemContextBlock: rtieResult.systemContextBlock || buildRealtimeTemporalSystemBlock(),
+    directFallbackMarkdown: rtieResult.directFallbackMarkdown,
+  };
+
+  const enrichedSystemInstruction =
+    (options.systemInstruction || '') + realtimeSnapshot.systemContextBlock;
 
   if (apiKey) {
     const ai = new GoogleGenAI({
@@ -189,6 +224,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     // Order candidate models prioritizing active high-speed models
     const candidateModels = Array.from(new Set([
       preferredModel,
+      'gemini-3.8-flash',
       'gemini-3-flash-preview',
       'gemini-2.5-flash',
       'gemini-flash-latest',
@@ -209,15 +245,15 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
         : 'You are Manus, an AI workspace agent. Provide direct, authoritative, structured, and high-quality responses. Never expose private internal chain-of-thought. Answer factual and conversational questions directly and concisely without <think> tags. Do not generate fake business reports or irrelevant charts unless specifically asked for data visualization, financial reports, or charts.'
     );
 
+    baseSystemPrompt += realtimeSnapshot.systemContextBlock;
+
     if (options.thinkHarder) {
       baseSystemPrompt += '\n\n[EXTENDED REASONING MODE ACTIVE]\nNever expose raw internal chain-of-thought. Enclose only a brief, user-safe high-level reasoning summary (up to 4 concise bullet points) inside <think> and </think> tags at the beginning of your response.';
     }
 
-    const useGoogleSearch = needsLiveSearch(latestUserText);
-
     if (useGoogleSearch) {
       baseSystemPrompt +=
-        '\n\nLIVE WEB SEARCH IS ENABLED. Use Google Search grounding for current-events, news, and other changing-fact questions. ' +
+        '\n\nLIVE WEB SEARCH & REAL-TIME DATA ARE ENABLED. Use Google Search grounding and the verified real-time data snapshot above for current-events, weather, exchange rates, crypto prices, news, and other changing-fact questions. ' +
         'Prioritize recent, reliable sources. Clearly distinguish confirmed information from uncertainty. Include useful source links and publication dates when available. ' +
         'Never invent sources, URLs, dates, headlines, or live facts. If search results are insufficient, say so.';
     }
@@ -245,7 +281,9 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     modelLoop: for (const model of candidateModels) {
       // Attempt with Google Search grounding if applicable, and if that fails, retry without tools
       const toolConfigs = useGoogleSearch ? [{ tools: [{ googleSearch: {} }] }, {}] : [{}];
-      const supportsThinkingBudget = model.includes('gemini-2.5') || model.includes('gemini-3');
+      const supportsThinkingBudget =
+        (model.includes('gemini-2.5') || model.includes('gemini-3')) &&
+        model !== 'gemini-3.8-flash';
       const modelSystemInstruction = baseSystemPrompt + buildModelIdentityInstruction(model, 'Google Gemini');
 
       for (const toolConfig of toolConfigs) {
@@ -264,6 +302,11 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
 
           let hasYielded = false;
           const sources = new Map<string, string>();
+          for (const src of realtimeSnapshot.sources) {
+            if (src.url && /^https?:\/\//i.test(src.url)) {
+              sources.set(src.url, src.title || src.url);
+            }
+          }
           const searchQueries = new Set<string>();
 
           for await (const chunk of responseStream) {
@@ -338,7 +381,10 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
 
   for (const openRouterKey of uniqueKeys) {
     try {
-      yield* streamOpenRouterResponse(options, openRouterKey);
+      yield* streamOpenRouterResponse(
+        { ...options, systemInstruction: enrichedSystemInstruction },
+        openRouterKey
+      );
       return;
     } catch (orErr: any) {
       console.log('[AI Model Router] OpenRouter key unavailable, attempting fallback...');
@@ -347,7 +393,9 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
 
   // Graceful resilient synthesizer fallback ensures user requests never receive unhandled 500 crashes
   console.log('[AI Model Router] Using resilient response synthesizer for user query');
-  const fallbackText = generateResilientResponse(latestUserText, options.messages, preferredModel);
+  const fallbackText =
+    realtimeSnapshot.directFallbackMarkdown ||
+    generateResilientResponse(latestUserText, options.messages, preferredModel);
   const words = fallbackText.split(/(\s+)/);
   for (let i = 0; i < words.length; i += 3) {
     yield words.slice(i, i + 3).join('');

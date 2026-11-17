@@ -123,7 +123,38 @@ export function deriveContextualThinkingStages(
   }));
 }
 
-export function WorkModeThinkingAnimation({
+const ThinkingElapsedBadge = React.memo(function ThinkingElapsedBadge({
+  isActivelyProcessing,
+  resetKey,
+}: {
+  isActivelyProcessing: boolean;
+  resetKey: string;
+}) {
+  const [elapsedTenths, setElapsedTenths] = useState(0);
+
+  useEffect(() => {
+    setElapsedTenths(0);
+  }, [resetKey]);
+
+  useEffect(() => {
+    if (!isActivelyProcessing) return;
+    const interval = window.setInterval(() => {
+      setElapsedTenths(prev => prev + 1);
+    }, 100);
+    return () => window.clearInterval(interval);
+  }, [isActivelyProcessing]);
+
+  return (
+    <span
+      data-testid="thinking-elapsed-timer"
+      className="text-[11px] font-mono text-[#777777] dark:text-[#AAAAAA] tabular-nums"
+    >
+      {(elapsedTenths / 10).toFixed(1)}s
+    </span>
+  );
+});
+
+export const WorkModeThinkingAnimation = React.memo(function WorkModeThinkingAnimation({
   prompt = '',
   isLive = true,
   deepMode = false,
@@ -131,7 +162,6 @@ export function WorkModeThinkingAnimation({
   className,
 }: WorkModeThinkingAnimationProps) {
   const [isExpanded, setIsExpanded] = useState(true);
-  const [elapsedTenths, setElapsedTenths] = useState(0);
 
   const stages = useMemo(
     () => deriveContextualThinkingStages(prompt, deepMode, steps, isLive),
@@ -141,18 +171,6 @@ export function WorkModeThinkingAnimation({
   const hasError = stages.some(s => s.status === 'error');
   const allCompleted = stages.length > 0 && stages.every(s => s.status === 'completed');
   const isActivelyProcessing = isLive && !allCompleted && !hasError;
-
-  useEffect(() => {
-    setElapsedTenths(0);
-  }, [prompt]);
-
-  useEffect(() => {
-    if (!isActivelyProcessing) return;
-    const interval = window.setInterval(() => {
-      setElapsedTenths(prev => prev + 1);
-    }, 100);
-    return () => window.clearInterval(interval);
-  }, [isActivelyProcessing]);
 
   const runningIndex = stages.findIndex(s => s.status === 'running');
   const completedCount = stages.filter(s => s.status === 'completed').length;
@@ -226,12 +244,10 @@ export function WorkModeThinkingAnimation({
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
-          <span
-            data-testid="thinking-elapsed-timer"
-            className="text-[11px] font-mono text-[#777777] dark:text-[#AAAAAA] tabular-nums"
-          >
-            {(elapsedTenths / 10).toFixed(1)}s
-          </span>
+          <ThinkingElapsedBadge
+            isActivelyProcessing={isActivelyProcessing}
+            resetKey={prompt}
+          />
           <button
             type="button"
             onClick={(e) => {
@@ -247,7 +263,7 @@ export function WorkModeThinkingAnimation({
       </div>
 
       {isExpanded && stages.length > 0 && (
-        <div className="pt-2 border-t border-[#E0E0E0] dark:border-[#333333] space-y-1.5 text-xs">
+        <div className="pt-2 border-t border-[#E0E0E0] dark:border-[#333333] space-y-1.5 text-xs animate-in fade-in duration-150">
           {stages.map((stage, idx) => {
             const isDone = stage.status === 'completed';
             const isRunning = stage.status === 'running' && isActivelyProcessing;
@@ -331,5 +347,4 @@ export function WorkModeThinkingAnimation({
       )}
     </div>
   );
-}
-
+});

@@ -24,6 +24,16 @@
   status = 200
 
 [[redirects]]
+  from = "/api/realtime*"
+  to = "/.netlify/functions/realtime"
+  status = 200
+
+[[redirects]]
+  from = "/api/rtie/*"
+  to = "/.netlify/functions/realtime"
+  status = 200
+
+[[redirects]]
   from = "/api/permissions/*"
   to = "/.netlify/functions/permissions"
   status = 200

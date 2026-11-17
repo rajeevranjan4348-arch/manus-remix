@@ -2,6 +2,19 @@ import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import { streamGeminiResponse, summarizeSessionHistory } from './server/geminiService';
+import {
+  enrichQueryWithRealtimeData,
+  fetchLiveCryptoPrices,
+  fetchLiveExchangeRates,
+  fetchLiveNewsAndFacts,
+  fetchLiveWeatherSnapshot,
+  getLiveTemporalContext,
+} from './server/realtimeDataService';
+import {
+  knowledgeCacheService,
+  orchestrateRealtimeResearch,
+  routeQueryIntent,
+} from './server/rtie';
 import { generateOAuthUrl, handleOAuthCallback, executeServerConnectorTool, isSafeUrl } from './server/connectorsService';
 import { GoogleGenAI } from '@google/genai';
 
@@ -55,6 +68,73 @@ function geminiApiPlugin(): Plugin {
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const url = req.url?.split('?')[0];
+
+        // Server-Side Real-Time Data & RTIE Intelligence Endpoint
+        if (url === '/api/realtime' || url === '/api/realtime-data' || url === '/api/rtie/research') {
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+          const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'local';
+          const rateCheck = knowledgeCacheService.checkRateLimit(clientIp, 60);
+          if (!rateCheck.allowed) {
+            res.statusCode = 429;
+            res.end(JSON.stringify({ ok: false, error: 'Rate limit exceeded. Please wait before sending more research requests.' }));
+            return;
+          }
+
+          const queryParams = new URLSearchParams(req.url?.split('?')[1] || '');
+          let bodyStr = '';
+          req.on('data', chunk => { bodyStr += chunk; });
+          req.on('end', async () => {
+            try {
+              const body = bodyStr ? JSON.parse(bodyStr) : {};
+              const query = String(body.query || queryParams.get('q') || queryParams.get('query') || '').trim();
+              const city = String(body.city || queryParams.get('city') || 'New Delhi').trim();
+
+              if (query) {
+                const [rtie, enriched] = await Promise.all([
+                  orchestrateRealtimeResearch(query, {
+                    bypassCache: Boolean(body.bypassCache),
+                    includeGoogleGroundingFetch: Boolean(body.includeGoogleGroundingFetch),
+                  }),
+                  enrichQueryWithRealtimeData(query),
+                ]);
+                res.end(JSON.stringify({
+                  ok: true,
+                  ...enriched,
+                  rtie,
+                  route: rtie.route,
+                  verification: rtie.verification,
+                  freshness: rtie.freshness,
+                }));
+                return;
+              }
+
+              const [weather, currency, crypto, news] = await Promise.all([
+                fetchLiveWeatherSnapshot(city),
+                fetchLiveExchangeRates('USD', 'INR', 1),
+                fetchLiveCryptoPrices(),
+                fetchLiveNewsAndFacts('latest technology and science news', 4),
+              ]);
+
+              res.end(JSON.stringify({
+                ok: true,
+                temporal: getLiveTemporalContext(),
+                weather,
+                currency,
+                crypto,
+                news,
+              }));
+            } catch (err: any) {
+              res.statusCode = 200;
+              res.end(JSON.stringify({
+                ok: true,
+                temporal: getLiveTemporalContext(),
+                error: err?.message || 'Partial real-time feed unavailable',
+              }));
+            }
+          });
+          return;
+        }
 
         // Connector API Endpoints
         if (url?.startsWith('/api/connectors')) {
@@ -631,11 +711,27 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
 
             try {
               const body = bodyStr ? JSON.parse(bodyStr) : {};
+              const abortController = new AbortController();
+              res.on('close', () => {
+                if (!res.writableEnded) {
+                  abortController.abort();
+                }
+              });
+
               const stream = streamGeminiResponse({
                 messages: body.messages || (body.prompt ? [{ role: 'user', content: body.prompt }] : []),
                 systemInstruction: body.systemInstruction,
                 model: body.model || 'gemini-3.8-flash',
                 thinkHarder: Boolean(body.thinkHarder),
+                signal: abortController.signal,
+                onResearchProgress: (stageEvent) => {
+                  if (!clientAborted && !res.writableEnded) {
+                    res.write(`data: ${JSON.stringify({ type: 'research-stage', ...stageEvent })}\n\n`);
+                    if (typeof (res as any).flush === 'function') {
+                      (res as any).flush();
+                    }
+                  }
+                },
               });
 
               for await (const delta of stream) {

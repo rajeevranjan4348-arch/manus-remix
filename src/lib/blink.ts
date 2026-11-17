@@ -324,6 +324,16 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
                 }
                 return;
               }
+              if (eventType === 'research-stage') {
+                emitWindowEvent('manus_research_stage', {
+                  requestId,
+                  stage: parsed.stage,
+                  label: parsed.label,
+                  detail: parsed.detail,
+                  timestamp: parsed.timestamp,
+                });
+                return;
+              }
               if (eventType === 'error') {
                 finishReason = 'error';
                 const errMsg = parsed.error || parsed.message || serviceFailureMessage;

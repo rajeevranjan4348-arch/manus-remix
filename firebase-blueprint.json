@@ -94,6 +94,26 @@
         }
       }
     },
+    "KnowledgeCache": {
+      "title": "KnowledgeCache",
+      "description": "Verified real-time intelligence records, source metadata, and user research history",
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "description": "List of verified knowledge records with freshness timestamps"
+        },
+        "history": {
+          "type": "array",
+          "description": "User research query history"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp",
+          "maxLength": 64
+        }
+      }
+    },
     "Project": {
       "title": "Project",
       "description": "Organizational container for agent tasks and sessions",

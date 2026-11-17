@@ -510,7 +510,7 @@ export function VoiceInputButton({
         aria-label={isListening ? 'Stop voice recording' : 'Voice-to-text input (Speak your prompt)'}
         title={isListening ? 'Listening... click to stop' : 'Voice-to-text input: Speak your prompt instead of typing (Alt+V)'}
         className={cn(
-          "relative flex items-center justify-center rounded-full transition-all cursor-pointer shrink-0 active:scale-95",
+          "manus-mic-button relative flex items-center justify-center rounded-full transition-all cursor-pointer shrink-0 active:scale-95",
           isListening
             ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] shadow-md ring-2 ring-[#333333] dark:ring-[#E0E0E0]"
             : "hover:bg-[#F2F2F2] dark:hover:bg-[#171717] text-[#000000] dark:text-[#FFFFFF]",

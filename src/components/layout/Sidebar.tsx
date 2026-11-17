@@ -550,7 +550,7 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
               key={item.id}
               onClick={() => handleMobileSelect(() => item.action ? item.action() : setActiveTab(item.id))}
               className={cn(
-                "w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-all duration-200 font-medium text-sm cursor-pointer hover:scale-[1.02] hover:shadow-xs active:scale-[0.98]",
+                "manus-sidebar-item-slide group w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium text-sm cursor-pointer",
                 item.id === 'new'
                   ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] font-semibold shadow-sm"
                   : activeTab === item.id && !item.action
@@ -562,6 +562,7 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                 size={21}
                 strokeWidth={2.4}
                 className={cn(
+                  "manus-icon-spring",
                   item.id === 'new'
                     ? "text-[#FFFFFF] dark:text-[#000000]"
                     : activeTab === item.id && !item.action
@@ -803,7 +804,7 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                           handleMobileSelect(() => navigate(`/task/${task.id}`));
                         }}
                         className={cn(
-                          "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-all text-left cursor-pointer",
+                          "manus-sidebar-item-slide w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left cursor-pointer",
                           isActive
                             ? "bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] font-semibold shadow-xs" 
                             : "text-[#000000] dark:text-[#FFFFFF] hover:bg-[#F2F2F2] dark:hover:bg-[#171717]"
@@ -811,7 +812,7 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                         title={task.prompt}
                       >
                         <MessageSquare size={17} strokeWidth={2.3} className={cn(
-                          "shrink-0 transition-colors",
+                          "manus-icon-spring shrink-0 transition-colors",
                           isActive ? "text-[#000000] dark:text-[#FFFFFF]" : "text-[#777777] dark:text-[#AAAAAA] group-hover:text-[#000000] dark:group-hover:text-[#FFFFFF]"
                         )} />
                         

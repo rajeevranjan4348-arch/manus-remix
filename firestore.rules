@@ -63,6 +63,13 @@ service cloud.firestore {
         (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
     }
 
+    // Helper for validation of KnowledgeCache
+    function isValidKnowledgeCache(data) {
+      return (!('entries' in data) || data.entries is list) &&
+        (!('history' in data) || data.history is list) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
     // Helper for validation of Project
     function isValidProject(data) {
       return data.keys().hasAll(['id', 'userId', 'name', 'created_at', 'updated_at']) &&
@@ -122,19 +129,21 @@ service cloud.firestore {
       allow update: if isOwner(userId) && isValidId(userId) && isValidUser(incoming()) && incoming().id == existing().id;
       allow delete: if isOwner(userId) && isValidId(userId);
 
-      // User Settings, Memories & Schedules subcollection
+      // User Settings, Memories, Schedules & Knowledge Cache subcollection
       match /settings/{settingsId} {
         allow get: if isOwner(userId) && isValidId(settingsId);
         allow list: if isOwner(userId);
         allow create: if isOwner(userId) && isValidId(settingsId) && (
           (settingsId == 'preferences' && isValidSettings(incoming())) ||
           (settingsId == 'memories' && isValidMemories(incoming())) ||
-          (settingsId == 'schedules' && isValidSchedules(incoming()))
+          (settingsId == 'schedules' && isValidSchedules(incoming())) ||
+          (settingsId == 'knowledge_cache' && isValidKnowledgeCache(incoming()))
         );
         allow update: if isOwner(userId) && isValidId(settingsId) && (
           (settingsId == 'preferences' && isValidSettings(incoming()) && incoming().userId == existing().userId) ||
           (settingsId == 'memories' && isValidMemories(incoming())) ||
-          (settingsId == 'schedules' && isValidSchedules(incoming()))
+          (settingsId == 'schedules' && isValidSchedules(incoming())) ||
+          (settingsId == 'knowledge_cache' && isValidKnowledgeCache(incoming()))
         );
         allow delete: if isOwner(userId) && isValidId(settingsId);
       }
