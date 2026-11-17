@@ -227,6 +227,7 @@ export function useAgentTask() {
   const liveStreamTextRef = useRef<string>('');
   const messagesRef = useRef<any[]>([]);
   const persistentMessagesRef = useRef<any[]>([]);
+  const isSubmittingRef = useRef<boolean>(false);
   if (!isSubmittingRef.current || persistentMessages.length >= persistentMessagesRef.current.length) {
     persistentMessagesRef.current = persistentMessages;
   }
@@ -417,8 +418,6 @@ export function useAgentTask() {
     }
     return () => { mounted = false; };
   }, [isAuthenticated, sandbox]);
-
-  var isSubmittingRef = useRef<boolean>(false);
 
   // Synchronize typing indicator in topbar and watchdog timer
   useEffect(() => {
