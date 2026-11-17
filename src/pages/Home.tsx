@@ -40,7 +40,7 @@ import { GoogleDriveFileItem } from '@/lib/workspaceTools';
 import { getSettings } from '@/lib/settingsStore';
 import { getDraftPrompt, saveDraftPrompt, clearDraftPrompt } from '@/lib/draftStorage';
 import { getActivePerformanceProfile } from '@/lib/performanceEngine';
-
+import { getHomeActionDefaults } from '@/lib/homeActionDefaults';
 const ConnectorsStorePanel = React.lazy(() =>
   import('@/components/connectors/ConnectorsStorePanel').then((m) => ({ default: m.ConnectorsStorePanel }))
 );
@@ -236,27 +236,19 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const lastTextareaHeightRef = useRef<number>(28);
 
   const wordCount = React.useMemo(() => {
     const trimmed = prompt.trim();
     return trimmed ? trimmed.split(/\s+/).filter(Boolean).length : 0;
   }, [prompt]);
 
-  // Auto-resize typing area dynamically as user types a big prompt/question
+  // Measure every prompt: even short text can wrap on a narrow screen.
   React.useEffect(() => {
     if (wordCount < 50 && isExpanded) {
       setIsExpanded(false);
     }
     const el = textareaRef.current;
     if (!el) return;
-    if (!prompt || (prompt.length < 44 && !prompt.includes('\n'))) {
-      if (lastTextareaHeightRef.current !== 28) {
-        lastTextareaHeightRef.current = 28;
-        el.style.height = '28px';
-      }
-      return;
-    }
     const rafId = window.requestAnimationFrame(() => {
       const node = textareaRef.current;
       if (!node) return;
@@ -264,7 +256,6 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
       const scrollHeight = node.scrollHeight;
       const maxHeight = isExpanded ? 460 : 280;
       const targetHeight = Math.max(Math.min(scrollHeight, maxHeight), 28);
-      lastTextareaHeightRef.current = targetHeight;
       node.style.height = `${targetHeight}px`;
     });
     return () => window.cancelAnimationFrame(rafId);
@@ -604,8 +595,8 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   };
 
   return (
-    <div ref={containerRef} className="w-full h-full overflow-y-auto flex flex-col items-center p-6 md:py-10 bg-manus-cream dark:bg-background">
-      <div className="w-full max-w-4xl space-y-6 sm:space-y-8 my-auto">
+    <div ref={containerRef} className="w-full h-full overflow-y-auto overscroll-y-contain flex flex-col items-center px-4 py-6 sm:px-6 md:py-10 bg-manus-cream dark:bg-background">
+      <div className="w-full max-w-4xl space-y-5 sm:space-y-7 my-auto">
         <div className="flex flex-col items-center animate-on-load" aria-label="Manus AI robot assistant">
           <div
             className="relative shrink-0 cursor-pointer select-none manus-hero-float"
@@ -634,7 +625,8 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
               floorShadow={robotFloorShadow && getActivePerformanceProfile() !== 'ultra-lite'}
               seed={robotSeed}
               aria-label={`Manus AI robot assistant, ${isHappyExpression ? 'happy' : robotState}`}
-              className={`shrink-0 transform transition-transform ${showIndiaClock ? 'opacity-20' : ''}`}
+              data-hero-robot-shape={robotShape}
+              className={`shrink-0 transform transition-transform manus-hero-robot-gloss ${robotPaused ? '' : 'manus-hero-robot-breathe'} ${showIndiaClock ? 'opacity-20' : ''}`}
             />
             {showIndiaClock && (
               <div
@@ -650,13 +642,13 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
           </div>
         </div>
 
-        <div className="space-y-6 animate-on-load">
+        <div className="w-full max-w-3xl mx-auto space-y-5 sm:space-y-6 animate-on-load">
           {/* File Upload indicators */}
           {uploadedFile && (
             <div className="flex gap-2 justify-center flex-wrap">
-              <div className="manus-tag-pop flex items-center gap-2 px-3 py-2 bg-white rounded-full border border-primary/20 shadow-sm">
+              <div className="manus-tag-pop flex max-w-full min-w-0 items-center gap-2 px-3 py-2 bg-white dark:bg-card rounded-full border border-primary/20 shadow-sm">
                 <FileText size={18} strokeWidth={2.4} className="text-primary" />
-                <span className="text-sm font-medium">{uploadedFile.name}</span>
+                <span className="min-w-0 truncate text-sm font-medium">{uploadedFile.name}</span>
                 {isExtracting ? (
                   <div className="w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
                 ) : (
@@ -736,6 +728,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                 value={prompt}
                 onChange={handlePromptChange}
                 onKeyDown={(e) => {
+                  if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                   if (showMentionPicker) {
                     if (e.key === 'ArrowDown') {
                       e.preventDefault();
@@ -996,6 +989,9 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                     key={chip.label}
                     style={{ animationDelay: `${chipIdx * 45}ms` }}
                     onClick={() => {
+                      const defaults = getHomeActionDefaults(chip.label);
+                      setSelectedFormat(defaults.format);
+                      setSelectedChart(defaults.chartType);
                       if (chip.label === "Research link") {
                         setActiveIntent({ 
                           label: "Research", 
@@ -1004,7 +1000,6 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                         });
                         setPrompt('');
                       } else if (chip.label === "Build website") {
-                        setSelectedFormat('website');
                         setActiveIntent({ 
                           label: "Website", 
                           icon: chip.icon,
@@ -1012,8 +1007,6 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                         });
                         setPrompt('');
                       } else if (chip.label === "Data analysis") {
-                        setSelectedFormat('graph');
-                        setSelectedChart('bar');
                         setActiveIntent({ 
                           label: "Data analysis", 
                           icon: chip.icon,
@@ -1043,32 +1036,33 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
 
         {/* Building agent features (Output formats and Chart gallery) shown ONLY in Work mode */}
         {chatWorkMode === 'work' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-on-load animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 animate-on-load animate-in fade-in slide-in-from-bottom-4 duration-300">
             <div className="space-y-4">
-              <h3 className="text-xs font-bold text-slate-500 dark:text-muted-foreground uppercase tracking-widest px-1">Choose output format</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <h3 className="font-sans text-xs font-bold text-slate-500 dark:text-muted-foreground uppercase tracking-widest px-1">Choose output format</h3>
+              <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-2 sm:gap-3">
                 {OUTPUT_FORMATS.map((format, formatIdx) => (
                   <button
                     key={format.id}
                     style={{ animationDelay: `${formatIdx * 55}ms` }}
                     onClick={() => setSelectedFormat(format.id)}
+                    aria-pressed={selectedFormat === format.id}
                     className={cn(
-                      "manus-card-stagger manus-hover-lift flex items-start gap-4 p-4 rounded-2xl border text-left group cursor-pointer",
+                      "manus-card-stagger manus-hover-lift flex min-w-0 items-start gap-2.5 sm:gap-4 p-3 sm:p-4 rounded-2xl border text-left group cursor-pointer",
                       selectedFormat === format.id 
                         ? "bg-white dark:bg-card border-primary shadow-md ring-1 ring-primary/10 -translate-y-0.5" 
                         : "bg-white dark:bg-card border-slate-200 dark:border-border hover:border-primary/40 dark:hover:border-primary/50 shadow-xs"
                     )}
                   >
                     <div className={cn(
-                      "p-2.5 rounded-xl transition-colors",
+                      "shrink-0 p-2 sm:p-2.5 rounded-xl transition-colors",
                       selectedFormat === format.id 
                         ? "bg-primary text-primary-foreground" 
                         : "bg-slate-100 dark:bg-muted text-slate-700 dark:text-foreground group-hover:bg-slate-200 dark:group-hover:bg-accent"
                     )}>
                       <format.icon size={23} strokeWidth={2.4} className="manus-icon-spring" />
                     </div>
-                    <div>
-                      <div className="font-bold text-sm tracking-tight text-foreground">{format.label}</div>
+                    <div className="min-w-0">
+                      <div className="font-bold text-sm tracking-tight text-foreground break-words">{format.label}</div>
                       <div className="text-xs text-muted-foreground leading-relaxed mt-0.5">{format.desc}</div>
                     </div>
                   </button>
@@ -1077,15 +1071,16 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
             </div>
 
             <div className="space-y-4">
-              <h3 className="text-xs font-bold text-slate-500 dark:text-muted-foreground uppercase tracking-widest px-1">Preferred charts gallery</h3>
+              <h3 className="font-sans text-xs font-bold text-slate-500 dark:text-muted-foreground uppercase tracking-widest px-1">Preferred charts gallery</h3>
               <div className="grid grid-cols-3 gap-3">
                 {CHART_TYPES.map((chart, chartIdx) => (
                   <button
                     key={chart.id}
                     style={{ animationDelay: `${chartIdx * 45}ms` }}
                     onClick={() => setSelectedChart(chart.id)}
+                    aria-pressed={selectedChart === chart.id}
                     className={cn(
-                      "manus-card-stagger manus-hover-lift flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border bg-white dark:bg-card group cursor-pointer",
+                      "manus-card-stagger manus-hover-lift flex min-w-0 flex-col items-center justify-center gap-2 p-2 sm:p-4 rounded-2xl border bg-white dark:bg-card group cursor-pointer",
                       selectedChart === chart.id 
                         ? "border-primary shadow-md ring-1 ring-primary/10 -translate-y-0.5" 
                         : "border-slate-200 dark:border-border hover:border-primary/40 dark:hover:border-primary/50 shadow-xs"

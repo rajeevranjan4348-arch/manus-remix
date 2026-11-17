@@ -36,7 +36,6 @@ import { cn } from '@/lib/utils';
 import { ManusLogo } from '../layout/Logo';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { FileAttachments } from './FileAttachments';
-import { ContextualThinking } from './ContextualThinking';
 import { AttachmentMenu } from '../chat/AttachmentMenu';
 import { ConversationActionBar } from './ConversationActionBar';
 import { VoiceInputButton, formatSpeechAutoFill } from '../voice/VoiceInputButton';
@@ -1422,25 +1421,6 @@ export function ChatView({
     );
   };
 
-  const lastDisplayMessage = displayMessages[displayMessages.length - 1];
-  const hasVisibleAssistantMessage = Boolean(
-    lastDisplayMessage &&
-    lastDisplayMessage.role === 'assistant' &&
-    (() => {
-      const raw = lastDisplayMessage.content || '';
-      const { content: extracted } = extractThoughtProcess(raw);
-      const cleanedContent = cleanMessageContent(extracted || raw);
-      return Boolean(cleanedContent);
-    })()
-  );
-  const activeRunningStep = steps.find(s => s.status === 'running');
-  const showComposingStatus = shouldShowComposingIndicator({
-    isAssistantWorking,
-    hasVisibleAssistantMessage,
-    phase,
-    steps,
-  });
-
   const footerRenderRef = useRef<() => React.ReactNode>(() => null);
   const footerSubscribersRef = useRef<Set<() => void>>(new Set());
   footerRenderRef.current = () => (
@@ -1489,40 +1469,6 @@ export function ChatView({
           </div>
         );
       })()}
-
-      {/* Synchronized thinking stage card & active response composition indicator */}
-      {isAssistantWorking && !hasVisibleAssistantMessage && (
-        <div className="flex gap-4 max-w-3xl mx-auto my-2 animate-in fade-in duration-200">
-          <div className="flex-1 space-y-2 min-w-0">
-            <div className="flex items-center gap-2.5">
-              <ManusLogo showBadge={true} />
-            </div>
-            <div className="pt-0.5 space-y-1.5">
-              <ContextualThinking
-                prompt={messages.filter((message: any) => message?.role === 'user').slice(-1)[0]?.content || prompt}
-                activeStep={activeRunningStep?.label}
-                deepMode={isThinkHarder}
-                isLive={isAssistantWorking}
-                steps={steps}
-              />
-              {showComposingStatus && (
-                <div
-                  data-testid="ai-typing-sequence"
-                  className="manus-typing-sequence-lead"
-                  role="status"
-                  aria-live="polite"
-                >
-                  <span
-                    className="w-1.5 h-1.5 rounded-full bg-[#000000] dark:bg-[#FFFFFF] shrink-0"
-                    aria-hidden="true"
-                  />
-                  <span>Composing response...</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Error State Card */}
       {status === 'error' && !isAssistantWorking && (
@@ -1573,22 +1519,12 @@ export function ChatView({
   const virtuosoContext = React.useMemo(() => ({
     isAssistantWorking,
     status,
-    activeRunningStepId: activeRunningStep?.id,
-    activeRunningStepLabel: activeRunningStep?.label,
-    activeRunningStepStatus: activeRunningStep?.status,
-    hasVisibleAssistantMessage,
-    showComposingStatus,
     result,
     chartData,
     messagesCount: displayMessages.length,
   }), [
     isAssistantWorking,
     status,
-    activeRunningStep?.id,
-    activeRunningStep?.label,
-    activeRunningStep?.status,
-    hasVisibleAssistantMessage,
-    showComposingStatus,
     result,
     chartData,
     displayMessages.length,

@@ -5,11 +5,13 @@ import {
   formatChatAsMarkdown,
   formatChatAsJSON,
   generateChatPdfBytes,
+  generateChatDocxBytes,
   exportChatSession,
   deriveSessionTitle,
   slugifyFilename,
   ChatExportSessionData,
 } from '../src/lib/chatExport';
+import { strFromU8, unzipSync } from 'fflate';
 import { EXPORT_FORMAT_OPTIONS } from '../src/components/agent/ExportChatDropdown';
 
 const sampleSession: ChatExportSessionData = {
@@ -98,6 +100,19 @@ describe('Topbar Chat Session Export (PDF, Markdown, JSON)', () => {
     expect(pdfText.trim().endsWith('%%EOF')).toBe(true);
   });
 
+  it('generates a valid DOCX package containing the session conversation', () => {
+    const docxBytes = generateChatDocxBytes(sampleSession);
+    const archive = unzipSync(docxBytes);
+    const documentXml = strFromU8(archive['word/document.xml']);
+
+    expect(docxBytes[0]).toBe(0x50);
+    expect(docxBytes[1]).toBe(0x4b);
+    expect(documentXml).toContain('Compare renewable energy growth in 2025 vs 2026');
+    expect(documentXml).toContain('Search global solar &amp; wind capacity reports');
+    expect(documentXml).toContain('Global renewable capacity additions increased by 18%');
+    expect(documentXml).toContain('Conversation');
+  });
+
   it('exportChatSession returns matching filename, mimeType, and payload for pdf, markdown, and json', () => {
     const pdfExport = exportChatSession(sampleSession, 'pdf', { triggerDownload: false });
     expect(pdfExport.format).toBe('pdf');
@@ -113,6 +128,12 @@ describe('Topbar Chat Session Export (PDF, Markdown, JSON)', () => {
     expect(jsonExport.format).toBe('json');
     expect(jsonExport.filename).toBe('compare-renewable-energy-growth-in-2025-vs-2026.json');
     expect(jsonExport.mimeType).toContain('application/json');
+
+    const docxExport = exportChatSession(sampleSession, 'docx', { triggerDownload: false });
+    expect(docxExport.format).toBe('docx');
+    expect(docxExport.filename).toBe('compare-renewable-energy-growth-in-2025-vs-2026.docx');
+    expect(docxExport.mimeType).toContain('application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    expect(docxExport.content).toBeInstanceOf(Uint8Array);
   });
 
   it('exposes PDF, Markdown, and JSON options in ExportChatDropdown and removes topbar Export button', () => {

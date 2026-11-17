@@ -1,4 +1,6 @@
-export type ChatExportFormat = 'pdf' | 'markdown' | 'json';
+import { strToU8, zipSync } from 'fflate';
+
+export type ChatExportFormat = 'pdf' | 'markdown' | 'json' | 'docx';
 
 export interface ChatExportMessage {
   id?: string;
@@ -525,6 +527,82 @@ export function generateChatPdfBytes(data: ChatExportSessionData): Uint8Array {
   return encoder.encode(pdfString);
 }
 
+function escapeXmlText(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function docxParagraph(text: string, options: { bold?: boolean; fontSize?: number } = {}): string {
+  const runs = text.split('\n').map((line, index) => {
+    const breakXml = index > 0 ? '<w:br/>' : '';
+    const runProps = `${options.bold ? '<w:b/>' : ''}${options.fontSize ? `<w:sz w:val="${options.fontSize}"/>` : ''}`;
+    return `${breakXml}<w:r>${runProps ? `<w:rPr>${runProps}</w:rPr>` : ''}<w:t xml:space="preserve">${escapeXmlText(line)}</w:t></w:r>`;
+  }).join('');
+  return `<w:p><w:pPr><w:spacing w:after="120"/></w:pPr>${runs}</w:p>`;
+}
+
+/** Generates a valid DOCX package containing session metadata, steps, and conversation messages. */
+export function generateChatDocxBytes(data: ChatExportSessionData): Uint8Array {
+  const title = deriveSessionTitle(data);
+  const exportedAt = data.exportedAt || new Date().toISOString();
+  const messages = normalizeExportMessages(data);
+  const steps = Array.isArray(data.steps) ? data.steps : [];
+  const paragraphs: string[] = [
+    docxParagraph(title, { bold: true, fontSize: 32 }),
+    docxParagraph(`Exported: ${exportedAt}`),
+  ];
+
+  if (data.taskId) paragraphs.push(docxParagraph(`Session ID: ${data.taskId}`));
+  if (data.status) paragraphs.push(docxParagraph(`Status: ${data.status}`));
+  if (data.format) paragraphs.push(docxParagraph(`Format: ${data.format}`));
+
+  if (steps.length > 0) {
+    paragraphs.push(docxParagraph('Execution Steps', { bold: true, fontSize: 24 }));
+    steps.forEach((step) => {
+      const marker = step.status === 'completed' ? '[DONE]' : `[${String(step.status).toUpperCase()}]`;
+      paragraphs.push(docxParagraph(`${marker} ${step.label}`, { bold: true }));
+      (step.trace || []).forEach((line) => paragraphs.push(docxParagraph(`  ${line}`)));
+    });
+  }
+
+  paragraphs.push(docxParagraph('Conversation', { bold: true, fontSize: 24 }));
+  if (messages.length === 0) {
+    paragraphs.push(docxParagraph('No messages recorded in this session.'));
+  } else {
+    messages.forEach((message, index) => {
+      const speaker = message.role === 'user' ? 'User' : 'Cue';
+      const timestamp = message.timestamp ? ` (${message.timestamp})` : '';
+      paragraphs.push(docxParagraph(`${index + 1}. ${speaker}${timestamp}`, { bold: true }));
+      if (message.thought) paragraphs.push(docxParagraph(`Thought Process: ${message.thought}`));
+      if (message.content) paragraphs.push(docxParagraph(message.content));
+    });
+  }
+
+  paragraphs.push(docxParagraph('Exported from Cue'));
+  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+    `<w:body>${paragraphs.join('')}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/>` +
+    `<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>`;
+
+  return zipSync({
+    '[Content_Types].xml': strToU8('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+      '</Types>'),
+    '_rels/.rels': strToU8('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+      '</Relationships>'),
+    'word/document.xml': strToU8(documentXml),
+  }, { level: 6 });
+}
+
 /**
  * Triggers a browser download for a Blob without using window.open or window.alert.
  */
@@ -576,6 +654,16 @@ export function exportChatSession(
     const mimeType = 'application/json;charset=utf-8';
     if (shouldDownload && typeof Blob !== 'undefined') {
       triggerBrowserDownload(new Blob([content], { type: mimeType }), filename);
+    }
+    return { format, filename, mimeType, content };
+  }
+
+  if (format === 'docx') {
+    const content = generateChatDocxBytes(data);
+    const filename = `${baseSlug}.docx`;
+    const mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    if (shouldDownload && typeof Blob !== 'undefined') {
+      triggerBrowserDownload(new Blob([content as unknown as BlobPart], { type: mimeType }), filename);
     }
     return { format, filename, mimeType, content };
   }

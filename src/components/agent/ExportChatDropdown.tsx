@@ -99,7 +99,7 @@ export function ExportChatDropdown({
 
     if (sessionData) {
       const exported = exportChatSession(sessionData, format);
-      const formatLabel = format === 'pdf' ? 'PDF' : format === 'markdown' ? 'Markdown' : 'JSON';
+      const formatLabel = format === 'pdf' ? 'PDF' : format === 'markdown' ? 'Markdown' : format === 'docx' ? 'DOCX' : 'JSON';
       toast.success(`Exported chat session as ${formatLabel} (${exported.filename})`);
     }
   };

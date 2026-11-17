@@ -75,3 +75,140 @@ body,
     transition-duration: 0.01ms !important;
   }
 }
+
+
+/* A soft breathing halo adds a little life to the home assistant without moving layout. */
+.manus-hero-float {
+  isolation: isolate;
+}
+
+.manus-hero-float::before {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  z-index: -1;
+  border-radius: 50%;
+  box-shadow: 0 0 26px 8px rgba(0, 0, 0, 0.075);
+  opacity: 0.38;
+  pointer-events: none;
+}
+
+.dark .manus-hero-float::before {
+  box-shadow: 0 0 28px 8px rgba(255, 255, 255, 0.09);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .manus-hero-float::before {
+    animation: manus-hero-halo-breathe 4.6s ease-in-out infinite;
+  }
+
+  @keyframes manus-hero-halo-breathe {
+    0%, 100% {
+      opacity: 0.28;
+      transform: scale(0.92);
+    }
+    50% {
+      opacity: 0.72;
+      transform: scale(1.06);
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .manus-hero-float::before {
+    animation: none !important;
+    opacity: 0.38;
+    transform: none;
+  }
+}
+
+[data-perf-mode="ultra-lite"] .manus-hero-float::before {
+  animation: none !important;
+  opacity: 0.32;
+  transform: none;
+}
+
+/* Let the robot breathe and gently sway independently of its floating halo. */
+@media (prefers-reduced-motion: no-preference) {
+  .manus-hero-robot-breathe {
+    transform-origin: 50% 58%;
+    animation: manus-hero-robot-breathe 3.8s ease-in-out infinite;
+    will-change: transform;
+  }
+
+  @keyframes manus-hero-robot-breathe {
+    0%, 100% {
+      transform: scale(1) rotate(0deg);
+    }
+    50% {
+      transform: scale(1.018, 0.99) rotate(-1deg);
+    }
+  }
+}
+
+[data-perf-mode="ultra-lite"] .manus-hero-robot-breathe {
+  animation: none !important;
+  transform: none;
+  will-change: auto;
+}
+
+/* A restrained studio sheen gives the hero robot shell a polished, glassy finish. */
+.manus-hero-robot-gloss {
+  isolation: isolate;
+}
+
+.manus-hero-robot-gloss::after {
+  content: "";
+  position: absolute;
+  inset: 19% 13% 27%;
+  z-index: 2;
+  pointer-events: none;
+  clip-path: inset(0 round 17%);
+  background-image:
+    linear-gradient(112deg, transparent 34%, rgba(255, 255, 255, 0.04) 42%, rgba(255, 255, 255, 0.36) 48%, rgba(255, 255, 255, 0.04) 54%, transparent 63%),
+    radial-gradient(ellipse 55% 34% at 22% 14%, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.1) 46%, transparent 100%);
+  background-size: 230% 100%, 100% 100%;
+  background-position: 145% 0, 0 0;
+  background-repeat: no-repeat;
+  mix-blend-mode: screen;
+  opacity: 0.72;
+}
+
+.manus-hero-robot-gloss[data-hero-robot-shape="square"]::after {
+  inset: 20% 20% 25%;
+  clip-path: inset(0 round 18%);
+}
+
+.manus-hero-robot-gloss[data-hero-robot-shape="circle"]::after {
+  inset: 22% 19% 27%;
+  clip-path: ellipse(50% 50% at 50% 50%);
+}
+
+.manus-hero-robot-gloss[data-hero-robot-shape="hexagon"]::after {
+  inset: 21% 18% 26%;
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .manus-hero-robot-gloss::after {
+    animation: manus-hero-robot-sheen 7.2s ease-in-out infinite;
+  }
+
+  @keyframes manus-hero-robot-sheen {
+    0%, 24% { background-position: 145% 0, 0 0; }
+    72%, 100% { background-position: -45% 0, 0 0; }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .manus-hero-robot-gloss::after {
+    animation: none !important;
+    background-position: 0 0, 0 0;
+  }
+}
+
+[data-perf-mode="ultra-lite"] .manus-hero-robot-gloss::after {
+  animation: none !important;
+  opacity: 0.5;
+  background-position: 0 0, 0 0;
+}

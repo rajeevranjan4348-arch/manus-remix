@@ -33,7 +33,14 @@ import {
   Cloud,
   LogIn,
   LogOut,
-  User as UserIcon
+  User as UserIcon,
+  Bookmark,
+  Share2,
+  Shield,
+  FolderPlus,
+  FileText,
+  FileCode,
+  FileType
 } from 'lucide-react';
 import { ConnectorsStorePanel } from '../connectors/ConnectorsStorePanel';
 import { cn } from '@/lib/utils';
@@ -45,7 +52,9 @@ import { useFirebase } from '@/context/FirebaseContext';
 import { blink } from '@/lib/blink';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { renameConversation } from '@/lib/chatDatabase';
+import { getMessages, renameConversation } from '@/lib/chatDatabase';
+import { exportChatSession, ChatExportFormat } from '@/lib/chatExport';
+import { getBookmarkedSessionIds, setSessionBookmarked } from '@/lib/sessionBookmarks';
 import { Project } from '@/types/project';
 import { getProjects, deleteProject, addTaskToProject } from '@/lib/projectStore';
 import { ProjectModal } from '@/components/projects/ProjectModal';
@@ -80,6 +89,8 @@ interface TaskHistory {
   status?: string;
   outputFormat?: string;
   projectId?: string;
+  result?: any;
+  steps?: string | any[];
 }
 
 const PROJECT_ICON_MAP: Record<string, any> = {
@@ -181,6 +192,8 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
   const [taskToDelete, setTaskToDelete] = useState<{ id: string; title: string } | null>(null);
   const [taskToRename, setTaskToRename] = useState<{ id: string; title: string } | null>(null);
   const [newChatTitle, setNewChatTitle] = useState('');
+  const [bookmarkedSessionIds, setBookmarkedSessionIds] = useState<string[]>(() => getBookmarkedSessionIds());
+  const [taskToAddToProject, setTaskToAddToProject] = useState<string | null>(null);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [isDeletingTask, setIsDeletingTask] = useState(false);
   const [isRenamingTask, setIsRenamingTask] = useState(false);
@@ -201,6 +214,12 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
     loadTasks();
     loadProjects();
   }, [isAuthenticated, user, fbUser, activeTaskId]);
+
+  useEffect(() => {
+    const handleBookmarksUpdated = () => setBookmarkedSessionIds(getBookmarkedSessionIds());
+    window.addEventListener('manus_bookmarked_sessions_updated', handleBookmarksUpdated);
+    return () => window.removeEventListener('manus_bookmarked_sessions_updated', handleBookmarksUpdated);
+  }, []);
 
   useEffect(() => {
     const handleProjectsUpdated = () => {
@@ -304,6 +323,80 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
     } catch (err) {
       toast.error('Failed to assign task to project');
     }
+  };
+
+  const handleToggleSessionBookmark = (task: TaskHistory) => {
+    const isBookmarked = bookmarkedSessionIds.includes(task.id);
+    const updated = setSessionBookmarked(task.id, !isBookmarked);
+    setBookmarkedSessionIds(updated);
+    toast.success(isBookmarked ? 'Bookmark removed' : 'Session bookmarked');
+  };
+
+  const handleShareSession = async (task: TaskHistory) => {
+    const url = `${window.location.origin}/task/${encodeURIComponent(task.id)}`;
+    const title = formatTaskTitle(task);
+    if (typeof navigator.share === 'function') {
+      try {
+        await navigator.share({ title, text: `Chat session: ${title}`, url });
+        return;
+      } catch (error: any) {
+        if (error?.name === 'AbortError') return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(`${title}\n${url}`);
+      toast.success('Session link copied');
+    } catch {
+      toast.error('Could not share this session');
+    }
+  };
+
+  const handleOpenPrivacySettings = () => {
+    window.dispatchEvent(new CustomEvent('manus_open_settings', { detail: { tab: 'data' } }));
+  };
+
+  const handleExportSession = async (task: TaskHistory, format: ChatExportFormat) => {
+    const parseStoredValue = (value: any, fallback: any) => {
+      if (value === undefined || value === null || value === '') return fallback;
+      if (typeof value !== 'string') return value;
+      try {
+        return JSON.parse(value);
+      } catch {
+        return value;
+      }
+    };
+
+    try {
+      const storedMessages = await getMessages(task.id);
+      const messages = storedMessages.map(message => ({
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        timestamp: message.timestamp,
+        status: message.status,
+      }));
+      const exported = exportChatSession({
+        taskId: task.id,
+        title: formatTaskTitle(task),
+        prompt: task.prompt,
+        status: task.status,
+        format: task.outputFormat,
+        steps: parseStoredValue(task.steps, []),
+        result: parseStoredValue(task.result, undefined),
+        messages,
+      }, format);
+      const formatLabel = format === 'pdf' ? 'PDF' : format === 'markdown' ? 'Markdown' : 'DOCX';
+      toast.success(`Exported session as ${formatLabel} (${exported.filename})`);
+    } catch (error) {
+      console.error('Session export failed:', error);
+      toast.error('Failed to export session');
+    }
+  };
+
+  const startProjectCreationForTask = (taskId: string) => {
+    setTaskToAddToProject(taskId);
+    setProjectToEdit(null);
+    setIsProjectModalOpen(true);
   };
 
   const filteredTasks = useMemo(() => {
@@ -822,6 +915,9 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                             <span className="text-[10px] text-muted-foreground/70 leading-tight">
                               {relTime}
                             </span>
+                            {bookmarkedSessionIds.includes(task.id) && (
+                              <Bookmark size={10} aria-label="Bookmarked session" className="text-primary fill-primary/20 shrink-0" />
+                            )}
                             {taskProj && (
                               <span className="text-[9px] px-1.5 py-0.2 rounded bg-primary/10 text-primary font-semibold truncate max-w-[90px]">
                                 {taskProj.name}
@@ -847,7 +943,94 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                             <MoreHorizontal size={16} strokeWidth={2.4} />
                           </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-48 p-1">
+                        <DropdownMenuContent align="end" className="w-52 p-1">
+                          <DropdownMenuItem
+                            onClick={() => handleToggleSessionBookmark(task)}
+                            className="flex items-center gap-2 cursor-pointer text-xs"
+                          >
+                            <Bookmark size={15} strokeWidth={2.4} className={bookmarkedSessionIds.includes(task.id) ? 'fill-primary/20 text-primary' : ''} />
+                            <span>{bookmarkedSessionIds.includes(task.id) ? 'Remove Bookmark' : 'Bookmark Session'}</span>
+                          </DropdownMenuItem>
+
+                          <DropdownMenuItem
+                            onClick={() => void handleShareSession(task)}
+                            className="flex items-center gap-2 cursor-pointer text-xs"
+                          >
+                            <Share2 size={15} strokeWidth={2.4} />
+                            <span>Share</span>
+                          </DropdownMenuItem>
+
+                          {projects.length > 0 ? (
+                            <DropdownMenuSub>
+                              <DropdownMenuSubTrigger className="flex items-center gap-2 cursor-pointer text-xs">
+                                <FolderPlus size={15} strokeWidth={2.4} />
+                                <span>Add to project</span>
+                              </DropdownMenuSubTrigger>
+                              <DropdownMenuSubContent className="w-48 p-1">
+                                {projects.map((project) => (
+                                  <DropdownMenuItem
+                                    key={project.id}
+                                    onClick={() => void handleAssignTaskToProject(task.id, project.id)}
+                                    className="flex items-center justify-between cursor-pointer text-xs"
+                                  >
+                                    <span className="truncate">{project.name}</span>
+                                    {task.projectId === project.id && <Check size={14} strokeWidth={2.5} className="text-primary" />}
+                                  </DropdownMenuItem>
+                                ))}
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={() => startProjectCreationForTask(task.id)}
+                                  className="flex items-center gap-2 cursor-pointer text-xs"
+                                >
+                                  <Plus size={14} />
+                                  <span>New project</span>
+                                </DropdownMenuItem>
+                              </DropdownMenuSubContent>
+                            </DropdownMenuSub>
+                          ) : (
+                            <DropdownMenuItem
+                              onClick={() => startProjectCreationForTask(task.id)}
+                              className="flex items-center gap-2 cursor-pointer text-xs"
+                            >
+                              <FolderPlus size={15} strokeWidth={2.4} />
+                              <span>Add to project</span>
+                            </DropdownMenuItem>
+                          )}
+
+                          <DropdownMenuItem
+                            onClick={handleOpenPrivacySettings}
+                            className="flex items-center gap-2 cursor-pointer text-xs"
+                          >
+                            <Shield size={15} strokeWidth={2.4} />
+                            <span>Privacy</span>
+                          </DropdownMenuItem>
+
+                          <DropdownMenuSeparator />
+
+                          <DropdownMenuItem
+                            onClick={() => void handleExportSession(task, 'pdf')}
+                            className="flex items-center gap-2 cursor-pointer text-xs"
+                          >
+                            <FileText size={15} strokeWidth={2.4} />
+                            <span>Export as PDF</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => void handleExportSession(task, 'markdown')}
+                            className="flex items-center gap-2 cursor-pointer text-xs"
+                          >
+                            <FileCode size={15} strokeWidth={2.4} />
+                            <span>Export as Markdown</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => void handleExportSession(task, 'docx')}
+                            className="flex items-center gap-2 cursor-pointer text-xs"
+                          >
+                            <FileType size={15} strokeWidth={2.4} />
+                            <span>Export as DOCX</span>
+                          </DropdownMenuItem>
+
+                          <DropdownMenuSeparator />
+
                           <DropdownMenuItem
                             onClick={() => navigate(`/task/${task.id}`)}
                             className="flex items-center gap-2 cursor-pointer text-xs"
@@ -855,7 +1038,6 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                             <ExternalLink size={15} strokeWidth={2.4} />
                             <span>Open session</span>
                           </DropdownMenuItem>
-                          
                           <DropdownMenuItem
                             onClick={(e) => handleStartRename(task.id, e as any, formatTaskTitle(task))}
                             className="flex items-center gap-2 cursor-pointer text-xs"
@@ -863,7 +1045,6 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                             <Edit3 size={15} strokeWidth={2.4} />
                             <span>Rename chat</span>
                           </DropdownMenuItem>
-
                           <DropdownMenuItem
                             onClick={(e) => handleCopyTaskId(task.id, e as any)}
                             className="flex items-center gap-2 cursor-pointer text-xs"
@@ -872,36 +1053,13 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                             <span>Copy Task ID</span>
                           </DropdownMenuItem>
 
-                          {/* Move to Project Submenu */}
-                          {projects.length > 0 && (
-                            <DropdownMenuSub>
-                              <DropdownMenuSubTrigger className="flex items-center gap-2 cursor-pointer text-xs">
-                                <FolderKanban size={15} strokeWidth={2.4} />
-                                <span>Assign to Project</span>
-                              </DropdownMenuSubTrigger>
-                              <DropdownMenuSubContent className="w-44 p-1">
-                                {projects.map((p) => (
-                                  <DropdownMenuItem
-                                    key={p.id}
-                                    onClick={() => handleAssignTaskToProject(task.id, p.id)}
-                                    className="flex items-center justify-between cursor-pointer text-xs"
-                                  >
-                                    <span className="truncate">{p.name}</span>
-                                    {task.projectId === p.id && <Check size={14} strokeWidth={2.5} className="text-primary" />}
-                                  </DropdownMenuItem>
-                                ))}
-                              </DropdownMenuSubContent>
-                            </DropdownMenuSub>
-                          )}
-
                           <DropdownMenuSeparator />
-
                           <DropdownMenuItem
                             onClick={(e) => handleDeleteTask(task.id, e as any, formatTaskTitle(task))}
                             className="flex items-center gap-2 text-red-600 hover:text-red-700 cursor-pointer text-xs"
                           >
                             <Trash2 size={15} strokeWidth={2.4} />
-                            <span>Delete session</span>
+                            <span>Delete</span>
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -983,8 +1141,16 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
         onClose={() => {
           setIsProjectModalOpen(false);
           setProjectToEdit(null);
+          setTaskToAddToProject(null);
         }}
         projectToEdit={projectToEdit}
+        onSuccess={(project) => {
+          loadProjects();
+          if (taskToAddToProject) {
+            void handleAssignTaskToProject(taskToAddToProject, project.id);
+          }
+          setTaskToAddToProject(null);
+        }}
       />
 
       {/* Project View Modal */}

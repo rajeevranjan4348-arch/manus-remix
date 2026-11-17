@@ -1943,7 +1943,7 @@ export function useAgentTask() {
       format
     );
 
-    const formatLabel = format === 'pdf' ? 'PDF' : format === 'markdown' ? 'Markdown' : 'JSON';
+    const formatLabel = format === 'pdf' ? 'PDF' : format === 'markdown' ? 'Markdown' : format === 'docx' ? 'DOCX' : 'JSON';
     toast.success(`Exported chat session as ${formatLabel} (${exported.filename})`);
   }, [result, currentTask, taskId, taskStatus]);
 

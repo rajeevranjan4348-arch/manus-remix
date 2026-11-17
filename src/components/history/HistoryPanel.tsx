@@ -1180,40 +1180,9 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
             })}
           </div>
 
-          {/* Prominent Search Bar + Compact Date Filter Icon Button */}
+          {/* Date Filter */}
           <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1 min-w-0">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#777777] pointer-events-none" />
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape' && searchQuery) {
-                      e.stopPropagation();
-                      setSearchQuery('');
-                    }
-                  }}
-                  placeholder="Search past tasks by title or content..."
-                  aria-label="Search past tasks by title or content"
-                  className="w-full h-9 pl-9 pr-8 bg-[#FAFAFA] dark:bg-[#111111] border border-[#E0E0E0] dark:border-[#262626] rounded-xl text-xs text-[#000000] dark:text-[#FFFFFF] placeholder:text-[#777777] focus:outline-none focus:border-[#000000] dark:focus:border-[#FFFFFF] transition-colors"
-                />
-                {searchQuery && (
-                  <button
-                    type="button"
-                    data-size="icon"
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full text-[#777777] hover:text-[#000000] dark:hover:text-[#FFFFFF] cursor-pointer"
-                    title="Clear search query"
-                    aria-label="Clear search query"
-                  >
-                    <X size={13} />
-                  </button>
-                )}
-              </div>
-
+            <div className="flex items-center justify-end">
               <button
                 type="button"
                 data-size="icon"
