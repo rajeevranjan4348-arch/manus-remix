@@ -224,7 +224,6 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     // Order candidate models prioritizing active high-speed models
     const candidateModels = Array.from(new Set([
       preferredModel,
-      'gemini-3.8-flash',
       'gemini-3-flash-preview',
       'gemini-2.5-flash',
       'gemini-flash-latest',
@@ -281,9 +280,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     modelLoop: for (const model of candidateModels) {
       // Attempt with Google Search grounding if applicable, and if that fails, retry without tools
       const toolConfigs = useGoogleSearch ? [{ tools: [{ googleSearch: {} }] }, {}] : [{}];
-      const supportsThinkingBudget =
-        (model.includes('gemini-2.5') || model.includes('gemini-3')) &&
-        model !== 'gemini-3.8-flash';
+      const supportsThinkingBudget = model.includes('gemini-2.5');
       const modelSystemInstruction = baseSystemPrompt + buildModelIdentityInstruction(model, 'Google Gemini');
 
       for (const toolConfig of toolConfigs) {

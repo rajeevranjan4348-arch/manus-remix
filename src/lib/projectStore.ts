@@ -1,5 +1,6 @@
 import { Project } from '@/types/project';
 import { saveProjectToFirestore, deleteProjectFromFirestore, getProjectsFromFirestore } from './firestoreService';
+import { saveProjectToCloudSql, deleteProjectFromCloudSql } from './cloudSqlClient';
 
 const PROJECTS_STORAGE_KEY = 'manus_agent_projects';
 
@@ -86,6 +87,7 @@ export function createProject(data: Partial<Project> & { name: string }): Projec
   projects.unshift(newProject);
   saveProjects(projects);
   saveProjectToFirestore(newProject).catch(() => {});
+  saveProjectToCloudSql(newProject).catch(() => {});
   return newProject;
 }
 
@@ -102,6 +104,7 @@ export function updateProject(id: string, updates: Partial<Project>): Project | 
 
   saveProjects(projects);
   saveProjectToFirestore(projects[index]).catch(() => {});
+  saveProjectToCloudSql(projects[index]).catch(() => {});
   return projects[index];
 }
 
@@ -113,6 +116,7 @@ export function deleteProject(id: string): boolean {
   if (projects.length !== initialLength) {
     saveProjects(projects);
     deleteProjectFromFirestore(id).catch(() => {});
+    deleteProjectFromCloudSql(id).catch(() => {});
     return true;
   }
   return false;

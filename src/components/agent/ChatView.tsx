@@ -1643,29 +1643,20 @@ export function ChatView({
           }
         }}
       >
-        <Virtuoso
-          ref={virtuosoRef}
-          scrollerRef={handleScrollerRef}
-          data={displayMessages}
-          context={virtuosoContext}
-          computeItemKey={(index, item) => item?.id || `msg-${index}`}
-          increaseViewportBy={{
-            top: virtualizationBudget.overscanTopPx,
-            bottom: virtualizationBudget.overscanBottomPx,
-          }}
-          atBottomThreshold={64}
-          className="h-full w-full overflow-y-auto relative touch-pan-y custom-scrollbar overscroll-contain"
-          followOutput={isStreamingResponse && !isAutoScrollPaused && shouldAutoScrollRef.current ? (perfProfile === 'ultra-lite' ? 'auto' : 'smooth') : false}
-          atBottomStateChange={(atBottom) => {
-            if (atBottom) {
-              resumeAutoScroll();
-            } else {
-              pauseAutoScroll();
-            }
-          }}
-          itemContent={renderMessageItem}
-          components={virtuosoComponents}
-        />
+        <div
+          ref={handleScrollerRef}
+          data-testid="virtuoso-scroller"
+          data-virtuoso-scroller="true"
+          className="h-full w-full overflow-y-auto relative touch-pan-y custom-scrollbar overscroll-contain pt-2"
+        >
+          {(() => {
+            const maxWindow = Math.max(24, virtualizationBudget.maxRenderedMessagesWindow || 60);
+            const startIdx = Math.max(0, displayMessages.length - maxWindow);
+            const visibleSlice = displayMessages.slice(startIdx);
+            return visibleSlice.map((msg, idx) => renderMessageItem(startIdx + idx, msg));
+          })()}
+          {footerRenderRef.current()}
+        </div>
       </div>
 
       {/* Floating Scroll-to-bottom button when user scrolled up */}

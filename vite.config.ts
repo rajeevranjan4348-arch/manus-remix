@@ -16,6 +16,7 @@ import {
   routeQueryIntent,
 } from './server/rtie';
 import { generateOAuthUrl, handleOAuthCallback, executeServerConnectorTool, isSafeUrl } from './server/connectorsService';
+import { handleCloudSqlApiRequest } from './server/cloudSqlRoutes';
 import { GoogleGenAI } from '@google/genai';
 
 class StreamCircuitBreaker {
@@ -68,6 +69,12 @@ function geminiApiPlugin(): Plugin {
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const url = req.url?.split('?')[0];
+
+        // Server-Side Cloud SQL Relational Data Endpoints
+        if (url && url.startsWith('/api/sql/')) {
+          const handled = await handleCloudSqlApiRequest(req, res, url);
+          if (handled) return;
+        }
 
         // Server-Side Real-Time Data & RTIE Intelligence Endpoint
         if (url === '/api/realtime' || url === '/api/realtime-data' || url === '/api/rtie/research') {
@@ -711,6 +718,9 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
 
             try {
               const body = bodyStr ? JSON.parse(bodyStr) : {};
+              const requestId = typeof body?.requestId === 'string' && body.requestId.trim()
+                ? body.requestId.trim().slice(0, 120)
+                : `srv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
               const abortController = new AbortController();
               res.on('close', () => {
                 if (!res.writableEnded) {
@@ -718,15 +728,18 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
                 }
               });
 
+              const inputMessages = body.messages || (body.prompt ? [{ role: 'user', content: body.prompt }] : []);
+              console.info(`[AI Stream] reqId=${requestId} status=started messages=${Array.isArray(inputMessages) ? inputMessages.length : 0}`);
+
               const stream = streamGeminiResponse({
-                messages: body.messages || (body.prompt ? [{ role: 'user', content: body.prompt }] : []),
+                messages: inputMessages,
                 systemInstruction: body.systemInstruction,
-                model: body.model || 'gemini-3.8-flash',
+                model: body.model || 'gemini-3-flash-preview',
                 thinkHarder: Boolean(body.thinkHarder),
                 signal: abortController.signal,
                 onResearchProgress: (stageEvent) => {
                   if (!clientAborted && !res.writableEnded) {
-                    res.write(`data: ${JSON.stringify({ type: 'research-stage', ...stageEvent })}\n\n`);
+                    res.write(`data: ${JSON.stringify({ type: 'research-stage', requestId, ...stageEvent })}\n\n`);
                     if (typeof (res as any).flush === 'function') {
                       (res as any).flush();
                     }
@@ -737,7 +750,7 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
               for await (const delta of stream) {
                 if (clientAborted || res.writableEnded) break;
                 if (delta) {
-                  res.write(`data: ${JSON.stringify({ type: 'text-delta', delta, textDelta: delta })}\n\n`);
+                  res.write(`data: ${JSON.stringify({ type: 'text-delta', delta, textDelta: delta, requestId })}\n\n`);
                   if (typeof (res as any).flush === 'function') {
                     (res as any).flush();
                   }
@@ -746,12 +759,15 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
 
               if (!clientAborted && !res.writableEnded) {
                 streamCircuitBreaker.recordSuccess();
-                res.write(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop' })}\n\n`);
+                console.info(`[AI Stream] reqId=${requestId} status=completed`);
+                res.write(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId })}\n\n`);
                 res.write('data: [DONE]\n\n');
                 res.end();
               }
             } catch (err: any) {
-              streamCircuitBreaker.recordFailure();
+              if (!clientAborted) {
+                streamCircuitBreaker.recordFailure();
+              }
               console.error('[AI Stream Error]', err?.message || err);
 
               let userErrorMsg = '⚠️ Stream processing failed. Please verify your connection or try again.';

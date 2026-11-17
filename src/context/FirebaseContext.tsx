@@ -13,6 +13,7 @@ import {
 } from '@/lib/firebase';
 import { logoutWorkspace } from '@/lib/workspaceAuth';
 import { syncUserProfile } from '@/lib/firestoreService';
+import { syncUserToCloudSql } from '@/lib/cloudSqlClient';
 import { toast } from 'sonner';
 
 const AUTH_USER_CACHE_KEY = 'manus_auth_user_cache';
@@ -95,6 +96,10 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
               photoURL: currentUser.photoURL || '',
               createdAt: currentUser.metadata?.creationTime || new Date().toISOString()
             });
+            syncUserToCloudSql({
+              email: currentUser.email,
+              displayName: currentUser.displayName,
+            }).catch(() => {});
           } catch (e) {
             console.warn('[Firebase] Profile sync notice:', e);
           }

@@ -511,6 +511,33 @@ describe('AI Response Streaming and Loading State Regression Tests', () => {
     expect(thinkingAnimSource).not.toContain('setTimeout');
     expect(thinkingAnimSource).not.toContain('LatticeLoader');
     expect(thinkingAnimSource).not.toContain('animate-ping');
+    // ChatView must render visibleSlice messages directly inside data-virtuoso-scroller so messages never wait on ResizeObserver
+    expect(chatViewSource).toContain('data-virtuoso-scroller="true"');
+    expect(chatViewSource).toContain('visibleSlice.map((msg, idx) => renderMessageItem(startIdx + idx, msg))');
+  });
+
+  it('handles invalid API key (401/403) and API timeout gracefully with readable retryable error output', async () => {
+    const mockFetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'API key not valid. Please pass a valid API key.' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mockFetch as any;
+
+    try {
+      const response = createAutonomousStreamResponse([
+        { role: 'user', content: 'Hello' },
+      ]);
+      const text = await response.text();
+      expect(text).toContain('API key not valid');
+      expect(text).toContain('"finishReason":"error"');
+      expect(text).toContain('data: [DONE]');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
+
 

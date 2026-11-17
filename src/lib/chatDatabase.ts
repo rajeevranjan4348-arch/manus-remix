@@ -39,6 +39,11 @@ import {
   deleteConversationFromFirestore,
   saveMessageToFirestore
 } from './firestoreService';
+import {
+  saveConversationToCloudSql,
+  deleteConversationFromCloudSql,
+  saveMessageToCloudSql
+} from './cloudSqlClient';
 
 const DB_NAME = 'manus_permanent_chat_db';
 const DB_VERSION = 1;
@@ -287,6 +292,7 @@ export async function createConversation(data: {
 
   notifyDbUpdated(id);
   saveConversationToFirestore(conversation).catch(() => {});
+  saveConversationToCloudSql(conversation).catch(() => {});
   return conversation;
 }
 
@@ -344,6 +350,7 @@ export async function updateConversation(id: string, updates: Partial<StoredConv
 
   notifyDbUpdated(id);
   saveConversationToFirestore(updated).catch(() => {});
+  saveConversationToCloudSql(updated).catch(() => {});
   return updated;
 }
 
@@ -442,6 +449,7 @@ export async function deleteConversation(id: string): Promise<boolean> {
 
   notifyDbUpdated(id);
   deleteConversationFromFirestore(id).catch(() => {});
+  deleteConversationFromCloudSql(id).catch(() => {});
   return true;
 }
 
@@ -524,6 +532,7 @@ export async function saveMessage(data: {
 
   notifyDbUpdated(data.conversationId);
   saveMessageToFirestore(message).catch(() => {});
+  saveMessageToCloudSql(message).catch(() => {});
   return message;
 }
 
