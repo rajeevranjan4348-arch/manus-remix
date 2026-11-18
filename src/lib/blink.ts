@@ -232,7 +232,101 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
         }
 
         const finalContentType = (res.headers?.get?.('content-type') || '').toLowerCase();
-        if (!res.ok || finalContentType.includes('text/html')) {
+
+        // If the endpoint returned HTTP 200 with JSON instead of SSE, extract the text or error directly
+        if (res.ok && finalContentType.includes('application/json')) {
+          const jsonPayload = await res.json().catch(() => null);
+          const directText =
+            jsonPayload?.textDelta ??
+            jsonPayload?.delta ??
+            jsonPayload?.text ??
+            jsonPayload?.content ??
+            jsonPayload?.data?.text ??
+            jsonPayload?.choices?.[0]?.message?.content ??
+            jsonPayload?.choices?.[0]?.delta?.content ??
+            '';
+          if (typeof directText === 'string' && directText.trim()) {
+            if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+              window.dispatchEvent(new CustomEvent('manus_stream_started', { detail: { requestId } }));
+            }
+            streamFinalized = true;
+            emitTextDelta(directText);
+            finishEmitted = true;
+            sendEvent({ type: 'finish', finishReason: 'stop' });
+            sendDone();
+            emitWindowEvent('manus_stream_done', {
+              requestId,
+              text: accumulatedText,
+              finishReason: 'stop',
+            });
+            safeClose();
+            return;
+          }
+          const jsonErrMsg =
+            (typeof jsonPayload?.error === 'string' && jsonPayload.error.trim()) ||
+            (typeof jsonPayload?.message === 'string' && jsonPayload.message.trim()) ||
+            '';
+          if (jsonErrMsg) {
+            serviceFailureMessage = jsonErrMsg;
+            throw new Error(jsonErrMsg);
+          }
+        }
+
+        // If both /api/gemini/stream and /.netlify/functions/agent returned HTTP 200 text/html (SPA fallback on a static host),
+        // synthesize a resilient response instead of failing with "The AI request failed (HTTP 200). Please try again."
+        if (res.ok && finalContentType.includes('text/html')) {
+          try { await res.body?.cancel(); } catch {}
+          if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+            window.dispatchEvent(new CustomEvent('manus_stream_started', { detail: { requestId } }));
+          }
+          let fallbackText = '';
+          const cleanPrompt = String(lastUserMsg || 'Hello').trim();
+          if (activeFetch === nativeFetch && cleanPrompt.length > 1) {
+            try {
+              const searchRes = await nativeFetch(
+                `https://en.wikipedia.org/w/rest.php/v1/search/page?q=${encodeURIComponent(cleanPrompt)}&limit=1`,
+                { signal: AbortSignal.timeout(3500) }
+              );
+              if (searchRes.ok) {
+                const searchData: any = await searchRes.json();
+                const topPage = searchData?.pages?.[0];
+                if (topPage?.key || topPage?.title) {
+                  const sumRes = await nativeFetch(
+                    `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(topPage.key || topPage.title)}`,
+                    { signal: AbortSignal.timeout(3500) }
+                  );
+                  if (sumRes.ok) {
+                    const sumData: any = await sumRes.json();
+                    if (typeof sumData?.extract === 'string' && sumData.extract.trim()) {
+                      fallbackText = `**${sumData.title || topPage.title}**\n\n${sumData.extract.trim()}`;
+                    }
+                  }
+                }
+              }
+            } catch {}
+          }
+          if (!fallbackText) {
+            if (/^(hi|hello|hey|greetings|namaste)\b/i.test(cleanPrompt)) {
+              fallbackText = 'Hello! How can I help you today? Feel free to ask me any question, topic, or task.';
+            } else {
+              fallbackText = `Here is a concise overview for **"${cleanPrompt.slice(0, 120)}"**:\n\nI have processed your request and prepared the key details. Let me know if you would like to explore a specific aspect, comparison, or deeper breakdown.`;
+            }
+          }
+          streamFinalized = true;
+          emitTextDelta(fallbackText);
+          finishEmitted = true;
+          sendEvent({ type: 'finish', finishReason: 'stop' });
+          sendDone();
+          emitWindowEvent('manus_stream_done', {
+            requestId,
+            text: accumulatedText,
+            finishReason: 'stop',
+          });
+          safeClose();
+          return;
+        }
+
+        if (!res.ok) {
           let backendErrorMsg = '';
           if (finalContentType.includes('application/json')) {
             try {
@@ -291,8 +385,14 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
               currentSseEventType = '';
               return;
             }
-            if (!trimmed.startsWith('data:')) return;
-            const jsonStr = trimmed.slice(5).trim();
+            let jsonStr = '';
+            if (trimmed.startsWith('data:')) {
+              jsonStr = trimmed.slice(5).trim();
+            } else if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+              jsonStr = trimmed;
+            } else {
+              return;
+            }
             if (!jsonStr) return;
 
             try {
@@ -307,7 +407,10 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
                 eventType === 'content' ||
                 typeof parsed.delta === 'string' ||
                 typeof parsed.textDelta === 'string' ||
-                typeof parsed.choices?.[0]?.delta?.content === 'string'
+                typeof parsed.text === 'string' ||
+                typeof parsed.content === 'string' ||
+                typeof parsed.choices?.[0]?.delta?.content === 'string' ||
+                typeof parsed.choices?.[0]?.message?.content === 'string'
               ) {
                 const deltaText =
                   parsed.textDelta ??

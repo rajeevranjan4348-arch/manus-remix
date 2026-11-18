@@ -65,10 +65,7 @@ class StreamCircuitBreaker {
 const streamCircuitBreaker = new StreamCircuitBreaker();
 
 function geminiApiPlugin(): Plugin {
-  return {
-    name: 'gemini-api-plugin',
-    configureServer(server) {
-      server.middlewares.use(async (req, res, next) => {
+  const apiMiddleware = async (req: any, res: any, next: any) => {
         const url = req.url?.split('?')[0];
 
         // Server-Side Cloud SQL Relational Data Endpoints
@@ -78,7 +75,7 @@ function geminiApiPlugin(): Plugin {
         }
 
         // Server-Side Real-Time Data & RTIE Intelligence Endpoint
-        if (url === '/api/realtime' || url === '/api/realtime-data' || url === '/api/rtie/research') {
+        if (url === '/api/realtime' || url === '/api/realtime-data' || url === '/api/rtie/research' || url === '/.netlify/functions/realtime') {
           res.setHeader('Content-Type', 'application/json; charset=utf-8');
           res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
           const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'local';
@@ -302,7 +299,7 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
         }
 
         // Server-Side Visual Answer Engine Image Search Endpoint
-        if (url === '/api/visual-search' && req.method === 'POST') {
+        if ((url === '/api/visual-search' || url === '/.netlify/functions/visual-search') && req.method === 'POST') {
           res.setHeader('Content-Type', 'application/json; charset=utf-8');
           let bodyStr = '';
           req.on('data', chunk => { bodyStr += chunk; });
@@ -330,7 +327,7 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
         }
 
         // Server-Side Web Search Endpoint (mirrors netlify/functions/web-search.ts)
-        if ((url === '/api/web-search' || url === '/api/search') && req.method === 'POST') {
+        if ((url === '/api/web-search' || url === '/api/search' || url === '/.netlify/functions/web-search') && req.method === 'POST') {
           res.setHeader('Content-Type', 'application/json');
           let bodyStr = '';
           req.on('data', chunk => { bodyStr += chunk; });
@@ -558,7 +555,7 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
         }
 
         // Server-Side AI Image Generation Endpoint
-        if (req.method === 'POST' && url === '/api/image-generation') {
+        if (req.method === 'POST' && (url === '/api/image-generation' || url === '/.netlify/functions/image-generation')) {
           res.setHeader('Content-Type', 'application/json');
           let bodyStr = '';
           req.on('data', chunk => { bodyStr += chunk; });
@@ -713,7 +710,14 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
           return;
         }
 
-        if (req.method === 'POST' && (url === '/api/gemini/stream' || url === '/api/ai/stream' || url?.startsWith('/api/ai/'))) {
+        if (
+          req.method === 'POST' &&
+          (url === '/api/gemini/stream' ||
+            url === '/api/ai/stream' ||
+            url === '/api/agent' ||
+            url === '/.netlify/functions/agent' ||
+            url?.startsWith('/api/ai/'))
+        ) {
           let bodyStr = '';
           req.on('data', chunk => {
             bodyStr += chunk;
@@ -823,7 +827,15 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
         }
 
         next();
-      });
+  };
+
+  return {
+    name: 'gemini-api-plugin',
+    configureServer(server) {
+      server.middlewares.use(apiMiddleware);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(apiMiddleware);
     },
   };
 }

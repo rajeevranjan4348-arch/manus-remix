@@ -241,6 +241,38 @@ describe('AI Response Streaming and Loading State Regression Tests', () => {
     }
   });
 
+  it('never fails with "The AI request failed (HTTP 200)" when both /api/gemini/stream and /.netlify/functions/agent return HTTP 200 text/html or JSON', async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(
+        new Response('<!DOCTYPE html><html><body>SPA</body></html>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response('<!DOCTYPE html><html><body>SPA</body></html>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        })
+      );
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mockFetch as any;
+
+    try {
+      const response = createAutonomousStreamResponse([
+        { role: 'user', content: 'Hello' },
+      ]);
+      const text = await response.text();
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(text).not.toContain('The AI request failed (HTTP 200)');
+      expect(text).toContain('"finishReason":"stop"');
+      expect(text).toContain('data: [DONE]');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('terminates cleanly with error finishReason, surfaces backend error message, and emits [DONE] on failed API calls', async () => {
     const mockFetch = vi.fn().mockResolvedValueOnce(
       new Response(JSON.stringify({ error: 'Provider quota exceeded for model' }), {

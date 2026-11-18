@@ -1033,8 +1033,10 @@ export function ChatView({
   }>>(new Map());
 
   // Helper to render each message item in the virtualized list (memoized so typing in composer doesn't re-render messages)
-  const renderMessageItem = React.useCallback((index: number, msg: any, windowStartIndex = 0) => {
+  const renderMessageItem = React.useCallback((index: number, msg: any, explicitWindowStartIndex?: number) => {
     if (!msg) return null;
+    const maxWindow = Math.max(24, virtualizationBudget.maxRenderedMessagesWindow || 60);
+    const windowStartIndex = explicitWindowStartIndex ?? Math.max(0, displayMessages.length - maxWindow);
     const staggerDelayMs = getChatBubbleStaggerDelayMs(index, windowStartIndex);
     const staggerStyle = getChatMessageStaggerStyle(index, windowStartIndex);
 
@@ -1641,7 +1643,7 @@ export function ChatView({
             const maxWindow = Math.max(24, virtualizationBudget.maxRenderedMessagesWindow || 60);
             const startIdx = Math.max(0, displayMessages.length - maxWindow);
             const visibleSlice = displayMessages.slice(startIdx);
-            return visibleSlice.map((msg, idx) => renderMessageItem(startIdx + idx, msg, startIdx));
+            return visibleSlice.map((msg, idx) => renderMessageItem(startIdx + idx, msg));
           })()}
           {footerRenderRef.current()}
         </div>
