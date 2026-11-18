@@ -1694,6 +1694,35 @@ button[aria-label]:has(> svg:only-child),
   justify-content: center;
 }
 
+/* Mobile 44x44px (2.75rem) minimum accessibility touch hit-area standard for sidebar & chat composer controls */
+@media (max-width: 767px), (pointer: coarse) {
+  :root {
+    --mobile-touch-target: 2.75rem;
+  }
+
+  aside button,
+  aside [role="button"],
+  .manus-input-container button,
+  .manus-input-container [role="button"],
+  .manus-touch-target {
+    min-width: var(--mobile-touch-target);
+    min-height: var(--mobile-touch-target);
+  }
+
+  aside button:has(> svg:only-child),
+  aside button[aria-label]:has(> svg:only-child),
+  aside [role="button"]:has(> svg:only-child),
+  .manus-input-container button:has(> svg:only-child),
+  .manus-input-container button[aria-label]:has(> svg:only-child),
+  .manus-input-container [role="button"]:has(> svg:only-child),
+  button.manus-touch-target:has(> svg:only-child) {
+    width: var(--mobile-touch-target);
+    min-width: var(--mobile-touch-target);
+    height: var(--mobile-touch-target);
+    min-height: var(--mobile-touch-target);
+  }
+}
+
 /* Prevent oversized Lucide icons from disrupting normal text and control layouts. */
 svg.lucide {
   max-width: 1.25rem;

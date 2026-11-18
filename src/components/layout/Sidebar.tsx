@@ -469,7 +469,7 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
             <TooltipTrigger asChild>
               <button 
                 onClick={onToggle}
-                className="p-2 rounded-xl hover:bg-[#F2F2F2] dark:hover:bg-[#171717] transition-all duration-200 group relative mb-6 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 smooth-press"
+                className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-2 rounded-xl hover:bg-[#F2F2F2] dark:hover:bg-[#171717] transition-all duration-200 group relative mb-6 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 smooth-press flex items-center justify-center"
                 title="Open sidebar"
               >
                 <div className="group-hover:opacity-0 transition-opacity">
@@ -493,7 +493,7 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                   <button
                     onClick={() => item.action ? item.action() : setActiveTab(item.id)}
                     className={cn(
-                      "p-2.5 rounded-xl transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95",
+                      "manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-2.5 rounded-xl transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 flex items-center justify-center",
                       item.id === 'new'
                         ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] shadow-sm"
                         : activeTab === item.id && !item.action
@@ -525,7 +525,7 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                         setSelectedProjectView(proj);
                       }}
                       className={cn(
-                        "w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-2xs hover:scale-105",
+                        "manus-touch-target w-11 h-11 sm:w-9 sm:h-9 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 rounded-xl flex items-center justify-center transition-all cursor-pointer shadow-2xs hover:scale-105",
                         colorTheme.bg
                       )}
                     >
@@ -554,7 +554,7 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                     <button
                       onClick={() => navigate(`/task/${task.id}`)}
                       className={cn(
-                        "p-2.5 rounded-xl transition-all relative group cursor-pointer",
+                        "manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-2.5 rounded-xl transition-all relative group cursor-pointer flex items-center justify-center",
                         isActive
                           ? "bg-primary text-primary-foreground shadow-sm"
                           : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
@@ -585,7 +585,7 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
               <TooltipTrigger asChild>
                 <button
                   onClick={fbUser ? () => fbSignOut() : () => signInWithGoogle()}
-                  className="w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer bg-white/80 dark:bg-card border border-border/80 hover:border-foreground/30 shadow-xs"
+                  className="manus-touch-target w-11 h-11 sm:w-9 sm:h-9 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 rounded-xl flex items-center justify-center transition-all cursor-pointer bg-white/80 dark:bg-card border border-border/80 hover:border-foreground/30 shadow-xs"
                 >
                   {fbUser ? (
                     fbUser.photoURL ? (
@@ -629,8 +629,9 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
           <ManusLogo showBadge={true} />
           <button 
             onClick={onToggle}
-            className="p-2 text-[#777777] dark:text-[#AAAAAA] hover:text-[#000000] dark:hover:text-[#FFFFFF] hover:bg-[#F2F2F2] dark:hover:bg-[#171717] rounded-lg transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 smooth-press"
+            className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-2 text-[#777777] dark:text-[#AAAAAA] hover:text-[#000000] dark:hover:text-[#FFFFFF] hover:bg-[#F2F2F2] dark:hover:bg-[#171717] rounded-lg transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 smooth-press inline-flex items-center justify-center"
             title="Collapse sidebar"
+            aria-label="Collapse sidebar"
           >
             <PanelLeft size={21} strokeWidth={2.4} />
           </button>
@@ -676,19 +677,21 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
               onClick={() => setShowAllProjects((current) => !current)}
               aria-expanded={showAllProjects}
               aria-label={showAllProjects ? "Show less projects" : "Show all projects"}
-              className="flex items-center gap-2 text-left rounded-md text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              className="manus-touch-target min-h-[44px] sm:min-h-0 flex items-center gap-2 text-left rounded-md text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
             >
               <Folder size={20} strokeWidth={2.4} />
               <h3 className="text-sm font-semibold tracking-wide">Projects</h3>
               <ChevronRight size={16} strokeWidth={2.4} className={cn("transition-transform", showAllProjects && "rotate-90")} />
             </button>
             <button 
+              type="button"
               onClick={() => {
                 setProjectToEdit(null);
                 setIsProjectModalOpen(true);
               }}
-              className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent transition-all duration-200 cursor-pointer hover:scale-110 hover:shadow-2xs active:scale-95"
+              className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent transition-all duration-200 cursor-pointer hover:scale-110 hover:shadow-2xs active:scale-95 inline-flex items-center justify-center"
               title="Create new project"
+              aria-label="Create new project"
             >
               <Plus size={16} strokeWidth={2.4} />
             </button>
@@ -735,8 +738,11 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button
+                        type="button"
                         onClick={(e) => e.stopPropagation()}
-                        className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                        className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-md text-muted-foreground hover:text-foreground opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity cursor-pointer inline-flex items-center justify-center"
+                        title="Project options"
+                        aria-label="Project options"
                       >
                         <MoreHorizontal size={15} strokeWidth={2.4} />
                       </button>
@@ -815,20 +821,24 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
             <div className="flex items-center gap-1">
               {onOpenHistory && (
                 <button 
+                  type="button"
                   onClick={onOpenHistory}
-                  className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent transition-all duration-200 cursor-pointer hover:scale-110 hover:shadow-2xs active:scale-95"
+                  className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent transition-all duration-200 cursor-pointer hover:scale-110 hover:shadow-2xs active:scale-95 inline-flex items-center justify-center"
                   title="Open full history panel"
+                  aria-label="Open full history panel"
                 >
                   <HistoryIcon size={16} strokeWidth={2.4} />
                 </button>
               )}
               <button 
+                type="button"
                 onClick={() => setIsSearchOpen(!isSearchOpen)}
                 className={cn(
-                  "p-1 rounded-md transition-all duration-200 cursor-pointer hover:scale-110 hover:shadow-2xs active:scale-95",
+                  "manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-1 rounded-md transition-all duration-200 cursor-pointer hover:scale-110 hover:shadow-2xs active:scale-95 inline-flex items-center justify-center",
                   isSearchOpen ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent"
                 )}
                 title="Search task history"
+                aria-label="Search task history"
               >
                 <Search size={16} strokeWidth={2.4} />
               </button>
@@ -841,9 +851,11 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
               <div className="flex items-center justify-between px-2.5 py-1 rounded-xl bg-primary/10 border border-primary/20 text-xs font-medium text-primary">
                 <span className="truncate">Filtered: {activeProject.name}</span>
                 <button
+                  type="button"
                   onClick={() => setActiveProjectId(null)}
-                  className="p-0.5 rounded-full hover:bg-primary/20 text-primary cursor-pointer"
+                  className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 -m-2 sm:m-0 p-0.5 rounded-full hover:bg-primary/20 text-primary cursor-pointer inline-flex items-center justify-center"
                   title="Clear project filter"
+                  aria-label="Clear project filter"
                 >
                   <X size={14} strokeWidth={2.4} />
                 </button>
@@ -866,8 +878,11 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                 />
                 {searchQuery && (
                   <button 
+                    type="button"
                     onClick={() => setSearchQuery('')}
-                    className="p-0.5 hover:bg-slate-100 dark:hover:bg-white/10 rounded-full text-muted-foreground"
+                    className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 -m-2 sm:m-0 p-0.5 hover:bg-slate-100 dark:hover:bg-white/10 rounded-full text-muted-foreground inline-flex items-center justify-center"
+                    title="Clear search query"
+                    aria-label="Clear search query"
                   >
                     <X size={14} strokeWidth={2.4} />
                   </button>
@@ -931,14 +946,16 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <button
+                            type="button"
                             onClick={(e) => e.stopPropagation()}
                             className={cn(
-                              "absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md transition-all opacity-0 group-hover:opacity-100 cursor-pointer",
+                              "manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-md transition-all opacity-100 sm:opacity-0 sm:group-hover:opacity-100 cursor-pointer inline-flex items-center justify-center",
                               isActive
                                 ? "text-foreground hover:bg-slate-100 dark:hover:bg-white/10"
                                 : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
                             )}
                             title="Task options"
+                            aria-label="Task options"
                           >
                             <MoreHorizontal size={16} strokeWidth={2.4} />
                           </button>
@@ -1111,9 +1128,11 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => fbSignOut()}
-                className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors cursor-pointer shrink-0"
+                className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors cursor-pointer shrink-0 inline-flex items-center justify-center"
                 title="Sign out of Firebase"
+                aria-label="Sign out of Firebase"
               >
                 <LogOut size={15} />
               </button>

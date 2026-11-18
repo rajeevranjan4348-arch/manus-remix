@@ -228,7 +228,6 @@ export function useAgentTask() {
   const liveStreamTextRef = useRef<string>('');
   const messagesRef = useRef<any[]>([]);
   const persistentMessagesRef = useRef<any[]>([]);
-  const isSubmittingRef = useRef<boolean>(false);
   if (!isSubmittingRef.current || persistentMessages.length >= persistentMessagesRef.current.length) {
     persistentMessagesRef.current = persistentMessages;
   }

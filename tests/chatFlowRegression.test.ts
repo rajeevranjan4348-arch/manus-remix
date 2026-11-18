@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { getChatBubbleStaggerDelayMs, getChatMessageStaggerStyle } from '../src/components/agent/ChatView';
 
 describe('Chat Flow & Stream Processing Regression Tests', () => {
   it('1. Duplicate Rendering Prevention: Message deduplication returns single canonical list', () => {
@@ -149,7 +150,6 @@ describe('Chat Flow & Stream Processing Regression Tests', () => {
   it('8. Staggered Chat Bubble Transitions: Applies bounded index-based entrance delay in ChatView and index.css', async () => {
     const fs = await import('fs');
     const path = await import('path');
-    const { getChatBubbleStaggerDelayMs } = await import('../src/components/agent/ChatView');
 
     expect(getChatBubbleStaggerDelayMs(-1)).toBe(0);
     expect(getChatBubbleStaggerDelayMs(0)).toBe(0);
@@ -159,14 +159,24 @@ describe('Chat Flow & Stream Processing Regression Tests', () => {
     expect(getChatBubbleStaggerDelayMs(8)).toBe(360);
     // Caps at 8 steps (360ms) so long message histories never stall
     expect(getChatBubbleStaggerDelayMs(20)).toBe(360);
+    // Relative to windowStartIndex when rendering a windowed slice of history
+    expect(getChatBubbleStaggerDelayMs(10, 10)).toBe(0);
+    expect(getChatBubbleStaggerDelayMs(12, 10)).toBe(90);
+
+    expect(getChatMessageStaggerStyle(3)).toEqual({
+      animationDelay: '135ms',
+      '--chat-stagger-delay': '135ms',
+      '--manus-stagger-index': 3,
+    });
 
     const chatViewSource = fs.readFileSync(
       path.resolve(__dirname, '../src/components/agent/ChatView.tsx'),
       'utf-8'
     );
-    expect(chatViewSource).toContain('getChatBubbleStaggerDelayMs(index)');
-    expect(chatViewSource).toContain("'--chat-stagger-delay': `${staggerDelayMs}ms`");
+    expect(chatViewSource).toContain('getChatBubbleStaggerDelayMs(index, windowStartIndex)');
+    expect(chatViewSource).toContain('getChatMessageStaggerStyle(index, windowStartIndex)');
     expect(chatViewSource).toContain('data-stagger-index={index}');
+    expect(chatViewSource).toContain('data-stagger-delay-ms={staggerDelayMs}');
 
     const cssSource = fs.readFileSync(
       path.resolve(__dirname, '../src/index.css'),
@@ -174,5 +184,38 @@ describe('Chat Flow & Stream Processing Regression Tests', () => {
     );
     expect(cssSource).toContain('animation-delay: var(--chat-stagger-delay, 0ms);');
   });
-});
 
+  it('9. Mobile 44x44px Accessibility Touch Targets: Enforces minimum 44x44px hit areas for small buttons in Sidebar and Chat Composer', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+
+    const cssSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/index.css'),
+      'utf-8'
+    );
+    expect(cssSource).toContain('--mobile-touch-target: 2.75rem;');
+    expect(cssSource).toContain('.manus-input-container button');
+    expect(cssSource).toContain('aside button');
+
+    const sidebarSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/components/layout/Sidebar.tsx'),
+      'utf-8'
+    );
+    expect(sidebarSource).toContain('manus-touch-target');
+    expect(sidebarSource).toContain('min-w-[44px] min-h-[44px]');
+
+    const chatViewSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/components/agent/ChatView.tsx'),
+      'utf-8'
+    );
+    expect(chatViewSource).toContain('manus-touch-target');
+    expect(chatViewSource).toContain('w-11 h-11 sm:w-9 sm:h-9 min-w-[44px] min-h-[44px]');
+
+    const homeSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/pages/Home.tsx'),
+      'utf-8'
+    );
+    expect(homeSource).toContain('manus-touch-target');
+    expect(homeSource).toContain('w-11 h-11 sm:w-9 sm:h-9 min-w-[44px] min-h-[44px]');
+  });
+});

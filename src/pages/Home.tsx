@@ -651,7 +651,13 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                 {isExtracting ? (
                   <div className="w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
                 ) : (
-                  <button onClick={handleRemoveFile} className="p-0.5 hover:bg-manus-soft rounded-full transition-colors">
+                  <button
+                    type="button"
+                    onClick={handleRemoveFile}
+                    className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 -m-2 sm:m-0 p-0.5 hover:bg-manus-soft rounded-full transition-colors inline-flex items-center justify-center"
+                    title="Remove file"
+                    aria-label="Remove file"
+                  >
                     <X size={16} strokeWidth={2.4} />
                   </button>
                 )}
@@ -796,7 +802,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                   <button 
                     type="button"
                     disabled={isExtracting}
-                    className="group w-9 h-9 rounded-full border border-[#E0E0E0] dark:border-[#333333] bg-[#F2F2F2] dark:bg-[#171717] hover:bg-[#E0E0E0] dark:hover:bg-[#333333] transition-colors flex items-center justify-center text-[#000000] dark:text-[#FFFFFF] shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                    className="manus-touch-target group w-11 h-11 sm:w-9 sm:h-9 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 rounded-full border border-[#E0E0E0] dark:border-[#333333] bg-[#F2F2F2] dark:bg-[#171717] hover:bg-[#E0E0E0] dark:hover:bg-[#333333] transition-colors flex items-center justify-center text-[#000000] dark:text-[#FFFFFF] shadow-2xs cursor-pointer active:scale-95 shrink-0"
                     title="Add attachments or connectors"
                     aria-label="Add attachments or options"
                   >
@@ -829,8 +835,9 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                               e.stopPropagation();
                               removeConnectorTag(tagId);
                             }}
-                            className="p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full text-current/70 hover:text-current ml-0.5 shrink-0"
+                            className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 -m-2 sm:m-0 p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full text-current/70 hover:text-current ml-0.5 shrink-0 inline-flex items-center justify-center"
                             title="Remove connector"
+                            aria-label={`Remove ${displayName} connector`}
                           >
                             <X size={13} strokeWidth={2.4} />
                           </button>
@@ -846,6 +853,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                     <activeIntent.icon size={14} strokeWidth={2.4} className="shrink-0 text-current" />
                     <span className="shrink-0 truncate">{activeIntent.label}</span>
                     <button 
+                      type="button"
                       onClick={() => {
                         if (activeIntent.label === "Data analysis") {
                           setSelectedFormat(null);
@@ -857,7 +865,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                         setActiveIntent(null);
                         setPrompt('');
                       }} 
-                      className="p-0.5 hover:bg-white/15 dark:hover:bg-black/15 rounded-full transition-colors ml-0.5 shrink-0"
+                      className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 -m-2 sm:m-0 p-0.5 hover:bg-white/15 dark:hover:bg-black/15 rounded-full transition-colors ml-0.5 shrink-0 inline-flex items-center justify-center"
                       title="Clear intent"
                       aria-label="Clear intent"
                     >
@@ -871,8 +879,9 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                     <Brain size={14} strokeWidth={2.4} className="text-current animate-pulse shrink-0" />
                     <span className="shrink-0">Deep reasoning</span>
                     <button 
+                      type="button"
                       onClick={() => setIsThinkHarder(false)} 
-                      className="p-0.5 hover:bg-white/15 dark:hover:bg-black/15 rounded-full transition-colors ml-0.5 shrink-0"
+                      className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 -m-2 sm:m-0 p-0.5 hover:bg-white/15 dark:hover:bg-black/15 rounded-full transition-colors ml-0.5 shrink-0 inline-flex items-center justify-center"
                       title="Remove deep reasoning"
                       aria-label="Remove deep reasoning"
                     >
@@ -888,7 +897,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                   <button
                     type="button"
                     onClick={() => setIsExpanded(prev => !prev)}
-                    className="w-9 h-9 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer animate-in fade-in zoom-in-95 duration-150 shrink-0"
+                    className="manus-touch-target w-11 h-11 sm:w-9 sm:h-9 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 rounded-full hover:bg-slate-100 dark:hover:bg-accent transition-colors flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer animate-in fade-in zoom-in-95 duration-150 shrink-0"
                     title={isExpanded ? "Collapse typing area" : "Expand typing area"}
                     aria-label={isExpanded ? "Collapse typing area" : "Expand typing area"}
                   >
@@ -919,14 +928,14 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                       handleStart(finalPrompt);
                     }
                   }}
-                  className="w-9 h-9 rounded-full hover:bg-[#F2F2F2] dark:hover:bg-[#171717] transition-colors flex items-center justify-center text-[#000000] dark:text-[#FFFFFF] cursor-pointer shrink-0"
+                  className="manus-touch-target w-11 h-11 sm:w-9 sm:h-9 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 rounded-full hover:bg-[#F2F2F2] dark:hover:bg-[#171717] transition-colors flex items-center justify-center text-[#000000] dark:text-[#FFFFFF] cursor-pointer shrink-0"
                   size={18}
                 />
                 <button 
                   type="button"
                   onClick={handleStart}
                   className={cn(
-                    "group w-9 h-9 rounded-full flex items-center justify-center transition-all duration-150 cursor-pointer shadow-md shrink-0",
+                    "manus-touch-target group w-11 h-11 sm:w-9 sm:h-9 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 rounded-full flex items-center justify-center transition-all duration-150 cursor-pointer shadow-md shrink-0",
                     (prompt.trim() || uploadedFile || activeConnectorTags.length > 0)
                       ? "manus-send-btn-ready bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] hover:scale-105 active:scale-95 shadow-lg opacity-100"
                       : "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] opacity-90 hover:opacity-100"

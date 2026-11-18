@@ -48,6 +48,7 @@ body,
 @media (prefers-reduced-motion: no-preference) {
   :where([data-message], .chat-message, .message-bubble, .message-item) {
     animation: manus-message-enter var(--manus-motion-standard) var(--manus-motion-ease) both;
+    animation-delay: var(--chat-stagger-delay, 0ms);
     will-change: transform, opacity;
   }
 

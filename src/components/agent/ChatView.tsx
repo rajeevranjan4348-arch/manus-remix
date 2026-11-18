@@ -193,10 +193,24 @@ interface ChatViewProps {
 const CHAT_BUBBLE_STAGGER_STEP_MS = 45;
 const CHAT_BUBBLE_MAX_STAGGER_STEPS = 8;
 
-export function getChatBubbleStaggerDelayMs(index: number): number {
-  if (!Number.isFinite(index) || index <= 0) return 0;
-  const boundedIndex = Math.min(Math.floor(index), CHAT_BUBBLE_MAX_STAGGER_STEPS);
+export function getChatBubbleStaggerDelayMs(index: number, windowStartIndex = 0): number {
+  if (!Number.isFinite(index)) return 0;
+  const normalizedStart = Number.isFinite(windowStartIndex) ? Math.max(0, Math.floor(windowStartIndex)) : 0;
+  const relativeIndex = Math.max(0, Math.floor(index) - normalizedStart);
+  if (relativeIndex <= 0) return 0;
+  const boundedIndex = Math.min(relativeIndex, CHAT_BUBBLE_MAX_STAGGER_STEPS);
   return boundedIndex * CHAT_BUBBLE_STAGGER_STEP_MS;
+}
+
+export function getChatMessageStaggerStyle(index: number, windowStartIndex = 0): React.CSSProperties {
+  const staggerDelayMs = getChatBubbleStaggerDelayMs(index, windowStartIndex);
+  const normalizedStart = Number.isFinite(windowStartIndex) ? Math.max(0, Math.floor(windowStartIndex)) : 0;
+  const relativeIndex = Number.isFinite(index) ? Math.max(0, Math.floor(index) - normalizedStart) : 0;
+  return {
+    animationDelay: `${staggerDelayMs}ms`,
+    '--chat-stagger-delay': `${staggerDelayMs}ms`,
+    '--manus-stagger-index': relativeIndex,
+  } as React.CSSProperties;
 }
 
 export function shouldShowComposingIndicator({
@@ -1019,13 +1033,10 @@ export function ChatView({
   }>>(new Map());
 
   // Helper to render each message item in the virtualized list (memoized so typing in composer doesn't re-render messages)
-  const renderMessageItem = React.useCallback((index: number, msg: any) => {
+  const renderMessageItem = React.useCallback((index: number, msg: any, windowStartIndex = 0) => {
     if (!msg) return null;
-    const staggerDelayMs = getChatBubbleStaggerDelayMs(index);
-    const staggerStyle = {
-      animationDelay: `${staggerDelayMs}ms`,
-      '--chat-stagger-delay': `${staggerDelayMs}ms`,
-    } as React.CSSProperties;
+    const staggerDelayMs = getChatBubbleStaggerDelayMs(index, windowStartIndex);
+    const staggerStyle = getChatMessageStaggerStyle(index, windowStartIndex);
 
     if (msg.role === 'user') {
       const msgId = msg.id || String(index);
@@ -1036,7 +1047,9 @@ export function ChatView({
       return (
         <div
           key={msgId}
+          data-message="user"
           data-stagger-index={index}
+          data-stagger-delay-ms={staggerDelayMs}
           style={staggerStyle}
           className="flex justify-end my-2 chat-message-enter chat-message-user-enter group relative px-4 sm:px-20"
         >
@@ -1146,7 +1159,9 @@ export function ChatView({
         <div
           key={msg.id || index}
           data-testid={`ai-message-${msgKey}`}
+          data-message="assistant"
           data-stagger-index={index}
+          data-stagger-delay-ms={staggerDelayMs}
           style={staggerStyle}
           className="group/ai-message relative flex gap-4 max-w-3xl mx-auto my-3 chat-message-enter chat-message-assistant-enter px-4 sm:px-20"
         >
@@ -1626,7 +1641,7 @@ export function ChatView({
             const maxWindow = Math.max(24, virtualizationBudget.maxRenderedMessagesWindow || 60);
             const startIdx = Math.max(0, displayMessages.length - maxWindow);
             const visibleSlice = displayMessages.slice(startIdx);
-            return visibleSlice.map((msg, idx) => renderMessageItem(startIdx + idx, msg));
+            return visibleSlice.map((msg, idx) => renderMessageItem(startIdx + idx, msg, startIdx));
           })()}
           {footerRenderRef.current()}
         </div>
@@ -1660,7 +1675,13 @@ export function ChatView({
               <div className="manus-tag-pop inline-flex items-center gap-1.5 px-3 py-1 bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] rounded-full text-xs font-semibold shadow-md">
                 <Brain size={14} className="animate-pulse" />
                 <span>Deep reasoning</span>
-                <button onClick={() => setIsThinkHarder(false)} className="p-0.5 hover:bg-white/20 dark:hover:bg-black/20 rounded-full ml-1" title="Remove deep reasoning">
+                <button
+                  type="button"
+                  onClick={() => setIsThinkHarder(false)}
+                  className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 -m-2 sm:m-0 p-0.5 hover:bg-white/20 dark:hover:bg-black/20 rounded-full ml-1 inline-flex items-center justify-center"
+                  title="Remove deep reasoning"
+                  aria-label="Remove deep reasoning"
+                >
                   <X size={10} />
                 </button>
               </div>
@@ -1670,7 +1691,13 @@ export function ChatView({
                 <FileText size={13} className="text-primary" />
                 <span className="truncate max-w-[150px] font-semibold">{attachedFile.name}</span>
                 <span className="text-[10px] text-muted-foreground uppercase">({formatFileSize(attachedFile.size)})</span>
-                <button onClick={() => setAttachedFile(null)} className="p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full ml-1" title="Remove attachment">
+                <button
+                  type="button"
+                  onClick={() => setAttachedFile(null)}
+                  className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 -m-2 sm:m-0 p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full ml-1 inline-flex items-center justify-center"
+                  title="Remove attachment"
+                  aria-label="Remove attachment"
+                >
                   <X size={10} />
                 </button>
               </div>
@@ -1807,7 +1834,7 @@ export function ChatView({
               >
                 <button 
                   type="button"
-                  className="group w-9 h-9 rounded-full border border-[#E0E0E0] dark:border-[#333333] bg-[#F2F2F2] dark:bg-[#171717] hover:bg-[#E0E0E0] dark:hover:bg-[#333333] transition-colors flex items-center justify-center text-[#000000] dark:text-[#FFFFFF] shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                  className="manus-touch-target group w-11 h-11 sm:w-9 sm:h-9 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 rounded-full border border-[#E0E0E0] dark:border-[#333333] bg-[#F2F2F2] dark:bg-[#171717] hover:bg-[#E0E0E0] dark:hover:bg-[#333333] transition-colors flex items-center justify-center text-[#000000] dark:text-[#FFFFFF] shadow-2xs cursor-pointer active:scale-95 shrink-0"
                   title="Add attachments or options"
                   aria-label="Add attachments or options"
                 >
@@ -1841,8 +1868,9 @@ export function ChatView({
                             e.stopPropagation();
                             removeConnectorTag(tagId);
                           }}
-                          className="p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full text-current/70 hover:text-current ml-0.5 shrink-0"
+                          className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 -m-2 sm:m-0 p-0.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full text-current/70 hover:text-current ml-0.5 shrink-0 inline-flex items-center justify-center"
                           title="Remove connector"
+                          aria-label={`Remove ${displayName} connector`}
                         >
                           <X size={13} strokeWidth={2.4} />
                         </button>
@@ -1881,7 +1909,7 @@ export function ChatView({
                     setInterimSpeech('');
                   }
                 }}
-                className="w-9 h-9 rounded-full hover:bg-[#F2F2F2] dark:hover:bg-[#171717] transition-colors flex items-center justify-center text-[#000000] dark:text-[#FFFFFF] cursor-pointer shrink-0"
+                className="manus-touch-target w-11 h-11 sm:w-9 sm:h-9 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 rounded-full hover:bg-[#F2F2F2] dark:hover:bg-[#171717] transition-colors flex items-center justify-center text-[#000000] dark:text-[#FFFFFF] cursor-pointer shrink-0"
                 size={18}
               />
               <button 
@@ -1898,7 +1926,7 @@ export function ChatView({
                 }}
                 disabled={!isAssistantWorking && (!input.trim() && !attachedFile && activeConnectorTags.length === 0)}
                 className={cn(
-                  "group w-9 h-9 rounded-full flex items-center justify-center transition-all duration-150 shadow-2xs shrink-0 cursor-pointer",
+                  "manus-touch-target group w-11 h-11 sm:w-9 sm:h-9 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 rounded-full flex items-center justify-center transition-all duration-150 shadow-2xs shrink-0 cursor-pointer",
                   isAssistantWorking
                     ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] hover:scale-105 active:scale-95 shadow-md"
                     : (input.trim() || attachedFile || activeConnectorTags.length > 0)
