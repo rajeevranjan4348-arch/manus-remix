@@ -220,7 +220,7 @@ export const WorkModeThinkingAnimation = React.memo(function WorkModeThinkingAni
         <div className="flex items-center gap-2 min-w-0 flex-1">
           <div
             className={cn(
-              "relative flex items-center justify-center w-6 h-6 rounded-full shrink-0",
+              "relative flex items-center justify-center w-6 h-6 rounded-full shrink-0 manus-thinking-orbit",
               deepMode
                 ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000]"
                 : "bg-[#F2F2F2] text-[#000000] dark:bg-[#111111] dark:text-[#FFFFFF]"
@@ -275,7 +275,7 @@ export const WorkModeThinkingAnimation = React.memo(function WorkModeThinkingAni
                 data-testid={`thinking-stage-row-${idx}`}
                 data-stage-status={stage.status}
                 className={cn(
-                  "flex items-start gap-2 px-2.5 py-1.5 rounded-xl transition-colors duration-150 min-w-0",
+                  "flex items-start gap-2 px-2.5 py-1.5 rounded-xl transition-colors duration-150 min-w-0 manus-thinking-stage-row",
                   isRunning
                     ? "bg-[#FAFAFA] dark:bg-[#111111] border border-[#E0E0E0] dark:border-[#333333]"
                     : "opacity-85"
