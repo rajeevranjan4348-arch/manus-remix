@@ -343,6 +343,12 @@ export function filterTasks(
     }).toLowerCase();
     const fullDate = created.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).toLowerCase();
     const isoDate = created.toISOString().toLowerCase();
+    const relTime = getRelativeTime(task.created_at).toLowerCase();
+    const relativeDayKeyword = createdTime >= todayStart
+      ? 'today'
+      : (createdTime >= yesterdayStart && createdTime < todayStart)
+        ? 'yesterday'
+        : '';
 
     return (
       title.includes(q) ||
@@ -354,7 +360,9 @@ export function filterTasks(
       tagsStr.includes(q) ||
       dateFormatted.includes(q) ||
       fullDate.includes(q) ||
-      isoDate.includes(q)
+      isoDate.includes(q) ||
+      relTime.includes(q) ||
+      (Boolean(relativeDayKeyword) && relativeDayKeyword.includes(q))
     );
   });
 }
@@ -1180,9 +1188,42 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
             })}
           </div>
 
-          {/* Date Filter */}
+          {/* Prominent Search Bar + Compact Date Filter Icon Button */}
           <div className="space-y-2">
-            <div className="flex items-center justify-end">
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1 min-w-0">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#777777] pointer-events-none" />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  data-testid="history-search-input"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape' && searchQuery) {
+                      e.stopPropagation();
+                      setSearchQuery('');
+                    }
+                  }}
+                  placeholder="Search past tasks by keyword or date..."
+                  aria-label="Search past tasks by title, content, or date"
+                  className="w-full h-9 pl-9 pr-8 bg-[#FAFAFA] dark:bg-[#111111] border border-[#E0E0E0] dark:border-[#262626] rounded-xl text-xs text-[#000000] dark:text-[#FFFFFF] placeholder:text-[#777777] focus:outline-none focus:border-[#000000] dark:focus:border-[#FFFFFF] transition-colors"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    data-size="icon"
+                    data-testid="history-search-clear"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full text-[#777777] hover:text-[#000000] dark:hover:text-[#FFFFFF] cursor-pointer"
+                    title="Clear search query"
+                    aria-label="Clear search query"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+
               <button
                 type="button"
                 data-size="icon"

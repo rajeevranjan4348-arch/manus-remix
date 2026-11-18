@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { filterTasks, getContentSnippet } from '../src/components/history/HistoryPanel';
 
 export interface TaskHistoryItem {
   id: string;
@@ -149,9 +150,7 @@ describe('HistoryPanel Search & Date Filtering', () => {
     expect(results.length).toBe(2); // task-1 and task-3
   });
 
-  it('filters tasks by full-text content using exported filterTasks', async () => {
-    const { filterTasks, getContentSnippet } = await import('../src/components/history/HistoryPanel');
-
+  it('filters tasks by full-text content and date keywords using exported filterTasks', () => {
     const tasksWithContent = [
       {
         id: 'task-a',
@@ -166,7 +165,7 @@ describe('HistoryPanel Search & Date Filtering', () => {
         title: 'UI Design Review',
         prompt: 'Review colors and layout',
         content: 'Tailwind CSS classes with glassmorphism navbar and dark mode toggle',
-        created_at: '2026-10-14T11:00:00Z',
+        created_at: '2026-10-13T11:00:00Z',
         mode: 'chat'
       }
     ];
@@ -189,6 +188,14 @@ describe('HistoryPanel Search & Date Filtering', () => {
     const glassmorphismResults = filterTasks(tasksWithContent, 'glassmorphism', 'all', undefined, undefined, simulatedNow);
     expect(glassmorphismResults.length).toBe(1);
     expect(glassmorphismResults[0].id).toBe('task-b');
+
+    // Search by relative date keywords ("today" / "yesterday") and formatted date
+    const todaySearch = filterTasks(tasksWithContent, 'today', 'all', undefined, undefined, simulatedNow);
+    expect(todaySearch.map(t => t.id)).toEqual(['task-a']);
+    const yesterdaySearch = filterTasks(tasksWithContent, 'yesterday', 'all', undefined, undefined, simulatedNow);
+    expect(yesterdaySearch.map(t => t.id)).toEqual(['task-b']);
+    const formattedDateSearch = filterTasks(tasksWithContent, 'Oct 14', 'all', undefined, undefined, simulatedNow);
+    expect(formattedDateSearch.map(t => t.id)).toEqual(['task-a']);
   });
 
   it('implements a single primary vertical scrolling container, collapsible Tag Distribution defaulting to compact view, and pure monochrome styling', async () => {
@@ -223,7 +230,12 @@ describe('HistoryPanel Search & Date Filtering', () => {
     // 4. Pure Black & White Monochrome palette (no colorful emerald/purple/amber/indigo/cyan/rose classes)
     expect(source).not.toMatch(/emerald-|purple-|amber-|indigo-|cyan-|rose-|red-/);
 
-    // 5. All existing actions preserved
+    // 5. Search bar input and clear button alongside date filter
+    expect(source).toContain('data-testid="history-search-input"');
+    expect(source).toContain('placeholder="Search past tasks by keyword or date..."');
+    expect(source).toContain('data-testid="history-search-clear"');
+
+    // 6. All existing actions preserved
     expect(source).toContain('Summarize All');
     expect(source).toContain('Select');
     expect(source).toContain('Backup');
