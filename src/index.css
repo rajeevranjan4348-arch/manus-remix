@@ -1873,16 +1873,6 @@ select,
    MANUS MOTION LAYER — subtle UI transitions + lightweight thinking feedback
    ============================================================================ */
 
-/* Small entrance motion: opacity/transform only, so it stays GPU-friendly. */
-.manus-transition-enter {
-  animation: manus-view-enter 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-@keyframes manus-view-enter {
-  from { opacity: 0; transform: translate3d(0, 7px, 0); }
-  to { opacity: 1; transform: translate3d(0, 0, 0); }
-}
-
 /* Active thinking icon: restrained orbit ring, no blur or large repaint. */
 .manus-thinking-orbit::after {
   content: "";
@@ -1904,7 +1894,7 @@ select,
   to { transform: rotate(360deg); }
 }
 
-/* Active stage receives a quiet breathing highlight and a three-bar activity pulse. */
+/* Active stage receives a quiet breathing highlight and a soft pulse ring. */
 .manus-thinking-stage-row[data-stage-status="running"] {
   animation: manus-thinking-row 2.2s ease-in-out infinite;
 }
@@ -1931,17 +1921,6 @@ select,
 @keyframes manus-thinking-pulse {
   0% { transform: scale(0.85); opacity: 0.38; }
   100% { transform: scale(1.55); opacity: 0; }
-}
-
-/* Consistent, quick micro-interactions for clickable controls and cards. */
-button, [role="button"] {
-  transition-property: transform, opacity, background-color, border-color, box-shadow;
-  transition-duration: 160ms;
-  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-button:active, [role="button"]:active {
-  transform: scale(0.985);
 }
 
 /* Keep essential thinking feedback alive in low-power mode; disable only decoration. */
