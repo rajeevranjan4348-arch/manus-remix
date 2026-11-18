@@ -12,6 +12,62 @@
     <meta property="og:title" content="Manus AI Agent Clone" />
     <meta property="og:description" content="Autonomous AI agent workspace with multi-step reasoning, research, data analysis, and live preview." />
     <script>
+      // Defensive fallback for localStorage & sessionStorage in restricted cross-origin iframes
+      (function () {
+        function createMemoryStorage() {
+          var store = Object.create(null);
+          return {
+            getItem: function (key) {
+              return Object.prototype.hasOwnProperty.call(store, key) ? store[key] : null;
+            },
+            setItem: function (key, value) {
+              store[String(key)] = String(value);
+            },
+            removeItem: function (key) {
+              delete store[key];
+            },
+            clear: function () {
+              store = Object.create(null);
+            },
+            key: function (index) {
+              var keys = Object.keys(store);
+              return index >= 0 && index < keys.length ? keys[index] : null;
+            },
+            get length() {
+              return Object.keys(store).length;
+            }
+          };
+        }
+        try {
+          var testKey = '__manus_storage_test__';
+          window.localStorage.setItem(testKey, '1');
+          window.localStorage.removeItem(testKey);
+        } catch (e) {
+          try {
+            var memLocal = createMemoryStorage();
+            Object.defineProperty(window, 'localStorage', {
+              get: function () { return memLocal; },
+              configurable: true,
+              enumerable: true
+            });
+          } catch (_) {}
+        }
+        try {
+          var testSessionKey = '__manus_session_test__';
+          window.sessionStorage.setItem(testSessionKey, '1');
+          window.sessionStorage.removeItem(testSessionKey);
+        } catch (e) {
+          try {
+            var memSession = createMemoryStorage();
+            Object.defineProperty(window, 'sessionStorage', {
+              get: function () { return memSession; },
+              configurable: true,
+              enumerable: true
+            });
+          } catch (_) {}
+        }
+      })();
+
       // Defensive fallback to ensure window.fetch can be modified without getter-only errors
       try {
         const _origFetch = window.fetch ? window.fetch.bind(window) : undefined;

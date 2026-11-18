@@ -21,6 +21,10 @@ describe('Global Mobile Responsiveness & UI Overflow Fixes', () => {
       const gpuRuleMatch = indexCss.match(/\.gpu-accelerated\s*\{([\s\S]*?)\}/);
       expect(gpuRuleMatch).toBeTruthy();
       expect(gpuRuleMatch![1]).not.toContain('transform: translate3d');
+
+      const ultraLiteGpuMatch = indexCss.match(/\[data-perf-mode="ultra-lite"\]\s*\.gpu-accelerated\s*\{([\s\S]*?)\}/);
+      expect(ultraLiteGpuMatch).toBeTruthy();
+      expect(ultraLiteGpuMatch![1]).not.toContain('transform: none');
     });
 
     it('enforces global box-sizing: border-box, 100dvh, and overflow-x protection', () => {
@@ -37,15 +41,19 @@ describe('Global Mobile Responsiveness & UI Overflow Fixes', () => {
     });
   });
 
-  describe('Shared UI Primitives viewport clamping', () => {
-    it('clamps DialogContent and AlertDialogContent to viewport width and 100dvh height on mobile', () => {
+  describe('Shared UI Primitives viewport clamping & transform-independent centering', () => {
+    it('clamps DialogContent and AlertDialogContent to viewport width and 100dvh height and centers via fixed inset-0 flex wrapper', () => {
       const dialogTsx = readWorkspaceFile('src/components/ui/dialog.tsx');
       const alertDialogTsx = readWorkspaceFile('src/components/ui/alert-dialog.tsx');
 
+      expect(dialogTsx).toContain('fixed inset-0 z-50 flex items-center justify-center');
+      expect(dialogTsx).not.toContain('left-[50%]');
       expect(dialogTsx).toContain('w-[calc(100vw-1rem)]');
       expect(dialogTsx).toContain('max-w-[calc(100vw-1rem)]');
       expect(dialogTsx).toContain('max-h-[calc(100dvh-1rem)]');
 
+      expect(alertDialogTsx).toContain('fixed inset-0 z-50 flex items-center justify-center');
+      expect(alertDialogTsx).not.toContain('left-[50%]');
       expect(alertDialogTsx).toContain('w-[calc(100vw-1rem)]');
       expect(alertDialogTsx).toContain('max-w-[calc(100vw-1rem)]');
       expect(alertDialogTsx).toContain('max-h-[calc(100dvh-1rem)]');
@@ -74,13 +82,17 @@ describe('Global Mobile Responsiveness & UI Overflow Fixes', () => {
   });
 
   describe('Dashboards, Modals, Popups & D3 Charts mobile responsiveness', () => {
-    it('ensures TagAnalyticsModal and D3 charts resize dynamically and fit within mobile viewports', () => {
+    it('ensures TagAnalyticsModal and D3 charts resize dynamically and fit within mobile viewports without tailwind-merge max-w conflicts', () => {
       const tagModal = readWorkspaceFile('src/components/analytics/TagAnalyticsModal.tsx');
       const timelineChart = readWorkspaceFile('src/components/analytics/D3TagTimelineChart.tsx');
       const barChart = readWorkspaceFile('src/components/analytics/D3TagBarChart.tsx');
 
       expect(tagModal).toContain('w-[calc(100vw-1rem)]');
+      expect(tagModal).toContain('max-w-[calc(100vw-1rem)]');
+      expect(tagModal).toContain('sm:max-w-4xl');
       expect(tagModal).toContain('max-h-[calc(100dvh-1rem)]');
+      expect(tagModal).toContain('grid-cols-5');
+      expect(tagModal).toContain('grid-cols-2');
       expect(timelineChart).toContain('ResizeObserver');
       expect(barChart).toContain('ResizeObserver');
     });
@@ -107,16 +119,24 @@ describe('Global Mobile Responsiveness & UI Overflow Fixes', () => {
       expect(getSafeLocalPointerX({ clientX: NaN, clientY: undefined }, mockTarget, 400)).toBeNull();
     });
 
-    it('ensures SettingsModal, ConnectorsStorePanel, ProjectModals, and WorkspaceMentionPicker fit mobile screens', () => {
+    it('ensures SettingsModal, ConnectorsStorePanel, ConnectorConfigModal, and WorkspaceMentionPicker fit mobile screens', () => {
       const settingsModal = readWorkspaceFile('src/components/settings/SettingsModal.tsx');
       const connectorsPanel = readWorkspaceFile('src/components/connectors/ConnectorsStorePanel.tsx');
+      const connectorConfigModal = readWorkspaceFile('src/components/connectors/ConnectorConfigModal.tsx');
       const mentionPicker = readWorkspaceFile('src/components/chat/WorkspaceMentionPicker.tsx');
       const driveExplorer = readWorkspaceFile('src/components/workspace/GoogleDriveFileExplorer.tsx');
 
       expect(settingsModal).toContain('max-h-[calc(100dvh-1rem)]');
       expect(connectorsPanel).toContain('w-[calc(100vw-1rem)]');
+      expect(connectorsPanel).toContain('max-w-[calc(100vw-1rem)]');
+      expect(connectorsPanel).toContain('sm:max-w-2xl');
+      expect(connectorsPanel).toContain('grid-cols-3');
+      expect(connectorConfigModal).toContain('max-w-[calc(100vw-1rem)]');
+      expect(connectorConfigModal).toContain('sm:max-w-xl');
       expect(mentionPicker).toContain('w-[calc(100vw-2rem)]');
       expect(driveExplorer).toContain('w-[calc(100vw-1rem)]');
+      expect(driveExplorer).toContain('max-w-[calc(100vw-1rem)]');
+      expect(driveExplorer).toContain('sm:max-w-4xl');
     });
   });
 });

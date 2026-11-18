@@ -41,6 +41,8 @@ import { ConversationActionBar } from './ConversationActionBar';
 import { VoiceInputButton, formatSpeechAutoFill } from '../voice/VoiceInputButton';
 import { VoiceTranscriptionIndicator } from '../voice/VoiceTranscriptionIndicator';
 import { SourceCitations, parseSourcesFromMarkdown, resolveMessageSourcesAndQueries } from './SourceCitations';
+import { VisualAnswerGallery } from './VisualAnswerGallery';
+import { detectVisualSubjectQuery } from '@/lib/visualAnswerEngine';
 import { WeatherWidgetCard } from './WeatherWidgetCard';
 import { ToolApprovalCard } from './ToolApprovalCard';
 import { extractWeatherQuery, fetchWeatherByCity, WeatherData } from '@/lib/weatherService';
@@ -186,6 +188,15 @@ interface ChatViewProps {
   onStop?: () => void;
   onReorderSteps?: (steps: Step[]) => void;
   isLoading: boolean;
+}
+
+const CHAT_BUBBLE_STAGGER_STEP_MS = 45;
+const CHAT_BUBBLE_MAX_STAGGER_STEPS = 8;
+
+export function getChatBubbleStaggerDelayMs(index: number): number {
+  if (!Number.isFinite(index) || index <= 0) return 0;
+  const boundedIndex = Math.min(Math.floor(index), CHAT_BUBBLE_MAX_STAGGER_STEPS);
+  return boundedIndex * CHAT_BUBBLE_STAGGER_STEP_MS;
 }
 
 export function shouldShowComposingIndicator({
@@ -1010,6 +1021,12 @@ export function ChatView({
   // Helper to render each message item in the virtualized list (memoized so typing in composer doesn't re-render messages)
   const renderMessageItem = React.useCallback((index: number, msg: any) => {
     if (!msg) return null;
+    const staggerDelayMs = getChatBubbleStaggerDelayMs(index);
+    const staggerStyle = {
+      animationDelay: `${staggerDelayMs}ms`,
+      '--chat-stagger-delay': `${staggerDelayMs}ms`,
+    } as React.CSSProperties;
+
     if (msg.role === 'user') {
       const msgId = msg.id || String(index);
       const isEditing = editingMessageId === msgId;
@@ -1017,7 +1034,12 @@ export function ChatView({
       const attachedImageUrl = extractUserImageAttachment(msg.content);
 
       return (
-        <div key={msgId} className="flex justify-end my-2 chat-message-enter chat-message-user-enter group relative px-4 sm:px-20">
+        <div
+          key={msgId}
+          data-stagger-index={index}
+          style={staggerStyle}
+          className="flex justify-end my-2 chat-message-enter chat-message-user-enter group relative px-4 sm:px-20"
+        >
           {isEditing ? (
             <div className="bg-card border border-border p-3 rounded-2xl max-w-[90%] sm:max-w-[80%] shadow-md w-full space-y-2">
               <textarea
@@ -1113,11 +1135,19 @@ export function ChatView({
 
       const prevUserMsg = displayMessages.slice(0, index).reverse().find((m: any) => m?.role === 'user');
       const prevUserPromptText = prevUserMsg ? cleanUserMessage(prevUserMsg.content) : cleanUserMessage(prompt);
+      const priorUserMessages = displayMessages
+        .slice(0, index)
+        .filter((m: any) => m?.role === 'user' && m !== prevUserMsg);
+      const previousTurnSubjects = priorUserMessages.flatMap((m: any) =>
+        detectVisualSubjectQuery(cleanUserMessage(m.content || '')).subjects
+      );
 
       return (
         <div
           key={msg.id || index}
           data-testid={`ai-message-${msgKey}`}
+          data-stagger-index={index}
+          style={staggerStyle}
           className="group/ai-message relative flex gap-4 max-w-3xl mx-auto my-3 chat-message-enter chat-message-assistant-enter px-4 sm:px-20"
         >
           <div className="flex-1 space-y-3 min-w-0">
@@ -1126,14 +1156,21 @@ export function ChatView({
             </div>
 
             {cleanedContent ? (
-              <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
-                <MarkdownRenderer 
-                  content={parsedSources.cleanedContent} 
-                  animateTypewriter={shouldAnimate}
-                  onTypewriterComplete={() => handleTypewriterComplete(msgKey)}
-                  onTypewriterTick={() => {}}
+              <>
+                <VisualAnswerGallery
+                  prompt={prevUserPromptText}
+                  assistantContent={parsedSources.cleanedContent}
+                  previousTurnSubjects={previousTurnSubjects}
                 />
-              </div>
+                <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
+                  <MarkdownRenderer 
+                    content={parsedSources.cleanedContent} 
+                    animateTypewriter={shouldAnimate}
+                    onTypewriterComplete={() => handleTypewriterComplete(msgKey)}
+                    onTypewriterTick={() => {}}
+                  />
+                </div>
+              </>
             ) : null}
 
             {/* Google Calendar Tool Card Detection */}

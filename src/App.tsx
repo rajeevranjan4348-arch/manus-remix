@@ -395,19 +395,24 @@ function AppContent() {
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <FirebaseProvider>
-        <BlinkProvider 
-          projectId={PROJECT_ID} 
-          publishableKey={PUBLISHABLE_KEY}
-        >
-          <BlinkAuthProvider>
-            <BrowserRouter>
-              <AppContent />
-            </BrowserRouter>
-          </BlinkAuthProvider>
-        </BlinkProvider>
-      </FirebaseProvider>
-    </ThemeProvider>
+    <ErrorBoundary
+      title="Application Error"
+      description="Manus encountered an unexpected startup error. Click below to reload the workspace."
+    >
+      <ThemeProvider>
+        <FirebaseProvider>
+          <BlinkProvider 
+            projectId={PROJECT_ID} 
+            publishableKey={PUBLISHABLE_KEY}
+          >
+            <BlinkAuthProvider>
+              <BrowserRouter>
+                <AppContent />
+              </BrowserRouter>
+            </BlinkAuthProvider>
+          </BlinkProvider>
+        </FirebaseProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }

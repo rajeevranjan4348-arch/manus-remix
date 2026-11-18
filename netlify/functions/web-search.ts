@@ -5,6 +5,7 @@
  */
 import { GoogleGenAI } from '@google/genai';
 import { fetchLiveNewsAndFacts } from '../../server/realtimeDataService';
+import { searchVerifiedEntityImages } from '../../server/visualSearchService';
 
 type SearchResult = {
   title: string;
@@ -41,6 +42,32 @@ export default async (req: Request) => {
   } catch {
     return json({ error: 'Request body must be valid JSON.' }, 400);
   }
+
+  // Handle Visual Answer Engine image lookup requests (/api/visual-search)
+  const reqUrl = new URL(req.url, 'https://manus.local');
+  if (
+    reqUrl.pathname.endsWith('/visual-search') ||
+    body?.mode === 'images' ||
+    Array.isArray(body?.queries)
+  ) {
+    try {
+      const queries = Array.isArray(body?.queries)
+        ? body.queries.map((q: any) => String(q || '').trim()).filter(Boolean)
+        : typeof body?.query === 'string' && body.query.trim()
+          ? [body.query.trim()]
+          : [];
+      const maxResults = Math.min(4, Math.max(2, Number(body?.maxResults) || 4));
+      const isComparison = Boolean(body?.isComparison);
+      if (queries.length === 0) {
+        return json({ ok: true, images: [] });
+      }
+      const images = await searchVerifiedEntityImages(queries, maxResults, isComparison);
+      return json({ ok: true, images });
+    } catch (err: any) {
+      return json({ ok: false, images: [], error: err?.message || 'Visual search failed' });
+    }
+  }
+
   const query = typeof body?.query === 'string' ? body.query.trim() : '';
   if (!query || query.length > 1000) {
     return json({ error: 'Provide a query between 1 and 1000 characters.' }, 400);

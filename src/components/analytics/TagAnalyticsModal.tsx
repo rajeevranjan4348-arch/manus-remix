@@ -152,29 +152,29 @@ export function TagAnalyticsModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-4xl w-[calc(100vw-1rem)] sm:w-[95vw] p-0 flex flex-col max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] bg-background border-border shadow-2xl overflow-hidden rounded-2xl sm:rounded-3xl z-50">
+      <DialogContent className="w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:w-[95vw] sm:max-w-4xl min-w-0 box-border p-0 flex flex-col max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] bg-background border-border shadow-2xl overflow-hidden rounded-2xl sm:rounded-3xl z-50">
         {/* Modal Header */}
-        <div className="p-3.5 sm:p-5 pb-3 sm:pb-4 border-b border-border bg-manus-soft dark:bg-card/40 flex flex-col gap-2.5 sm:gap-3 shrink-0 min-w-0">
-          <div className="flex items-start sm:items-center justify-between flex-wrap gap-2.5 pr-7 sm:pr-8 min-w-0">
-            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+        <div className="p-3 sm:p-5 pb-2.5 sm:pb-4 border-b border-border bg-manus-soft dark:bg-card/40 flex flex-col gap-2.5 sm:gap-3 shrink-0 min-w-0 max-w-full overflow-hidden">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 min-w-0 max-w-full">
+            <div className="flex items-start sm:items-center gap-2.5 sm:gap-3 pr-7 sm:pr-8 min-w-0 flex-1">
               <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shadow-xs shrink-0">
                 <BarChart3 size={20} />
               </div>
-              <div className="min-w-0">
-                <DialogTitle className="text-base sm:text-xl font-extrabold text-foreground tracking-tight flex items-center gap-2 flex-wrap">
-                  <span className="truncate">Productivity & Tag Analytics</span>
+              <div className="min-w-0 flex-1">
+                <DialogTitle className="text-sm sm:text-xl font-extrabold text-foreground tracking-tight flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
+                  <span className="truncate max-w-full">Productivity & Tag Analytics</span>
                   <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 shrink-0">
                     D3.js
                   </span>
                 </DialogTitle>
-                <DialogDescription className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                <DialogDescription className="text-[11px] sm:text-xs text-muted-foreground mt-0.5 line-clamp-2">
                   Visualize category distribution and activity trends over time
                 </DialogDescription>
               </div>
             </div>
 
             {/* Time Range Selector */}
-            <div className="flex items-center gap-1 bg-white dark:bg-card border border-border p-1 rounded-2xl shadow-2xs overflow-x-auto max-w-full no-scrollbar">
+            <div className="grid grid-cols-5 sm:flex items-center gap-1 bg-white dark:bg-card border border-border p-1 rounded-2xl shadow-2xs w-full sm:w-auto max-w-full min-w-0">
               {[
                 { id: '7d', label: '7 Days' },
                 { id: '30d', label: '30 Days' },
@@ -187,7 +187,7 @@ export function TagAnalyticsModal({
                   type="button"
                   onClick={() => setTimeRange(r.id as TimeRangeKey)}
                   className={cn(
-                    'px-2.5 sm:px-3 py-1 rounded-xl text-[11px] sm:text-xs font-semibold transition-all cursor-pointer shrink-0 whitespace-nowrap',
+                    'px-1.5 sm:px-3 py-1 rounded-xl text-[10px] sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap text-center justify-center min-w-0 truncate',
                     timeRange === r.id
                       ? 'bg-primary text-primary-foreground shadow-2xs font-bold'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
@@ -200,9 +200,9 @@ export function TagAnalyticsModal({
           </div>
 
           {/* Action Bar (Chart Mode + Export) */}
-          <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-border/40 flex-wrap min-w-0">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1.5 border-t border-border/40 min-w-0 max-w-full">
             {/* Chart Mode Toggle */}
-            <div className="flex items-center gap-1 text-xs flex-wrap min-w-0">
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 sm:gap-1 text-xs w-full sm:w-auto min-w-0">
               <span className="text-[11px] font-semibold text-muted-foreground mr-1 hidden sm:inline">
                 View:
               </span>
@@ -219,44 +219,45 @@ export function TagAnalyticsModal({
                     type="button"
                     onClick={() => setChartMode(m.id as any)}
                     className={cn(
-                      'flex items-center gap-1.5 px-2.5 py-1 rounded-xl font-medium transition-all cursor-pointer border text-[11px] shrink-0',
+                      'flex items-center justify-center sm:justify-start gap-1.5 px-2 sm:px-2.5 py-1 rounded-xl font-medium transition-all cursor-pointer border text-[11px] min-w-0 w-full sm:w-auto',
                       chartMode === m.id
                         ? 'bg-primary text-primary-foreground border-primary font-bold shadow-2xs'
                         : 'bg-white dark:bg-card border-border/60 text-muted-foreground hover:text-foreground'
                     )}
                   >
-                    <Icon size={13} />
-                    <span>{m.label}</span>
+                    <Icon size={13} className="shrink-0" />
+                    <span className="truncate">{m.label}</span>
                   </button>
                 );
               })}
             </div>
 
             {/* Export Actions */}
-            <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="flex items-center gap-1.5 w-full sm:w-auto justify-between sm:justify-end flex-wrap min-w-0">
               <button
                 type="button"
                 onClick={handleExportCSV}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white dark:bg-card border border-border text-foreground hover:border-primary/40 text-xs font-semibold transition-all shadow-2xs cursor-pointer shrink-0"
+                className="flex-1 sm:flex-initial flex items-center justify-center gap-1 px-2.5 py-1 rounded-xl bg-white dark:bg-card border border-border text-foreground hover:border-primary/40 text-xs font-semibold transition-all shadow-2xs cursor-pointer min-w-0"
                 title="Export analytics dataset to CSV"
               >
-                <FileSpreadsheet size={13} className="text-foreground" />
-                <span>Export CSV</span>
+                <FileSpreadsheet size={13} className="text-foreground shrink-0" />
+                <span className="truncate">Export CSV</span>
               </button>
               <button
                 type="button"
                 onClick={handleExportJSON}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white dark:bg-card border border-border text-foreground hover:border-primary/40 text-xs font-semibold transition-all shadow-2xs cursor-pointer shrink-0"
+                className="flex-1 sm:flex-initial flex items-center justify-center gap-1 px-2.5 py-1 rounded-xl bg-white dark:bg-card border border-border text-foreground hover:border-primary/40 text-xs font-semibold transition-all shadow-2xs cursor-pointer min-w-0"
                 title="Export analytics payload to JSON"
               >
-                <FileCode size={13} className="text-foreground" />
-                <span>JSON</span>
+                <FileCode size={13} className="text-foreground shrink-0" />
+                <span className="truncate">JSON</span>
               </button>
               <button
                 type="button"
                 onClick={loadData}
                 className="p-1.5 rounded-xl border border-border bg-white dark:bg-card text-muted-foreground hover:text-foreground cursor-pointer transition-colors shrink-0"
                 title="Refresh analytics data"
+                aria-label="Refresh analytics data"
               >
                 <RefreshCw size={13} className={cn(isLoading && 'animate-spin')} />
               </button>
@@ -265,7 +266,7 @@ export function TagAnalyticsModal({
         </div>
 
         {/* Modal Scrollable Body */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-3.5 sm:p-5 space-y-4 sm:space-y-5 custom-scrollbar min-h-0">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-3.5 sm:space-y-5 custom-scrollbar min-h-0 min-w-0 max-w-full box-border">
           {!data && isLoading ? (
             <div className="flex flex-col items-center justify-center h-64 space-y-3">
               <RefreshCw size={28} className="animate-spin text-primary" />

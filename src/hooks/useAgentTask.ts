@@ -224,6 +224,7 @@ export function useAgentTask() {
   const [sandbox, setSandbox] = useState<Sandbox | null>(null);
   const [persistentMessages, setPersistentMessages] = useState<any[]>([]);
   const [liveStreamText, setLiveStreamText] = useState<string>('');
+  const isSubmittingRef = useRef<boolean>(false);
   const liveStreamTextRef = useRef<string>('');
   const messagesRef = useRef<any[]>([]);
   const persistentMessagesRef = useRef<any[]>([]);

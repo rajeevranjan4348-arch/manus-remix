@@ -169,8 +169,27 @@ export function generateResilientResponse(
     return "**Samay Raina** is a prominent Indian stand-up comedian, YouTuber, and chess enthusiast. He co-won *Comicstaan Season 2*, popularized online chess streams in India during 2020 alongside grandmasters like Vidit Gujrathi and Viswanathan Anand, and created the hit comedy show *India's Got Latent*.";
   }
 
+  if (/jethalal|dilip\s*joshi|champaklal\s*gada|tmkoc|taarak\s*mehta/i.test(clean)) {
+    return (
+      `Jethalal is **Jethalal Champaklal Gada**, the central comedic character of the long-running Indian sitcom *Taarak Mehta Ka Ooltah Chashmah* (TMKOC). He is portrayed by veteran Indian actor **Dilip Joshi**.\n\n` +
+      `### Quick Information\n` +
+      `- **Character:** Jethalal Champaklal Gada\n` +
+      `- **Actor:** Dilip Joshi\n` +
+      `- **Show:** *Taarak Mehta Ka Ooltah Chashmah* (TMKOC)\n` +
+      `- **Occupation (In-Show):** Proprietor of Gada Electronics, Mumbai\n` +
+      `- **Nationality:** Indian`
+    );
+  }
+
   if (/who (is|are) (the )?prime minister of india/i.test(clean) || /pm of india/i.test(clean)) {
-    return "The Prime Minister of India is **Narendra Modi**, serving as the head of government of the Republic of India.";
+    return (
+      `The Prime Minister of India is **Narendra Modi**, serving as the head of government of the Republic of India.\n\n` +
+      `### Quick Information\n` +
+      `- **Full Name:** Narendra Damodardas Modi\n` +
+      `- **Office:** 14th Prime Minister of India (since May 2014)\n` +
+      `- **Political Party:** Bharatiya Janata Party (BJP)\n` +
+      `- **Nationality:** Indian`
+    );
   }
 
   if (/who are you|what can you do|what is manus/i.test(clean)) {
@@ -256,6 +275,13 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
         'Prioritize recent, reliable sources. Clearly distinguish confirmed information from uncertainty. Include useful source links and publication dates when available. ' +
         'Never invent sources, URLs, dates, headlines, or live facts. If search results are insufficient, say so.';
     }
+
+    baseSystemPrompt +=
+      '\n\n[VISUAL ANSWER OVERVIEW STYLE]\n' +
+      'When the user asks about a famous person, celebrity, actor, athlete, politician, fictional/anime character, movie, TV show, brand, product, animal, landmark, or historical entity (e.g., "Who is...", "What is...", "Tell me about..."):\n' +
+      '1. Start with a concise, Google AI Overview-style lead paragraph that bolds the full name/title of the subject and key associated figures (such as the portraying actor, creator, or show title in italics).\n' +
+      '2. Follow with a clean **Quick Information** section containing 4–6 key factual bullet points (e.g., Character/Full Name, Actor/Creator, Show/Organization, Role/Known For, Nationality/Origin).\n' +
+      '3. Never fabricate image URLs or markdown `![img](...)` links in the text—the Visual Answer Engine automatically renders verified photographs above your response.';
 
     const contents = options.messages
       .filter(m => m.role === 'user' || m.role === 'assistant')

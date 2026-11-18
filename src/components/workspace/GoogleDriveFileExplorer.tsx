@@ -236,7 +236,7 @@ export function GoogleDriveFileExplorer({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl w-[calc(100vw-1rem)] sm:w-[95vw] h-[min(85dvh,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] bg-card border-border/80 text-foreground p-0 overflow-hidden shadow-2xl rounded-2xl flex flex-col">
+      <DialogContent className="w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:w-[95vw] sm:max-w-4xl min-w-0 box-border h-[min(85dvh,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] bg-card border-border/80 text-foreground p-0 overflow-hidden shadow-2xl rounded-2xl flex flex-col">
         
         {/* Header */}
         <DialogHeader className="p-3.5 sm:p-5 pr-10 pb-3 border-b border-border/60 bg-muted/20 flex flex-row items-center justify-between shrink-0 min-w-0">

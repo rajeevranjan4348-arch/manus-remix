@@ -17,21 +17,49 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-// Initialize Firebase App
-export const app = initializeApp(firebaseConfig);
+// Initialize Firebase App safely so restricted iframe environments never crash on import
+export const app = (() => {
+  try {
+    return initializeApp(firebaseConfig);
+  } catch (err) {
+    console.warn('[Firebase] App initialization notice:', err);
+    return initializeApp(firebaseConfig, 'manus-fallback-' + Date.now());
+  }
+})();
 
 // Initialize Firestore with specific database ID (CRITICAL: Required for named database if provided)
-export const db = (firebaseConfig as any).firestoreDatabaseId 
-  ? getFirestore(app, (firebaseConfig as any).firestoreDatabaseId) 
-  : getFirestore(app);
+export const db = (() => {
+  try {
+    return (firebaseConfig as any).firestoreDatabaseId
+      ? getFirestore(app, (firebaseConfig as any).firestoreDatabaseId)
+      : getFirestore(app);
+  } catch (err) {
+    console.warn('[Firebase] Firestore initialization notice:', err);
+    return getFirestore(app);
+  }
+})();
 
-// Initialize Firebase Authentication
-export const auth = getAuth(app);
-
-// Explicitly set browserLocalPersistence to guarantee auth session persistence across app restarts & browser refreshes
-setPersistence(auth, browserLocalPersistence).catch((err) => {
-  console.warn('[Firebase Auth] Persistence initialization notice:', err);
-});
+// Initialize Firebase Authentication safely
+export const auth: ReturnType<typeof getAuth> = (() => {
+  try {
+    const instance = getAuth(app);
+    setPersistence(instance, browserLocalPersistence).catch((err) => {
+      console.warn('[Firebase Auth] Persistence initialization notice:', err);
+    });
+    return instance;
+  } catch (err) {
+    console.warn('[Firebase Auth] Auth initialization fallback notice:', err);
+    return {
+      currentUser: null,
+      onAuthStateChanged: (cb: any) => {
+        if (typeof cb === 'function') {
+          Promise.resolve().then(() => cb(null));
+        }
+        return () => {};
+      },
+    } as any;
+  }
+})();
 
 // Authentication Provider (Google Login configured)
 export const googleProvider = new GoogleAuthProvider();
@@ -129,7 +157,9 @@ export async function testConnection(): Promise<void> {
   }
 }
 
-// Test connection on boot
+// Test connection asynchronously after initial render
 if (typeof window !== 'undefined') {
-  testConnection();
+  setTimeout(() => {
+    testConnection().catch(() => {});
+  }, 2000);
 }

@@ -128,8 +128,26 @@ export default async (req: Request) => {
     if (/\bnvidia\b/i.test(clean)) {
       return '**NVIDIA Corporation** is a global technology company headquartered in Santa Clara, California, and the world\'s leading designer of **GPUs (graphics processing units)**, AI accelerators (Hopper, Blackwell), the **CUDA** software ecosystem, and GeForce RTX gaming hardware. Founded in 1993 by CEO **Jensen Huang**, Chris Malachowsky, and Curtis Priem, NVIDIA powers modern generative AI data centers, autonomous vehicles, and high-performance computing.';
     }
+    if (/jethalal|dilip\s*joshi|champaklal\s*gada|tmkoc|taarak\s*mehta/i.test(clean)) {
+      return (
+        `Jethalal is **Jethalal Champaklal Gada**, the central comedic character of the long-running Indian sitcom *Taarak Mehta Ka Ooltah Chashmah* (TMKOC). He is portrayed by veteran Indian actor **Dilip Joshi**.\n\n` +
+        `### Quick Information\n` +
+        `- **Character:** Jethalal Champaklal Gada\n` +
+        `- **Actor:** Dilip Joshi\n` +
+        `- **Show:** *Taarak Mehta Ka Ooltah Chashmah* (TMKOC)\n` +
+        `- **Occupation (In-Show):** Proprietor of Gada Electronics, Mumbai\n` +
+        `- **Nationality:** Indian`
+      );
+    }
     if (/who (is|are) (the )?prime minister of india/i.test(clean) || /pm of india/i.test(clean)) {
-      return 'The Prime Minister of India is **Narendra Modi**.';
+      return (
+        `The Prime Minister of India is **Narendra Modi**, serving as the head of government of the Republic of India.\n\n` +
+        `### Quick Information\n` +
+        `- **Full Name:** Narendra Damodardas Modi\n` +
+        `- **Office:** 14th Prime Minister of India (since May 2014)\n` +
+        `- **Political Party:** Bharatiya Janata Party (BJP)\n` +
+        `- **Nationality:** Indian`
+      );
     }
     if (/who are you|what can you do|what is manus/i.test(clean)) {
       return `I am **Manus**, your AI workspace agent powered by the **${modelId}** model (Google Gemini). I can answer questions, research topics, write and debug code, analyze data, and help with everyday tasks.`;

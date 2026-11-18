@@ -17,6 +17,7 @@ import {
 } from './server/rtie';
 import { generateOAuthUrl, handleOAuthCallback, executeServerConnectorTool, isSafeUrl } from './server/connectorsService';
 import { handleCloudSqlApiRequest } from './server/cloudSqlRoutes';
+import { searchVerifiedEntityImages } from './server/visualSearchService';
 import { GoogleGenAI } from '@google/genai';
 
 class StreamCircuitBreaker {
@@ -295,6 +296,34 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
             } catch (err: any) {
               res.statusCode = 500;
               res.end(JSON.stringify({ error: err?.message || 'Failed to generate session summary' }));
+            }
+          });
+          return;
+        }
+
+        // Server-Side Visual Answer Engine Image Search Endpoint
+        if (url === '/api/visual-search' && req.method === 'POST') {
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          let bodyStr = '';
+          req.on('data', chunk => { bodyStr += chunk; });
+          req.on('end', async () => {
+            try {
+              const body = bodyStr ? JSON.parse(bodyStr) : {};
+              const queries = Array.isArray(body?.queries)
+                ? body.queries.map((q: any) => String(q || '').trim()).filter(Boolean)
+                : typeof body?.query === 'string' && body.query.trim()
+                  ? [body.query.trim()]
+                  : [];
+              const maxResults = Math.min(4, Math.max(2, Number(body?.maxResults) || 4));
+              const isComparison = Boolean(body?.isComparison);
+              if (queries.length === 0) {
+                res.end(JSON.stringify({ ok: true, images: [] }));
+                return;
+              }
+              const images = await searchVerifiedEntityImages(queries, maxResults, isComparison);
+              res.end(JSON.stringify({ ok: true, images }));
+            } catch (err: any) {
+              res.end(JSON.stringify({ ok: false, images: [], error: err?.message || 'Visual search unavailable' }));
             }
           });
           return;
@@ -814,10 +843,12 @@ export default defineConfig({
     strictPort: true,
     host: true,
     allowedHosts: true,
-    hmr: process.env.DISABLE_HMR !== 'true',
+    hmr: false,
     watch: process.env.DISABLE_HMR === 'true' ? null : {},
   },
   preview: {
+    port: 3000,
+    host: true,
     allowedHosts: true,
   },
 });

@@ -73,79 +73,72 @@ const FirebaseContext = createContext<FirebaseContextType>({
 });
 
 export function FirebaseProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<FirebaseUser | any | null>(() => auth.currentUser || getCachedUserSession());
-  const [loading, setLoading] = useState<boolean>(true);
+  const [user, setUser] = useState<FirebaseUser | any | null>(() => auth?.currentUser || getCachedUserSession());
+  const [loading, setLoading] = useState<boolean>(false);
 
   useEffect(() => {
     let isSubscribed = true;
+    let unsubscribe: () => void = () => {};
 
-    // Attach listener immediately (persistence is configured in firebase.ts on load)
-    const unsubscribe = onAuthStateChanged(
-      auth, 
-      async (currentUser) => {
-        if (!isSubscribed) return;
+    try {
+      unsubscribe = onAuthStateChanged(
+        auth, 
+        (currentUser) => {
+          if (!isSubscribed) return;
+          setLoading(false);
 
-        if (currentUser) {
-          setUser(currentUser);
-          setCachedUserSession(currentUser);
-          try {
-            await syncUserProfile({
+          if (currentUser) {
+            setUser(currentUser);
+            setCachedUserSession(currentUser);
+            // Non-blocking background sync so UI never waits on Firestore/Cloud SQL network round-trips
+            syncUserProfile({
               id: currentUser.uid,
               email: currentUser.email || '',
               displayName: currentUser.displayName || 'Manus User',
               photoURL: currentUser.photoURL || '',
               createdAt: currentUser.metadata?.creationTime || new Date().toISOString()
+            }).catch((e) => {
+              console.warn('[Firebase] Profile sync notice:', e);
             });
             syncUserToCloudSql({
               email: currentUser.email,
               displayName: currentUser.displayName,
             }).catch(() => {});
-          } catch (e) {
-            console.warn('[Firebase] Profile sync notice:', e);
-          }
-        } else {
-          // Handle network failures gracefully without immediately signing out users whose valid session cannot temporarily be verified
-          if (typeof navigator !== 'undefined' && !navigator.onLine && (auth.currentUser || getCachedUserSession())) {
-            console.warn('[Firebase Auth] Offline state detected; retaining existing user session');
           } else {
-            // Keep guest user if stored locally
-            const cached = getCachedUserSession();
-            if (cached && (cached.uid.startsWith('guest-') || !auth.currentUser)) {
-              setUser(cached as any);
+            if (typeof navigator !== 'undefined' && !navigator.onLine && (auth?.currentUser || getCachedUserSession())) {
+              console.warn('[Firebase Auth] Offline state detected; retaining existing user session');
             } else {
-              setUser(null);
-              setCachedUserSession(null);
+              const cached = getCachedUserSession();
+              if (cached && (cached.uid.startsWith('guest-') || !auth?.currentUser)) {
+                setUser(cached as any);
+              } else {
+                setUser(null);
+                setCachedUserSession(null);
+              }
             }
           }
+        },
+        (error) => {
+          console.warn('[Firebase Auth] Auth state listener notice:', error);
+          if (typeof navigator !== 'undefined' && !navigator.onLine && (auth?.currentUser || getCachedUserSession())) {
+            console.warn('[Firebase Auth] Offline network error; retaining cached user session');
+          } else {
+            setUser(null);
+            setCachedUserSession(null);
+          }
+          setLoading(false);
         }
-        setLoading(false);
-      },
-      (error) => {
-        console.error('[Firebase Auth] Auth state listener error:', error);
-        if (typeof navigator !== 'undefined' && !navigator.onLine && (auth.currentUser || getCachedUserSession())) {
-          console.warn('[Firebase Auth] Offline network error; retaining cached user session');
-        } else {
-          setUser(null);
-          setCachedUserSession(null);
-        }
-        setLoading(false);
-      }
-    );
-
-    // Timeout fallback timer (5s) in case network is severely stalled
-    const fallbackTimer = setTimeout(() => {
-      if (isSubscribed && loading) {
-        if (auth.currentUser) {
-          setUser(auth.currentUser);
-        }
-        setLoading(false);
-      }
-    }, 5000);
+      );
+    } catch (err) {
+      console.warn('[Firebase Auth] Listener setup notice:', err);
+      setLoading(false);
+    }
 
     return () => {
       isSubscribed = false;
-      unsubscribe();
-      clearTimeout(fallbackTimer);
+      try {
+        unsubscribe();
+      } catch {}
     };
   }, []);
 
@@ -262,21 +255,7 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
         getIdToken,
       }}
     >
-      {loading ? (
-        <div className="flex h-screen w-full items-center justify-center bg-background text-foreground">
-          <div className="flex flex-col items-center gap-4 animate-fade-in">
-            <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center font-bold text-xl shadow-md animate-pulse">
-              M
-            </div>
-            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-              <span>Restoring session...</span>
-            </div>
-          </div>
-        </div>
-      ) : (
-        children
-      )}
+      {children}
     </FirebaseContext.Provider>
   );
 }

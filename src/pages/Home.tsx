@@ -384,14 +384,13 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
       const ctx = gsap.context(() => {
         gsap.fromTo(
           '.animate-on-load',
-          { y: 15, opacity: 0 },
+          { y: 10 },
           {
             y: 0,
-            opacity: 1,
-            stagger: 0.08,
-            duration: 0.5,
+            stagger: 0.06,
+            duration: 0.35,
             ease: 'power2.out',
-            clearProps: 'all'
+            clearProps: 'transform'
           }
         );
       }, containerRef);

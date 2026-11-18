@@ -464,24 +464,24 @@ export function ConnectorConfigModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-xl p-0 overflow-hidden rounded-[28px] border border-border dark:border-white/10 bg-white dark:bg-[#1a1b1e] text-foreground dark:text-white shadow-2xl backdrop-blur-2xl">
+      <DialogContent className="w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:w-full sm:max-w-xl max-h-[calc(100dvh-1rem)] flex flex-col min-w-0 box-border p-0 overflow-hidden rounded-2xl sm:rounded-[28px] border border-border dark:border-white/10 bg-white dark:bg-[#1a1b1e] text-foreground dark:text-white shadow-2xl backdrop-blur-2xl">
         {/* Header */}
-        <div className={cn("px-6 pt-6 pb-5 border-b border-border/50 flex items-start justify-between relative", metadata.bgClass)}>
-          <div className="flex items-center gap-4">
-            <div className={cn("w-12 h-12 rounded-2xl border flex items-center justify-center shadow-sm shrink-0 bg-white dark:bg-card", metadata.borderClass, metadata.colorClass)}>
-              <IconComp size={24} />
+        <div className={cn("px-4 sm:px-6 pt-4 sm:pt-6 pb-4 sm:pb-5 pr-10 border-b border-border/50 flex items-start justify-between relative shrink-0 min-w-0", metadata.bgClass)}>
+          <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+            <div className={cn("w-10 h-10 sm:w-12 sm:h-12 rounded-2xl border flex items-center justify-center shadow-sm shrink-0 bg-white dark:bg-card", metadata.borderClass, metadata.colorClass)}>
+              <IconComp size={22} />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-lg font-bold text-foreground dark:text-white">{metadata.name}</h3>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-primary/10 text-primary border border-primary/20">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
+                <h3 className="text-base sm:text-lg font-bold text-foreground dark:text-white truncate">{metadata.name}</h3>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-primary/10 text-primary border border-primary/20 shrink-0">
                   {metadata.tag}
                 </span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-muted text-muted-foreground border border-border">
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-muted text-muted-foreground border border-border shrink-0">
                   {metadata.category}
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground mt-0.5 max-w-sm leading-relaxed">
+              <p className="text-xs text-muted-foreground mt-0.5 max-w-sm leading-relaxed line-clamp-2">
                 {metadata.desc}
               </p>
             </div>
@@ -489,11 +489,11 @@ export function ConnectorConfigModal({
         </div>
 
         {/* Tab Selector */}
-        <div className="flex items-center border-b border-border/60 px-6 bg-slate-50/50 dark:bg-white/5">
+        <div className="flex items-center border-b border-border/60 px-3 sm:px-6 bg-slate-50/50 dark:bg-white/5 overflow-x-auto no-scrollbar shrink-0 min-w-0">
           <button
             onClick={() => setActiveTab('status')}
             className={cn(
-              "py-3 px-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer",
+              "py-2.5 sm:py-3 px-2.5 sm:px-3 text-xs font-semibold flex items-center gap-1.5 sm:gap-2 border-b-2 transition-colors cursor-pointer shrink-0 whitespace-nowrap",
               activeTab === 'status'
                 ? "border-primary text-primary"
                 : "border-transparent text-muted-foreground hover:text-foreground"
@@ -505,7 +505,7 @@ export function ConnectorConfigModal({
           <button
             onClick={() => setActiveTab('config')}
             className={cn(
-              "py-3 px-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer",
+              "py-2.5 sm:py-3 px-2.5 sm:px-3 text-xs font-semibold flex items-center gap-1.5 sm:gap-2 border-b-2 transition-colors cursor-pointer shrink-0 whitespace-nowrap",
               activeTab === 'config'
                 ? "border-primary text-primary"
                 : "border-transparent text-muted-foreground hover:text-foreground"
@@ -517,7 +517,7 @@ export function ConnectorConfigModal({
           <button
             onClick={() => setActiveTab('docs')}
             className={cn(
-              "py-3 px-3 text-xs font-semibold flex items-center gap-2 border-b-2 transition-colors cursor-pointer",
+              "py-2.5 sm:py-3 px-2.5 sm:px-3 text-xs font-semibold flex items-center gap-1.5 sm:gap-2 border-b-2 transition-colors cursor-pointer shrink-0 whitespace-nowrap",
               activeTab === 'docs'
                 ? "border-primary text-primary"
                 : "border-transparent text-muted-foreground hover:text-foreground"
@@ -529,7 +529,7 @@ export function ConnectorConfigModal({
         </div>
 
         {/* Modal Content */}
-        <div className="p-6 max-h-[60vh] overflow-y-auto space-y-5 custom-scrollbar">
+        <div className="p-4 sm:p-6 flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-4 sm:space-y-5 custom-scrollbar min-w-0">
           {/* TAB 1: STATUS & METADATA */}
           {activeTab === 'status' && (
             <div className="space-y-4 animate-in fade-in duration-200">

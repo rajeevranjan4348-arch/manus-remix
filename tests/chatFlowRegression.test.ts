@@ -145,4 +145,34 @@ describe('Chat Flow & Stream Processing Regression Tests', () => {
     expect(content).toContain('webkitSpeechRecognition');
     expect(content).toContain('formatSpokenPunctuation');
   });
+
+  it('8. Staggered Chat Bubble Transitions: Applies bounded index-based entrance delay in ChatView and index.css', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const { getChatBubbleStaggerDelayMs } = await import('../src/components/agent/ChatView');
+
+    expect(getChatBubbleStaggerDelayMs(-1)).toBe(0);
+    expect(getChatBubbleStaggerDelayMs(0)).toBe(0);
+    expect(getChatBubbleStaggerDelayMs(1)).toBe(45);
+    expect(getChatBubbleStaggerDelayMs(2)).toBe(90);
+    expect(getChatBubbleStaggerDelayMs(4)).toBe(180);
+    expect(getChatBubbleStaggerDelayMs(8)).toBe(360);
+    // Caps at 8 steps (360ms) so long message histories never stall
+    expect(getChatBubbleStaggerDelayMs(20)).toBe(360);
+
+    const chatViewSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/components/agent/ChatView.tsx'),
+      'utf-8'
+    );
+    expect(chatViewSource).toContain('getChatBubbleStaggerDelayMs(index)');
+    expect(chatViewSource).toContain("'--chat-stagger-delay': `${staggerDelayMs}ms`");
+    expect(chatViewSource).toContain('data-stagger-index={index}');
+
+    const cssSource = fs.readFileSync(
+      path.resolve(__dirname, '../src/index.css'),
+      'utf-8'
+    );
+    expect(cssSource).toContain('animation-delay: var(--chat-stagger-delay, 0ms);');
+  });
 });
+

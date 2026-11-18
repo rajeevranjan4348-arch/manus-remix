@@ -538,6 +538,17 @@ describe('AI Response Streaming and Loading State Regression Tests', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it('declares isSubmittingRef before reading isSubmittingRef.current in useAgentTask', () => {
+    const hookPath = path.resolve(__dirname, '../src/hooks/useAgentTask.ts');
+    const hookSource = fs.readFileSync(hookPath, 'utf-8');
+    const declIdx = hookSource.indexOf('const isSubmittingRef = useRef');
+    const firstReadIdx = hookSource.indexOf('isSubmittingRef.current');
+    expect(declIdx).toBeGreaterThan(-1);
+    expect(firstReadIdx).toBeGreaterThan(-1);
+    expect(declIdx).toBeLessThan(firstReadIdx);
+    expect(hookSource).not.toContain('var isSubmittingRef');
+  });
 });
 
 

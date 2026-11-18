@@ -281,23 +281,24 @@ export function ConnectorsStorePanel({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl w-[calc(100vw-1rem)] sm:w-full bg-card border-border/80 text-foreground p-0 overflow-hidden shadow-2xl rounded-2xl sm:rounded-3xl h-[min(85dvh,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] flex flex-col">
+      <DialogContent className="w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:w-full sm:max-w-2xl min-w-0 box-border bg-card border-border/80 text-foreground p-0 overflow-hidden shadow-2xl rounded-2xl sm:rounded-3xl h-[min(88dvh,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] flex flex-col">
         {/* Header */}
-        <div className="p-3.5 sm:p-5 pr-10 border-b border-border/60 bg-muted/20 flex flex-wrap items-center justify-between gap-2.5 shrink-0 min-w-0">
-          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+        <div className="p-3 sm:p-5 border-b border-border/60 bg-muted/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 shrink-0 min-w-0 max-w-full overflow-hidden">
+          <div className="flex items-start sm:items-center gap-2 sm:gap-3 pr-7 sm:pr-8 min-w-0 flex-1">
             <button 
               onClick={onClose}
               className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors shrink-0"
               title="Back"
+              aria-label="Back"
             >
               <ArrowLeft size={18} />
             </button>
-            <div className="min-w-0">
-              <DialogTitle className="text-base sm:text-lg font-bold flex items-center gap-2 truncate">
+            <div className="min-w-0 flex-1">
+              <DialogTitle className="text-sm sm:text-lg font-bold flex items-center gap-1.5 sm:gap-2 min-w-0">
                 <Plug className="text-primary shrink-0" size={18} />
                 <span className="truncate">Connectors & Plugins</span>
               </DialogTitle>
-              <DialogDescription className="text-xs text-muted-foreground line-clamp-2">
+              <DialogDescription className="text-[11px] sm:text-xs text-muted-foreground line-clamp-2 mt-0.5">
                 Connect Google Workspace, agent capabilities, and third-party tools
               </DialogDescription>
             </div>
@@ -305,10 +306,12 @@ export function ConnectorsStorePanel({
 
           {/* Google Connection Status Banner */}
           {workspaceConnected ? (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#F2F2F2] dark:bg-[#111111] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] text-xs font-medium max-w-full">
-              <ShieldCheck size={14} className="shrink-0" />
-              <span className="truncate max-w-[130px] sm:max-w-[180px]">{userEmail || 'Google Connected'}</span>
-              <button onClick={handleDisconnectGoogleWorkspace} className="p-1 hover:bg-[#E0E0E0] dark:hover:bg-[#333333] rounded-md shrink-0" title="Disconnect Google">
+            <div className="flex items-center justify-between sm:justify-start gap-2 px-3 py-1.5 rounded-xl bg-[#F2F2F2] dark:bg-[#111111] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] text-xs font-medium w-full sm:w-auto max-w-full min-w-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <ShieldCheck size={14} className="shrink-0" />
+                <span className="truncate max-w-[180px]">{userEmail || 'Google Connected'}</span>
+              </div>
+              <button onClick={handleDisconnectGoogleWorkspace} className="p-1 hover:bg-[#E0E0E0] dark:hover:bg-[#333333] rounded-md shrink-0" title="Disconnect Google" aria-label="Disconnect Google">
                 <LogOut size={12} />
               </button>
             </div>
@@ -316,10 +319,10 @@ export function ConnectorsStorePanel({
             <button
               onClick={handleConnectGoogleWorkspace}
               disabled={isConnectingGoogle}
-              className="gsi-material-button inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] font-semibold text-xs hover:opacity-90 transition-opacity cursor-pointer shadow-xs shrink-0"
+              className="gsi-material-button inline-flex items-center justify-center gap-2 px-3 py-2 sm:py-1.5 rounded-xl bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] font-semibold text-xs hover:opacity-90 transition-opacity cursor-pointer shadow-xs w-full sm:w-auto max-w-full min-w-0 shrink-0"
             >
               {isConnectingGoogle ? (
-                <RefreshCw size={13} className="animate-spin" />
+                <RefreshCw size={13} className="animate-spin shrink-0" />
               ) : (
                 <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-3.5 h-3.5 shrink-0">
                   <path fill="currentColor" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
@@ -328,23 +331,23 @@ export function ConnectorsStorePanel({
                   <path fill="currentColor" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
                 </svg>
               )}
-              <span>Connect Google Workspace</span>
+              <span className="truncate">Connect Google Workspace</span>
             </button>
           )}
         </div>
 
         {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-3.5 sm:p-5 space-y-5 sm:space-y-6 custom-scrollbar min-h-0">
-          {/* INSTALLED / ENABLED CONNECTORS ROW (Matches Reference Image 2) */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                <Layers size={13} className="text-primary" />
-                <span>Active & Installed Connectors ({enabledConnectors.length})</span>
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-5 space-y-4 sm:space-y-6 custom-scrollbar min-h-0 min-w-0 max-w-full box-border">
+          {/* INSTALLED / ENABLED CONNECTORS ROW */}
+          <div className="space-y-2 min-w-0 max-w-full">
+            <div className="flex items-center justify-between min-w-0">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 min-w-0">
+                <Layers size={13} className="text-primary shrink-0" />
+                <span className="truncate">Active & Installed Connectors ({enabledConnectors.length})</span>
               </h3>
             </div>
 
-            <div className="flex items-center gap-2.5 overflow-x-auto pb-2 pt-1 no-scrollbar">
+            <div className="grid grid-cols-3 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2 pb-1 pt-1 min-w-0 max-w-full">
               {enabledConnectors.map((id) => {
                 const item = CONNECTOR_CATALOG.find(c => c.id === id);
                 if (!item) return null;
@@ -353,30 +356,30 @@ export function ConnectorsStorePanel({
                   <div
                     key={id}
                     onClick={() => toggleConnector(id)}
-                    className="flex flex-col items-center gap-1.5 p-2 rounded-2xl border border-border/70 bg-muted/30 hover:bg-muted/70 transition-all cursor-pointer group shrink-0 w-20 text-center"
+                    className="flex flex-col items-center justify-center gap-1.5 p-2 rounded-2xl border border-border/70 bg-muted/30 hover:bg-muted/70 transition-all cursor-pointer group w-full sm:w-20 min-w-0 text-center"
                     title={`Click to disable ${item.name}`}
                   >
-                    <div className={cn("w-10 h-10 rounded-2xl flex items-center justify-center font-bold shadow-2xs group-hover:scale-105 transition-transform", item.iconBg)}>
+                    <div className={cn("w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center font-bold shadow-2xs group-hover:scale-105 transition-transform shrink-0", item.iconBg)}>
                       <Icon size={18} />
                     </div>
                     <span className="text-[10px] font-semibold text-foreground truncate w-full">{item.name}</span>
                   </div>
                 );
               })}
-              <div className="flex flex-col items-center justify-center gap-1.5 p-2 rounded-2xl border border-dashed border-border bg-muted/10 w-20 h-20 shrink-0 text-muted-foreground text-center">
+              <div className="flex flex-col items-center justify-center gap-1 p-2 rounded-2xl border border-dashed border-border bg-muted/10 w-full sm:w-20 min-h-[72px] sm:h-20 min-w-0 text-muted-foreground text-center">
                 <span className="text-xs font-bold font-mono">+{CONNECTOR_CATALOG.length - enabledConnectors.length}</span>
-                <span className="text-[9px]">available</span>
+                <span className="text-[9px] truncate w-full">available</span>
               </div>
             </div>
           </div>
 
           {/* POPULAR CONNECTORS SECTION */}
-          <div className="space-y-3">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+          <div className="space-y-3 min-w-0 max-w-full">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground truncate">
               Popular Connectors & Integrations
             </h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 sm:gap-3 min-w-0 max-w-full">
               {filteredCatalog.map((item) => {
                 const isEnabled = enabledConnectors.includes(item.id);
                 const Icon = item.icon;
@@ -385,26 +388,26 @@ export function ConnectorsStorePanel({
                   <div
                     key={item.id}
                     className={cn(
-                      "flex items-start justify-between p-3.5 rounded-2xl border transition-all",
+                      "flex items-start justify-between gap-2.5 p-3 sm:p-3.5 rounded-2xl border transition-all min-w-0 max-w-full overflow-hidden",
                       isEnabled 
                         ? "border-primary/30 bg-primary/5 dark:bg-primary/10 shadow-xs" 
                         : "border-border/60 bg-muted/20 hover:bg-muted/50"
                     )}
                   >
-                    <div className="flex items-start gap-3 min-w-0 pr-2">
-                      <div className={cn("w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-2xs mt-0.5", item.iconBg)}>
-                        <Icon size={20} />
+                    <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
+                      <div className={cn("w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-2xs mt-0.5", item.iconBg)}>
+                        <Icon size={18} />
                       </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <h4 className="font-semibold text-sm text-foreground truncate">{item.name}</h4>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                          <h4 className="font-semibold text-xs sm:text-sm text-foreground truncate">{item.name}</h4>
                           {item.isWorkspaceAuth && workspaceConnected && (
-                            <span className="px-1.5 py-0.2 rounded-full bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF] text-[9px] font-semibold border border-[#E0E0E0] dark:border-[#333333]">
+                            <span className="px-1.5 py-0.2 rounded-full bg-[#F2F2F2] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF] text-[9px] font-semibold border border-[#E0E0E0] dark:border-[#333333] shrink-0">
                               Synced
                             </span>
                           )}
                         </div>
-                        <p className="text-xs text-muted-foreground leading-snug mt-0.5 line-clamp-2">{item.desc}</p>
+                        <p className="text-[11px] sm:text-xs text-muted-foreground leading-snug mt-0.5 line-clamp-2">{item.desc}</p>
                       </div>
                     </div>
 
@@ -414,6 +417,7 @@ export function ConnectorsStorePanel({
                           onClick={handleConnectGoogleWorkspace}
                           className="p-2 rounded-xl bg-muted border border-border text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors cursor-pointer"
                           title="Connect Google Workspace to enable"
+                          aria-label={`Connect Google Workspace to enable ${item.name}`}
                         >
                           <Lock size={15} />
                         </button>
@@ -421,7 +425,7 @@ export function ConnectorsStorePanel({
                         <button
                           onClick={() => toggleConnector(item.id)}
                           className={cn(
-                            "px-3 py-1.5 rounded-xl font-semibold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs",
+                            "px-2.5 sm:px-3 py-1.5 rounded-xl font-semibold text-[11px] sm:text-xs flex items-center gap-1 sm:gap-1.5 transition-all cursor-pointer shadow-2xs shrink-0",
                             isEnabled 
                               ? "bg-primary text-primary-foreground hover:opacity-90" 
                               : "bg-muted border border-border/80 text-foreground hover:bg-muted/80"
@@ -429,12 +433,12 @@ export function ConnectorsStorePanel({
                         >
                           {isEnabled ? (
                             <>
-                              <Check size={13} strokeWidth={2.5} />
+                              <Check size={13} strokeWidth={2.5} className="shrink-0" />
                               <span>Enabled</span>
                             </>
                           ) : (
                             <>
-                              <Plus size={13} />
+                              <Plus size={13} className="shrink-0" />
                               <span>Enable</span>
                             </>
                           )}
@@ -448,16 +452,16 @@ export function ConnectorsStorePanel({
           </div>
         </div>
 
-        {/* Search Bar at Bottom (Matches Reference Image 2) */}
-        <div className="p-4 border-t border-border/60 bg-muted/20 shrink-0">
-          <div className="relative max-w-2xl mx-auto">
+        {/* Search Bar at Bottom */}
+        <div className="p-3 sm:p-4 border-t border-border/60 bg-muted/20 shrink-0 min-w-0 max-w-full">
+          <div className="relative max-w-2xl mx-auto min-w-0">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
             <input
               type="text"
               placeholder="Search connectors, plugins, or workspace tools..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full text-xs pl-10 pr-4 py-3 bg-card border border-border/80 rounded-2xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40 shadow-inner"
+              className="w-full text-xs pl-10 pr-4 py-2.5 sm:py-3 bg-card border border-border/80 rounded-2xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40 shadow-inner box-border"
             />
           </div>
         </div>
