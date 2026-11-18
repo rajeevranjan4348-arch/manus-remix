@@ -371,16 +371,14 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
           <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 custom-scrollbar bg-background min-h-0 min-w-0">
             {/* GENERAL TAB */}
             {activeTab === 'general' && (
-              <div className="space-y-6 animate-in fade-in duration-100">
-                {/* Theme row */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <div>
-                      <p className="text-xs font-medium text-foreground">Appearance</p>
-                      <p className="text-[11px] text-muted-foreground">Choose your workspace interface theme</p>
-                    </div>
+              <div className="space-y-5 animate-in fade-in duration-100">
+                {/* Appearance */}
+                <section className="space-y-3 pb-5 border-b border-border/50">
+                  <div>
+                    <p className="text-xs font-semibold text-foreground">Appearance</p>
+                    <p className="text-[11px] text-muted-foreground">Personalize the look of your workspace</p>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 mt-2">
+                  <div className="grid grid-cols-3 gap-2">
                     {[
                       { id: 'light', label: 'Light', icon: Sun },
                       { id: 'dark', label: 'Dark', icon: Moon },
@@ -405,49 +403,52 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
                       );
                     })}
                   </div>
-                </div>
 
-                {/* Accent colour combinations */}
-                <div className="pt-4 border-t border-border/50">
-                  <div className="mb-3">
-                    <p className="text-xs font-medium text-foreground">Accent colour</p>
-                    <p className="text-[11px] text-muted-foreground">Choose a colour combo for buttons, highlights, and focus states</p>
+                  <div className="space-y-2 pt-1">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Accent colour</p>
+                      <p className="text-[11px] text-muted-foreground">Buttons, highlights, and focus states</p>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {accentCombos.map((combo) => {
+                        const selected = accentCombo === combo.id;
+                        return (
+                          <button
+                            key={combo.id}
+                            type="button"
+                            onClick={() => applyAccentCombo(combo.id)}
+                            aria-pressed={selected}
+                            className={cn(
+                              "flex items-center gap-2 rounded-xl border px-2.5 py-2 text-xs transition-all text-left",
+                              selected ? "border-foreground/30 bg-muted/60 ring-1 ring-border" : "border-border/60 hover:bg-muted/40"
+                            )}
+                          >
+                            <span className="flex -space-x-1.5 shrink-0" aria-hidden="true">
+                              {combo.swatches.map((colour) => (
+                                <span key={colour} className="h-5 w-5 rounded-full border-2 border-background" style={{ backgroundColor: colour }} />
+                              ))}
+                            </span>
+                            <span className="flex-1">{combo.label}</span>
+                            {selected && <Check size={13} className="text-foreground" />}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {accentCombos.map((combo) => {
-                      const selected = accentCombo === combo.id;
-                      return (
-                        <button
-                          key={combo.id}
-                          type="button"
-                          onClick={() => applyAccentCombo(combo.id)}
-                          aria-pressed={selected}
-                          className={cn(
-                            "flex items-center gap-2 rounded-xl border px-2.5 py-2 text-xs transition-all text-left",
-                            selected ? "border-foreground/30 bg-muted/60 ring-1 ring-border" : "border-border/60 hover:bg-muted/40"
-                          )}
-                        >
-                          <span className="flex -space-x-1.5 shrink-0" aria-hidden="true">
-                            {combo.swatches.map((colour) => (
-                              <span key={colour} className="h-5 w-5 rounded-full border-2 border-background" style={{ backgroundColor: colour }} />
-                            ))}
-                          </span>
-                          <span className="flex-1">{combo.label}</span>
-                          {selected && <Check size={13} className="text-foreground" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                </section>
 
-                {/* Workspace Mode */}
-                <div className="pt-4 border-t border-border/50">
-                  <div className="flex items-center justify-between">
+                {/* Workspace defaults */}
+                <section className="space-y-2 pb-5 border-b border-border/50">
+                  <div className="pb-1">
+                    <p className="text-xs font-semibold text-foreground">Workspace defaults</p>
+                    <p className="text-[11px] text-muted-foreground">Choose how tasks start and set your language</p>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 py-2">
                     <div>
                       <p className="text-xs font-medium text-foreground">Default Mode</p>
                       <p className="text-[11px] text-muted-foreground">Select default task launch mode</p>
                     </div>
-                    <div className="inline-flex rounded-lg border border-border/60 p-0.5 bg-muted/30">
+                    <div className="inline-flex rounded-lg border border-border/60 p-0.5 bg-muted/30 shrink-0">
                       <button
                         onClick={() => updateSetting('defaultMode', 'chat')}
                         className={cn(
@@ -472,211 +473,227 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
                       </button>
                     </div>
                   </div>
-                </div>
-
-                {/* Language */}
-                <div className="pt-4 border-t border-border/50 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-medium text-foreground">Language</p>
-                    <p className="text-[11px] text-muted-foreground">Display and prompt locale</p>
-                  </div>
-                  <select
-                    value={settings.language}
-                    onChange={(e) => updateSetting('language', e.target.value as any)}
-                    className="text-xs bg-muted/40 border border-border/60 rounded-lg px-2.5 py-1 font-medium cursor-pointer focus:outline-none focus:ring-1 focus:ring-foreground/20"
-                    aria-label="Language selection"
-                  >
-                    <option value="en">English (US)</option>
-                    <option value="hi">हिंदी (Hindi)</option>
-                    <option value="es">Español</option>
-                    <option value="fr">Français</option>
-                    <option value="de">Deutsch</option>
-                    <option value="ja">日本語</option>
-                    <option value="zh">中文</option>
-                  </select>
-                </div>
-
-                {/* Sound Effects */}
-                <div className="pt-4 border-t border-border/50 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-medium text-foreground">Sound Effects</p>
-                    <p className="text-[11px] text-muted-foreground">Play subtle chimes on completions</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {settings.soundEffects && (
-                      <button
-                        onClick={() => playNotificationSound('success')}
-                        className="text-[11px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted/50 cursor-pointer"
-                      >
-                        Test
-                      </button>
-                    )}
-                    <button
-                      onClick={() => updateSetting('soundEffects', !settings.soundEffects)}
-                      role="switch"
-                      aria-checked={settings.soundEffects}
-                      aria-label="Toggle sound effects"
-                      className={cn(
-                        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
-                        settings.soundEffects ? "bg-foreground" : "bg-muted"
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-xs transform transition duration-200 ease-in-out",
-                          settings.soundEffects ? "translate-x-4" : "translate-x-0"
-                        )}
-                      />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Reduced Motion */}
-                <div className="pt-4 border-t border-border/50 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-medium text-foreground">Reduced Motion</p>
-                    <p className="text-[11px] text-muted-foreground">Minimize decorative animations</p>
-                  </div>
-                  <button
-                    onClick={() => updateSetting('reducedMotion', !settings.reducedMotion)}
-                    role="switch"
-                    aria-checked={settings.reducedMotion}
-                    aria-label="Toggle reduced motion"
-                    className={cn(
-                      "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
-                      settings.reducedMotion ? "bg-foreground" : "bg-muted"
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-xs transform transition duration-200 ease-in-out",
-                        settings.reducedMotion ? "translate-x-4" : "translate-x-0"
-                      )}
-                    />
-                  </button>
-                </div>
-
-                {/* Auto-scroll to results */}
-                <div className="pt-4 border-t border-border/50 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-medium text-foreground">Auto-scroll to Results</p>
-                    <p className="text-[11px] text-muted-foreground">Automatically center search content in view once stream finishes</p>
-                  </div>
-                  <button
-                    onClick={() => updateSetting('autoScrollToResults', settings.autoScrollToResults === false ? true : false)}
-                    role="switch"
-                    aria-checked={settings.autoScrollToResults !== false}
-                    aria-label="Toggle auto-scroll to results"
-                    className={cn(
-                      "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
-                      settings.autoScrollToResults !== false ? "bg-foreground" : "bg-muted"
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-xs transform transition duration-200 ease-in-out",
-                        settings.autoScrollToResults !== false ? "translate-x-4" : "translate-x-0"
-                      )}
-                    />
-                  </button>
-                </div>
-
-                {/* Ultra-Lite Performance Engine (2GB RAM Android Target) */}
-                <div className="pt-4 border-t border-border/50 space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-3 pt-3 border-t border-border/40">
                     <div>
-                      <div className="flex items-center gap-1.5">
-                        <p className="text-xs font-semibold text-foreground">Ultra-Lite Mode (2GB RAM Android)</p>
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-foreground text-background">
-                          {getActivePerformanceProfile().toUpperCase()}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground">
-                        Minimizes JS heap, batches SSE streams, bounds caches, and disables expensive GPU blurs
-                      </p>
+                      <p className="text-xs font-medium text-foreground">Language</p>
+                      <p className="text-[11px] text-muted-foreground">Display and prompt locale</p>
                     </div>
-                    <button
-                      onClick={() => {
-                        const next = !(settings.ultraLiteMode ?? true);
-                        updateSetting('ultraLiteMode', next);
-                        updateSetting('performanceProfile', next ? 'ultra-lite' : 'balanced');
-                        toast.success(next ? 'Ultra-Lite 2GB RAM Engine enabled' : 'Switched to Balanced performance profile');
-                      }}
-                      role="switch"
-                      aria-checked={settings.ultraLiteMode ?? true}
-                      aria-label="Toggle Ultra-Lite Mode"
-                      className={cn(
-                        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
-                        (settings.ultraLiteMode ?? true) ? "bg-foreground" : "bg-muted"
-                      )}
+                    <select
+                      value={settings.language}
+                      onChange={(e) => updateSetting('language', e.target.value as any)}
+                      className="text-xs bg-muted/40 border border-border/60 rounded-lg px-2.5 py-1 font-medium cursor-pointer focus:outline-none focus:ring-1 focus:ring-foreground/20"
+                      aria-label="Language selection"
                     >
-                      <span
-                        className={cn(
-                          "pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-xs transform transition duration-200 ease-in-out",
-                          (settings.ultraLiteMode ?? true) ? "translate-x-4" : "translate-x-0"
-                        )}
-                      />
-                    </button>
+                      <option value="en">English (US)</option>
+                      <option value="hi">हिंदी (Hindi)</option>
+                      <option value="es">Español</option>
+                      <option value="fr">Français</option>
+                      <option value="de">Deutsch</option>
+                      <option value="ja">日本語</option>
+                      <option value="zh">中文</option>
+                    </select>
                   </div>
+                </section>
 
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {(
-                      [
-                        { id: 'auto', label: 'Auto (2GB)' },
-                        { id: 'ultra-lite', label: 'Ultra-Lite' },
-                        { id: 'saver', label: 'Saver' },
-                        { id: 'balanced', label: 'Balanced' },
-                      ] as { id: PerformanceProfileSetting; label: string }[]
-                    ).map((prof) => {
-                      const currentProf = settings.performanceProfile || 'auto';
-                      const isSelected = currentProf === prof.id;
-                      return (
+                {/* Experience */}
+                <section className="pb-5 border-b border-border/50">
+                  <div className="mb-1">
+                    <p className="text-xs font-semibold text-foreground">Experience</p>
+                    <p className="text-[11px] text-muted-foreground">Adjust sounds, motion, and result behavior</p>
+                  </div>
+                  <div className="divide-y divide-border/40">
+                    <div className="flex items-center justify-between gap-3 py-3">
+                      <div>
+                        <p className="text-xs font-medium text-foreground">Sound Effects</p>
+                        <p className="text-[11px] text-muted-foreground">Play subtle chimes on completions</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {settings.soundEffects && (
+                          <button
+                            onClick={() => playNotificationSound('success')}
+                            className="text-[11px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted/50 cursor-pointer"
+                          >
+                            Test
+                          </button>
+                        )}
                         <button
-                          key={prof.id}
-                          type="button"
-                          onClick={() => {
-                            updateSetting('performanceProfile', prof.id);
-                            updateSetting('ultraLiteMode', prof.id === 'ultra-lite' || prof.id === 'auto');
-                            toast.success(`Performance profile set to ${prof.label}`);
-                          }}
+                          onClick={() => updateSetting('soundEffects', !settings.soundEffects)}
+                          role="switch"
+                          aria-checked={settings.soundEffects}
+                          aria-label="Toggle sound effects"
                           className={cn(
-                            "py-1.5 px-2 rounded-lg border text-[11px] font-medium transition-colors cursor-pointer text-center",
-                            isSelected
-                              ? "bg-foreground text-background border-foreground font-semibold"
-                              : "border-border/60 text-muted-foreground hover:text-foreground bg-card/40"
+                            "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                            settings.soundEffects ? "bg-foreground" : "bg-muted"
                           )}
                         >
-                          {prof.label}
+                          <span
+                            className={cn(
+                              "pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-xs transform transition duration-200 ease-in-out",
+                              settings.soundEffects ? "translate-x-4" : "translate-x-0"
+                            )}
+                          />
                         </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                      </div>
+                    </div>
 
-                {/* Google Workspace Account */}
-                <div className="pt-4 border-t border-border/50 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-medium text-foreground">Google Workspace Account</p>
-                    <p className="text-[11px] text-muted-foreground">Sign in to connect Calendar, Gmail & Drive</p>
-                  </div>
-                  <WorkspaceConnectButton />
-                </div>
+                    <div className="flex items-center justify-between gap-3 py-3">
+                      <div>
+                        <p className="text-xs font-medium text-foreground">Reduced Motion</p>
+                        <p className="text-[11px] text-muted-foreground">Minimize decorative animations</p>
+                      </div>
+                      <button
+                        onClick={() => updateSetting('reducedMotion', !settings.reducedMotion)}
+                        role="switch"
+                        aria-checked={settings.reducedMotion}
+                        aria-label="Toggle reduced motion"
+                        className={cn(
+                          "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                          settings.reducedMotion ? "bg-foreground" : "bg-muted"
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-xs transform transition duration-200 ease-in-out",
+                            settings.reducedMotion ? "translate-x-4" : "translate-x-0"
+                          )}
+                        />
+                      </button>
+                    </div>
 
-                {/* GitHub Connection & Repositories Quick Row */}
-                <div className="pt-4 border-t border-border/50 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-medium text-foreground">GitHub Integration</p>
-                    <p className="text-[11px] text-muted-foreground">Browse user-accessible public & private repositories</p>
+                    <div className="flex items-center justify-between gap-3 py-3">
+                      <div>
+                        <p className="text-xs font-medium text-foreground">Auto-scroll to Results</p>
+                        <p className="text-[11px] text-muted-foreground">Keep new results in view when a run finishes</p>
+                      </div>
+                      <button
+                        onClick={() => updateSetting('autoScrollToResults', settings.autoScrollToResults === false ? true : false)}
+                        role="switch"
+                        aria-checked={settings.autoScrollToResults !== false}
+                        aria-label="Toggle auto-scroll to results"
+                        className={cn(
+                          "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                          settings.autoScrollToResults !== false ? "bg-foreground" : "bg-muted"
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-xs transform transition duration-200 ease-in-out",
+                            settings.autoScrollToResults !== false ? "translate-x-4" : "translate-x-0"
+                          )}
+                        />
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('connectors')}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border/70 hover:bg-muted text-xs font-medium transition-colors cursor-pointer"
-                  >
-                    <Github size={13} />
-                    <span>Browse Repositories</span>
-                  </button>
-                </div>
+                </section>
+
+                {/* Performance */}
+                <section className="space-y-3 pb-5 border-b border-border/50">
+                  <div>
+                    <p className="text-xs font-semibold text-foreground">Performance</p>
+                    <p className="text-[11px] text-muted-foreground">Tune memory use and responsiveness</p>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-xs font-medium text-foreground">Ultra-Lite Mode</p>
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-foreground text-background">
+                            {getActivePerformanceProfile().toUpperCase()}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">
+                          Reduces memory use and costly visual effects on low-memory devices
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const next = !(settings.ultraLiteMode ?? true);
+                          updateSetting('ultraLiteMode', next);
+                          updateSetting('performanceProfile', next ? 'ultra-lite' : 'balanced');
+                          toast.success(next ? 'Ultra-Lite 2GB RAM Engine enabled' : 'Switched to Balanced performance profile');
+                        }}
+                        role="switch"
+                        aria-checked={settings.ultraLiteMode ?? true}
+                        aria-label="Toggle Ultra-Lite Mode"
+                        className={cn(
+                          "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                          (settings.ultraLiteMode ?? true) ? "bg-foreground" : "bg-muted"
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-xs transform transition duration-200 ease-in-out",
+                            (settings.ultraLiteMode ?? true) ? "translate-x-4" : "translate-x-0"
+                          )}
+                        />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                      {(
+                        [
+                          { id: 'auto', label: 'Auto (2GB)' },
+                          { id: 'ultra-lite', label: 'Ultra-Lite' },
+                          { id: 'saver', label: 'Saver' },
+                          { id: 'balanced', label: 'Balanced' },
+                        ] as { id: PerformanceProfileSetting; label: string }[]
+                      ).map((prof) => {
+                        const currentProf = settings.performanceProfile || 'auto';
+                        const isSelected = currentProf === prof.id;
+                        return (
+                          <button
+                            key={prof.id}
+                            type="button"
+                            onClick={() => {
+                              updateSetting('performanceProfile', prof.id);
+                              updateSetting('ultraLiteMode', prof.id === 'ultra-lite' || prof.id === 'auto');
+                              toast.success(`Performance profile set to ${prof.label}`);
+                            }}
+                            className={cn(
+                              "py-1.5 px-2 rounded-lg border text-[11px] font-medium transition-colors cursor-pointer text-center",
+                              isSelected
+                                ? "bg-foreground text-background border-foreground font-semibold"
+                                : "border-border/60 text-muted-foreground hover:text-foreground bg-card/40"
+                            )}
+                          >
+                            {prof.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </section>
+
+                {/* Connected accounts */}
+                <section className="space-y-1">
+                  <div className="pb-1">
+                    <p className="text-xs font-semibold text-foreground">Connected accounts</p>
+                    <p className="text-[11px] text-muted-foreground">Manage the services available in your workspace</p>
+                  </div>
+                  <div className="divide-y divide-border/40">
+                    <div className="flex items-center justify-between gap-3 py-3">
+                      <div>
+                        <p className="text-xs font-medium text-foreground">Google Workspace</p>
+                        <p className="text-[11px] text-muted-foreground">Connect Calendar, Gmail, and Drive</p>
+                      </div>
+                      <WorkspaceConnectButton />
+                    </div>
+                    <div className="flex items-center justify-between gap-3 py-3">
+                      <div>
+                        <p className="text-xs font-medium text-foreground">GitHub</p>
+                        <p className="text-[11px] text-muted-foreground">Browse your connected repositories</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('connectors')}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border/70 hover:bg-muted text-xs font-medium transition-colors cursor-pointer shrink-0"
+                      >
+                        <Github size={13} />
+                        <span>Browse Repositories</span>
+                      </button>
+                    </div>
+                  </div>
+                </section>
               </div>
             )}
 

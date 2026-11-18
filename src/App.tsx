@@ -1,9 +1,7 @@
 import React, { useEffect, useCallback, useMemo, Suspense, lazy } from 'react';
-import { BrowserRouter, Routes, Route, useNavigate, useParams, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { Sidebar } from './components/layout/Sidebar';
 import { Topbar } from './components/layout/Topbar';
-import { Home } from './pages/Home';
-import { ChatView } from './components/agent/ChatView';
 import { useAgentTask } from './hooks/useAgentTask';
 import { useWebsiteBuilder } from './hooks/useWebsiteBuilder';
 import { BlinkProvider, BlinkAuthProvider, useBlinkAuth } from '@blinkdotnew/react';
@@ -16,9 +14,16 @@ import {
   getActivePerformanceProfile,
   applyPerformanceProfileToDOM,
 } from './lib/performanceEngine';
+import { startRecoveryMonitoring } from './lib/recoveryController';
 
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 
+const Home = lazy(() =>
+  import('./pages/Home').then((m) => ({ default: m.Home }))
+);
+const ChatView = lazy(() =>
+  import('./components/agent/ChatView').then((m) => ({ default: m.ChatView }))
+);
 // Lazy-load Work Mode, E2B sandbox preview, editors, and heavy secondary panels
 const WebsiteBuilderView = lazy(() =>
   import('./components/agent/WebsiteBuilderView').then((m) => ({ default: m.WebsiteBuilderView }))
@@ -38,6 +43,13 @@ const AndroidConnectorsSettings = lazy(() =>
 const MyAIChat = lazy(() =>
   import('./components/chat/MyAIChat').then((m) => ({ default: m.MyAIChat }))
 );
+function RouteLoadingFallback() {
+  return (
+    <div className="flex h-full min-h-24 w-full items-center justify-center" role="status" aria-label="Loading view">
+      <span className="h-1.5 w-12 rounded-full bg-muted" />
+    </div>
+  );
+}
 
 const PROJECT_ID = (import.meta as any).env?.VITE_BLINK_PROJECT_ID || 'manus-agent-clone-tkzhogvs';
 const PUBLISHABLE_KEY = (import.meta as any).env?.VITE_BLINK_PUBLISHABLE_KEY || '';
@@ -114,16 +126,26 @@ function AppContent() {
     const stopMonitoring = startPerformanceMonitoring();
     let batteryManager: any = null;
     let disposed = false;
+    let adaptivePerformanceDegraded = false;
 
     const updatePerformanceMode = () => {
       if (disposed) return;
       const activeProfile = getActivePerformanceProfile();
       const batteryLow = Boolean(batteryManager && !batteryManager.charging && batteryManager.level <= 0.2);
       const hidden = document.visibilityState === 'hidden';
-      const effectiveMode = activeProfile === 'ultra-lite' ? 'ultra-lite' : batteryLow ? 'saver' : activeProfile;
+      const effectiveMode = adaptivePerformanceDegraded
+        ? 'ultra-lite'
+        : activeProfile === 'ultra-lite' ? 'ultra-lite' : batteryLow ? 'saver' : activeProfile;
       applyPerformanceProfileToDOM(effectiveMode);
       document.documentElement.dataset.pageHidden = hidden ? 'true' : 'false';
     };
+
+    const stopRecoveryMonitoring = startRecoveryMonitoring({
+      onPerformanceDegraded: (degraded) => {
+        adaptivePerformanceDegraded = degraded;
+        updatePerformanceMode();
+      },
+    });
 
     const onVisibilityChange = () => updatePerformanceMode();
     const onMotionPreferenceChange = () => updatePerformanceMode();
@@ -149,6 +171,7 @@ function AppContent() {
     return () => {
       disposed = true;
       stopMonitoring();
+      stopRecoveryMonitoring();
       document.removeEventListener('visibilitychange', onVisibilityChange);
       motionPreference?.removeEventListener?.('change', onMotionPreferenceChange);
       window.removeEventListener('manus_performance_profile_changed', onPerfProfileChange);
@@ -297,7 +320,7 @@ function AppContent() {
         <main className="flex-1 overflow-hidden relative transition-all duration-300 ease-out">
           {isWebsiteActive ? (
             <div className="w-full h-full manus-transition-enter gpu-accelerated">
-              <Suspense fallback={null}>
+              <Suspense fallback={<RouteLoadingFallback />}>
                 <WebsiteBuilderView
                   websiteName={websiteTask?.websiteName || 'Website'}
                   steps={websiteSteps}
@@ -311,9 +334,12 @@ function AppContent() {
           ) : (
             <div key={location.pathname} className="w-full h-full manus-transition-enter gpu-accelerated">
               <ErrorBoundary>
-                <Suspense fallback={null}>
+                <Suspense fallback={<RouteLoadingFallback />}>
                   <Routes>
                     <Route path="/" element={<Home onStartTask={handleStartTask} />} />
+                    <Route path="/login" element={<Navigate to="/" replace />} />
+                    <Route path="/forgot-password" element={<Navigate to="/" replace />} />
+                    <Route path="/signup" element={<Navigate to="/" replace />} />
                     <Route 
                       path="/task/:taskId" 
                       element={
@@ -353,6 +379,7 @@ function AppContent() {
                         <MyAIChat onBack={() => navigate('/')} />
                       } 
                     />
+                    <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
                 </Suspense>
               </ErrorBoundary>
@@ -397,12 +424,12 @@ export default function App() {
   return (
     <ErrorBoundary
       title="Application Error"
-      description="Manus encountered an unexpected startup error. Click below to reload the workspace."
+      description="The app could not render this view. Your account and saved conversations have not been reset. Reload to try again."
     >
       <ThemeProvider>
         <FirebaseProvider>
-          <BlinkProvider 
-            projectId={PROJECT_ID} 
+          <BlinkProvider
+            projectId={PROJECT_ID}
             publishableKey={PUBLISHABLE_KEY}
           >
             <BlinkAuthProvider>

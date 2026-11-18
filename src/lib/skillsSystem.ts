@@ -7,6 +7,7 @@
 
 import { observability } from './observability';
 import { securityCenter } from './securityCenter';
+import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
 
 export interface SkillMetadata {
   id: string;
@@ -395,18 +396,21 @@ class SkillsRegistryService {
 
         if (typeof window !== 'undefined' && typeof fetch === 'function') {
           try {
-            const res = await fetch(`/api/realtime?q=${encodeURIComponent(query)}`, {
-              method: 'GET',
-              headers: { Accept: 'application/json' },
-              signal: AbortSignal.timeout(3500),
-            });
-            if (res.ok) {
-              const payload = await res.json();
-              return {
-                success: true,
-                output: payload,
-                summary: `Fetched live real-time data snapshot as of ${ist}`,
-              };
+            const authorization = await getFirebaseAuthorizationHeader();
+            if (authorization) {
+              const res = await fetch(`/api/realtime?q=${encodeURIComponent(query)}`, {
+                method: 'GET',
+                headers: { Accept: 'application/json', Authorization: authorization },
+                signal: AbortSignal.timeout(3500),
+              });
+              if (res.ok) {
+                const payload = await res.json();
+                return {
+                  success: true,
+                  output: payload,
+                  summary: `Fetched live real-time data snapshot as of ${ist}`,
+                };
+              }
             }
           } catch {}
         }
@@ -458,4 +462,3 @@ class SkillsRegistryService {
 }
 
 export const skillsRegistry = new SkillsRegistryService();
-

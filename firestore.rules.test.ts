@@ -1,75 +1,85 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
-describe('Firestore Security Rules - Dirty Dozen Adversarial Test Suite', () => {
-  it('Payload 1: Identity Spoofing - Impersonate Another User Profile should fail', () => {
-    const authUid = 'attacker_uid';
-    const targetUserId = 'victim_user_123';
-    expect(authUid === targetUserId).toBe(false);
+const rules = readFileSync(resolve(process.cwd(), 'firestore.rules'), 'utf8');
+
+function ruleBlock(start: string, end: string): string {
+  const startIndex = rules.indexOf(start);
+  const endIndex = rules.indexOf(end, startIndex + start.length);
+  expect(startIndex, `missing rule block: ${start}`).toBeGreaterThanOrEqual(0);
+  expect(endIndex, `missing rule block terminator: ${end}`).toBeGreaterThan(startIndex);
+  return rules.slice(startIndex, endIndex);
+}
+
+describe('Firestore security rules contract', () => {
+  it('keeps a default-deny catch-all before explicit collection grants', () => {
+    expect(rules).toContain("match /{document=**} {");
+    expect(rules).toContain('allow read, write: if false;');
   });
 
-  it('Payload 2: Ghost Field Injection - Shadow field attack on user profile should fail', () => {
-    const allowedKeys = ['id', 'email', 'displayName', 'photoURL', 'createdAt'];
-    const payloadKeys = ['id', 'email', 'isAdmin', 'superUser'];
-    const hasOnlyAllowed = payloadKeys.every(k => allowedKeys.includes(k));
-    expect(hasOnlyAllowed).toBe(false);
+  it('binds user, project, conversation, and message IDs to their paths', () => {
+    const users = ruleBlock('match /users/{userId}', 'match /projects/{projectId}');
+    const projects = ruleBlock('match /projects/{projectId}', 'match /conversations/{conversationId}');
+    const conversations = ruleBlock('match /conversations/{conversationId}', '\n    }\n  }\n}');
+
+    expect(users).toContain('incoming().id == userId');
+    expect(users).toContain('incoming().id == existing().id');
+    expect(projects).toContain('incoming().id == projectId');
+    expect(projects).toContain('incoming().id == existing().id');
+    expect(conversations).toContain('incoming().id == conversationId');
+    expect(conversations).toContain('incoming().id == messageId');
+    expect(conversations).toContain('incoming().conversationId == conversationId');
+    expect(conversations).toContain('incoming().conversationId == existing().conversationId');
   });
 
-  it('Payload 3: Unauthenticated Read on User Profiles should fail', () => {
-    const isAuthenticated = false;
-    expect(isAuthenticated).toBe(false);
+  it('prevents creation timestamps from changing on updates', () => {
+    expect(rules).toContain("incoming().createdAt == existing().createdAt");
+    expect(rules).toContain("incoming().created_at == existing().created_at");
+    expect(rules).toContain("incoming().timestamp == existing().timestamp");
+    expect(rules).toContain("('createdAt' in existing()) || ('createdAt' in incoming() && incoming().createdAt == existing().createdAt)");
   });
 
-  it('Payload 4: Identity Theft on Project Creation should fail', () => {
-    const authUid = 'attacker_uid';
-    const payloadUserId = 'victim_user_123';
-    expect(authUid === payloadUserId).toBe(false);
+  it('requires checkpoint ownership, path task identity, bounded fields, and immutable identity fields', () => {
+    const checkpoints = ruleBlock('match /checkpoints/{checkpointId}', 'match /projects/{projectId}');
+    const checkpointValidator = ruleBlock('function isValidCheckpoint(', 'function isValidCheckpointTransition');
+
+    expect(checkpoints).toContain('isValidCheckpoint(incoming(), userId, checkpointId)');
+    expect(checkpointValidator).toContain('data.taskId == checkpointId');
+    expect(checkpointValidator).toContain('data.userId == ownerId');
+    expect(checkpointValidator).toContain('data.completedToolCalls.size() <= 100');
+    expect(checkpointValidator).toContain('data.accumulatedResult.size() <= 500000');
+    expect(checkpoints).toContain('incoming().id == existing().id');
+    expect(checkpoints).toContain('incoming().taskId == existing().taskId');
+    expect(checkpoints).toContain('incoming().conversationId == existing().conversationId');
+    expect(checkpoints).toContain('incoming().userId == existing().userId');
   });
 
-  it('Payload 5: Cross-Tenant Project Snooping should fail', () => {
-    const projectOwnerId = 'victim_user_123';
-    const requestingUserId = 'attacker_uid';
-    expect(projectOwnerId === requestingUserId).toBe(false);
+  it('makes completed checkpoints terminal and prevents invalid terminal-state reversion', () => {
+    const checkpoints = ruleBlock('function isValidCheckpointTransition()', 'match /test/connection');
+
+    expect(checkpoints).toContain("existing().status == 'completed' && incoming().status == 'completed'");
+    expect(checkpoints).toContain("existing().status == 'failed' && incoming().status in ['failed', 'completed']");
+    expect(checkpoints).toContain("existing().status == 'interrupted' && incoming().status in ['interrupted', 'failed', 'completed']");
   });
 
-  it('Payload 6: Owner Tampering on Project Update should fail', () => {
-    const existingOwnerId = 'attacker_uid';
-    const incomingOwnerId = 'another_user_456';
-    expect(existingOwnerId === incomingOwnerId).toBe(false);
+  it('protects completed conversations from reopening or changing immutable content', () => {
+    const conversationUpdate = ruleBlock('function isValidConversationUpdate()', 'function isValidMessage');
+    const messages = ruleBlock('match /messages/{messageId}', '\n      }\n    }\n  }\n}');
+
+    expect(conversationUpdate).toContain("incoming().status == 'completed'");
+    expect(conversationUpdate).toContain('incoming().title == existing().title');
+    expect(conversationUpdate).toContain('incoming().mode == existing().mode');
+    expect(conversationUpdate).toContain('incoming().createdAt == existing().createdAt');
+    expect(conversationUpdate).toContain('incoming().result == existing().result');
+    expect(conversationUpdate).toContain("('steps' in existing()) || ('steps' in incoming() && incoming().steps == existing().steps)");
+    expect(conversationUpdate).toContain("('messages' in existing()) || ('messages' in incoming() && incoming().messages == existing().messages)");
+    expect(messages).toContain("data.status != 'completed'");
   });
 
-  it('Payload 7: Massive String Resource Exhaustion should fail boundary limits', () => {
-    const maxProjectNameLength = 128;
-    const oversizedName = 'A'.repeat(10000);
-    expect(oversizedName.length <= maxProjectNameLength).toBe(false);
-  });
-
-  it('Payload 8: Foreign Conversation Read should fail', () => {
-    const conversationOwnerId = 'victim_user_123';
-    const requestingUserId = 'attacker_uid';
-    expect(conversationOwnerId === requestingUserId).toBe(false);
-  });
-
-  it('Payload 9: Unauthorized Message Injection into Foreign Chat should fail', () => {
-    const conversationOwnerId = 'victim_user_123';
-    const messageSenderId = 'attacker_uid';
-    expect(conversationOwnerId === messageSenderId).toBe(false);
-  });
-
-  it('Payload 10: Malicious ID Injection should fail regex check', () => {
-    const regex = /^[a-zA-Z0-9_\-]+$/;
-    const maliciousId = '../../../system_config/secrets';
-    expect(regex.test(maliciousId)).toBe(false);
-  });
-
-  it('Payload 11: Invalid Status Enum Tampering should fail enum check', () => {
-    const allowedStatuses = ['idle', 'running', 'completed', 'error'];
-    const tamperedStatus = 'hacked_status_bypassed';
-    expect(allowedStatuses.includes(tamperedStatus)).toBe(false);
-  });
-
-  it('Payload 12: Blanket Query Scraping should fail when not scoped to userId', () => {
-    const queriedUserId = undefined;
-    const requestAuthUid = 'attacker_uid';
-    expect(queriedUserId === requestAuthUid).toBe(false);
+  it('does not use shallow JavaScript self-comparisons as emulator substitutes', () => {
+    expect(rules).not.toContain('authUid === targetUserId');
+    expect(rules).not.toContain('projectOwnerId === requestingUserId');
+    expect(rules).not.toContain('allowedStatuses.includes(tamperedStatus)');
   });
 });

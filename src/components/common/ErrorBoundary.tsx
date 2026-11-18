@@ -1,5 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RotateCcw, ChevronDown, ChevronRight, Home } from 'lucide-react';
+import { observability } from '../../lib/observability';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -29,7 +30,16 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('ErrorBoundary caught an error:', error, errorInfo);
+    observability.log({
+      level: 'error',
+      category: 'ui-recovery',
+      message: 'A React component failed while rendering.',
+      classification: 'INTERNAL_ERROR',
+      details: {
+        errorType: error?.name || 'Error',
+        componentStackCaptured: Boolean(errorInfo?.componentStack),
+      },
+    });
     this.setState({ errorInfo });
   }
 

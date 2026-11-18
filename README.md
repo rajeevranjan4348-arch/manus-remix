@@ -47,3 +47,7 @@ npm run build
 ```bash
 npm test
 ```
+
+### Production security configuration
+
+Configure `TOKEN_ENCRYPTION_SECRET` and `POLICY_GATEWAY_SECRET` as independent server-only random secrets of at least 32 characters. Do not expose them through `VITE_*` variables. Production AI and web-search endpoints also require `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` for atomic per-user rate limits across serverless instances; without the shared limiter, those endpoints fail closed. Configure `VITE_GOOGLE_MAPS_API_KEY` only with a Google Maps key restricted to the app's allowed domains and required APIs.

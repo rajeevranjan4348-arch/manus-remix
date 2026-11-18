@@ -203,7 +203,7 @@ describe('Centralized Permission Gateway, Security Review & Durable Checkpoints'
         accumulatedResult: 'Phase 1 and 2 synthesis...',
       });
 
-      expect(cp.id).toBe('chk_task_resilience_101_step_2');
+      expect(cp.id).toBe('chk_task_resilience_101');
       expect(cp.checksum).toBeDefined();
       expect(cp.checksum.startsWith('chk_')).toBe(true);
 

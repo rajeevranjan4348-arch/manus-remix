@@ -37,6 +37,7 @@ import { matchVoiceCommand, executeOpenUrl, executeDeviceCommand } from '@/lib/v
 import { extractWeatherQuery, fetchWeatherByCity } from '@/lib/weatherService';
 import { requestMicrophonePermission } from '@/lib/permissionsManager';
 import { getSettings, saveSettings } from '@/lib/settingsStore';
+import { getFirebaseAuthorizationHeader } from '@/lib/firebaseAuthorization';
 import { MicrophonePermissionModal } from './MicrophonePermissionModal';
 
 export interface VoiceMessage {
@@ -595,9 +596,15 @@ export function VoiceCallModal({ isOpen, onClose, onSendMessageToChat }: VoiceCa
     // 3. Query Gemini for authentic, intelligent conversational response
     setStatusText('Gemini is responding...');
     try {
+      const authorization = await getFirebaseAuthorizationHeader();
+      if (!authorization) {
+        setCallStatus('listening');
+        setStatusText('Please sign in to use voice AI.');
+        return;
+      }
       const response = await fetch('/api/gemini/stream', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: authorization },
         body: JSON.stringify({
           messages: [
             ...messages.slice(-4).map(m => ({

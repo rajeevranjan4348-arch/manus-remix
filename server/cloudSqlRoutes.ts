@@ -103,6 +103,10 @@ export async function handleCloudSqlApiRequest(
         projectId: typeof body.projectId === 'string' ? body.projectId : null,
         summary: typeof body.summary === 'string' ? body.summary : undefined,
       });
+      if (!saved) {
+        sendJson(res, 409, { ok: false, error: 'Conversation id or project is not available to this account.' });
+        return true;
+      }
       sendJson(res, 200, { ok: true, conversation: saved });
       return true;
     }
@@ -151,6 +155,10 @@ export async function handleCloudSqlApiRequest(
         thought: typeof body.thought === 'string' ? body.thought : null,
         status: typeof body.status === 'string' ? body.status : 'success',
       });
+      if (!saved) {
+        sendJson(res, 409, { ok: false, error: 'Conversation or message is not available to this account.' });
+        return true;
+      }
       sendJson(res, 200, { ok: true, message: saved });
       return true;
     }
@@ -178,6 +186,10 @@ export async function handleCloudSqlApiRequest(
         icon: typeof body.icon === 'string' ? body.icon : null,
         color: typeof body.color === 'string' ? body.color : null,
       });
+      if (!saved) {
+        sendJson(res, 409, { ok: false, error: 'Project id is not available to this account.' });
+        return true;
+      }
       sendJson(res, 200, { ok: true, project: saved });
       return true;
     }

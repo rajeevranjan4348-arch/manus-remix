@@ -5,11 +5,15 @@ import {
   isRealtimeOrLiveFactQuery,
 } from '../../server/realtimeDataService';
 import {
-  knowledgeCacheService,
   orchestrateRealtimeResearch,
   ResearchOrchestrationResult,
   ResearchProgressEvent,
 } from '../../server/rtie';
+import { checkSharedRateLimit } from '../../server/distributedRateLimiter';
+import { verifyBearerToken } from '../../src/middleware/auth';
+import { geminiCircuitBreaker, openRouterCircuitBreaker } from '../../server/circuitBreaker';
+import { recoveryTelemetry } from '../../server/recoveryTelemetry';
+import { parseJsonBodyLimited } from '../../server/limitedJsonBody';
 
 const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -26,30 +30,27 @@ export default async (req: Request) => {
     return jsonResponse({ error: 'Method not allowed. Use POST.', code: 'METHOD_NOT_ALLOWED' }, 405);
   }
 
-  const clientIp =
-    req.headers.get('x-nf-client-connection-ip') ||
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    'netlify-agent';
-  const rateCheck = knowledgeCacheService.checkRateLimit(clientIp, 45);
+  const decodedToken = await verifyBearerToken(req.headers.get('authorization') || undefined);
+  if (!decodedToken?.uid) {
+    return jsonResponse({ error: 'Authentication required.', code: 'UNAUTHENTICATED' }, 401);
+  }
+  const rateCheck = await checkSharedRateLimit(`agent:${decodedToken.uid}`, 45, 60);
+  if (rateCheck.unavailable) {
+    return jsonResponse({ error: 'AI service is temporarily unavailable because the shared rate limiter is not configured.', code: 'RATE_LIMIT_UNAVAILABLE' }, 503);
+  }
   if (!rateCheck.allowed) {
-    return jsonResponse(
-      { error: 'Too many requests. Please wait a moment and try again.', code: 'RATE_LIMITED' },
-      429
-    );
+    return new Response(JSON.stringify({ error: 'Too many requests. Please wait a moment and try again.', code: 'RATE_LIMITED' }), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Retry-After': String(rateCheck.retryAfterSeconds), 'X-Content-Type-Options': 'nosniff' },
+    });
   }
 
-  // Request size limit check: enforce max 2MB payload
-  const contentLength = req.headers.get('content-length');
-  if (contentLength && parseInt(contentLength, 10) > 2 * 1024 * 1024) {
-    return jsonResponse({ error: 'Payload exceeds maximum allowed size (2MB).', code: 'PAYLOAD_TOO_LARGE' }, 413);
+  // Count actual streamed bytes as well as validating Content-Length to reject chunked oversize bodies.
+  const parsedBody = await parseJsonBodyLimited(req, 2 * 1024 * 1024);
+  if (!parsedBody.ok) {
+    return jsonResponse({ error: parsedBody.error, code: parsedBody.code }, parsedBody.status);
   }
-
-  let body: any;
-  try {
-    body = await req.json();
-  } catch {
-    return jsonResponse({ error: 'Malformed JSON payload. Expected valid JSON object.', code: 'BAD_REQUEST' }, 400);
-  }
+  const body: any = parsedBody.value;
 
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return jsonResponse({ error: 'Invalid request body format. Expected JSON object.', code: 'INVALID_PAYLOAD' }, 400);
@@ -382,6 +383,10 @@ export default async (req: Request) => {
             const toolConfigs = useGoogleSearch ? [{ tools: [{ googleSearch: {} }] }, {}] : [{}];
             modelLoop: for (const model of candidateModels) {
               for (const toolCfg of toolConfigs) {
+                if (!geminiCircuitBreaker.canAttempt()) {
+                  recoveryTelemetry.record({ component: 'gemini', action: 'circuit_open', outcome: 'degraded', statusCode: 503, requestId });
+                  break modelLoop;
+                }
                 try {
                   const responseStream = await ai!.models.generateContentStream({
                     model,
@@ -410,11 +415,20 @@ export default async (req: Request) => {
                     }
                   }
 
+                  geminiCircuitBreaker.recordSuccess();
+                  recoveryTelemetry.record({ component: 'gemini', action: 'provider_recovered', outcome: 'success', requestId });
                   if (hasEmittedText) {
                     break modelLoop;
                   }
                 } catch (err: any) {
-                  console.warn(`[Netlify Agent] Model ${model} failed, trying fallback:`, err);
+                  geminiCircuitBreaker.recordFailure(err);
+                  recoveryTelemetry.record({
+                    component: 'gemini',
+                    action: 'provider_fallback',
+                    outcome: 'failed',
+                    statusCode: Number.isInteger(err?.status) ? err.status : undefined,
+                    requestId,
+                  });
                   const errMsg = String(err?.message || '');
                   if (err?.status === 401 || err?.status === 403 || errMsg.includes('API_KEY_INVALID') || errMsg.includes('API key not valid')) {
                     break modelLoop;
@@ -489,8 +503,12 @@ export default async (req: Request) => {
       'meta-llama/llama-3.3-70b-instruct',
     ];
 
-    for (const orKey of openRouterKeys) {
+    openRouterFallback: for (const orKey of openRouterKeys) {
       for (const orModel of orModels) {
+        if (!openRouterCircuitBreaker.canAttempt()) {
+          recoveryTelemetry.record({ component: 'openrouter', action: 'circuit_open', outcome: 'degraded', statusCode: 503, requestId });
+          break openRouterFallback;
+        }
         try {
           const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
@@ -512,6 +530,19 @@ export default async (req: Request) => {
             signal: AbortSignal.timeout(25000),
           });
 
+          if (!orRes.ok || !orRes.body) {
+            const statusCode = orRes.status || 502;
+            openRouterCircuitBreaker.recordFailure({ status: statusCode, message: `HTTP ${statusCode}` });
+            recoveryTelemetry.record({
+              component: 'openrouter',
+              action: 'provider_fallback',
+              outcome: 'failed',
+              statusCode,
+              requestId,
+            });
+            continue;
+          }
+
           if (orRes.ok && orRes.body) {
             const reader = orRes.body.getReader();
             const decoder = new TextDecoder();
@@ -532,6 +563,8 @@ export default async (req: Request) => {
                       const trimmed = line.trim();
                       if (!trimmed || trimmed.startsWith(':')) continue;
                       if (trimmed === 'data: [DONE]') {
+                        openRouterCircuitBreaker.recordSuccess();
+                        recoveryTelemetry.record({ component: 'openrouter', action: 'provider_recovered', outcome: 'success', requestId });
                         if (!hasEmittedText) {
                           const fallback = buildFallbackAnswer(latestUserText, configuredModelId, realtimeSnapshot);
                           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: fallback, textDelta: fallback, requestId })}\n\n`));
@@ -552,6 +585,8 @@ export default async (req: Request) => {
                       }
                     }
                   }
+                  openRouterCircuitBreaker.recordSuccess();
+                  recoveryTelemetry.record({ component: 'openrouter', action: 'provider_recovered', outcome: 'success', requestId });
                   if (!hasEmittedText) {
                     const fallback = buildFallbackAnswer(latestUserText, configuredModelId, realtimeSnapshot);
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: fallback, textDelta: fallback, requestId })}\n\n`));
@@ -559,6 +594,14 @@ export default async (req: Request) => {
                   controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId })}\n\n`));
                   controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                 } catch (err: any) {
+                  openRouterCircuitBreaker.recordFailure(err);
+                  recoveryTelemetry.record({
+                    component: 'openrouter',
+                    action: 'provider_fallback',
+                    outcome: 'failed',
+                    statusCode: Number.isInteger(err?.status) ? err.status : undefined,
+                    requestId,
+                  });
                   try {
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: err?.message || 'Stream error', requestId })}\n\n`));
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error', requestId })}\n\n`));
@@ -579,7 +622,16 @@ export default async (req: Request) => {
               },
             });
           }
-        } catch {}
+        } catch (err: any) {
+          openRouterCircuitBreaker.recordFailure(err);
+          recoveryTelemetry.record({
+            component: 'openrouter',
+            action: 'provider_fallback',
+            outcome: 'failed',
+            statusCode: Number.isInteger(err?.status) ? err.status : undefined,
+            requestId,
+          });
+        }
       }
     }
 

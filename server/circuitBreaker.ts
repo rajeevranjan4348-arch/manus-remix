@@ -341,3 +341,10 @@ export const geminiCircuitBreaker = new StreamingCircuitBreaker({
   resetTimeoutMs: 30000,
   halfOpenSuccessThreshold: 2,
 });
+
+export const openRouterCircuitBreaker = new StreamingCircuitBreaker({
+  serviceName: 'OpenRouter API',
+  failureThreshold: 3,
+  resetTimeoutMs: 30000,
+  halfOpenSuccessThreshold: 2,
+});

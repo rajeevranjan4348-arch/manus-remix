@@ -244,6 +244,18 @@ export function shouldShowComposingIndicator({
   return phase === 'text-generation';
 }
 
+export function shouldShowChatThinkingIndicator({
+  isAssistantWorking,
+  hasCurrentUserMessage,
+  hasVisibleAssistantMessage,
+}: {
+  isAssistantWorking: boolean;
+  hasCurrentUserMessage: boolean;
+  hasVisibleAssistantMessage: boolean;
+}): boolean {
+  return isAssistantWorking && hasCurrentUserMessage && !hasVisibleAssistantMessage;
+}
+
 // Extract embedded image Data URL from user message if present
 export function extractUserImageAttachment(raw: any): string | null {
   if (!raw || typeof raw !== 'string') return null;
@@ -1477,8 +1489,47 @@ export function ChatView({
 
   const footerRenderRef = useRef<() => React.ReactNode>(() => null);
   const footerSubscribersRef = useRef<Set<() => void>>(new Set());
+
+  const shouldShowThinkingIndicator = React.useMemo(() => {
+    let lastUserMessageIndex = -1;
+    displayMessages.forEach((message, index) => {
+      if (message?.role === 'user') lastUserMessageIndex = index;
+    });
+
+    const hasVisibleAssistantMessage = displayMessages
+      .slice(lastUserMessageIndex + 1)
+      .some((message) => {
+        if (message?.role !== 'assistant') return false;
+        const { content } = extractThoughtProcess(message.content);
+        return Boolean(cleanMessageContent(content || message.content));
+      });
+
+    return shouldShowChatThinkingIndicator({
+      isAssistantWorking,
+      hasCurrentUserMessage: lastUserMessageIndex >= 0 || Boolean(prompt.trim()),
+      hasVisibleAssistantMessage,
+    });
+  }, [displayMessages, isAssistantWorking, prompt]);
+
   footerRenderRef.current = () => (
     <div className="px-4 sm:px-20 space-y-3 pb-28 pt-2">
+      {shouldShowThinkingIndicator && (
+        <div
+          data-testid="chat-thinking-indicator"
+          role="status"
+          aria-label="AI is thinking"
+          className="chat-thinking-row max-w-3xl mx-auto w-full"
+        >
+          <span className="chat-thinking-bubble" aria-hidden="true">
+            <span className="chat-thinking-dots">
+              <span />
+              <span />
+              <span />
+            </span>
+          </span>
+        </div>
+      )}
+
       {/* Final Result */}
       {(() => {
         const hasChart = Boolean(

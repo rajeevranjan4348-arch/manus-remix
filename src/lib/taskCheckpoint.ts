@@ -78,7 +78,8 @@ export class TaskCheckpointService {
     const completedToolCalls = params.completedToolCalls || [];
     const accumulatedResult = params.accumulatedResult || '';
     const status = params.status || 'in_progress';
-    const id = `chk_${params.taskId}_step_${params.stepIndex}`;
+    // One document per task: keep its ID stable so immutable-ID rules allow step updates.
+    const id = `chk_${params.taskId}`;
 
     const checksum = this.computeChecksum({
       taskId: params.taskId,
@@ -114,12 +115,17 @@ export class TaskCheckpointService {
       } catch {}
     }
 
-    // 3. Sync to server-side durable checkpoint store (non-blocking)
-    if (typeof fetch !== 'undefined') {
-      fetch('/api/checkpoints/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(checkpoint),
+    // 3. Sync to the authenticated server-side checkpoint cache (non-blocking).
+    // The server derives ownership from the verified token, not this local record.
+    const currentUser = auth?.currentUser;
+    if (typeof fetch !== 'undefined' && currentUser) {
+      void currentUser.getIdToken().then((idToken) => {
+        const { userId: _clientUserId, ...serverCheckpoint } = checkpoint;
+        return fetch('/api/checkpoints/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+          body: JSON.stringify(serverCheckpoint),
+        });
       }).catch(() => {});
     }
 
@@ -187,9 +193,12 @@ export class TaskCheckpointService {
     }
 
     // Check Server API
-    if (typeof fetch !== 'undefined') {
+    if (typeof fetch !== 'undefined' && auth?.currentUser) {
       try {
-        const res = await fetch(`/api/checkpoints/${encodeURIComponent(taskId)}`);
+        const idToken = await auth.currentUser.getIdToken();
+        const res = await fetch(`/api/checkpoints/${encodeURIComponent(taskId)}`, {
+          headers: { Authorization: `Bearer ${idToken}` },
+        });
         if (res.ok) {
           const payload = await res.json();
           if (payload.checkpoint) {
@@ -300,8 +309,13 @@ export class TaskCheckpointService {
       deleteDoc(docRef).catch(() => {});
     }
 
-    if (typeof fetch !== 'undefined') {
-      fetch(`/api/checkpoints/${encodeURIComponent(taskId)}`, { method: 'DELETE' }).catch(() => {});
+    if (typeof fetch !== 'undefined' && auth?.currentUser) {
+      void auth.currentUser.getIdToken().then((idToken) =>
+        fetch(`/api/checkpoints/${encodeURIComponent(taskId)}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${idToken}` },
+        })
+      ).catch(() => {});
     }
   }
 }

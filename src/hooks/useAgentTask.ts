@@ -35,6 +35,7 @@ import {
   getActivePerformanceProfile,
   loadAIProviderIntegrationOnDemand,
 } from '@/lib/performanceEngine';
+import { SUPPORT_ISSUE_RESPONSE_GUIDANCE } from '@/lib/aiSupportGuidance';
 
 export type AgentTaskPhase = 'idle' | 'sending' | 'thinking' | 'tool-calling' | 'text-generation' | 'streaming' | 'completed' | 'error';
 
@@ -224,10 +225,10 @@ export function useAgentTask() {
   const [sandbox, setSandbox] = useState<Sandbox | null>(null);
   const [persistentMessages, setPersistentMessages] = useState<any[]>([]);
   const [liveStreamText, setLiveStreamText] = useState<string>('');
-  const isSubmittingRef = useRef<boolean>(false);
   const liveStreamTextRef = useRef<string>('');
   const messagesRef = useRef<any[]>([]);
   const persistentMessagesRef = useRef<any[]>([]);
+  const isSubmittingRef = useRef<boolean>(false);
   if (!isSubmittingRef.current || persistentMessages.length >= persistentMessagesRef.current.length) {
     persistentMessagesRef.current = persistentMessages;
   }
@@ -535,6 +536,8 @@ export function useAgentTask() {
     10. Before sending, silently check: Did I answer the latest question? Are claims supported? Did I follow constraints? Is the response complete, non-duplicative, and safe? Fix any obvious issue before finalizing.
     11. Do not reveal private chain-of-thought or internal deliberation, including <think> blocks. For complex questions, provide a concise explanation, key assumptions, calculations, evidence, and conclusions instead.
     12. When the request is ambiguous but still answerable, choose the most likely interpretation and briefly state it. When interpretations would lead to materially different actions, ask a concise clarifying question.
+
+    ${SUPPORT_ISSUE_RESPONSE_GUIDANCE}
 
     Output Format Guide:
     - graph: Generate structured JSON with chart data (labels, datasets with values) AND include a "type" field (bar, line, pie, scatter, area, bubble) if 'auto' was requested.

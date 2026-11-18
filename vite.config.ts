@@ -18,6 +18,8 @@ import {
 import { generateOAuthUrl, handleOAuthCallback, executeServerConnectorTool, isSafeUrl } from './server/connectorsService';
 import { handleCloudSqlApiRequest } from './server/cloudSqlRoutes';
 import { searchVerifiedEntityImages } from './server/visualSearchService';
+import { checkSharedRateLimit } from './server/distributedRateLimiter';
+import { verifyBearerToken } from './src/middleware/auth';
 import { GoogleGenAI } from '@google/genai';
 
 class StreamCircuitBreaker {
@@ -67,6 +69,20 @@ const streamCircuitBreaker = new StreamCircuitBreaker();
 function geminiApiPlugin(): Plugin {
   const apiMiddleware = async (req: any, res: any, next: any) => {
         const url = req.url?.split('?')[0];
+
+        if (url === '/api/health') {
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          res.setHeader('X-Content-Type-Options', 'nosniff');
+          if (req.method !== 'GET') {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ ok: false, code: 'METHOD_NOT_ALLOWED' }));
+            return;
+          }
+          res.statusCode = 200;
+          res.end(JSON.stringify({ ok: true, service: 'ai-app-function', generatedAt: new Date().toISOString() }));
+          return;
+        }
 
         // Server-Side Cloud SQL Relational Data Endpoints
         if (url && url.startsWith('/api/sql/')) {
@@ -301,9 +317,36 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
         // Server-Side Visual Answer Engine Image Search Endpoint
         if ((url === '/api/visual-search' || url === '/.netlify/functions/visual-search') && req.method === 'POST') {
           res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          const decodedToken = await verifyBearerToken(req.headers.authorization as string | undefined);
+          if (!decodedToken?.uid) {
+            res.statusCode = 401;
+            res.end(JSON.stringify({ error: 'Authentication required.', code: 'UNAUTHENTICATED' }));
+            return;
+          }
+          const rateLimit = await checkSharedRateLimit(`web-search:${decodedToken.uid}`, 30, 60);
+          if (rateLimit.unavailable || !rateLimit.allowed) {
+            res.statusCode = rateLimit.unavailable ? 503 : 429;
+            res.setHeader('Retry-After', String(rateLimit.retryAfterSeconds));
+            res.end(JSON.stringify({
+              error: rateLimit.unavailable ? 'Search is temporarily unavailable because the shared rate limiter is not configured.' : 'Too many search requests. Please wait and try again.',
+              code: rateLimit.unavailable ? 'RATE_LIMIT_UNAVAILABLE' : 'RATE_LIMITED',
+            }));
+            return;
+          }
           let bodyStr = '';
-          req.on('data', chunk => { bodyStr += chunk; });
+          let bodyBytes = 0;
+          let bodyTooLarge = false;
+          req.on('data', chunk => {
+            bodyBytes += Buffer.byteLength(chunk);
+            if (bodyBytes > 16 * 1024) bodyTooLarge = true;
+            else if (!bodyTooLarge) bodyStr += chunk;
+          });
           req.on('end', async () => {
+            if (bodyTooLarge) {
+              res.statusCode = 413;
+              res.end(JSON.stringify({ error: 'Request payload exceeds the maximum allowed size.', code: 'PAYLOAD_TOO_LARGE' }));
+              return;
+            }
             try {
               const body = bodyStr ? JSON.parse(bodyStr) : {};
               const queries = Array.isArray(body?.queries)
@@ -329,6 +372,22 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
         // Server-Side Web Search Endpoint (mirrors netlify/functions/web-search.ts)
         if ((url === '/api/web-search' || url === '/api/search' || url === '/.netlify/functions/web-search') && req.method === 'POST') {
           res.setHeader('Content-Type', 'application/json');
+          const decodedToken = await verifyBearerToken(req.headers.authorization as string | undefined);
+          if (!decodedToken?.uid) {
+            res.statusCode = 401;
+            res.end(JSON.stringify({ error: 'Authentication required.', code: 'UNAUTHENTICATED' }));
+            return;
+          }
+          const rateLimit = await checkSharedRateLimit(`web-search:${decodedToken.uid}`, 30, 60);
+          if (rateLimit.unavailable || !rateLimit.allowed) {
+            res.statusCode = rateLimit.unavailable ? 503 : 429;
+            res.setHeader('Retry-After', String(rateLimit.retryAfterSeconds));
+            res.end(JSON.stringify({
+              error: rateLimit.unavailable ? 'Search is temporarily unavailable because the shared rate limiter is not configured.' : 'Too many search requests. Please wait and try again.',
+              code: rateLimit.unavailable ? 'RATE_LIMIT_UNAVAILABLE' : 'RATE_LIMITED',
+            }));
+            return;
+          }
           let bodyStr = '';
           req.on('data', chunk => { bodyStr += chunk; });
           req.on('end', async () => {
@@ -613,6 +672,24 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
         }
 
         if (req.method === 'POST' && url === '/api/ai/completion') {
+          const decodedToken = await verifyBearerToken(req.headers.authorization as string | undefined);
+          if (!decodedToken?.uid) {
+            res.statusCode = 401;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: 'Authentication required.', code: 'UNAUTHENTICATED' }));
+            return;
+          }
+          const rateLimit = await checkSharedRateLimit(`agent:${decodedToken.uid}`, 45, 60);
+          if (rateLimit.unavailable || !rateLimit.allowed) {
+            res.statusCode = rateLimit.unavailable ? 503 : 429;
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Retry-After', String(rateLimit.retryAfterSeconds));
+            res.end(JSON.stringify({
+              error: rateLimit.unavailable ? 'AI service is temporarily unavailable because the shared rate limiter is not configured.' : 'Too many requests. Please wait and try again.',
+              code: rateLimit.unavailable ? 'RATE_LIMIT_UNAVAILABLE' : 'RATE_LIMITED',
+            }));
+            return;
+          }
           let bodyStr = '';
           req.on('data', chunk => {
             bodyStr += chunk;
@@ -718,6 +795,24 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
             url === '/.netlify/functions/agent' ||
             url?.startsWith('/api/ai/'))
         ) {
+          const decodedToken = await verifyBearerToken(req.headers.authorization as string | undefined);
+          if (!decodedToken?.uid) {
+            res.statusCode = 401;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: 'Authentication required.', code: 'UNAUTHENTICATED' }));
+            return;
+          }
+          const rateLimit = await checkSharedRateLimit(`agent:${decodedToken.uid}`, 45, 60);
+          if (rateLimit.unavailable || !rateLimit.allowed) {
+            res.statusCode = rateLimit.unavailable ? 503 : 429;
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Retry-After', String(rateLimit.retryAfterSeconds));
+            res.end(JSON.stringify({
+              error: rateLimit.unavailable ? 'AI service is temporarily unavailable because the shared rate limiter is not configured.' : 'Too many requests. Please wait and try again.',
+              code: rateLimit.unavailable ? 'RATE_LIMIT_UNAVAILABLE' : 'RATE_LIMITED',
+            }));
+            return;
+          }
           let bodyStr = '';
           req.on('data', chunk => {
             bodyStr += chunk;

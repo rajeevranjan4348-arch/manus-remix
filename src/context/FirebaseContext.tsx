@@ -1,63 +1,31 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { 
-  onAuthStateChanged, 
-  setPersistence,
-  browserLocalPersistence,
-  User as FirebaseUser 
-} from 'firebase/auth';
-import { 
-  auth, 
-  signInWithGoogle, 
+import type { User as FirebaseUser } from 'firebase/auth';
+import {
+  auth,
+  createEmailAccount,
+  refreshCurrentUser,
+  requestPasswordReset,
+  resendEmailVerification,
+  setRememberMePersistence,
   signInAnonymouslyUser,
-  signOutUser 
+  signInWithEmail,
+  signInWithGoogle,
+  signOutUser,
 } from '@/lib/firebase';
 import { logoutWorkspace } from '@/lib/workspaceAuth';
 import { syncUserProfile } from '@/lib/firestoreService';
 import { syncUserToCloudSql } from '@/lib/cloudSqlClient';
 import { toast } from 'sonner';
 
-const AUTH_USER_CACHE_KEY = 'manus_auth_user_cache';
-
-interface CachedUserSession {
-  uid: string;
-  email: string | null;
-  displayName: string | null;
-  photoURL: string | null;
-}
-
-function getCachedUserSession(): CachedUserSession | null {
-  if (typeof localStorage === 'undefined') return null;
-  try {
-    const raw = localStorage.getItem(AUTH_USER_CACHE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-function setCachedUserSession(user: FirebaseUser | any | null) {
-  if (typeof localStorage === 'undefined') return;
-  try {
-    if (user) {
-      const sess: CachedUserSession = {
-        uid: user.uid,
-        email: user.email || null,
-        displayName: user.displayName || null,
-        photoURL: user.photoURL || null,
-      };
-      localStorage.setItem(AUTH_USER_CACHE_KEY, JSON.stringify(sess));
-    } else {
-      localStorage.removeItem(AUTH_USER_CACHE_KEY);
-    }
-  } catch (err) {
-    console.warn('[Firebase Auth] Failed to update user session cache:', err);
-  }
-}
-
 interface FirebaseContextType {
-  user: FirebaseUser | any | null;
+  user: FirebaseUser | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
+  signInWithEmail: (email: string, password: string, rememberMe: boolean) => Promise<void>;
+  createAccount: (email: string, password: string, displayName: string, rememberMe: boolean) => Promise<void>;
+  sendPasswordReset: (email: string) => Promise<void>;
+  resendVerification: () => Promise<void>;
+  refreshVerification: () => Promise<boolean>;
   signInAsGuest: () => Promise<void>;
   signOut: () => Promise<void>;
   getIdToken: (forceRefresh?: boolean) => Promise<string | null>;
@@ -67,158 +35,118 @@ const FirebaseContext = createContext<FirebaseContextType>({
   user: null,
   loading: true,
   signInWithGoogle: async () => {},
+  signInWithEmail: async () => {},
+  createAccount: async () => {},
+  sendPasswordReset: async () => {},
+  resendVerification: async () => {},
+  refreshVerification: async () => false,
   signInAsGuest: async () => {},
   signOut: async () => {},
   getIdToken: async () => null,
 });
 
+function syncVerifiedUser(user: FirebaseUser): void {
+  if (user.isAnonymous || !user.emailVerified) return;
+  void syncUserProfile({
+    id: user.uid,
+    email: user.email || '',
+    displayName: user.displayName || 'User',
+    photoURL: user.photoURL || '',
+    createdAt: user.metadata?.creationTime || new Date().toISOString(),
+  }).catch((error) => {
+    console.warn('[Firebase] Profile sync notice:', (error as any)?.code || 'profile-sync-error');
+  });
+  void syncUserToCloudSql({ email: user.email, displayName: user.displayName }).catch(() => {});
+}
+
 export function FirebaseProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<FirebaseUser | any | null>(() => auth?.currentUser || getCachedUserSession());
-  const [loading, setLoading] = useState<boolean>(false);
+  const [user, setUser] = useState<FirebaseUser | null>(auth.currentUser);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let isSubscribed = true;
-    let unsubscribe: () => void = () => {};
+    let hasResolvedAuth = false;
 
-    try {
-      unsubscribe = onAuthStateChanged(
-        auth, 
-        (currentUser) => {
-          if (!isSubscribed) return;
-          setLoading(false);
+    const unsubscribe = auth.onAuthStateChanged(
+      (currentUser) => {
+        if (!isSubscribed) return;
+        hasResolvedAuth = true;
+        setUser(currentUser);
+        if (currentUser) syncVerifiedUser(currentUser);
+        setLoading(false);
+      },
+      (error) => {
+        if (!isSubscribed) return;
+        console.warn('[Firebase Auth] State listener notice:', (error as any)?.code || 'state-listener-error');
+        // Keep only the user Firebase itself has restored; never trust a local profile cache as a session.
+        setUser(auth.currentUser);
+        setLoading(false);
+      },
+    );
 
-          if (currentUser) {
-            setUser(currentUser);
-            setCachedUserSession(currentUser);
-            // Non-blocking background sync so UI never waits on Firestore/Cloud SQL network round-trips
-            syncUserProfile({
-              id: currentUser.uid,
-              email: currentUser.email || '',
-              displayName: currentUser.displayName || 'Manus User',
-              photoURL: currentUser.photoURL || '',
-              createdAt: currentUser.metadata?.creationTime || new Date().toISOString()
-            }).catch((e) => {
-              console.warn('[Firebase] Profile sync notice:', e);
-            });
-            syncUserToCloudSql({
-              email: currentUser.email,
-              displayName: currentUser.displayName,
-            }).catch(() => {});
-          } else {
-            if (typeof navigator !== 'undefined' && !navigator.onLine && (auth?.currentUser || getCachedUserSession())) {
-              console.warn('[Firebase Auth] Offline state detected; retaining existing user session');
-            } else {
-              const cached = getCachedUserSession();
-              if (cached && (cached.uid.startsWith('guest-') || !auth?.currentUser)) {
-                setUser(cached as any);
-              } else {
-                setUser(null);
-                setCachedUserSession(null);
-              }
-            }
-          }
-        },
-        (error) => {
-          console.warn('[Firebase Auth] Auth state listener notice:', error);
-          if (typeof navigator !== 'undefined' && !navigator.onLine && (auth?.currentUser || getCachedUserSession())) {
-            console.warn('[Firebase Auth] Offline network error; retaining cached user session');
-          } else {
-            setUser(null);
-            setCachedUserSession(null);
-          }
-          setLoading(false);
-        }
-      );
-    } catch (err) {
-      console.warn('[Firebase Auth] Listener setup notice:', err);
-      setLoading(false);
-    }
+    const fallbackTimer = setTimeout(() => {
+      if (isSubscribed && !hasResolvedAuth) {
+        setUser(auth.currentUser);
+        setLoading(false);
+      }
+    }, 5000);
 
     return () => {
       isSubscribed = false;
-      try {
-        unsubscribe();
-      } catch {}
+      unsubscribe();
+      clearTimeout(fallbackTimer);
     };
   }, []);
 
-  const handleSignInAsGuest = async () => {
-    try {
-      const anonUser = await signInAnonymouslyUser();
-      if (anonUser) {
-        setUser(anonUser);
-        setCachedUserSession(anonUser);
-        toast.success('Signed in as Guest');
-      } else {
-        const guestUser: any = {
-          uid: 'guest-' + Date.now(),
-          email: 'guest@app.local',
-          displayName: 'Guest User',
-          photoURL: '',
-          isAnonymous: true,
-          getIdToken: async () => 'guest-token',
-        };
-        setUser(guestUser);
-        setCachedUserSession(guestUser);
-        toast.success('Signed in as Guest');
-      }
-    } catch (e) {
-      toast.error('Failed to sign in as Guest');
+  const handleSignInWithGoogle = async () => {
+    const loggedUser = await signInWithGoogle();
+    if (loggedUser) {
+      setUser(loggedUser);
+      syncVerifiedUser(loggedUser);
+      toast.success(`Welcome${loggedUser.displayName ? `, ${loggedUser.displayName}` : ''}!`);
     }
   };
 
-  const handleSignInWithGoogle = async () => {
+  const handleSignInWithEmail = async (email: string, password: string, rememberMe: boolean) => {
+    const loggedUser = await signInWithEmail(email, password, rememberMe);
+    setUser(loggedUser);
+    syncVerifiedUser(loggedUser);
+  };
+
+  const handleCreateAccount = async (email: string, password: string, displayName: string, rememberMe: boolean) => {
+    const newUser = await createEmailAccount(email, password, displayName, rememberMe);
+    setUser(newUser);
+  };
+
+  const handleSendPasswordReset = async (email: string) => {
+    await requestPasswordReset(email);
+  };
+
+  const handleResendVerification = async () => {
+    if (!auth.currentUser) throw new Error('Sign in again to request a verification email.');
+    await resendEmailVerification(auth.currentUser);
+  };
+
+  const handleRefreshVerification = async (): Promise<boolean> => {
+    const refreshedUser = await refreshCurrentUser();
+    setUser(refreshedUser);
+    if (refreshedUser?.emailVerified) {
+      syncVerifiedUser(refreshedUser);
+      return true;
+    }
+    return false;
+  };
+
+  const handleSignInAsGuest = async () => {
     try {
-      const loggedUser = await signInWithGoogle();
-      if (loggedUser) {
-        setUser(loggedUser);
-        setCachedUserSession(loggedUser);
-        toast.success(`Welcome, ${loggedUser.displayName || loggedUser.email || 'User'}!`);
-      }
-    } catch (error: any) {
-      if (
-        error?.code === 'auth/popup-closed-by-user' || 
-        error?.code === 'auth/cancelled-popup-request'
-      ) {
-        return;
-      }
-
-      if (error?.code === 'auth/unauthorized-domain' || error?.message?.includes('unauthorized-domain')) {
-        const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'current domain';
-        console.warn(`[Firebase Auth] Domain "${currentHost}" is not listed in Firebase Auth Authorized Domains.`);
-
-        try {
-          const anonUser = await signInAnonymouslyUser();
-          if (anonUser) {
-            setUser(anonUser);
-            setCachedUserSession(anonUser);
-            toast.success('Signed in as Guest');
-            toast.info(`Domain "${currentHost}" is not in Firebase Auth's Authorized Domains list. Signed in as Guest.`, {
-              duration: 7000,
-            });
-            return;
-          }
-        } catch (anonErr) {
-          console.warn('[Firebase Auth] Anonymous sign in fallback notice:', anonErr);
-        }
-
-        const guestUser: any = {
-          uid: 'guest-' + Date.now(),
-          email: 'guest@app.local',
-          displayName: 'Guest User',
-          photoURL: '',
-          isAnonymous: true,
-          getIdToken: async () => 'guest-token',
-        };
-        setUser(guestUser);
-        setCachedUserSession(guestUser);
-        toast.success('Signed in as Guest');
-        toast.info(`Domain "${currentHost}" is not in Firebase Auth's Authorized Domains list. Signed in as Guest.`, {
-          duration: 7000,
-        });
-      } else {
-        toast.error(error?.message || 'Failed to sign in with Google');
-      }
+      await setRememberMePersistence(true);
+      const guestUser = await signInAnonymouslyUser();
+      if (!guestUser) throw new Error('Firebase anonymous sign-in is unavailable.');
+      setUser(guestUser);
+      toast.success('Signed in as Guest');
+    } catch (error) {
+      console.warn('[Firebase Auth] Guest sign-in notice:', (error as any)?.code || 'guest-sign-in-error');
+      toast.error('Guest sign-in is unavailable. Please use an account.');
     }
   };
 
@@ -227,10 +155,10 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
       await signOutUser();
       await logoutWorkspace();
       setUser(null);
-      setCachedUserSession(null);
       toast.success('Signed out successfully');
     } catch (error) {
-      toast.error('Failed to sign out');
+      console.warn('[Firebase Auth] Sign-out notice:', (error as any)?.code || 'sign-out-error');
+      toast.error('Failed to sign out. Please try again.');
     }
   };
 
@@ -238,8 +166,8 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
     if (!auth.currentUser) return null;
     try {
       return await auth.currentUser.getIdToken(forceRefresh);
-    } catch (err) {
-      console.warn('[Firebase Auth] Token refresh error:', err);
+    } catch (error) {
+      console.warn('[Firebase Auth] Token refresh notice:', (error as any)?.code || 'token-refresh-error');
       return null;
     }
   };
@@ -250,6 +178,11 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
         user,
         loading,
         signInWithGoogle: handleSignInWithGoogle,
+        signInWithEmail: handleSignInWithEmail,
+        createAccount: handleCreateAccount,
+        sendPasswordReset: handleSendPasswordReset,
+        resendVerification: handleResendVerification,
+        refreshVerification: handleRefreshVerification,
         signInAsGuest: handleSignInAsGuest,
         signOut: handleSignOut,
         getIdToken,

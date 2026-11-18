@@ -15,18 +15,22 @@ export interface EncryptedTokenData {
   user?: any;
 }
 
-// AES-256-GCM Encryption key derived securely
+// AES-256-GCM key is derived from a deployment secret. Never encrypt with a public fallback.
 const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
-const MASTER_KEY = process.env.TOKEN_ENCRYPTION_SECRET
-  ? crypto.scryptSync(process.env.TOKEN_ENCRYPTION_SECRET, 'manus_connector_salt_2026', 32)
-  : crypto.scryptSync('manus_secure_default_master_key_2026', 'manus_connector_salt_2026', 32);
+function getMasterKey(): Buffer {
+  const secret = process.env.TOKEN_ENCRYPTION_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error('TOKEN_ENCRYPTION_SECRET must be configured with at least 32 characters before storing connector tokens.');
+  }
+  return crypto.scryptSync(secret, 'connector-token-v1', 32);
+}
 
 /**
  * Encrypt token string at rest using AES-256-GCM
  */
 export function encryptToken(plainText: string): { iv: string; encryptedData: string; authTag: string } {
   const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, MASTER_KEY, iv);
+  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, getMasterKey(), iv);
   let encrypted = cipher.update(plainText, 'utf8', 'hex');
   encrypted += cipher.final('hex');
   const authTag = cipher.getAuthTag().toString('hex');
@@ -39,7 +43,7 @@ export function encryptToken(plainText: string): { iv: string; encryptedData: st
 export function decryptToken(encrypted: { iv: string; encryptedData: string; authTag: string }): string {
   const decipher = crypto.createDecipheriv(
     ENCRYPTION_ALGORITHM,
-    MASTER_KEY,
+    getMasterKey(),
     Buffer.from(encrypted.iv, 'hex')
   );
   decipher.setAuthTag(Buffer.from(encrypted.authTag, 'hex'));
@@ -636,4 +640,3 @@ export function getConnectorsRegistry(userId: string) {
     };
   });
 }
-
