@@ -41,22 +41,29 @@ describe('AI Message Hover Reactions (Thumbs Up/Down)', () => {
     const cleared = toggleMessageReaction('msg-101', 'down');
     expect(cleared.nextReaction).toBeNull();
     expect(getMessageReaction('msg-101')).toBeNull();
+
+    // Toggling heart reaction works and persists
+    const hearted = toggleMessageReaction('msg-101', 'heart');
+    expect(hearted.nextReaction).toBe('heart');
+    expect(getMessageReaction('msg-101')).toBe('heart');
   });
 
   it('persists multiple independent message reactions in localStorage', () => {
     setMessageReaction('msg-a', 'up');
     setMessageReaction('msg-b', 'down');
+    setMessageReaction('msg-c', 'heart');
 
     const stored = getStoredMessageReactions();
     expect(stored['msg-a']).toBe('up');
     expect(stored['msg-b']).toBe('down');
+    expect(stored['msg-c']).toBe('heart');
 
     setMessageReaction('msg-a', null);
     expect(getStoredMessageReactions()['msg-a']).toBeUndefined();
     expect(getStoredMessageReactions()['msg-b']).toBe('down');
   });
 
-  it('wires MessageHoverReactions into ChatView.tsx and MyAIChat.tsx AI message rows', () => {
+  it('wires ConversationActionBar reaction toolbar (thumbs up, heart, copy, thumbs down) with bounce animation into ChatView.tsx', () => {
     const hoverCompPath = path.resolve(__dirname, '../src/components/agent/MessageHoverReactions.tsx');
     const actionBarPath = path.resolve(__dirname, '../src/components/agent/ConversationActionBar.tsx');
     const chatViewPath = path.resolve(__dirname, '../src/components/agent/ChatView.tsx');
@@ -74,12 +81,16 @@ describe('AI Message Hover Reactions (Thumbs Up/Down)', () => {
     expect(hoverSource).toContain('hover-reaction-thumbs-down');
     expect(hoverSource).toContain('group-hover/ai-message:opacity-100');
 
-    // Verify spring-based pop animation and active monochrome icon states
+    // Verify spring-based bounce animation and active monochrome icon states
     expect(hoverSource).toContain('animate-reaction-spring-pop');
     expect(hoverSource).toContain('animate-reaction-icon-pop');
     expect(hoverSource).toContain('cubic-bezier(0.34, 1.56, 0.64, 1)');
     expect(hoverSource).toContain('text-[#000000] dark:text-[#FFFFFF] fill-[#000000]/20 dark:fill-[#FFFFFF]/20');
 
+    expect(actionBarSource).toContain('data-testid="action-bar-copy"');
+    expect(actionBarSource).toContain('data-testid="action-bar-like"');
+    expect(actionBarSource).toContain('data-testid="action-bar-heart"');
+    expect(actionBarSource).toContain('data-testid="action-bar-dislike"');
     expect(actionBarSource).toContain('animate-reaction-spring-pop');
     expect(actionBarSource).toContain('animate-reaction-icon-pop');
     expect(actionBarSource).toContain('text-[#000000] dark:text-[#FFFFFF] fill-[#000000]/20 dark:fill-[#FFFFFF]/20');

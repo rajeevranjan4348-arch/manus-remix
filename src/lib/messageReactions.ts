@@ -1,4 +1,4 @@
-export type MessageReactionType = 'up' | 'down';
+export type MessageReactionType = 'up' | 'down' | 'heart';
 
 const MESSAGE_REACTIONS_STORAGE_KEY = 'manus_message_reactions';
 

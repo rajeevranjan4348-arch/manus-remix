@@ -9,14 +9,30 @@ export type VisualSubjectCategory =
   | 'comparison'
   | 'none';
 
+export interface VerifiedEntityProfile {
+  canonicalName: string;
+  displayName: string;
+  category: VisualSubjectCategory;
+  isFictionalCharacter: boolean;
+  portrayedBy?: string;
+  aliases: string[];
+  searchQueries: string[];
+  requiredTokens: string[];
+  disallowedTokens: string[];
+}
+
 export interface VisualSubjectDetection {
   shouldDisplayImages: boolean;
   category: VisualSubjectCategory;
   primarySubject: string;
+  canonicalEntity?: string;
+  portrayedBy?: string;
+  isFictionalCharacter?: boolean;
   subjects: string[];
   searchQueries: string[];
   isComparison: boolean;
   reason: string;
+  entityProfile?: VerifiedEntityProfile;
 }
 
 export interface VisualAnswerImage {
@@ -37,41 +53,246 @@ export interface VisualAnswerResult {
   images: VisualAnswerImage[];
 }
 
-// In-memory LRU cache to keep repeated renders instant and avoid redundant network calls
+// In-memory LRU caches to keep repeated renders instant and avoid redundant network calls
 const visualResultCache = new Map<string, VisualAnswerImage[]>();
-const MAX_VISUAL_CACHE_ENTRIES = 80;
+const verifiedEntityCache = new Map<string, VerifiedEntityProfile>();
+const MAX_VISUAL_CACHE_ENTRIES = 100;
 
-// Known character / celebrity / entity expansions that enrich search recall with real actor/show photos
-const ENTITY_SEARCH_EXPANSIONS: Record<string, string[]> = {
-  jethalal: ['Dilip Joshi', 'Jethalal Champaklal Gada', 'Taarak Mehta Ka Ooltah Chashmah'],
-  'jethalal gada': ['Dilip Joshi', 'Jethalal Champaklal Gada', 'Taarak Mehta Ka Ooltah Chashmah'],
-  'jethalal champaklal gada': ['Dilip Joshi', 'Taarak Mehta Ka Ooltah Chashmah'],
-  daya: ['Disha Vakani', 'Taarak Mehta Ka Ooltah Chashmah'],
-  'daya gada': ['Disha Vakani', 'Taarak Mehta Ka Ooltah Chashmah'],
-  dayaben: ['Disha Vakani', 'Taarak Mehta Ka Ooltah Chashmah'],
-  bhide: ['Mandar Chandwadkar', 'Taarak Mehta Ka Ooltah Chashmah'],
-  'atmaram bhide': ['Mandar Chandwadkar', 'Taarak Mehta Ka Ooltah Chashmah'],
-  'taarak mehta': ['Shailesh Lodha', 'Taarak Mehta Ka Ooltah Chashmah'],
-  champaklal: ['Amit Bhatt', 'Taarak Mehta Ka Ooltah Chashmah'],
-  babita: ['Munmun Dutta', 'Taarak Mehta Ka Ooltah Chashmah'],
-  'babita ji': ['Munmun Dutta', 'Taarak Mehta Ka Ooltah Chashmah'],
-  popatlal: ['Shyam Pathak', 'Taarak Mehta Ka Ooltah Chashmah'],
-  'techno gamerz': ['Ujjwal Chaurasia', 'Techno Gamerz'],
-  'iron man': ['Iron Man', 'Robert Downey Jr. Tony Stark'],
-  'spider-man': ['Spider-Man', 'Peter Parker Marvel'],
-  spiderman: ['Spider-Man', 'Peter Parker Marvel'],
-  batman: ['Batman', 'Bruce Wayne DC'],
-  superman: ['Superman', 'Clark Kent DC'],
-  naruto: ['Naruto Uzumaki', 'Naruto anime'],
-  goku: ['Son Goku', 'Dragon Ball Goku'],
-  luffy: ['Monkey D. Luffy', 'One Piece Luffy'],
-  gojo: ['Satoru Gojo', 'Jujutsu Kaisen'],
-  pikachu: ['Pikachu', 'Pokemon Pikachu'],
-  'prime minister india': ['Narendra Modi', 'Prime Minister of India'],
-  'prime minister of india': ['Narendra Modi', 'Prime Minister of India'],
-  'pm india': ['Narendra Modi', 'Prime Minister of India'],
-  'pm of india': ['Narendra Modi', 'Prime Minister of India'],
-};
+interface StaticEntityDefinition {
+  canonicalName: string;
+  displayName: string;
+  category: VisualSubjectCategory;
+  isFictionalCharacter: boolean;
+  portrayedBy?: string;
+  aliases: string[];
+  searchQueries: string[];
+  requiredTokens: string[];
+  disallowedTokens?: string[];
+}
+
+const TMKOC_OTHER_CAST_TOKENS = [
+  'disha vakani',
+  'munmun dutta',
+  'shailesh lodha',
+  'amit bhatt',
+  'mandar chandwadkar',
+  'shyam pathak',
+  'asit kumarr modi',
+  'asit modi',
+  'tanuj mahashabde',
+  'ambika ranjankar',
+  'kavi kumar azad',
+  'bhavya gandhi',
+  'raj anadkat',
+  'nitish bhaluni',
+  'sunayana fozdar',
+  'sachin shroff',
+  'palak sindhwani',
+  'sonalika joshi',
+  'jennifer mistry',
+  'neha mehta',
+  'gurucharan singh',
+  'sharad sankla',
+  'ghanashyam nayak',
+  'salman khan',
+  'shah rukh khan',
+  'amitabh bachchan',
+  'akshay kumar',
+  'ajay devgn',
+  'ranveer singh',
+  'deepika padukone',
+  'varun dhawan',
+  'alia bhatt',
+];
+
+const VERIFIED_ENTITY_DEFINITIONS: StaticEntityDefinition[] = [
+  {
+    canonicalName: 'Jethalal Champaklal Gada',
+    displayName: 'Jethalal Champaklal Gada',
+    category: 'character',
+    isFictionalCharacter: true,
+    portrayedBy: 'Dilip Joshi',
+    aliases: ['jethalal', 'jetha', 'jethiya', 'jethalal gada', 'jethalal champaklal gada'],
+    searchQueries: ['Jethalal Champaklal Gada', 'Jethalal', 'Dilip Joshi'],
+    requiredTokens: ['jethalal', 'dilip joshi'],
+    disallowedTokens: TMKOC_OTHER_CAST_TOKENS,
+  },
+  {
+    canonicalName: 'Daya Jethalal Gada',
+    displayName: 'Daya Jethalal Gada (Dayaben)',
+    category: 'character',
+    isFictionalCharacter: true,
+    portrayedBy: 'Disha Vakani',
+    aliases: ['daya', 'dayaben', 'daya gada', 'daya jethalal gada', 'daya bhabhi'],
+    searchQueries: ['Daya Jethalal Gada', 'Dayaben', 'Disha Vakani'],
+    requiredTokens: ['dayaben', 'daya gada', 'disha vakani'],
+    disallowedTokens: TMKOC_OTHER_CAST_TOKENS.filter((t) => t !== 'disha vakani'),
+  },
+  {
+    canonicalName: 'Atmaram Tukaram Bhide',
+    displayName: 'Atmaram Tukaram Bhide',
+    category: 'character',
+    isFictionalCharacter: true,
+    portrayedBy: 'Mandar Chandwadkar',
+    aliases: ['bhide', 'atmaram bhide', 'atmaram tukaram bhide', 'master bhide'],
+    searchQueries: ['Atmaram Tukaram Bhide', 'Mandar Chandwadkar'],
+    requiredTokens: ['bhide', 'atmaram', 'mandar chandwadkar'],
+    disallowedTokens: TMKOC_OTHER_CAST_TOKENS.filter((t) => t !== 'mandar chandwadkar'),
+  },
+  {
+    canonicalName: 'Taarak Mehta',
+    displayName: 'Taarak Mehta',
+    category: 'character',
+    isFictionalCharacter: true,
+    portrayedBy: 'Shailesh Lodha',
+    aliases: ['taarak mehta', 'tarak mehta', 'mehta sahab'],
+    searchQueries: ['Taarak Mehta', 'Shailesh Lodha'],
+    requiredTokens: ['taarak mehta', 'shailesh lodha'],
+    disallowedTokens: TMKOC_OTHER_CAST_TOKENS.filter((t) => t !== 'shailesh lodha'),
+  },
+  {
+    canonicalName: 'Champaklal Jayantilal Gada',
+    displayName: 'Champaklal Jayantilal Gada',
+    category: 'character',
+    isFictionalCharacter: true,
+    portrayedBy: 'Amit Bhatt',
+    aliases: ['champaklal', 'champaklal gada', 'champaklal jayantilal gada', 'bapuji'],
+    searchQueries: ['Champaklal Jayantilal Gada', 'Amit Bhatt'],
+    requiredTokens: ['champaklal', 'amit bhatt'],
+    disallowedTokens: TMKOC_OTHER_CAST_TOKENS.filter((t) => t !== 'amit bhatt'),
+  },
+  {
+    canonicalName: 'Babita Krishnan Iyer',
+    displayName: 'Babita Krishnan Iyer',
+    category: 'character',
+    isFictionalCharacter: true,
+    portrayedBy: 'Munmun Dutta',
+    aliases: ['babita', 'babita ji', 'babita iyer', 'babita krishnan iyer'],
+    searchQueries: ['Babita Iyer', 'Munmun Dutta'],
+    requiredTokens: ['babita', 'munmun dutta'],
+    disallowedTokens: TMKOC_OTHER_CAST_TOKENS.filter((t) => t !== 'munmun dutta'),
+  },
+  {
+    canonicalName: 'Patrakar Popatlal',
+    displayName: 'Patrakar Popatlal',
+    category: 'character',
+    isFictionalCharacter: true,
+    portrayedBy: 'Shyam Pathak',
+    aliases: ['popatlal', 'patrakar popatlal', 'popatlal pandey'],
+    searchQueries: ['Patrakar Popatlal', 'Shyam Pathak'],
+    requiredTokens: ['popatlal', 'shyam pathak'],
+    disallowedTokens: TMKOC_OTHER_CAST_TOKENS.filter((t) => t !== 'shyam pathak'),
+  },
+  {
+    canonicalName: 'Techno Gamerz',
+    displayName: 'Techno Gamerz (Ujjwal Chaurasia)',
+    category: 'person',
+    isFictionalCharacter: false,
+    portrayedBy: 'Ujjwal Chaurasia',
+    aliases: ['techno gamerz', 'ujjwal chaurasia', 'ujjwal gamer'],
+    searchQueries: ['Ujjwal Chaurasia', 'Techno Gamerz'],
+    requiredTokens: ['ujjwal chaurasia', 'techno gamerz'],
+  },
+  {
+    canonicalName: 'Iron Man',
+    displayName: 'Iron Man (Tony Stark)',
+    category: 'character',
+    isFictionalCharacter: true,
+    portrayedBy: 'Robert Downey Jr.',
+    aliases: ['iron man', 'ironman', 'tony stark'],
+    searchQueries: ['Iron Man', 'Tony Stark', 'Robert Downey Jr.'],
+    requiredTokens: ['iron man', 'tony stark', 'robert downey'],
+  },
+  {
+    canonicalName: 'Spider-Man',
+    displayName: 'Spider-Man (Peter Parker)',
+    category: 'character',
+    isFictionalCharacter: true,
+    aliases: ['spider-man', 'spiderman', 'spider man', 'peter parker'],
+    searchQueries: ['Spider-Man', 'Peter Parker Marvel'],
+    requiredTokens: ['spider-man', 'spider man', 'spiderman', 'peter parker'],
+  },
+  {
+    canonicalName: 'Batman',
+    displayName: 'Batman (Bruce Wayne)',
+    category: 'character',
+    isFictionalCharacter: true,
+    aliases: ['batman', 'bruce wayne'],
+    searchQueries: ['Batman', 'Bruce Wayne DC'],
+    requiredTokens: ['batman', 'bruce wayne'],
+  },
+  {
+    canonicalName: 'Superman',
+    displayName: 'Superman (Clark Kent)',
+    category: 'character',
+    isFictionalCharacter: true,
+    aliases: ['superman', 'clark kent', 'kal-el'],
+    searchQueries: ['Superman', 'Clark Kent DC'],
+    requiredTokens: ['superman', 'clark kent'],
+  },
+  {
+    canonicalName: 'Naruto Uzumaki',
+    displayName: 'Naruto Uzumaki',
+    category: 'character',
+    isFictionalCharacter: true,
+    aliases: ['naruto', 'naruto uzumaki'],
+    searchQueries: ['Naruto Uzumaki', 'Naruto anime'],
+    requiredTokens: ['naruto'],
+  },
+  {
+    canonicalName: 'Son Goku',
+    displayName: 'Son Goku',
+    category: 'character',
+    isFictionalCharacter: true,
+    aliases: ['goku', 'son goku', 'kakarot'],
+    searchQueries: ['Son Goku', 'Dragon Ball Goku'],
+    requiredTokens: ['goku', 'kakarot'],
+  },
+  {
+    canonicalName: 'Monkey D. Luffy',
+    displayName: 'Monkey D. Luffy',
+    category: 'character',
+    isFictionalCharacter: true,
+    aliases: ['luffy', 'monkey d luffy', 'monkey d. luffy', 'straw hat luffy'],
+    searchQueries: ['Monkey D. Luffy', 'One Piece Luffy'],
+    requiredTokens: ['luffy'],
+  },
+  {
+    canonicalName: 'Satoru Gojo',
+    displayName: 'Satoru Gojo',
+    category: 'character',
+    isFictionalCharacter: true,
+    aliases: ['gojo', 'satoru gojo', 'gojo satoru'],
+    searchQueries: ['Satoru Gojo', 'Jujutsu Kaisen Gojo'],
+    requiredTokens: ['gojo'],
+  },
+  {
+    canonicalName: 'Pikachu',
+    displayName: 'Pikachu',
+    category: 'character',
+    isFictionalCharacter: true,
+    aliases: ['pikachu', 'pokemon pikachu'],
+    searchQueries: ['Pikachu', 'Pokemon Pikachu'],
+    requiredTokens: ['pikachu'],
+  },
+  {
+    canonicalName: 'Narendra Modi',
+    displayName: 'Narendra Modi',
+    category: 'person',
+    isFictionalCharacter: false,
+    aliases: [
+      'narendra modi',
+      'narendra damodardas modi',
+      'prime minister india',
+      'prime minister of india',
+      'pm india',
+      'pm of india',
+      'indian prime minister',
+    ],
+    searchQueries: ['Narendra Modi', 'Prime Minister of India'],
+    requiredTokens: ['narendra modi', 'pm modi', 'modi'],
+  },
+];
 
 const NON_VISUAL_PATTERNS = [
   /^(hi|hello|hey|hiya|howdy|yo|namaste|greetings|good\s+(morning|afternoon|evening|night)|how are you|how's it going|what's up|whats up|thanks|thank you|ok|okay|bye|goodbye|yes|no|sure|cool|great|nice)[!?.\s]*$/i,
@@ -92,6 +313,10 @@ const UNWANTED_IMAGE_FILENAME_PATTERNS = [
   /\.webm$/i,
   /\.mp3$/i,
   /\.wav$/i,
+  /\.pdf$/i,
+  /\.djvu$/i,
+  /\.tif$/i,
+  /\.tiff$/i,
   /commons-logo/i,
   /wiki_letter/i,
   /question_book/i,
@@ -121,10 +346,59 @@ const UNWANTED_IMAGE_FILENAME_PATTERNS = [
   /placeholder/i,
   /icon[-_]?logo/i,
   /flag_of_/i,
+  /map_of_/i,
+  /locator_map/i,
+  /location_map/i,
   /signature\.png/i,
   /_sign\.png/i,
   /autograph/i,
+  /wordmark/i,
+  /text_logo/i,
+  /coat_of_arms/i,
+  /emblem_of/i,
+  /seal_of/i,
 ];
+
+const GENERIC_STOPWORDS = new Set([
+  'the',
+  'and',
+  'for',
+  'with',
+  'from',
+  'into',
+  'that',
+  'this',
+  'who',
+  'what',
+  'where',
+  'when',
+  'why',
+  'how',
+  'actor',
+  'actress',
+  'character',
+  'fictional',
+  'series',
+  'show',
+  'movie',
+  'film',
+  'sitcom',
+  'television',
+  'indian',
+  'american',
+  'british',
+  'japanese',
+  'photo',
+  'photograph',
+  'image',
+  'picture',
+  'portrait',
+  'file',
+  'jpg',
+  'jpeg',
+  'png',
+  'webp',
+]);
 
 export function normalizeSubjectKey(raw: string): string {
   return String(raw || '')
@@ -141,7 +415,10 @@ export function cleanExtractedSubject(raw: string): string {
     .replace(/^\[[^\]]+\]\s*/g, '')
     .replace(/^(who|what|where|when|which)\s+(is|are|was|were)\s+/i, '')
     .replace(/^(who'?s|what'?s|where'?s)\s+/i, '')
-    .replace(/^(tell me about|show me|give me information on|give me info about|explain|describe|biography of|history of|profile of|overview of|details about|facts about|everything about|do you know about|do you know who|do you know)\s+/i, '')
+    .replace(
+      /^(tell me about|show me|give me information on|give me info about|explain|describe|biography of|history of|profile of|overview of|details about|facts about|everything about|do you know about|do you know who|do you know)\s+/i,
+      ''
+    )
     .replace(/\s+(is|are|was|were)\??$/i, '')
     .replace(/^(the|a|an)\s+/i, '')
     .replace(/\b(in hindi|in english|in detail|briefly|short note|wikipedia|wiki|biography|bio|net worth|age|height|photos|images|pictures)\b/gi, '')
@@ -151,35 +428,216 @@ export function cleanExtractedSubject(raw: string): string {
     .trim();
 }
 
-export function extractAssistantProperNouns(assistantText?: string): string[] {
-  if (!assistantText) return [];
+/**
+ * Extracts ONLY the verified portraying actor when the assistant response
+ * explicitly states that the queried fictional character is played/portrayed by that actor.
+ * Never extracts unrelated proper nouns or co-stars mentioned elsewhere in the text.
+ */
+export function extractPortrayingActorForSubject(
+  subject: string,
+  assistantText?: string
+): string | undefined {
+  if (!assistantText || !subject) return undefined;
   const cleaned = assistantText
     .replace(/<think>[\s\S]*?<\/think>/gi, ' ')
     .replace(/```[\s\S]*?```/g, ' ');
 
-  const boldMatches: string[] = [];
-  const boldRegex = /\*\*([A-Z][A-Za-z0-9 .'-]{2,45})\*\*/g;
-  let match: RegExpExecArray | null;
-  while ((match = boldRegex.exec(cleaned)) !== null) {
-    const candidate = match[1].trim();
-    if (
-      candidate.length >= 3 &&
-      !/^(Summary|Quick Information|Overview|Key Facts|Search Queries|Sources|Note|Important|Character|Actor|Show|Nationality|Founded|Creator|Known For|Impact|Core Technologies|Live Real-Time)$/i.test(
-        candidate
-      )
-    ) {
-      boldMatches.push(candidate);
+  // Match explicit "- **Actor:** Name" or "portrayed by actor Name" / "played by Name"
+  const bulletActorMatch = cleaned.match(
+    /-\s*\*\*Actor:\*\*\s*([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){1,3})/
+  );
+  if (bulletActorMatch?.[1]) {
+    return bulletActorMatch[1].trim();
+  }
+
+  const inlineActorMatch = cleaned.match(
+    /\b(?:played|portrayed)\s+by\s+(?:veteran\s+)?(?:indian\s+|american\s+|british\s+)?(?:actor\s+|actress\s+)?\*?\*?([A-Z][a-z]+(?:\s+[A-Z][a-z.]+){1,2})\*?\*?/i
+  );
+  if (inlineActorMatch?.[1]) {
+    return inlineActorMatch[1].trim();
+  }
+
+  return undefined;
+}
+
+/**
+ * Resolves a raw subject string into a canonical VerifiedEntityProfile.
+ * Distinguishes fictional characters from portraying actors, resolves aliases,
+ * and builds strict relevance validation tokens.
+ */
+export function resolveVerifiedEntityProfile(
+  rawSubject: string,
+  inferredCategory: VisualSubjectCategory = 'person',
+  assistantContent?: string
+): VerifiedEntityProfile {
+  const cleanedSubject = cleanExtractedSubject(rawSubject);
+  const normalized = normalizeSubjectKey(cleanedSubject);
+  const cacheKey = `${normalized}::${Boolean(assistantContent)}`;
+
+  const cached = verifiedEntityCache.get(cacheKey);
+  if (cached) return cached;
+
+  // 1. Check static verified entity directory by exact alias or normalized canonical name
+  for (const def of VERIFIED_ENTITY_DEFINITIONS) {
+    const defNormalized = normalizeSubjectKey(def.canonicalName);
+    const aliasMatched = def.aliases.some((alias) => normalizeSubjectKey(alias) === normalized);
+    if (aliasMatched || defNormalized === normalized) {
+      const profile: VerifiedEntityProfile = {
+        canonicalName: def.canonicalName,
+        displayName: def.displayName,
+        category: def.category,
+        isFictionalCharacter: def.isFictionalCharacter,
+        portrayedBy: def.portrayedBy,
+        aliases: [...def.aliases],
+        searchQueries: [...def.searchQueries],
+        requiredTokens: def.requiredTokens.map((t) => normalizeSubjectKey(t)).filter(Boolean),
+        disallowedTokens: (def.disallowedTokens || []).map((t) => normalizeSubjectKey(t)).filter(Boolean),
+      };
+      verifiedEntityCache.set(cacheKey, profile);
+      return profile;
     }
-    if (boldMatches.length >= 4) break;
   }
 
-  // Also check "played by actor X" or "portrayed by X"
-  const actorMatch = cleaned.match(/\b(?:played|portrayed|created|founded|directed)\s+by\s+(?:actor\s+|actress\s+)?\*?\*?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\*?\*?/);
-  if (actorMatch?.[1] && !boldMatches.includes(actorMatch[1].trim())) {
-    boldMatches.push(actorMatch[1].trim());
+  // 2. Dynamic entity resolution
+  let category = inferredCategory;
+  const lowerSub = cleanedSubject.toLowerCase();
+  if (/\b(naruto|goku|luffy|gojo|pikachu|iron man|spider-?man|batman|superman|jethalal|dayaben|bhide|shinchan|doraemon|harry potter|walter white|sherlock holmes|mr\.?\s*bean)\b/i.test(lowerSub)) {
+    category = 'character';
+  } else if (/\b(movie|film|series|show|sitcom|anime|cartoon|season|episode|tmkoc|taarak mehta ka ooltah chashmah|breaking bad|inception|interstellar|one piece|oppenheimer)\b/i.test(lowerSub)) {
+    category = 'media';
+  } else if (/\b(iphone|samsung|galaxy|pixel|macbook|ipad|playstation|xbox|tesla|cybertruck|ferrari|lamborghini|porsche|nvidia|apple|microsoft|google|sony|rolex)\b/i.test(lowerSub)) {
+    category = 'brand_product';
+  } else if (/\b(tiger|lion|elephant|leopard|cheetah|peacock|eagle|falcon|whale|dolphin|shark|panda|koala|penguin|dinosaur|t-rex|dog|cat|bird|animal)\b/i.test(lowerSub)) {
+    category = 'animal_nature';
+  } else if (/\b(taj mahal|eiffel tower|statue of liberty|colosseum|burj khalifa|mount everest|grand canyon|machu picchu|great wall|pyramids|temple|fort|palace|city|island|waterfall)\b/i.test(lowerSub)) {
+    category = 'landmark_location';
   }
 
-  return boldMatches;
+  const portrayedBy = extractPortrayingActorForSubject(cleanedSubject, assistantContent);
+  const isFictionalCharacter = category === 'character' || Boolean(portrayedBy);
+  if (isFictionalCharacter && category === 'person') {
+    category = 'character';
+  }
+
+  const searchQueries: string[] = [cleanedSubject];
+  if (portrayedBy && normalizeSubjectKey(portrayedBy) !== normalized) {
+    searchQueries.push(portrayedBy);
+  }
+
+  const requiredTokens: string[] = [normalized];
+  if (portrayedBy) {
+    const actorNorm = normalizeSubjectKey(portrayedBy);
+    if (actorNorm && !requiredTokens.includes(actorNorm)) {
+      requiredTokens.push(actorNorm);
+    }
+  }
+
+  const profile: VerifiedEntityProfile = {
+    canonicalName: cleanedSubject,
+    displayName: cleanedSubject,
+    category,
+    isFictionalCharacter,
+    portrayedBy,
+    aliases: [cleanedSubject],
+    searchQueries,
+    requiredTokens: requiredTokens.filter(Boolean),
+    disallowedTokens: [],
+  };
+
+  if (verifiedEntityCache.size >= MAX_VISUAL_CACHE_ENTRIES) {
+    const oldest = verifiedEntityCache.keys().next().value;
+    if (oldest) verifiedEntityCache.delete(oldest);
+  }
+  verifiedEntityCache.set(cacheKey, profile);
+  return profile;
+}
+
+/**
+ * Validates whether a candidate image (from Wikipedia, Wikimedia Commons, or TVMaze)
+ * actually depicts the requested entity.
+ * Rejects unrelated celebrity photos, co-star portraits, and non-matching articles.
+ */
+export function isImageRelevantToEntity(
+  image: Pick<VisualAnswerImage, 'url' | 'thumbnailUrl' | 'title' | 'caption' | 'subject'>,
+  entity: VerifiedEntityProfile | string
+): boolean {
+  if (!image || !isValidPhotoUrl(image.url) || !isValidPhotoUrl(image.thumbnailUrl || image.url)) {
+    return false;
+  }
+
+  const profile: VerifiedEntityProfile =
+    typeof entity === 'string' ? resolveVerifiedEntityProfile(entity) : entity;
+
+  const decodedFileKey = canonicalImageKey(image.url)
+    .replace(/\.[a-z0-9]+$/i, '')
+    .replace(/[_-]+/g, ' ');
+
+  const normalizedTitle = normalizeSubjectKey(image.title || '');
+  const normalizedCaption = normalizeSubjectKey(image.caption || '');
+  const normalizedFilename = normalizeSubjectKey(decodedFileKey);
+
+  const combinedMetadata = `${normalizedTitle} | ${normalizedCaption} | ${normalizedFilename}`;
+
+  // Reject Wikipedia disambiguation, list, template, or category pages
+  if (
+    /\b(disambiguation|list of|filmography|awards and nominations|category|template|portal)\b/i.test(
+      image.title || ''
+    )
+  ) {
+    return false;
+  }
+
+  // 1. Check disallowed tokens (e.g., co-stars or unrelated celebrities from the same show/event)
+  // If a disallowed celebrity/character name is present AND the primary entity's own canonical tokens are absent, reject!
+  if (profile.disallowedTokens && profile.disallowedTokens.length > 0) {
+    const hasDisallowed = profile.disallowedTokens.some(
+      (badToken) => badToken.length >= 4 && combinedMetadata.includes(badToken)
+    );
+    if (hasDisallowed) {
+      return false;
+    }
+  }
+
+  // 2. Check exact required phrase match (canonical name, alias, or verified portraying actor)
+  for (const reqPhrase of profile.requiredTokens) {
+    if (!reqPhrase) continue;
+    if (combinedMetadata.includes(reqPhrase)) {
+      return true;
+    }
+  }
+
+  // 3. Token-level validation for multi-word entity names (e.g. "Virat Kohli", "Shah Rukh Khan", "Bengal Tiger", "Apollo 11 Moon Landing")
+  for (const reqPhrase of profile.requiredTokens) {
+    const words = reqPhrase
+      .split(/\s+/)
+      .filter((w) => w.length >= 3 && !GENERIC_STOPWORDS.has(w));
+
+    if (words.length === 0) continue;
+
+    if (words.length === 1) {
+      const token = words[0];
+      const wordBoundaryRegex = new RegExp(`\\b${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (wordBoundaryRegex.test(combinedMetadata)) {
+        return true;
+      }
+    } else {
+      // For multi-word entities:
+      // All significant tokens must appear in the combined metadata, OR for 3+ word names at least 2 significant tokens including the primary/last identifier
+      const matchedWords = words.filter((w) => {
+        const regex = new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+        return regex.test(combinedMetadata);
+      });
+
+      if (matchedWords.length === words.length) {
+        return true;
+      }
+      if (words.length >= 3 && matchedWords.length >= 2) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 export function detectVisualSubjectQuery(
@@ -223,16 +681,16 @@ export function detectVisualSubjectQuery(
   const explicitPhotoRequest = /\b(photo|photos|image|images|picture|pictures|pic|pics|look like|looks like)\b/i.test(rawPrompt);
 
   // 1. Check for Comparison Queries ("X vs Y", "Compare X and Y", "Difference between X and Y")
-  const vsMatch =
-    rawPrompt.match(/^(?:compare\s+|difference\s+between\s+)?(.+?)\s+(?:vs\.?|versus|or|and)\s+(.+?)[?!.]*$/i);
-  if (
-    vsMatch &&
-    (/\b(vs\.?|versus|compare|difference between)\b/i.test(rawPrompt))
-  ) {
+  const vsMatch = rawPrompt.match(
+    /^(?:compare\s+|difference\s+between\s+)?(.+?)\s+(?:vs\.?|versus|or|and)\s+(.+?)[?!.]*$/i
+  );
+  if (vsMatch && /\b(vs\.?|versus|compare|difference between)\b/i.test(rawPrompt)) {
     const left = cleanExtractedSubject(vsMatch[1]);
     const right = cleanExtractedSubject(vsMatch[2]);
     if (left.length >= 2 && right.length >= 2 && left.split(/\s+/).length <= 5 && right.split(/\s+/).length <= 5) {
-      const subjects = [left, right];
+      const leftProfile = resolveVerifiedEntityProfile(left);
+      const rightProfile = resolveVerifiedEntityProfile(right);
+      const subjects = [leftProfile.canonicalName, rightProfile.canonicalName];
       return {
         shouldDisplayImages: true,
         category: 'comparison',
@@ -246,37 +704,46 @@ export function detectVisualSubjectQuery(
   }
 
   // 2. Check for "Who is / Who's / What is / Tell me about / Where is" entity patterns
-  const whoMatch = rawPrompt.match(/^(?:who\s+(?:is|was|are|were)|who'?s|tell\s+me\s+about|do\s+you\s+know\s+(?:who|about)?|biography\s+of|profile\s+of|information\s+about|info\s+on)\s+(.+?)[?!.]*$/i);
-  const whatWhereMatch = rawPrompt.match(/^(?:what\s+(?:is|was|are|were)|what'?s|where\s+(?:is|are)|show\s+me|describe)\s+(.+?)[?!.]*$/i);
+  const whoMatch = rawPrompt.match(
+    /^(?:who\s+(?:is|was|are|were)|who'?s|tell\s+me\s+about|do\s+you\s+know\s+(?:who|about)?|biography\s+of|profile\s+of|information\s+about|info\s+on)\s+(.+?)[?!.]*$/i
+  );
+  const whatWhereMatch = rawPrompt.match(
+    /^(?:what\s+(?:is|was|are|were)|what'?s|where\s+(?:is|are)|show\s+me|describe)\s+(.+?)[?!.]*$/i
+  );
 
   let candidateSubject = '';
-  let category: VisualSubjectCategory = 'none';
+  let inferredCategory: VisualSubjectCategory = 'none';
 
   if (whoMatch?.[1]) {
     candidateSubject = cleanExtractedSubject(whoMatch[1]);
-    category = 'person';
+    inferredCategory = 'person';
   } else if (whatWhereMatch?.[1]) {
     const candidate = cleanExtractedSubject(whatWhereMatch[1]);
-    // Avoid abstract conceptual "what is" questions like "what is love", "what is recursion", "what is inflation"
-    const isAbstractConcept = /\b(meaning|definition|difference|concept|recursion|polymorphism|closure|promises|async|await|inflation|democracy|philosophy|gravity|photosynthesis|mitosis|entropy|algorithm|database|latency|throughput|api|rest|graphql|oauth|jwt|cors|docker|kubernetes)\b/i.test(
-      candidate
-    );
+    const isAbstractConcept =
+      /\b(meaning|definition|difference|concept|recursion|polymorphism|closure|promises|async|await|inflation|democracy|philosophy|gravity|photosynthesis|mitosis|entropy|algorithm|database|latency|throughput|api|rest|graphql|oauth|jwt|cors|docker|kubernetes)\b/i.test(
+        candidate
+      );
     if (!isAbstractConcept && candidate.split(/\s+/).length <= 6) {
       candidateSubject = candidate;
-      category = /where\s+/i.test(rawPrompt) ? 'landmark_location' : 'historical_object';
+      inferredCategory = /where\s+/i.test(rawPrompt) ? 'landmark_location' : 'historical_object';
     }
   } else {
     // Short direct entity name query (e.g. "Jethalal", "Virat Kohli", "Taj Mahal", "Naruto Uzumaki", "iPhone 16 Pro")
     const cleanedDirect = cleanExtractedSubject(rawPrompt);
     const wordCount = cleanedDirect.split(/\s+/).filter(Boolean).length;
-    const looksLikeQuestionWithoutEntity = /^(why|how|when|can|could|should|would|will|did|does|do|is|are)\b/i.test(rawPrompt);
+    const looksLikeQuestionWithoutEntity =
+      /^(why|how|when|can|could|should|would|will|did|does|do|is|are)\b/i.test(rawPrompt);
     if (!looksLikeQuestionWithoutEntity && wordCount >= 1 && wordCount <= 5 && cleanedDirect.length >= 3) {
       const normalized = normalizeSubjectKey(cleanedDirect);
-      const isKnownExpansion = Boolean(ENTITY_SEARCH_EXPANSIONS[normalized]);
+      const isKnownEntity = VERIFIED_ENTITY_DEFINITIONS.some(
+        (d) =>
+          normalizeSubjectKey(d.canonicalName) === normalized ||
+          d.aliases.some((a) => normalizeSubjectKey(a) === normalized)
+      );
       const hasCapitalizedWords = /^[A-Z]/.test(cleanedDirect.trim());
-      if (isKnownExpansion || hasCapitalizedWords || explicitPhotoRequest) {
+      if (isKnownEntity || hasCapitalizedWords || explicitPhotoRequest) {
         candidateSubject = cleanedDirect;
-        category = 'person';
+        inferredCategory = 'person';
       }
     }
   }
@@ -293,24 +760,17 @@ export function detectVisualSubjectQuery(
     };
   }
 
-  // Refine category based on subject keywords
-  const lowerSub = candidateSubject.toLowerCase();
-  if (ENTITY_SEARCH_EXPANSIONS[normalizeSubjectKey(candidateSubject)] || /\b(naruto|goku|luffy|gojo|pikachu|iron man|spider-?man|batman|superman|jethalal|dayaben|bhide|shinchan|doraemon|avengers)\b/i.test(lowerSub)) {
-    category = 'character';
-  } else if (/\b(movie|film|series|show|sitcom|anime|cartoon|season|episode|tmkoc|taarak mehta|breaking bad|inception|interstellar|one piece)\b/i.test(lowerSub)) {
-    category = 'media';
-  } else if (/\b(iphone|samsung|galaxy|pixel|macbook|ipad|playstation|xbox|tesla|cybertruck|ferrari|lamborghini|porsche|nvidia|apple|microsoft|google|sony|rolex)\b/i.test(lowerSub)) {
-    category = 'brand_product';
-  } else if (/\b(tiger|lion|elephant|leopard|cheetah|peacock|eagle|falcon|whale|dolphin|shark|panda|koala|penguin|dinosaur|t-rex|dog|cat|bird|animal)\b/i.test(lowerSub)) {
-    category = 'animal_nature';
-  } else if (/\b(taj mahal|eiffel tower|statue of liberty|colosseum|burj khalifa|mount everest|grand canyon|machu picchu|great wall|pyramids|temple|fort|palace|city|island|waterfall)\b/i.test(lowerSub)) {
-    category = 'landmark_location';
-  }
+  const entityProfile = resolveVerifiedEntityProfile(
+    candidateSubject,
+    inferredCategory,
+    assistantContent
+  );
 
   // Follow-up suppression: if this subject (or a follow-up attribute question about a previously shown subject)
   // was already displayed earlier in the conversation and the user didn't explicitly ask for photos/images,
   // skip repeating the gallery.
   const normalizedPrimary = normalizeSubjectKey(candidateSubject);
+  const normalizedCanonical = normalizeSubjectKey(entityProfile.canonicalName);
   const normalizedFullPrompt = normalizeSubjectKey(rawPrompt);
   const previousNormalized = Array.from(
     new Set(previousTurnSubjects.map(normalizeSubjectKey).filter(Boolean))
@@ -318,51 +778,41 @@ export function detectVisualSubjectQuery(
   const matchesPreviousSubject = previousNormalized.some(
     (prev) =>
       prev === normalizedPrimary ||
+      prev === normalizedCanonical ||
       (prev.length >= 3 &&
-        (normalizedPrimary.includes(prev) || normalizedFullPrompt.includes(prev)))
+        (normalizedPrimary.includes(prev) ||
+          normalizedCanonical.includes(prev) ||
+          normalizedFullPrompt.includes(prev)))
   );
+
   if (!explicitPhotoRequest && normalizedPrimary && matchesPreviousSubject) {
     return {
       shouldDisplayImages: false,
-      category,
+      category: entityProfile.category,
       primarySubject: candidateSubject,
+      canonicalEntity: entityProfile.canonicalName,
+      portrayedBy: entityProfile.portrayedBy,
+      isFictionalCharacter: entityProfile.isFictionalCharacter,
       subjects: [candidateSubject],
       searchQueries: [],
       isComparison: false,
       reason: 'Follow-up on already displayed subject',
+      entityProfile,
     };
-  }
-
-  // Build search query list combining primary subject, known entity expansions, and assistant-extracted proper nouns
-  const searchQueries: string[] = [candidateSubject];
-  const expansions = ENTITY_SEARCH_EXPANSIONS[normalizedPrimary];
-  if (expansions) {
-    for (const exp of expansions) {
-      if (!searchQueries.includes(exp)) {
-        searchQueries.push(exp);
-      }
-    }
-  }
-
-  const assistantEntities = extractAssistantProperNouns(assistantContent);
-  for (const entity of assistantEntities) {
-    if (
-      normalizeSubjectKey(entity) !== normalizedPrimary &&
-      !searchQueries.some((q) => normalizeSubjectKey(q) === normalizeSubjectKey(entity))
-    ) {
-      searchQueries.push(entity);
-    }
-    if (searchQueries.length >= 4) break;
   }
 
   return {
     shouldDisplayImages: true,
-    category,
+    category: entityProfile.category,
     primarySubject: candidateSubject,
+    canonicalEntity: entityProfile.canonicalName,
+    portrayedBy: entityProfile.portrayedBy,
+    isFictionalCharacter: entityProfile.isFictionalCharacter,
     subjects: [candidateSubject],
-    searchQueries: searchQueries.slice(0, 4),
+    searchQueries: entityProfile.searchQueries.slice(0, 4),
     isComparison: false,
-    reason: `Detected visual entity (${category}): ${candidateSubject}`,
+    reason: `Detected visual entity (${entityProfile.category}): ${entityProfile.canonicalName}`,
+    entityProfile,
   };
 }
 
@@ -380,7 +830,6 @@ export const isValidVisualImageUrl = isValidPhotoUrl;
 export function canonicalImageKey(url: string): string {
   try {
     const parsed = new URL(url);
-    // Normalize Wikimedia thumb URLs so /thumb/a/ab/File.jpg/800px-File.jpg and /a/ab/File.jpg map to the same file
     const pathParts = parsed.pathname.split('/').filter(Boolean);
     const lastPart = decodeURIComponent(pathParts[pathParts.length - 1] || '')
       .replace(/^\d+px-/i, '')
@@ -393,12 +842,16 @@ export function canonicalImageKey(url: string): string {
 
 export function deduplicateVisualImages(
   images: VisualAnswerImage[],
-  maxImages = 4
+  maxImages = 4,
+  entityContext?: VerifiedEntityProfile | string
 ): VisualAnswerImage[] {
   const unique: VisualAnswerImage[] = [];
   const seenKeys = new Set<string>();
   for (const img of images) {
     if (!img || !isValidPhotoUrl(img.url) || !isValidPhotoUrl(img.thumbnailUrl || img.url)) {
+      continue;
+    }
+    if (entityContext && !isImageRelevantToEntity(img, entityContext)) {
       continue;
     }
     const key = canonicalImageKey(img.url);
@@ -410,17 +863,19 @@ export function deduplicateVisualImages(
   return unique;
 }
 
-async function fetchWikipediaSummaryAndMediaImages(
+async function fetchVerifiedWikipediaAndCommonsImages(
   query: string,
+  entityProfile: VerifiedEntityProfile,
   subjectLabel: string,
   signal?: AbortSignal
 ): Promise<VisualAnswerImage[]> {
   const results: VisualAnswerImage[] = [];
   const seenKeys = new Set<string>();
 
-  const addCandidate = (img: VisualAnswerImage) => {
+  const addVerifiedCandidate = (img: VisualAnswerImage) => {
     if (!isValidPhotoUrl(img.url) || !isValidPhotoUrl(img.thumbnailUrl)) return;
     if (img.width && img.height && (img.width < 100 || img.height < 100)) return;
+    if (!isImageRelevantToEntity(img, entityProfile)) return;
     const key = canonicalImageKey(img.url);
     if (seenKeys.has(key)) return;
     seenKeys.add(key);
@@ -428,7 +883,7 @@ async function fetchWikipediaSummaryAndMediaImages(
   };
 
   try {
-    // 1. Search Wikipedia pages with PageImages (returns up to 5 closely matching articles + thumbnails)
+    // 1. Search Wikipedia pages with PageImages
     const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrsearch=${encodeURIComponent(
       query
     )}&gsrlimit=5&prop=pageimages|info|description&inprop=url&pithumbsize=720`;
@@ -439,33 +894,52 @@ async function fetchWikipediaSummaryAndMediaImages(
     if (res.ok) {
       const data: any = await res.json();
       const pages = data?.query?.pages ? Object.values(data.query.pages) : [];
-      // Sort by search index
       pages.sort((a: any, b: any) => (a?.index ?? 99) - (b?.index ?? 99));
+
+      const verifiedPages: any[] = [];
 
       for (const page of pages as any[]) {
         const thumbUrl = page?.thumbnail?.source;
-        const pageTitle = String(page?.title || query);
-        const pageUrl = String(page?.fullurl || `https://en.wikipedia.org/wiki/${encodeURIComponent(pageTitle.replace(/\s+/g, '_'))}`);
+        const pageTitle = String(page?.title || '');
+        const pageDesc = String(page?.description || '');
+        const pageUrl = String(
+          page?.fullurl ||
+            `https://en.wikipedia.org/wiki/${encodeURIComponent(pageTitle.replace(/\s+/g, '_'))}`
+        );
+
+        // Verify the Wikipedia article itself matches the requested entity (not a random article mentioning the word)
+        const candidatePageImg: VisualAnswerImage = {
+          id: `wiki_pi_${page.pageid || pageTitle}`,
+          url: thumbUrl || 'https://upload.wikimedia.org/valid.jpg',
+          thumbnailUrl: thumbUrl || 'https://upload.wikimedia.org/valid.jpg',
+          title: pageTitle,
+          caption: pageDesc ? `${pageTitle} — ${pageDesc}` : pageTitle,
+          sourceUrl: pageUrl,
+          sourceName: 'Wikipedia',
+          subject: subjectLabel,
+          width: page?.thumbnail?.width,
+          height: page?.thumbnail?.height,
+        };
+
+        const isArticleAboutEntity = isImageRelevantToEntity(candidatePageImg, entityProfile);
+        if (!isArticleAboutEntity) {
+          continue;
+        }
+
+        verifiedPages.push(page);
         if (thumbUrl && isValidPhotoUrl(thumbUrl)) {
-          addCandidate({
-            id: `wiki_pi_${page.pageid || pageTitle}`,
+          addVerifiedCandidate({
+            ...candidatePageImg,
             url: thumbUrl,
             thumbnailUrl: thumbUrl,
-            title: pageTitle,
-            caption: page?.description || pageTitle,
-            sourceUrl: pageUrl,
-            sourceName: 'Wikipedia',
-            subject: subjectLabel,
-            width: page?.thumbnail?.width,
-            height: page?.thumbnail?.height,
           });
         }
       }
 
-      // 2. If top Wikipedia page exists, also inspect its media-list for additional photographs
-      const topPage: any = pages[0];
-      if (topPage?.title && results.length < 4) {
-        const encodedTitle = encodeURIComponent(String(topPage.title).replace(/\s+/g, '_'));
+      // 2. Only inspect media-list of a verified Wikipedia article about the entity itself
+      const topVerifiedPage: any = verifiedPages[0];
+      if (topVerifiedPage?.title && results.length < 4) {
+        const encodedTitle = encodeURIComponent(String(topVerifiedPage.title).replace(/\s+/g, '_'));
         const mediaRes = await fetch(
           `https://en.wikipedia.org/api/rest_v1/page/media-list/${encodedTitle}`,
           { signal: signal || AbortSignal.timeout(4000) }
@@ -480,14 +954,22 @@ async function fetchWikipediaSummaryAndMediaImages(
             if (!bestSrc) continue;
             const fullUrl = bestSrc.startsWith('//') ? `https:${bestSrc}` : bestSrc;
             if (!isValidPhotoUrl(fullUrl)) continue;
-            const captionText = String(item?.caption?.text || topPage.title || subjectLabel).trim();
-            addCandidate({
+            const itemTitle = String(item?.title || '')
+              .replace(/^File:/i, '')
+              .replace(/\.[a-z0-9]+$/i, '')
+              .replace(/[_-]+/g, ' ')
+              .trim();
+            const captionText = String(item?.caption?.text || itemTitle || topVerifiedPage.title).trim();
+
+            addVerifiedCandidate({
               id: `wiki_media_${canonicalImageKey(fullUrl)}`,
               url: fullUrl,
               thumbnailUrl: fullUrl,
-              title: String(topPage.title || subjectLabel),
+              title: itemTitle || String(topVerifiedPage.title || subjectLabel),
               caption: captionText.slice(0, 140),
-              sourceUrl: String(topPage.fullurl || `https://en.wikipedia.org/wiki/${encodedTitle}`),
+              sourceUrl: String(
+                topVerifiedPage.fullurl || `https://en.wikipedia.org/wiki/${encodedTitle}`
+              ),
               sourceName: 'Wikipedia',
               subject: subjectLabel,
             });
@@ -500,12 +982,12 @@ async function fetchWikipediaSummaryAndMediaImages(
     // Ignore individual source timeout/errors
   }
 
-  // 3. Query Wikimedia Commons directly for photographs if we still need more images
+  // 3. Query Wikimedia Commons directly for verified photographs of the entity
   if (results.length < 4) {
     try {
       const commonsUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrsearch=${encodeURIComponent(
-        `filetype:bitmap ${query}`
-      )}&gsrnamespace=6&gsrlimit=6&prop=imageinfo&iiprop=url|dimensions|extmetadata&iiurlwidth=720`;
+        `filetype:bitmap "${query}"`
+      )}&gsrnamespace=6&gsrlimit=8&prop=imageinfo&iiprop=url|dimensions|extmetadata&iiurlwidth=720`;
 
       const commonsRes = await fetch(commonsUrl, {
         signal: signal || AbortSignal.timeout(4500),
@@ -527,12 +1009,21 @@ async function fetchWikipediaSummaryAndMediaImages(
             .replace(/[_-]+/g, ' ')
             .trim();
 
-          addCandidate({
+          const rawDesc = String(
+            info?.extmetadata?.ImageDescription?.value ||
+              info?.extmetadata?.ObjectName?.value ||
+              ''
+          )
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+          addVerifiedCandidate({
             id: `commons_${page.pageid || cleanTitle}`,
             url: info?.url && isValidPhotoUrl(info.url) ? info.url : thumbUrl,
             thumbnailUrl: thumbUrl,
             title: cleanTitle || subjectLabel,
-            caption: cleanTitle || subjectLabel,
+            caption: (rawDesc || cleanTitle || subjectLabel).slice(0, 140),
             sourceUrl: descUrl,
             sourceName: 'Wikimedia Commons',
             subject: subjectLabel,
@@ -550,14 +1041,46 @@ async function fetchWikipediaSummaryAndMediaImages(
   return results;
 }
 
-async function fetchCharacterOrShowImagesFallback(
+async function fetchVerifiedCharacterOrActorFallback(
   query: string,
+  entityProfile: VerifiedEntityProfile,
   subjectLabel: string,
   signal?: AbortSignal
 ): Promise<VisualAnswerImage[]> {
   const results: VisualAnswerImage[] = [];
   try {
-    // TVMaze person & character search (CORS-enabled, great for TV actors & sitcom characters)
+    // 1. TVMaze character search first for fictional characters
+    if (entityProfile.isFictionalCharacter) {
+      const charRes = await fetch(
+        `https://api.tvmaze.com/search/characters?q=${encodeURIComponent(query)}`,
+        { signal: signal || AbortSignal.timeout(3500) }
+      ).catch(() => null);
+      if (charRes && charRes.ok) {
+        const charItems: any[] = await charRes.json();
+        for (const item of charItems.slice(0, 3)) {
+          const charObj = item?.character;
+          const imgUrl = charObj?.image?.original || charObj?.image?.medium;
+          const thumbUrl = charObj?.image?.medium || imgUrl;
+          if (imgUrl && /^https?:\/\//i.test(imgUrl)) {
+            const candidate: VisualAnswerImage = {
+              id: `tvmaze_char_${charObj.id}`,
+              url: imgUrl.replace(/^http:\/\//i, 'https://'),
+              thumbnailUrl: (thumbUrl || imgUrl).replace(/^http:\/\//i, 'https://'),
+              title: String(charObj.name || subjectLabel),
+              caption: `${charObj.name || subjectLabel}`,
+              sourceUrl: String(charObj.url || 'https://www.tvmaze.com'),
+              sourceName: 'TVMaze',
+              subject: subjectLabel,
+            };
+            if (isImageRelevantToEntity(candidate, entityProfile)) {
+              results.push(candidate);
+            }
+          }
+        }
+      }
+    }
+
+    // 2. TVMaze person search with strict name verification
     const tvRes = await fetch(
       `https://api.tvmaze.com/search/people?q=${encodeURIComponent(query)}`,
       { signal: signal || AbortSignal.timeout(3500) }
@@ -565,19 +1088,32 @@ async function fetchCharacterOrShowImagesFallback(
     if (tvRes.ok) {
       const items: any[] = await tvRes.json();
       for (const item of items.slice(0, 3)) {
+        const personName = String(item?.person?.name || '').trim();
         const imgUrl = item?.person?.image?.original || item?.person?.image?.medium;
         const thumbUrl = item?.person?.image?.medium || imgUrl;
-        if (imgUrl && /^https?:\/\//i.test(imgUrl)) {
-          results.push({
+        if (personName && imgUrl && /^https?:\/\//i.test(imgUrl)) {
+          const candidate: VisualAnswerImage = {
             id: `tvmaze_person_${item.person.id}`,
             url: imgUrl.replace(/^http:\/\//i, 'https://'),
             thumbnailUrl: (thumbUrl || imgUrl).replace(/^http:\/\//i, 'https://'),
-            title: String(item.person.name || subjectLabel),
-            caption: String(item.person.name || subjectLabel),
+            title: entityProfile.isFictionalCharacter && entityProfile.portrayedBy
+              ? `${entityProfile.canonicalName} (${personName})`
+              : personName,
+            caption: entityProfile.isFictionalCharacter
+              ? `${personName} (${entityProfile.canonicalName})`
+              : personName,
             sourceUrl: String(item.person.url || 'https://www.tvmaze.com'),
             sourceName: 'TVMaze',
             subject: subjectLabel,
-          });
+          };
+          // Strictly verify that the TVMaze person name matches the entity or its portraying actor
+          const normPerson = normalizeSubjectKey(personName);
+          const matchesEntityOrActor = entityProfile.requiredTokens.some(
+            (token) => token === normPerson
+          );
+          if (matchesEntityOrActor && isImageRelevantToEntity(candidate, entityProfile)) {
+            results.push(candidate);
+          }
         }
       }
     }
@@ -596,7 +1132,11 @@ export async function fetchVisualAnswerImages(
   }
 
   const maxImages = options?.maxImages ?? 4;
-  const cacheKey = `${detection.primarySubject.toLowerCase()}::${detection.searchQueries.join('|').toLowerCase()}`;
+  const entityProfile =
+    detection.entityProfile ||
+    resolveVerifiedEntityProfile(detection.primarySubject, detection.category);
+
+  const cacheKey = `${entityProfile.canonicalName.toLowerCase()}::${detection.searchQueries.join('|').toLowerCase()}`;
   const cached = visualResultCache.get(cacheKey);
   if (cached && cached.length > 0) {
     return cached.slice(0, maxImages);
@@ -605,8 +1145,18 @@ export async function fetchVisualAnswerImages(
   const collected: VisualAnswerImage[] = [];
   const seenKeys = new Set<string>();
 
-  const pushUnique = (img: VisualAnswerImage) => {
+  const pushVerifiedUnique = (img: VisualAnswerImage, targetEntity?: VerifiedEntityProfile) => {
     if (!isValidPhotoUrl(img.url) || !isValidPhotoUrl(img.thumbnailUrl)) return;
+    const profileToCheck = targetEntity || entityProfile;
+    if (!detection.isComparison && !isImageRelevantToEntity(img, profileToCheck)) {
+      return;
+    }
+    if (detection.isComparison && img.subject) {
+      const subProfile = resolveVerifiedEntityProfile(img.subject);
+      if (!isImageRelevantToEntity(img, subProfile)) {
+        return;
+      }
+    }
     const key = canonicalImageKey(img.url);
     if (seenKeys.has(key)) return;
     seenKeys.add(key);
@@ -619,9 +1169,11 @@ export async function fetchVisualAnswerImages(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        primarySubject: detection.primarySubject,
+        primarySubject: entityProfile.canonicalName,
         subjects: detection.subjects,
         queries: detection.searchQueries,
+        requiredTokens: entityProfile.requiredTokens,
+        disallowedTokens: entityProfile.disallowedTokens,
         isComparison: detection.isComparison,
         limit: maxImages,
       }),
@@ -634,7 +1186,7 @@ export async function fetchVisualAnswerImages(
         const payload = await serverRes.json();
         if (Array.isArray(payload?.images)) {
           for (const img of payload.images) {
-            pushUnique(img);
+            pushVerifiedUnique(img);
             if (collected.length >= maxImages) break;
           }
         }
@@ -644,19 +1196,21 @@ export async function fetchVisualAnswerImages(
     // Seamlessly continue to client-side CORS-safe Wikipedia/Commons retrieval
   }
 
-  // 2. Client-side CORS-safe retrieval (Wikipedia + Wikimedia Commons + TVMaze)
+  // 2. Client-side CORS-safe retrieval with strict entity relevance validation
   if (collected.length < 2) {
     if (detection.isComparison && detection.subjects.length >= 2) {
       const perSubjectLists = await Promise.all(
-        detection.subjects.map((sub) =>
-          fetchWikipediaSummaryAndMediaImages(sub, sub, options?.signal)
-        )
+        detection.subjects.map((sub) => {
+          const subProfile = resolveVerifiedEntityProfile(sub);
+          return fetchVerifiedWikipediaAndCommonsImages(sub, subProfile, sub, options?.signal);
+        })
       );
-      // Interleave images so each compared subject gets matched photos
       for (let i = 0; i < 3; i++) {
-        for (const list of perSubjectLists) {
+        for (let sIdx = 0; sIdx < perSubjectLists.length; sIdx++) {
+          const list = perSubjectLists[sIdx];
+          const subProfile = resolveVerifiedEntityProfile(detection.subjects[sIdx]);
           if (list[i]) {
-            pushUnique(list[i]);
+            pushVerifiedUnique(list[i], subProfile);
           }
           if (collected.length >= maxImages) break;
         }
@@ -664,27 +1218,29 @@ export async function fetchVisualAnswerImages(
       }
     } else {
       for (const query of detection.searchQueries) {
-        const imgs = await fetchWikipediaSummaryAndMediaImages(
+        const imgs = await fetchVerifiedWikipediaAndCommonsImages(
           query,
-          detection.primarySubject,
+          entityProfile,
+          entityProfile.canonicalName,
           options?.signal
         );
         for (const img of imgs) {
-          pushUnique(img);
+          pushVerifiedUnique(img);
           if (collected.length >= maxImages) break;
         }
         if (collected.length >= maxImages) break;
       }
 
-      if (collected.length < 2) {
+      if (collected.length === 0) {
         for (const query of detection.searchQueries) {
-          const fallbackImgs = await fetchCharacterOrShowImagesFallback(
+          const fallbackImgs = await fetchVerifiedCharacterOrActorFallback(
             query,
-            detection.primarySubject,
+            entityProfile,
+            entityProfile.canonicalName,
             options?.signal
           );
           for (const img of fallbackImgs) {
-            pushUnique(img);
+            pushVerifiedUnique(img);
             if (collected.length >= maxImages) break;
           }
           if (collected.length >= maxImages) break;

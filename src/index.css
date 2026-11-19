@@ -1897,7 +1897,6 @@ select,
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12) !important;
 }
 
-[data-perf-mode="ultra-lite"] .manus-hero-float,
 [data-perf-mode="ultra-lite"] .manus-chip-stagger,
 [data-perf-mode="ultra-lite"] .manus-tag-pop,
 [data-perf-mode="ultra-lite"] .manus-dropdown-spring,

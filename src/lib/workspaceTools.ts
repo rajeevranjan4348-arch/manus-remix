@@ -413,15 +413,48 @@ export async function listGoogleCalendarEvents(timeMin?: string, maxResults: num
   }));
 }
 
+export interface GmailMessageSummary {
+  id: string;
+  threadId: string;
+  subject: string;
+  from: string;
+  senderName: string;
+  senderEmail: string;
+  to?: string;
+  snippet: string;
+  date: string;
+  isUnread?: boolean;
+}
+
+export function parseGmailSenderHeader(fromHeader: string): { senderName: string; senderEmail: string } {
+  const raw = (fromHeader || '').trim();
+  if (!raw) {
+    return { senderName: 'Unknown Sender', senderEmail: '' };
+  }
+  const angleMatch = raw.match(/^(.*?)\s*<([^>]+)>$/);
+  if (angleMatch) {
+    const cleanName = angleMatch[1].replace(/^["']|["']$/g, '').trim();
+    const cleanEmail = angleMatch[2].trim();
+    return {
+      senderName: cleanName || cleanEmail,
+      senderEmail: cleanEmail,
+    };
+  }
+  return {
+    senderName: raw.replace(/^["']|["']$/g, ''),
+    senderEmail: raw.includes('@') ? raw : '',
+  };
+}
+
 /**
  * Searches messages in Gmail.
  */
-export async function searchGmailMessages(query?: string, maxResults: number = 10) {
+export async function searchGmailMessages(query?: string, maxResults: number = 10): Promise<GmailMessageSummary[]> {
   const token = await ensureAccessToken();
   const url = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages');
   url.searchParams.set('maxResults', String(maxResults));
-  if (query) {
-    url.searchParams.set('q', query);
+  if (query && query.trim()) {
+    url.searchParams.set('q', query.trim());
   }
 
   const res = await fetch(url.toString(), {
@@ -447,22 +480,41 @@ export async function searchGmailMessages(query?: string, maxResults: number = 1
         const headers = msgData.payload?.headers || [];
         const subject = headers.find((h: any) => h.name?.toLowerCase() === 'subject')?.value || '(No Subject)';
         const from = headers.find((h: any) => h.name?.toLowerCase() === 'from')?.value || '';
+        const to = headers.find((h: any) => h.name?.toLowerCase() === 'to')?.value || '';
         const snippet = msgData.snippet || '';
+        const labelIds: string[] = Array.isArray(msgData.labelIds) ? msgData.labelIds : [];
+        const { senderName, senderEmail } = parseGmailSenderHeader(from);
         return {
           id: msgData.id,
           threadId: msgData.threadId,
           subject,
           from,
+          senderName,
+          senderEmail,
+          to,
           snippet,
           date: headers.find((h: any) => h.name?.toLowerCase() === 'date')?.value || '',
-        };
+          isUnread: labelIds.includes('UNREAD'),
+        } satisfies GmailMessageSummary;
       } catch {
         return null;
       }
     })
   );
 
-  return details.filter(Boolean);
+  return details.filter((item): item is GmailMessageSummary => Boolean(item));
+}
+
+/**
+ * Fetches recent emails from the user's Gmail inbox (or matching an optional filter query).
+ */
+export async function fetchRecentGmailMessages(options?: {
+  query?: string;
+  maxResults?: number;
+}): Promise<GmailMessageSummary[]> {
+  const maxResults = options?.maxResults ?? 6;
+  const query = options?.query?.trim() !== undefined ? options.query.trim() : 'in:inbox';
+  return searchGmailMessages(query || undefined, maxResults);
 }
 
 /**
@@ -1227,12 +1279,139 @@ export async function replaceGoogleDocText(documentId: string, findText: string,
   return { success: true, occurrencesChanged: occurrences };
 }
 
+export interface GoogleSheetTabProperty {
+  sheetId: number;
+  title: string;
+  index: number;
+  rowCount?: number;
+  columnCount?: number;
+}
+
+export interface GoogleSpreadsheetMetadata {
+  spreadsheetId: string;
+  title: string;
+  spreadsheetUrl: string;
+  sheets: GoogleSheetTabProperty[];
+}
+
 /**
- * Retrieves values from a Google Sheets range.
+ * Retrieves spreadsheet metadata including actual sheet tab names so callers never rely on a hardcoded "Sheet1" tab name.
  */
-export async function getGoogleSheetValues(spreadsheetId: string, range: string = 'Sheet1!A1:Z100') {
+export async function getGoogleSpreadsheetMetadata(spreadsheetId: string): Promise<GoogleSpreadsheetMetadata> {
   const token = await ensureAccessToken();
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`;
+  const fields = 'spreadsheetId,properties.title,spreadsheetUrl,sheets.properties(sheetId,title,index,gridProperties)';
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}?fields=${encodeURIComponent(fields)}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Failed to fetch spreadsheet metadata (${res.status}): ${errText}`);
+  }
+
+  const data = await res.json();
+  const sheets: GoogleSheetTabProperty[] = Array.isArray(data.sheets)
+    ? data.sheets.map((s: any, idx: number) => ({
+        sheetId: s?.properties?.sheetId ?? idx,
+        title: s?.properties?.title || `Sheet${idx + 1}`,
+        index: s?.properties?.index ?? idx,
+        rowCount: s?.properties?.gridProperties?.rowCount,
+        columnCount: s?.properties?.gridProperties?.columnCount,
+      }))
+    : [];
+
+  return {
+    spreadsheetId: data.spreadsheetId || spreadsheetId,
+    title: data.properties?.title || 'Untitled Spreadsheet',
+    spreadsheetUrl:
+      data.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`,
+    sheets,
+  };
+}
+
+/**
+ * Resolves a range against actual spreadsheet sheet tabs so operations never fail on spreadsheets where the first tab is not named "Sheet1".
+ */
+export async function resolveGoogleSheetRange(
+  spreadsheetId: string,
+  requestedRange?: string,
+  knownSheets?: GoogleSheetTabProperty[]
+): Promise<{ resolvedRange: string; sheetTitle: string; sheets: GoogleSheetTabProperty[] }> {
+  let sheets = knownSheets;
+  if (!sheets || sheets.length === 0) {
+    try {
+      const metadata = await getGoogleSpreadsheetMetadata(spreadsheetId);
+      sheets = metadata.sheets;
+    } catch {
+      sheets = [];
+    }
+  }
+
+  const firstSheetTitle = sheets[0]?.title || 'Sheet1';
+  const rawRange = (requestedRange || '').trim();
+
+  if (!rawRange) {
+    return {
+      resolvedRange: `${firstSheetTitle}!A1:Z100`,
+      sheetTitle: firstSheetTitle,
+      sheets,
+    };
+  }
+
+  if (!rawRange.includes('!')) {
+    // Check if the caller passed a tab name directly or a cell coordinate like A1:D20
+    const matchingTab = sheets.find(
+      (s) => s.title.toLowerCase() === rawRange.replace(/^'|'$/g, '').toLowerCase()
+    );
+    if (matchingTab) {
+      return {
+        resolvedRange: `${matchingTab.title}!A1:Z100`,
+        sheetTitle: matchingTab.title,
+        sheets,
+      };
+    }
+    return {
+      resolvedRange: `${firstSheetTitle}!${rawRange}`,
+      sheetTitle: firstSheetTitle,
+      sheets,
+    };
+  }
+
+  const [tabPart, cellPart = 'A1:Z100'] = rawRange.split('!');
+  const normalizedTab = tabPart.replace(/^'|'$/g, '').trim();
+
+  if (sheets.length > 0) {
+    const exactMatch = sheets.find((s) => s.title.toLowerCase() === normalizedTab.toLowerCase());
+    if (exactMatch) {
+      return {
+        resolvedRange: `${exactMatch.title}!${cellPart}`,
+        sheetTitle: exactMatch.title,
+        sheets,
+      };
+    }
+    // Replace unverified default tab name with the actual first tab title
+    return {
+      resolvedRange: `${firstSheetTitle}!${cellPart}`,
+      sheetTitle: firstSheetTitle,
+      sheets,
+    };
+  }
+
+  return {
+    resolvedRange: rawRange,
+    sheetTitle: normalizedTab || firstSheetTitle,
+    sheets,
+  };
+}
+
+/**
+ * Retrieves values from a Google Sheets range, dynamically resolving the sheet tab name from metadata if needed.
+ */
+export async function getGoogleSheetValues(spreadsheetId: string, range?: string) {
+  const token = await ensureAccessToken();
+  const { resolvedRange, sheetTitle, sheets } = await resolveGoogleSheetRange(spreadsheetId, range);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(resolvedRange)}`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` }
   });
@@ -1243,17 +1422,20 @@ export async function getGoogleSheetValues(spreadsheetId: string, range: string 
 
   const data = await res.json();
   return {
-    range: data.range,
-    values: data.values || []
+    range: data.range || resolvedRange,
+    sheetTitle,
+    sheets,
+    values: (data.values || []) as string[][],
   };
 }
 
 /**
- * Updates cell values in a Google Sheets range.
+ * Updates cell values in a Google Sheets range, resolving the sheet tab name dynamically.
  */
 export async function updateGoogleSheetValues(spreadsheetId: string, range: string, values: any[][]) {
   const token = await ensureAccessToken();
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
+  const { resolvedRange, sheetTitle } = await resolveGoogleSheetRange(spreadsheetId, range);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(resolvedRange)}?valueInputOption=USER_ENTERED`;
   const res = await fetch(url, {
     method: 'PUT',
     headers: {
@@ -1270,7 +1452,8 @@ export async function updateGoogleSheetValues(spreadsheetId: string, range: stri
   const data = await res.json();
   return {
     spreadsheetId,
-    updatedRange: data.updatedRange,
+    sheetTitle,
+    updatedRange: data.updatedRange || resolvedRange,
     updatedRows: data.updatedRows,
     updatedColumns: data.updatedColumns,
     updatedCells: data.updatedCells
@@ -1278,11 +1461,12 @@ export async function updateGoogleSheetValues(spreadsheetId: string, range: stri
 }
 
 /**
- * Appends rows to a Google Sheets spreadsheet.
+ * Appends rows to a Google Sheets spreadsheet, resolving the sheet tab name dynamically.
  */
 export async function appendGoogleSheetValues(spreadsheetId: string, range: string, values: any[][]) {
   const token = await ensureAccessToken();
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+  const { resolvedRange, sheetTitle } = await resolveGoogleSheetRange(spreadsheetId, range);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(resolvedRange)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
   const res = await fetch(url, {
     method: 'POST',
     headers: {
@@ -1299,6 +1483,7 @@ export async function appendGoogleSheetValues(spreadsheetId: string, range: stri
   const data = await res.json();
   return {
     spreadsheetId,
+    sheetTitle,
     updates: data.updates
   };
 }
@@ -1501,6 +1686,9 @@ export async function deleteGoogleContact(resourceName: string) {
   return { success: true, resourceName };
 }
 
+const CHAT_CONFIG_CONSOLE_URL =
+  'https://console.cloud.google.com/apis/api/chat.googleapis.com/hangouts-chat?project=eternal-envoy-cnzsc';
+
 /**
  * Lists joined Google Chat spaces.
  */
@@ -1511,7 +1699,13 @@ export async function listGoogleChatSpaces() {
   });
 
   if (!res.ok) {
-    throw new Error(`Failed to list Chat spaces (${res.status})`);
+    const errText = await res.text().catch(() => '');
+    if (res.status === 404 || errText.includes('Google Chat app not found')) {
+      throw new Error(
+        `Google Chat app not found. To create a Chat app, you must use a Business/Enterprise Google Workspace account and configure the app in the Google Cloud Console: ${CHAT_CONFIG_CONSOLE_URL}`
+      );
+    }
+    throw new Error(`Failed to list Chat spaces (${res.status}): ${errText}`);
   }
 
   const data = await res.json();
@@ -1538,7 +1732,13 @@ export async function sendGoogleChatMessage(spaceName: string, text: string) {
   });
 
   if (!res.ok) {
-    throw new Error(`Failed to post message to Chat (${res.status})`);
+    const errText = await res.text().catch(() => '');
+    if (res.status === 404 || errText.includes('Google Chat app not found')) {
+      throw new Error(
+        `Google Chat app not found. To create a Chat app, you must use a Business/Enterprise Google Workspace account and configure the app in the Google Cloud Console: ${CHAT_CONFIG_CONSOLE_URL}`
+      );
+    }
+    throw new Error(`Failed to post message to Chat (${res.status}): ${errText}`);
   }
 
   const data = await res.json();

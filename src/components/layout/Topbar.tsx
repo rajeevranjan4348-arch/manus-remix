@@ -5,6 +5,10 @@ import { RobotHead } from 'robot-heads';
 import { toast } from 'sonner';
 import { getSettings } from '@/lib/settingsStore';
 import { ChatExportFormat } from '@/lib/chatExport';
+import {
+  AMBIENT_ROBOT_EXPRESSION_SEQUENCE,
+  RobotHeadState,
+} from '@/lib/robotAnimationEngine';
 
 interface TopbarProps {
   onToggleSidebar?: () => void;
@@ -49,11 +53,30 @@ export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistor
   const [robotSettings, setRobotSettings] = useState(() => getSettings());
   const [isHappyExpression, setIsHappyExpression] = useState(false);
   const [liveRobotState, setLiveRobotState] = useState<string | null>(null);
+  const [ambientRobotState, setAmbientRobotState] = useState<RobotHeadState>('idle');
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationText, setGenerationText] = useState('Manus is typing...');
   const [generationMode, setGenerationMode] = useState<'chat' | 'website' | 'work'>('chat');
   const dropdownRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (robotSettings.robotPaused) return;
+    let stepIndex = 0;
+    let timerId: number;
+
+    const scheduleNextExpression = () => {
+      const currentStep = AMBIENT_ROBOT_EXPRESSION_SEQUENCE[stepIndex];
+      setAmbientRobotState(currentStep.state);
+      timerId = window.setTimeout(() => {
+        stepIndex = (stepIndex + 1) % AMBIENT_ROBOT_EXPRESSION_SEQUENCE.length;
+        scheduleNextExpression();
+      }, currentStep.durationMs);
+    };
+
+    scheduleNextExpression();
+    return () => window.clearTimeout(timerId);
+  }, [robotSettings.robotPaused]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -242,11 +265,25 @@ export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistor
             aria-label="Customize robot settings"
           >
             <div className="transform transition-transform duration-200 group-hover:scale-110 active:scale-95 flex items-center justify-center">
-              <RobotHead
-                state={isHappyExpression ? 'happy' : (liveRobotState as any) || (robotSettings.robotState as any) || 'idle'}
-                shape={(robotSettings.robotShape as any) || 'rectangle'}
-                size={50}
-              />
+              {(() => {
+                const activeTopbarState: RobotHeadState = isHappyExpression
+                  ? 'happy'
+                  : liveRobotState && liveRobotState !== 'idle'
+                    ? (liveRobotState as RobotHeadState)
+                    : robotSettings.robotState && robotSettings.robotState !== 'idle'
+                      ? (robotSettings.robotState as RobotHeadState)
+                      : ambientRobotState || 'idle';
+                return (
+                  <RobotHead
+                    state={activeTopbarState}
+                    shape={(robotSettings.robotShape as any) || 'rectangle'}
+                    size={50}
+                    paused={Boolean(robotSettings.robotPaused)}
+                    data-robot-state={activeTopbarState}
+                    className={robotSettings.robotPaused ? '' : 'manus-hero-robot-breathe'}
+                  />
+                );
+              })()}
             </div>
           </button>
         </div>

@@ -129,7 +129,7 @@ body,
   transform: none;
 }
 
-/* Let the robot breathe and gently sway independently of its floating halo. */
+/* Let the robot breathe and express distinct physical animations per state (normal/idle, thinking, happy, searching, working, etc.). */
 @media (prefers-reduced-motion: no-preference) {
   .manus-hero-robot-breathe {
     transform-origin: 50% 58%;
@@ -137,20 +137,105 @@ body,
     will-change: transform;
   }
 
+  .manus-hero-robot-breathe[data-robot-state="thinking"] {
+    animation: manus-robot-state-thinking 2.6s ease-in-out infinite;
+  }
+
+  .manus-hero-robot-breathe[data-robot-state="happy"] {
+    animation: manus-robot-state-happy 1.4s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+  }
+
+  .manus-hero-robot-breathe[data-robot-state="searching"] {
+    animation: manus-robot-state-searching 2.4s ease-in-out infinite;
+  }
+
+  .manus-hero-robot-breathe[data-robot-state="working"] {
+    animation: manus-robot-state-working 1.8s ease-in-out infinite;
+  }
+
+  .manus-hero-robot-breathe[data-robot-state="listening"],
+  .manus-hero-robot-breathe[data-robot-state="speaking"] {
+    animation: manus-robot-state-active 1.5s ease-in-out infinite;
+  }
+
+  .manus-hero-robot-breathe[data-robot-state="sleeping"] {
+    animation: manus-robot-state-sleeping 5.2s ease-in-out infinite;
+  }
+
   @keyframes manus-hero-robot-breathe {
     0%, 100% {
-      transform: scale(1) rotate(0deg);
+      transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
     }
     50% {
-      transform: scale(1.018, 0.99) rotate(-1deg);
+      transform: translate3d(0, -3px, 0) scale(1.022, 0.99) rotate(-1.2deg);
     }
   }
-}
 
-[data-perf-mode="ultra-lite"] .manus-hero-robot-breathe {
-  animation: none !important;
-  transform: none;
-  will-change: auto;
+  @keyframes manus-robot-state-thinking {
+    0%, 100% {
+      transform: translate3d(0, 0, 0) rotate(-4.5deg) scale(1.01);
+    }
+    35% {
+      transform: translate3d(2px, -4px, 0) rotate(-6.5deg) scale(1.025);
+    }
+    70% {
+      transform: translate3d(-1px, -2px, 0) rotate(2.5deg) scale(1.015);
+    }
+  }
+
+  @keyframes manus-robot-state-happy {
+    0%, 100% {
+      transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
+    }
+    28% {
+      transform: translate3d(0, -7px, 0) scale(1.05, 0.97) rotate(3.5deg);
+    }
+    55% {
+      transform: translate3d(0, -2px, 0) scale(0.98, 1.03) rotate(-3deg);
+    }
+    78% {
+      transform: translate3d(0, -5px, 0) scale(1.035, 0.98) rotate(2deg);
+    }
+  }
+
+  @keyframes manus-robot-state-searching {
+    0%, 100% {
+      transform: translate3d(0, 0, 0) rotate(0deg);
+    }
+    25% {
+      transform: translate3d(-5px, -2px, 0) rotate(-3.5deg);
+    }
+    75% {
+      transform: translate3d(5px, -2px, 0) rotate(3.5deg);
+    }
+  }
+
+  @keyframes manus-robot-state-working {
+    0%, 100% {
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+    50% {
+      transform: translate3d(0, -3px, 0) scale(1.03, 0.985);
+    }
+  }
+
+  @keyframes manus-robot-state-active {
+    0%, 100% {
+      transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
+    }
+    50% {
+      transform: translate3d(0, -4px, 0) scale(1.04) rotate(1.8deg);
+    }
+  }
+
+  @keyframes manus-robot-state-sleeping {
+    0%, 100% {
+      transform: translate3d(0, 2px, 0) scale(0.985) rotate(3deg);
+    }
+    50% {
+      transform: translate3d(0, 5px, 0) scale(0.97, 1.01) rotate(4.5deg);
+    }
+  }
 }
 
 /* A restrained studio sheen gives the hero robot shell a polished, glassy finish. */

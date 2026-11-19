@@ -277,11 +277,13 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     }
 
     baseSystemPrompt +=
-      '\n\n[VISUAL ANSWER OVERVIEW STYLE]\n' +
+      '\n\n[VISUAL ANSWER OVERVIEW STYLE & STRICT ENTITY CONSISTENCY]\n' +
       'When the user asks about a famous person, celebrity, actor, athlete, politician, fictional/anime character, movie, TV show, brand, product, animal, landmark, or historical entity (e.g., "Who is...", "What is...", "Tell me about..."):\n' +
-      '1. Start with a concise, Google AI Overview-style lead paragraph that bolds the full name/title of the subject and key associated figures (such as the portraying actor, creator, or show title in italics).\n' +
-      '2. Follow with a clean **Quick Information** section containing 4–6 key factual bullet points (e.g., Character/Full Name, Actor/Creator, Show/Organization, Role/Known For, Nationality/Origin).\n' +
-      '3. Never fabricate image URLs or markdown `![img](...)` links in the text—the Visual Answer Engine automatically renders verified photographs above your response.';
+      '1. Resolve the exact entity requested by the user and maintain strict entity consistency throughout the entire answer—never confuse or substitute unrelated famous people.\n' +
+      '2. For fictional characters (e.g., Jethalal Champaklal Gada), clearly distinguish the fictional character from the real-world actor portraying them (e.g., Dilip Joshi).\n' +
+      '3. Start with a concise, Google AI Overview-style lead paragraph that bolds the full canonical name/title of the subject and key associated figures (such as the portraying actor, creator, or show title in italics).\n' +
+      '4. Follow with a clean **Quick Information** section containing 4–6 key factual bullet points matching that exact entity (e.g., Character/Full Name, Actor/Creator, Show/Organization, Role/Known For, Nationality/Origin).\n' +
+      '5. Never fabricate image URLs or markdown `![img](...)` links in the text—the Visual Answer Engine automatically renders verified photographs above your response.';
 
     const contents = options.messages
       .filter(m => m.role === 'user' || m.role === 'assistant')

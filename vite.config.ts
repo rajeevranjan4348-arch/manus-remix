@@ -354,13 +354,21 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
                 : typeof body?.query === 'string' && body.query.trim()
                   ? [body.query.trim()]
                   : [];
-              const maxResults = Math.min(4, Math.max(2, Number(body?.maxResults) || 4));
+              const maxResults = Math.min(4, Math.max(1, Number(body?.limit || body?.maxResults) || 4));
               const isComparison = Boolean(body?.isComparison);
               if (queries.length === 0) {
                 res.end(JSON.stringify({ ok: true, images: [] }));
                 return;
               }
-              const images = await searchVerifiedEntityImages(queries, maxResults, isComparison);
+              const images = await searchVerifiedEntityImages({
+                primarySubject: typeof body?.primarySubject === 'string' ? body.primarySubject : queries[0],
+                subjects: Array.isArray(body?.subjects) ? body.subjects : undefined,
+                queries,
+                requiredTokens: Array.isArray(body?.requiredTokens) ? body.requiredTokens : undefined,
+                disallowedTokens: Array.isArray(body?.disallowedTokens) ? body.disallowedTokens : undefined,
+                isComparison,
+                limit: maxResults,
+              });
               res.end(JSON.stringify({ ok: true, images }));
             } catch (err: any) {
               res.end(JSON.stringify({ ok: false, images: [], error: err?.message || 'Visual search unavailable' }));

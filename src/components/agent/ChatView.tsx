@@ -48,6 +48,9 @@ import { ToolApprovalCard } from './ToolApprovalCard';
 import { extractWeatherQuery, fetchWeatherByCity, WeatherData } from '@/lib/weatherService';
 import { executeOpenUrl, executeDeviceCommand, VoiceCommandResult } from '@/lib/voiceCommands';
 import { WorkspaceToolCard } from '../workspace/WorkspaceToolCard';
+import { GoogleSheetsDataGridCard } from '../workspace/GoogleSheetsDataGridCard';
+import { GmailRecentEmailsCard } from '../workspace/GmailRecentEmailsCard';
+import { GoogleDriveSelectorCard } from '../workspace/GoogleDriveSelectorCard';
 import { GoogleDriveFileItem } from '@/lib/workspaceTools';
 import { WorkspaceMentionPicker, WORKSPACE_CONNECTOR_OPTIONS, WorkspaceConnectorOption } from '../chat/WorkspaceMentionPicker';
 import { fetchWorkspaceContextSummary } from '@/lib/workspaceContextService';
@@ -1278,6 +1281,33 @@ export function ChatView({
                   title: 'Follow-up Task',
                   notes: 'Created via Manus Assistant',
                 }}
+              />
+            )}
+
+            {/* Google Sheets Read/Write Data Grid Component Detection */}
+            {/(google sheet|spreadsheet|@sheets|read sheet|write to sheet|sheet data|data grid)/i.test(
+              `${prevUserPromptText || ''} ${cleanedContent || ''}`
+            ) && (
+              <GoogleSheetsDataGridCard
+                initialTitle="Workspace Spreadsheet"
+              />
+            )}
+
+            {/* Gmail Recent Emails Compact Card Detection */}
+            {/(recent email|recent messages|gmail inbox|check gmail|check email|unread email|fetch email|@gmail)/i.test(
+              `${prevUserPromptText || ''} ${cleanedContent || ''}`
+            ) && (
+              <GmailRecentEmailsCard />
+            )}
+
+            {/* Google Drive File Browser & Selector Component Detection */}
+            {/(google drive|drive files|list files|select file from drive|browse drive|my drive|@drive)/i.test(
+              `${prevUserPromptText || ''} ${cleanedContent || ''}`
+            ) && (
+              <GoogleDriveSelectorCard
+                onSelectFile={(file, ctx) =>
+                  handleDriveFileSelect(file, ctx?.formattedContext)
+                }
               />
             )}
 

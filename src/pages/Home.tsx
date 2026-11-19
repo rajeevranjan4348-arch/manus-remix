@@ -41,6 +41,11 @@ import { getSettings } from '@/lib/settingsStore';
 import { getDraftPrompt, saveDraftPrompt, clearDraftPrompt } from '@/lib/draftStorage';
 import { getActivePerformanceProfile } from '@/lib/performanceEngine';
 import { getHomeActionDefaults } from '@/lib/homeActionDefaults';
+import {
+  AMBIENT_ROBOT_EXPRESSION_SEQUENCE,
+  getNextCycledRobotState,
+  resolveContextualRobotState,
+} from '@/lib/robotAnimationEngine';
 const ConnectorsStorePanel = React.lazy(() =>
   import('@/components/connectors/ConnectorsStorePanel').then((m) => ({ default: m.ConnectorsStorePanel }))
 );
@@ -129,10 +134,54 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   const [robotFloorShadow, setRobotFloorShadow] = useState(() => initialSettings.robotFloorShadow ?? true);
   const [robotSeed, setRobotSeed] = useState(() => initialSettings.robotSeed ?? 0.3);
   const [isHappyExpression, setIsHappyExpression] = useState(false);
+  const [ambientRobotState, setAmbientRobotState] = useState<RobotHeadState>('idle');
+  const [manualOverrideState, setManualOverrideState] = useState<RobotHeadState | null>(null);
+  const [isTypingPrompt, setIsTypingPrompt] = useState(false);
   const [showIndiaClock, setShowIndiaClock] = useState(false);
   const [indiaClockTime, setIndiaClockTime] = useState('');
   const [indiaClockDate, setIndiaClockDate] = useState('');
   const robotTapCountRef = useRef(0);
+  const manualOverrideTimerRef = useRef<number | null>(null);
+  const typingTimerRef = useRef<number | null>(null);
+
+  // Ambient multi-expression cycle (normal/idle -> thinking 🤔 -> happy 😊 -> searching -> working)
+  React.useEffect(() => {
+    if (robotPaused || robotState !== 'idle') return;
+    let stepIndex = 0;
+    let timerId: number;
+
+    const scheduleNextExpression = () => {
+      const currentStep = AMBIENT_ROBOT_EXPRESSION_SEQUENCE[stepIndex];
+      setAmbientRobotState(currentStep.state);
+      timerId = window.setTimeout(() => {
+        stepIndex = (stepIndex + 1) % AMBIENT_ROBOT_EXPRESSION_SEQUENCE.length;
+        scheduleNextExpression();
+      }, currentStep.durationMs);
+    };
+
+    scheduleNextExpression();
+    return () => window.clearTimeout(timerId);
+  }, [robotPaused, robotState]);
+
+  // Trigger typing animation state when user types in the prompt
+  React.useEffect(() => {
+    if (!prompt.trim()) {
+      setIsTypingPrompt(false);
+      return;
+    }
+    setIsTypingPrompt(true);
+    if (typingTimerRef.current) {
+      window.clearTimeout(typingTimerRef.current);
+    }
+    typingTimerRef.current = window.setTimeout(() => {
+      setIsTypingPrompt(false);
+    }, 2400);
+    return () => {
+      if (typingTimerRef.current) {
+        window.clearTimeout(typingTimerRef.current);
+      }
+    };
+  }, [prompt]);
 
   React.useEffect(() => {
     if (!showIndiaClock) return;
@@ -166,7 +215,21 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
       robotTapCountRef.current = 0;
       setShowIndiaClock((visible) => !visible);
       setIsHappyExpression(false);
+      setManualOverrideState(null);
+      return;
     }
+
+    const nextState = getNextCycledRobotState(
+      manualOverrideState || (isHappyExpression ? 'happy' : ambientRobotState)
+    );
+    setManualOverrideState(nextState);
+    if (manualOverrideTimerRef.current) {
+      window.clearTimeout(manualOverrideTimerRef.current);
+    }
+    manualOverrideTimerRef.current = window.setTimeout(() => {
+      setManualOverrideState(null);
+      robotTapCountRef.current = 0;
+    }, 4500);
   };
 
   React.useEffect(() => {
@@ -593,6 +656,20 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
     setIsExpanded(false);
   };
 
+  const effectiveRobotState = resolveContextualRobotState({
+    baseState: robotState,
+    manualOverrideState,
+    ambientState: ambientRobotState,
+    isHappyExpression,
+    isExtracting,
+    isListening,
+    isThinkHarder,
+    isTypingPrompt,
+    promptText: prompt,
+    activeIntentLabel: activeIntent?.label ?? null,
+    chatWorkMode,
+  });
+
   return (
     <div ref={containerRef} className="w-full h-full overflow-y-auto overscroll-y-contain flex flex-col items-center px-4 py-6 sm:px-6 md:py-10 bg-manus-cream dark:bg-background">
       <div className="w-full max-w-4xl space-y-5 sm:space-y-7 my-auto">
@@ -611,20 +688,21 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
             }}
           >
             <RobotHead
-              state={isHappyExpression ? 'happy' : isExtracting ? 'thinking' : activeIntent?.label === 'Research' ? 'searching' : chatWorkMode === 'work' && robotState === 'idle' ? 'working' : robotState}
+              state={effectiveRobotState}
               shape={robotShape}
               size={148}
               color={ROBOT_THEMES[robotTheme]?.shell || ROBOT_THEMES[0].shell}
               trimColor={ROBOT_THEMES[robotTheme]?.trim || ROBOT_THEMES[0].trim}
               screenColor={ROBOT_THEMES[robotTheme]?.screen || ROBOT_THEMES[0].screen}
               speed={robotSpeed}
-              paused={robotPaused || (getActivePerformanceProfile() === 'ultra-lite' && robotState === 'idle' && !isExtracting && !isHappyExpression)}
+              paused={robotPaused}
               interactive={robotInteractive}
               antenna={robotAntenna}
-              floorShadow={robotFloorShadow && getActivePerformanceProfile() !== 'ultra-lite'}
+              floorShadow={robotFloorShadow}
               seed={robotSeed}
-              aria-label={`Manus AI robot assistant, ${isHappyExpression ? 'happy' : robotState}`}
+              aria-label={`Manus AI robot assistant, ${effectiveRobotState}`}
               data-hero-robot-shape={robotShape}
+              data-robot-state={effectiveRobotState}
               className={`shrink-0 transform transition-transform manus-hero-robot-gloss ${robotPaused ? '' : 'manus-hero-robot-breathe'} ${showIndiaClock ? 'opacity-20' : ''}`}
             />
             {showIndiaClock && (

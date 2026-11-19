@@ -4,6 +4,7 @@ import {
   Check, 
   ThumbsUp, 
   ThumbsDown, 
+  Heart,
   Volume2, 
   VolumeX, 
   Share2, 
@@ -80,22 +81,10 @@ export const ConversationActionBar = memo(function ConversationActionBar({
     };
   }, [isSpeaking]);
 
-  const handleCopy = async () => {
-    if (!content) return;
-    try {
-      await navigator.clipboard.writeText(content);
-      setCopied(true);
-      toast.success('Copied to clipboard');
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      toast.error('Failed to copy text');
-    }
-  };
-
-  const [poppingReaction, setPoppingReaction] = useState<MessageReactionType | null>(null);
+  const [poppingReaction, setPoppingReaction] = useState<MessageReactionType | 'copy' | null>(null);
   const popTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const triggerSpringPop = (type: MessageReactionType) => {
+  const triggerSpringPop = (type: MessageReactionType | 'copy') => {
     if (popTimerRef.current) {
       clearTimeout(popTimerRef.current);
     }
@@ -108,6 +97,19 @@ export const ConversationActionBar = memo(function ConversationActionBar({
     });
   };
 
+  const handleCopy = async () => {
+    if (!content) return;
+    triggerSpringPop('copy');
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      toast.success('Copied to clipboard');
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error('Failed to copy text');
+    }
+  };
+
   const handleThumbsUp = () => {
     triggerSpringPop('up');
     const { nextReaction } = toggleMessageReaction(resolvedId, 'up');
@@ -116,6 +118,17 @@ export const ConversationActionBar = memo(function ConversationActionBar({
       toast.success('Thanks for your feedback!');
     } else {
       toast.info('Feedback removed');
+    }
+  };
+
+  const handleHeart = () => {
+    triggerSpringPop('heart');
+    const { nextReaction } = toggleMessageReaction(resolvedId, 'heart');
+    setFeedback(nextReaction);
+    if (nextReaction === 'heart') {
+      toast.success('Loved this response!');
+    } else {
+      toast.info('Reaction removed');
     }
   };
 
@@ -217,14 +230,21 @@ export const ConversationActionBar = memo(function ConversationActionBar({
         type="button"
         onClick={handleCopy}
         data-testid="action-bar-copy"
+        data-popping={poppingReaction === 'copy' ? 'true' : 'false'}
         title={copied ? "Copied" : "Copy to clipboard"}
         aria-label="Copy to clipboard"
-        className="p-1.5 rounded-lg hover:bg-[#F2F2F2] dark:hover:bg-[#171717] active:scale-95 transition-all text-[#000000] dark:text-[#FFFFFF] cursor-pointer"
+        style={{
+          transitionTimingFunction: 'cubic-bezier(0.34, 1.56, 0.64, 1)',
+        }}
+        className={cn(
+          "p-1.5 rounded-lg hover:bg-[#F2F2F2] dark:hover:bg-[#171717] active:scale-90 transition-all duration-200 text-[#000000] dark:text-[#FFFFFF] cursor-pointer",
+          poppingReaction === 'copy' && "animate-reaction-spring-pop"
+        )}
       >
         {copied ? (
-          <Check size={18} className="text-[#000000] dark:text-[#FFFFFF] animate-in zoom-in-75 duration-150" strokeWidth={2} />
+          <Check size={18} className={cn("text-[#000000] dark:text-[#FFFFFF] animate-in zoom-in-75 duration-150", poppingReaction === 'copy' && "animate-reaction-icon-pop")} strokeWidth={2} />
         ) : (
-          <Copy size={18} strokeWidth={1.75} />
+          <Copy size={18} strokeWidth={1.75} className={cn(poppingReaction === 'copy' && "animate-reaction-icon-pop")} />
         )}
       </button>
 
@@ -256,6 +276,40 @@ export const ConversationActionBar = memo(function ConversationActionBar({
             "transition-colors duration-200",
             poppingReaction === 'up' && "animate-reaction-icon-pop",
             feedback === 'up'
+              ? "text-[#000000] dark:text-[#FFFFFF] fill-[#000000]/20 dark:fill-[#FFFFFF]/20 stroke-[#000000] dark:stroke-[#FFFFFF]"
+              : "text-[#000000] dark:text-[#FFFFFF]"
+          )}
+        />
+      </button>
+
+      {/* 2b. Heart reaction button */}
+      <button
+        type="button"
+        onClick={handleHeart}
+        data-testid="action-bar-heart"
+        data-active={feedback === 'heart' ? 'true' : 'false'}
+        data-popping={poppingReaction === 'heart' ? 'true' : 'false'}
+        aria-pressed={feedback === 'heart'}
+        title="Love response"
+        aria-label="Love response"
+        style={{
+          transitionTimingFunction: 'cubic-bezier(0.34, 1.56, 0.64, 1)',
+        }}
+        className={cn(
+          "p-1.5 rounded-lg hover:bg-[#F2F2F2] dark:hover:bg-[#171717] active:scale-90 transition-all duration-200 cursor-pointer",
+          poppingReaction === 'heart' && "animate-reaction-spring-pop",
+          feedback === 'heart' 
+            ? "text-[#000000] dark:text-[#FFFFFF] bg-[#F2F2F2] dark:bg-[#171717] ring-1 ring-[#000000] dark:ring-[#FFFFFF]" 
+            : "text-[#000000] dark:text-[#FFFFFF]"
+        )}
+      >
+        <Heart 
+          size={18} 
+          strokeWidth={feedback === 'heart' ? 2.25 : 1.75} 
+          className={cn(
+            "transition-colors duration-200",
+            poppingReaction === 'heart' && "animate-reaction-icon-pop",
+            feedback === 'heart'
               ? "text-[#000000] dark:text-[#FFFFFF] fill-[#000000]/20 dark:fill-[#FFFFFF]/20 stroke-[#000000] dark:stroke-[#FFFFFF]"
               : "text-[#000000] dark:text-[#FFFFFF]"
           )}

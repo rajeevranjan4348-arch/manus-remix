@@ -5,19 +5,74 @@ import {
   detectVisualSubjectQuery,
   deduplicateVisualImages,
   isValidVisualImageUrl,
+  resolveVerifiedEntityProfile,
+  isImageRelevantToEntity,
   VisualAnswerImage,
 } from '../src/lib/visualAnswerEngine';
 import { generateResilientResponse } from '../server/geminiService';
 
 describe('Visual Answer Engine — Auto Image Display & Google AI Overview Style', () => {
   describe('1. Automatic Subject Detection Across All Required Categories', () => {
-    it('detects famous characters and actors such as "Who\'s jethalal" and expands aliases to Dilip Joshi', () => {
+    it('detects famous characters and actors such as "Who\'s jethalal", resolves canonical entity, distinguishes character from actor, and excludes broad show queries', () => {
       const result = detectVisualSubjectQuery("Who's jethalal");
       expect(result.shouldDisplayImages).toBe(true);
+      expect(result.canonicalEntity).toBe('Jethalal Champaklal Gada');
+      expect(result.portrayedBy).toBe('Dilip Joshi');
+      expect(result.isFictionalCharacter).toBe(true);
       expect(result.subjects.length).toBeGreaterThan(0);
       expect(result.searchQueries).toEqual(
         expect.arrayContaining(['Dilip Joshi', 'Jethalal Champaklal Gada'])
       );
+      // Must NOT include broad show name that pulls unrelated cast/celebrity photos
+      expect(result.searchQueries).not.toContain('Taarak Mehta Ka Ooltah Chashmah');
+    });
+
+    it('strictly validates entity relevance and rejects unrelated celebrity or co-star images', () => {
+      const jethalalProfile = resolveVerifiedEntityProfile('jethalal');
+      expect(jethalalProfile.canonicalName).toBe('Jethalal Champaklal Gada');
+      expect(jethalalProfile.portrayedBy).toBe('Dilip Joshi');
+
+      // Relevant Jethalal / Dilip Joshi photo -> accepted
+      expect(
+        isImageRelevantToEntity(
+          {
+            url: 'https://upload.wikimedia.org/wikipedia/commons/5/5c/Dilip_Joshi_at_event.jpg',
+            thumbnailUrl: 'https://upload.wikimedia.org/wikipedia/commons/5/5c/Dilip_Joshi_at_event.jpg',
+            title: 'Dilip Joshi',
+            caption: 'Dilip Joshi portraying Jethalal Champaklal Gada',
+            subject: 'Jethalal Champaklal Gada',
+          },
+          jethalalProfile
+        )
+      ).toBe(true);
+
+      // Unrelated celebrity (Salman Khan) -> rejected
+      expect(
+        isImageRelevantToEntity(
+          {
+            url: 'https://upload.wikimedia.org/wikipedia/commons/1/1a/Salman_Khan_at_event.jpg',
+            thumbnailUrl: 'https://upload.wikimedia.org/wikipedia/commons/1/1a/Salman_Khan_at_event.jpg',
+            title: 'Salman Khan',
+            caption: 'Salman Khan promoting film on television show',
+            subject: 'Jethalal Champaklal Gada',
+          },
+          jethalalProfile
+        )
+      ).toBe(false);
+
+      // Unrelated co-star (Disha Vakani / Munmun Dutta) -> rejected when user asked for Jethalal
+      expect(
+        isImageRelevantToEntity(
+          {
+            url: 'https://upload.wikimedia.org/wikipedia/commons/2/2b/Munmun_Dutta_2022.jpg',
+            thumbnailUrl: 'https://upload.wikimedia.org/wikipedia/commons/2/2b/Munmun_Dutta_2022.jpg',
+            title: 'Munmun Dutta',
+            caption: 'Munmun Dutta at Taarak Mehta Ka Ooltah Chashmah event',
+            subject: 'Jethalal Champaklal Gada',
+          },
+          jethalalProfile
+        )
+      ).toBe(false);
     });
 
     it('detects celebrities, actors, politicians, and athletes', () => {
