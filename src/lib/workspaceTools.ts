@@ -1,4 +1,9 @@
-import { getAccessToken, googleSignIn } from './workspaceAuth';
+import {
+  getAccessToken,
+  googleSignIn,
+  ensureValidWorkspaceAccessToken,
+  refreshWorkspaceAccessToken,
+} from './workspaceAuth';
 
 export interface CalendarEventPayload {
   summary: string;
@@ -27,18 +32,56 @@ export interface GoogleDriveFileItem {
 }
 
 /**
- * Ensures a valid access token exists, otherwise triggers sign-in popup.
+ * Ensures a valid, non-expired access token exists, silently refreshing if approaching expiration
+ * or triggering sign-in only when no session can be restored.
  */
 async function ensureAccessToken(): Promise<string> {
-  let token = getAccessToken();
-  if (!token) {
-    const res = await googleSignIn();
-    if (!res?.accessToken) {
-      throw new Error('Google Workspace authentication required. Please sign in with Google.');
+  return ensureValidWorkspaceAccessToken();
+}
+
+/**
+ * Executes a Google Workspace API fetch with automatic silent token refresh and retry on HTTP 401.
+ */
+export async function fetchGoogleApiWithTokenRefresh(
+  input: string,
+  init: RequestInit = {}
+): Promise<Response> {
+  const token = await ensureAccessToken();
+  const buildHeaders = (bearerToken: string): Record<string, string> => {
+    const base: Record<string, string> = {};
+    if (init.headers) {
+      if (init.headers instanceof Headers) {
+        init.headers.forEach((v, k) => {
+          base[k] = v;
+        });
+      } else if (Array.isArray(init.headers)) {
+        for (const [k, v] of init.headers) {
+          base[k] = v;
+        }
+      } else {
+        Object.assign(base, init.headers);
+      }
     }
-    token = res.accessToken;
+    base.Authorization = `Bearer ${bearerToken}`;
+    return base;
+  };
+
+  let res = await fetch(input, {
+    ...init,
+    headers: buildHeaders(token),
+  });
+
+  if (res.status === 401) {
+    const refreshed = await refreshWorkspaceAccessToken({ force: true, silentOnly: true });
+    if (refreshed.success && refreshed.accessToken) {
+      res = await fetch(input, {
+        ...init,
+        headers: buildHeaders(refreshed.accessToken),
+      });
+    }
   }
-  return token;
+
+  return res;
 }
 
 /**

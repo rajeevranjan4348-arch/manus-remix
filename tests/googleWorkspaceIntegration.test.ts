@@ -10,6 +10,29 @@ import {
   formatDriveMimeTypeLabel,
   googleDriveService,
 } from '../src/lib/googleDriveService';
+import {
+  WORKSPACE_SERVICES,
+  getInitialWorkspaceServiceStatuses,
+  verifyWorkspaceServiceConnection,
+  fetchActiveGoogleIntegrationsFromBackend,
+} from '../src/lib/workspaceConnectionStatus';
+import {
+  setCachedAccessToken,
+  getWorkspaceTokenMetadata,
+  isWorkspaceTokenExpiringSoon,
+} from '../src/lib/workspaceAuth';
+import {
+  isConnectorTokenExpiringSoon,
+  refreshConnectorAccessToken,
+  executeWithConnectorTokenRefresh,
+} from '../src/lib/connectors';
+import {
+  storeUserToken,
+  getUserToken,
+  isUserTokenExpiringSoon,
+  refreshUserConnectorToken,
+} from '../server/connectorsService';
+import { resolveBackendGoogleIntegrations } from '../server/workspaceIntegrationsHandler';
 
 describe('Google Workspace Integration: Sheets, Gmail, and Drive', () => {
   describe('Gmail Sender Parsing & Compact Email Card', () => {
@@ -101,6 +124,153 @@ describe('Google Workspace Integration: Sheets, Gmail, and Drive', () => {
       expect(driveCardSource).toContain('google-drive-selector-card');
       expect(driveCardSource).toContain('googleDriveService');
       expect(driveCardSource).toContain('drive-mutation-confirmation');
+    });
+  });
+
+  describe('Connected Apps Backend & Settings Dashboard (Link Account & Manage Connection)', () => {
+    it('resolves active and unlinked Google integrations via backend handler', async () => {
+      const unauthResult = await resolveBackendGoogleIntegrations({});
+      expect(unauthResult.authenticated).toBe(false);
+      expect(unauthResult.integrations).toHaveLength(4);
+      expect(unauthResult.integrations.every((i) => !i.isLinked && i.status === 'disconnected')).toBe(
+        true
+      );
+
+      const authResult = await resolveBackendGoogleIntegrations({
+        authorizationHeader: 'Bearer mock-oauth-token',
+        userEmailHeader: 'rajeev@example.com',
+        disabledAppIds: ['calendar'],
+      });
+      expect(authResult.authenticated).toBe(true);
+      const driveApp = authResult.integrations.find((i) => i.id === 'drive');
+      const calendarApp = authResult.integrations.find((i) => i.id === 'calendar');
+      expect(driveApp?.isLinked).toBe(true);
+      expect(driveApp?.status).toBe('connected');
+      expect(calendarApp?.isLinked).toBe(false);
+      expect(calendarApp?.status).toBe('disconnected');
+    });
+
+    it('tracks connection status for all 4 core Google Workspace services', async () => {
+      expect(WORKSPACE_SERVICES.map((s) => s.id)).toEqual([
+        'drive',
+        'sheets',
+        'calendar',
+        'gmail',
+      ]);
+
+      const disconnectedStatuses = getInitialWorkspaceServiceStatuses(null, null);
+      expect(disconnectedStatuses).toHaveLength(4);
+      expect(disconnectedStatuses.every((s) => s.status === 'disconnected')).toBe(true);
+
+      const connectedStatuses = getInitialWorkspaceServiceStatuses(
+        'mock-oauth-token',
+        'user@example.com'
+      );
+      expect(connectedStatuses.every((s) => s.status === 'connected')).toBe(true);
+      expect(connectedStatuses[0].accountEmail).toBe('user@example.com');
+
+      const unauthCheck = await verifyWorkspaceServiceConnection('drive', null);
+      expect(unauthCheck.status).toBe('disconnected');
+      expect(typeof fetchActiveGoogleIntegrationsFromBackend).toBe('function');
+    });
+
+    it('verifies ConnectedAppsDashboard queries backend and renders Link Account and Manage Connection actions inside SettingsModal', () => {
+      const settingsSource = fs.readFileSync(
+        path.resolve(__dirname, '../src/components/settings/SettingsModal.tsx'),
+        'utf-8'
+      );
+      expect(settingsSource).toContain('ConnectedAppsDashboard');
+      expect(settingsSource).toContain('WorkspaceConnectionsDashboard');
+
+      const connectedAppsSource = fs.readFileSync(
+        path.resolve(__dirname, '../src/components/workspace/ConnectedAppsDashboard.tsx'),
+        'utf-8'
+      );
+      expect(connectedAppsSource).toContain('connected-apps-dashboard');
+      expect(connectedAppsSource).toContain('Connected Apps');
+      expect(connectedAppsSource).toContain('fetchActiveGoogleIntegrationsFromBackend');
+      expect(connectedAppsSource).toContain('connected-app-link-${service.id}');
+      expect(connectedAppsSource).toContain('Link Account');
+      expect(connectedAppsSource).toContain('connected-app-manage-${service.id}');
+      expect(connectedAppsSource).toContain('Manage Connection');
+      expect(connectedAppsSource).toContain('workspace-status-${service.id}');
+      expect(connectedAppsSource).toContain('workspace-reconnect-${service.id}');
+    });
+  });
+
+  describe('Connectors Service Automatic Token Refresh Mechanism', () => {
+    it('detects near-expiry tokens, refreshes silently, and retries 401 operations transparently', async () => {
+      // Seed an access token that is within the 5-minute expiry buffer (expires in 30 seconds)
+      setCachedAccessToken('ya29.test-expiring-token', {
+        expiresInMs: 30 * 1000,
+        source: 'google_oauth',
+      });
+
+      expect(isWorkspaceTokenExpiringSoon()).toBe(true);
+      expect(isConnectorTokenExpiringSoon('drive')).toBe(true);
+
+      const refreshResult = await refreshConnectorAccessToken('drive', { silentOnly: true });
+      expect(refreshResult.success).toBe(true);
+      expect(refreshResult.refreshed).toBe(true);
+      expect(refreshResult.accessToken).toBe('ya29.test-expiring-token');
+      expect(isWorkspaceTokenExpiringSoon()).toBe(false);
+
+      const meta = getWorkspaceTokenMetadata();
+      expect(meta?.refreshCount).toBeGreaterThanOrEqual(1);
+
+      // Verify executeWithConnectorTokenRefresh automatically refreshes and retries once on a 401/expired error
+      let attempts = 0;
+      const result = await executeWithConnectorTokenRefresh('gmail', async (token) => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error('Gmail API Error (401): invalid_token - token expired');
+        }
+        return { ok: true, usedToken: token, attempts };
+      });
+
+      expect(attempts).toBe(2);
+      expect(result.ok).toBe(true);
+      expect(result.usedToken).toBe('ya29.test-expiring-token');
+
+      setCachedAccessToken(null);
+    });
+
+    it('renews expired Google tokens in the server connectors vault without dropping active user sessions', async () => {
+      const prevSecret = process.env.TOKEN_ENCRYPTION_SECRET;
+      process.env.TOKEN_ENCRYPTION_SECRET = 'manus-test-encryption-secret-key-32-chars-minimum!';
+      try {
+        const userId = 'usr_refresh_test';
+        storeUserToken(userId, 'drive', 'ya29.server-vault-token', {
+          refreshToken: '1//0g-test-refresh-token',
+          expiresAt: Date.now() - 10_000, // already expired 10s ago
+          user: { email: 'rajeev@example.com' },
+        });
+
+        expect(isUserTokenExpiringSoon(userId, 'drive')).toBe(true);
+
+        // Accessing getUserToken on an expired Google connector with a refresh token auto-renews instead of returning null
+        const autoRenewed = getUserToken(userId, 'drive');
+        expect(autoRenewed).not.toBeNull();
+        expect(autoRenewed?.accessToken).toBe('ya29.server-vault-token');
+        expect(autoRenewed?.refreshCount).toBe(1);
+        expect(isUserTokenExpiringSoon(userId, 'drive')).toBe(false);
+
+        // Force-refresh via refreshUserConnectorToken increments refreshCount and updates expiration
+        const forcedRefresh = await refreshUserConnectorToken(userId, 'drive', {
+          force: true,
+          clientAccessToken: 'ya29.rotated-google-token',
+        });
+        expect(forcedRefresh.success).toBe(true);
+        expect(forcedRefresh.refreshed).toBe(true);
+        expect(forcedRefresh.accessToken).toBe('ya29.rotated-google-token');
+        expect(forcedRefresh.refreshCount).toBe(2);
+      } finally {
+        if (prevSecret === undefined) {
+          delete process.env.TOKEN_ENCRYPTION_SECRET;
+        } else {
+          process.env.TOKEN_ENCRYPTION_SECRET = prevSecret;
+        }
+      }
     });
   });
 });

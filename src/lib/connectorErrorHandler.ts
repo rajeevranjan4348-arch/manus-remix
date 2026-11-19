@@ -22,9 +22,17 @@ export interface ConnectorErrorOptions {
 export function inferConnectorIssueType(error: any): ConnectorIssueType {
   if (!error) return 'connection_failed';
 
-  const errStr = typeof error === 'string' 
-    ? error.toLowerCase() 
-    : JSON.stringify(error).toLowerCase();
+  const errStr = (
+    typeof error === 'string'
+      ? error
+      : `${error?.message || ''} ${error?.code || ''} ${error?.status || ''} ${(() => {
+          try {
+            return JSON.stringify(error);
+          } catch {
+            return '';
+          }
+        })()}`
+  ).toLowerCase();
 
   if (
     errStr.includes('expired') || 

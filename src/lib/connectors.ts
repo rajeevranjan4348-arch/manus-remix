@@ -25,7 +25,17 @@ import {
   Users,
   StickyNote
 } from 'lucide-react';
-import { getAccessToken, googleSignIn, getCurrentUser, logoutWorkspace } from './workspaceAuth';
+import {
+  getAccessToken,
+  googleSignIn,
+  getCurrentUser,
+  logoutWorkspace,
+  getWorkspaceTokenMetadata,
+  isWorkspaceTokenExpiringSoon,
+  refreshWorkspaceAccessToken,
+  ensureValidWorkspaceAccessToken,
+  TOKEN_REFRESH_BUFFER_MS,
+} from './workspaceAuth';
 import { 
   searchGoogleDriveFiles, 
   listGoogleDriveFiles,
@@ -983,7 +993,7 @@ const CUSTOM_CONNECTORS_KEY = 'manus_custom_connectors_v2';
 // Local storage state helpers
 export function getStoredConnectorStates(): Record<string, ConnectorState> {
   try {
-    const raw = localStorage.getItem(CONNECTORS_STATE_KEY);
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(CONNECTORS_STATE_KEY) : null;
     if (!raw) {
       // Default setup
       const initial: Record<string, ConnectorState> = {};
@@ -1011,10 +1021,242 @@ export function getStoredConnectorStates(): Record<string, ConnectorState> {
 
 export function saveStoredConnectorStates(states: Record<string, ConnectorState>) {
   try {
-    localStorage.setItem(CONNECTORS_STATE_KEY, JSON.stringify(states));
-    window.dispatchEvent(new CustomEvent('manus_connectors_state_changed', { detail: states }));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(CONNECTORS_STATE_KEY, JSON.stringify(states));
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('manus_connectors_state_changed', { detail: states }));
+    }
   } catch (err) {
     console.warn('Failed to save connector states:', err);
+  }
+}
+
+export interface ConnectorTokenRefreshResult {
+  success: boolean;
+  connectorId: string;
+  accessToken: string | null;
+  refreshed: boolean;
+  expiresAt?: string;
+  refreshCount?: number;
+  error?: string;
+}
+
+let connectorRefreshDaemonInterval: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Checks whether a connector's token is expired or approaching expiration within bufferMs.
+ */
+export function isConnectorTokenExpiringSoon(
+  connectorId: string,
+  bufferMs: number = TOKEN_REFRESH_BUFFER_MS
+): boolean {
+  const catalogItem = CONNECTOR_CATALOG.find(c => c.id === connectorId);
+  if (catalogItem?.isWorkspaceAuth || !connectorId || connectorId === 'google_workspace') {
+    return isWorkspaceTokenExpiringSoon(bufferMs);
+  }
+  const states = getStoredConnectorStates();
+  const state = states[connectorId];
+  if (!state?.account?.expiresAt) return false;
+  const expiresMs = Date.parse(state.account.expiresAt);
+  if (Number.isNaN(expiresMs)) return false;
+  return Date.now() + Math.max(0, bufferMs) >= expiresMs;
+}
+
+/**
+ * Refreshes the OAuth access token for a Google Workspace connector (or third-party connector)
+ * so Google API access remains active without requiring frequent re-authentication.
+ */
+export async function refreshConnectorAccessToken(
+  connectorId: string = 'google_workspace',
+  options?: { force?: boolean; silentOnly?: boolean; bufferMs?: number }
+): Promise<ConnectorTokenRefreshResult> {
+  const catalogItem = CONNECTOR_CATALOG.find(c => c.id === connectorId);
+  const isWorkspace = Boolean(catalogItem?.isWorkspaceAuth) || connectorId === 'google_workspace';
+
+  if (isWorkspace) {
+    const res = await refreshWorkspaceAccessToken({
+      force: options?.force,
+      silentOnly: options?.silentOnly ?? true,
+      bufferMs: options?.bufferMs,
+      connectorId,
+    });
+
+    const expiresIso = res.expiresAt ? new Date(res.expiresAt).toISOString() : undefined;
+    if (res.success && res.accessToken) {
+      const u = getCurrentUser();
+      const states = getStoredConnectorStates();
+      CONNECTOR_CATALOG.forEach(c => {
+        if (c.isWorkspaceAuth) {
+          const prev = states[c.id] || { connectorId: c.id, status: 'connected' as ConnectorStatus };
+          if (prev.status === 'connected' || prev.status === 'expired' || prev.status === 'reconnecting' || c.id === connectorId) {
+            states[c.id] = {
+              ...prev,
+              connectorId: c.id,
+              status: 'connected',
+              errorMessage: undefined,
+              account: {
+                ...prev.account,
+                email: u?.email || prev.account?.email || 'user@workspace.google.com',
+                name: u?.displayName || prev.account?.name || 'Google Workspace Account',
+                expiresAt: expiresIso,
+              },
+            };
+          }
+        }
+      });
+      saveStoredConnectorStates(states);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('manus_connector_token_refreshed', {
+            detail: {
+              connectorId,
+              expiresAt: expiresIso,
+              refreshCount: res.refreshCount,
+              refreshed: res.refreshed,
+            },
+          })
+        );
+      }
+    }
+
+    return {
+      success: res.success,
+      connectorId,
+      accessToken: res.accessToken,
+      refreshed: res.refreshed,
+      expiresAt: expiresIso,
+      refreshCount: res.refreshCount,
+      error: res.error,
+    };
+  }
+
+  // Third-party connector token refresh via backend endpoint
+  try {
+    const response = await fetch('/api/connectors/token/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ connectorId, force: options?.force }),
+    });
+    if (response.ok) {
+      const data = await response.json();
+      if (data?.success && data.accessToken) {
+        const expiresIso = data.expiresAt
+          ? new Date(data.expiresAt).toISOString()
+          : new Date(Date.now() + 55 * 60 * 1000).toISOString();
+        const current = getStoredConnectorStates()[connectorId];
+        updateConnectorState(connectorId, {
+          status: 'connected',
+          errorMessage: undefined,
+          account: {
+            ...current?.account,
+            expiresAt: expiresIso,
+          },
+        });
+        return {
+          success: true,
+          connectorId,
+          accessToken: data.accessToken,
+          refreshed: Boolean(data.refreshed ?? true),
+          expiresAt: expiresIso,
+          refreshCount: data.refreshCount,
+        };
+      }
+    }
+  } catch {
+    // ignore network error in offline mode
+  }
+
+  return {
+    success: false,
+    connectorId,
+    accessToken: null,
+    refreshed: false,
+    error: `Unable to refresh token for ${connectorId}`,
+  };
+}
+
+/**
+ * Ensures the specified connector has a valid, fresh access token before making API calls.
+ */
+export async function ensureValidConnectorToken(
+  connectorId: string,
+  options?: { bufferMs?: number; silentOnly?: boolean }
+): Promise<string | null> {
+  const catalogItem = CONNECTOR_CATALOG.find(c => c.id === connectorId);
+  if (catalogItem?.isWorkspaceAuth || connectorId === 'google_workspace') {
+    const token = getAccessToken();
+    if (token && !isWorkspaceTokenExpiringSoon(options?.bufferMs)) {
+      return token;
+    }
+    const refreshed = await refreshConnectorAccessToken(connectorId, {
+      force: Boolean(token),
+      silentOnly: options?.silentOnly ?? true,
+      bufferMs: options?.bufferMs,
+    });
+    if (refreshed.success && refreshed.accessToken) {
+      return refreshed.accessToken;
+    }
+    if (!(options?.silentOnly ?? true)) {
+      return ensureValidWorkspaceAccessToken({
+        bufferMs: options?.bufferMs,
+        allowInteractive: true,
+        connectorId,
+      });
+    }
+    return getAccessToken();
+  }
+  return getAccessToken();
+}
+
+/**
+ * Wraps a connector API operation with proactive token refresh and automatic retry on 401/expired errors.
+ */
+export async function executeWithConnectorTokenRefresh<T>(
+  connectorId: string,
+  operation: (accessToken: string | null) => Promise<T>
+): Promise<T> {
+  const token = await ensureValidConnectorToken(connectorId, { silentOnly: true });
+  try {
+    return await operation(token);
+  } catch (err: any) {
+    const issueType = inferConnectorIssueType(err);
+    if (issueType === 'expired') {
+      const refreshRes = await refreshConnectorAccessToken(connectorId, {
+        force: true,
+        silentOnly: true,
+      });
+      if (refreshRes.success && refreshRes.accessToken) {
+        return await operation(refreshRes.accessToken);
+      }
+    }
+    throw err;
+  }
+}
+
+/**
+ * Starts a background keep-alive daemon that periodically checks and silently refreshes
+ * Google Workspace connector tokens before they expire.
+ */
+export function startConnectorTokenRefreshDaemon(intervalMs: number = 4 * 60 * 1000): () => void {
+  if (connectorRefreshDaemonInterval) {
+    clearInterval(connectorRefreshDaemonInterval);
+  }
+  connectorRefreshDaemonInterval = setInterval(() => {
+    const token = getAccessToken();
+    if (token && isWorkspaceTokenExpiringSoon()) {
+      refreshConnectorAccessToken('google_workspace', { silentOnly: true }).catch(() => {});
+    }
+  }, Math.max(15_000, intervalMs));
+
+  return () => stopConnectorTokenRefreshDaemon();
+}
+
+export function stopConnectorTokenRefreshDaemon(): void {
+  if (connectorRefreshDaemonInterval) {
+    clearInterval(connectorRefreshDaemonInterval);
+    connectorRefreshDaemonInterval = null;
   }
 }
 
@@ -1024,14 +1266,20 @@ export function getConnectorState(connectorId: string): ConnectorState {
   if (catalogItem?.isWorkspaceAuth) {
     const token = getAccessToken();
     if (token) {
+      if (isWorkspaceTokenExpiringSoon()) {
+        // Trigger non-blocking silent token refresh in the background so session stays active
+        refreshConnectorAccessToken(connectorId, { silentOnly: true }).catch(() => {});
+      }
       const u = getCurrentUser();
+      const meta = getWorkspaceTokenMetadata();
       return {
         connectorId,
         status: 'connected',
         account: {
           email: u?.email || 'user@workspace.google.com',
           name: u?.displayName || 'Google Workspace Account',
-          connectedAt: new Date().toISOString()
+          connectedAt: meta?.issuedAt ? new Date(meta.issuedAt).toISOString() : new Date().toISOString(),
+          expiresAt: meta?.expiresAt ? new Date(meta.expiresAt).toISOString() : undefined,
         }
       };
     }
@@ -1538,10 +1786,15 @@ export async function executeConnectorTool(
   // Identify parent connector
   const catalogItem = CONNECTOR_CATALOG.find(c => c.tools.some(t => t.name === toolName));
   const connectorId = catalogItem ? catalogItem.id : toolName.split('_')[1] || 'custom';
-  const state = getConnectorState(connectorId);
+  // Proactively refresh Google Workspace token if expiring soon or marked expired
+  if (catalogItem?.isWorkspaceAuth) {
+    await ensureValidConnectorToken(connectorId, { silentOnly: true });
+  }
+
+  const refreshedState = getConnectorState(connectorId);
 
   // Connection & Permission Validation
-  if (state.status !== 'connected' && !catalogItem?.defaultEnabled) {
+  if (refreshedState.status !== 'connected' && !catalogItem?.defaultEnabled) {
     return {
       success: false,
       connectorId,
@@ -1551,7 +1804,7 @@ export async function executeConnectorTool(
     };
   }
 
-  try {
+  const runToolInternal = async (): Promise<ToolExecutionResult> => {
     // 1. Google Drive execution
     if (toolName === 'drive_search_files') {
       const files = await searchGoogleDriveFiles(args.query || '');
@@ -2076,7 +2329,10 @@ export async function executeConnectorTool(
       error: errJson.error || 'Execution failed',
       message: errJson.message || `Could not execute ${toolName}`
     };
+  };
 
+  try {
+    return await executeWithConnectorTokenRefresh(connectorId, () => runToolInternal());
   } catch (err: any) {
     handleConnectorError(connectorId, err, { rawError: err });
     return {

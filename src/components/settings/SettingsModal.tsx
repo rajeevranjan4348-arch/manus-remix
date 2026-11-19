@@ -91,6 +91,7 @@ const VOICE_LANGUAGE_OPTIONS = [
   { code: 'auto', name: 'Browser Auto-Detect', flag: '🌐' },
 ];
 import { WorkspaceConnectButton } from '../workspace/WorkspaceConnectButton';
+import { ConnectedAppsDashboard, WorkspaceConnectionsDashboard } from '../workspace/WorkspaceConnectionsDashboard';
 import { RobotHead } from 'robot-heads';
 
 const ROBOT_THEMES = [
@@ -671,12 +672,15 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
                     <p className="text-[11px] text-muted-foreground">Manage the services available in your workspace</p>
                   </div>
                   <div className="divide-y divide-border/40">
-                    <div className="flex items-center justify-between gap-3 py-3">
-                      <div>
-                        <p className="text-xs font-medium text-foreground">Google Workspace</p>
-                        <p className="text-[11px] text-muted-foreground">Connect Calendar, Gmail, and Drive</p>
+                    <div className="py-3 space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-medium text-foreground">Google Workspace</p>
+                          <p className="text-[11px] text-muted-foreground">Connect Calendar, Gmail, and Drive</p>
+                        </div>
+                        <WorkspaceConnectButton />
                       </div>
-                      <WorkspaceConnectButton />
+                      <WorkspaceConnectionsDashboard />
                     </div>
                     <div className="flex items-center justify-between gap-3 py-3">
                       <div>

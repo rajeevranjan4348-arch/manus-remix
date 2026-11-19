@@ -1,4 +1,4 @@
-import { getAccessToken, googleSignIn } from './workspaceAuth';
+import { ensureValidWorkspaceAccessToken } from './workspaceAuth';
 import {
   GoogleDriveFileItem,
   ListDriveOptions,
@@ -11,35 +11,23 @@ import {
   renameGoogleDriveFile,
   deleteGoogleDriveFile,
   shareGoogleDriveFile,
+  fetchGoogleApiWithTokenRefresh,
 } from './workspaceTools';
 
 export type { GoogleDriveFileItem, ListDriveOptions, DriveDocumentContextResult };
 
 async function ensureDriveAccessToken(): Promise<string> {
-  let token = getAccessToken();
-  if (!token) {
-    const res = await googleSignIn();
-    if (!res?.accessToken) {
-      throw new Error('Google Drive authentication required. Please sign in with Google.');
-    }
-    token = res.accessToken;
-  }
-  return token;
+  return ensureValidWorkspaceAccessToken({ connectorId: 'drive' });
 }
 
 /**
  * Fetches metadata for a single Google Drive file by ID.
  */
 export async function getDriveFileMetadata(fileId: string): Promise<GoogleDriveFileItem> {
-  const token = await ensureDriveAccessToken();
+  await ensureDriveAccessToken();
   const fields = 'id,name,mimeType,webViewLink,iconLink,thumbnailLink,modifiedTime,size';
-  const res = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=${encodeURIComponent(fields)}`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
+  const res = await fetchGoogleApiWithTokenRefresh(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=${encodeURIComponent(fields)}`
   );
 
   if (!res.ok) {
@@ -58,13 +46,12 @@ export async function updateDriveFileContent(
   content: string,
   mimeType: string = 'text/plain'
 ): Promise<{ id: string; name?: string; mimeType?: string }> {
-  const token = await ensureDriveAccessToken();
-  const res = await fetch(
+  await ensureDriveAccessToken();
+  const res = await fetchGoogleApiWithTokenRefresh(
     `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(fileId)}?uploadType=media`,
     {
       method: 'PATCH',
       headers: {
-        Authorization: `Bearer ${token}`,
         'Content-Type': mimeType,
       },
       body: content,

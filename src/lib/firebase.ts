@@ -21,6 +21,7 @@ import {
 } from 'firebase/auth';
 import {
   getFirestore,
+  initializeFirestore,
   doc,
   getDocFromServer,
 } from 'firebase/firestore';
@@ -36,15 +37,20 @@ export const app = (() => {
   }
 })();
 
-// Initialize Firestore with the configured named database where applicable.
+// Initialize Firestore with the configured named database and automatic long-polling detection for iframe environments.
 export const db = (() => {
+  const databaseId = (firebaseConfig as any).firestoreDatabaseId as string | undefined;
   try {
-    return (firebaseConfig as any).firestoreDatabaseId
-      ? getFirestore(app, (firebaseConfig as any).firestoreDatabaseId)
-      : getFirestore(app);
-  } catch (err) {
-    console.warn('[Firebase] Firestore initialization notice:', err);
-    return getFirestore(app);
+    return databaseId
+      ? initializeFirestore(app, { experimentalAutoDetectLongPolling: true }, databaseId)
+      : initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
+  } catch {
+    try {
+      return databaseId ? getFirestore(app, databaseId) : getFirestore(app);
+    } catch (err) {
+      console.warn('[Firebase] Firestore initialization notice:', err);
+      return getFirestore(app);
+    }
   }
 })();
 
@@ -272,7 +278,13 @@ export async function testConnection(): Promise<void> {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration.');
+      const cfg = firebaseConfig as Record<string, unknown>;
+      const hasCompleteConfig = Boolean(cfg?.projectId && cfg?.apiKey && cfg?.firestoreDatabaseId);
+      if (!hasCompleteConfig) {
+        console.error('Please check your Firebase configuration.');
+      } else {
+        console.warn('[Firebase] Firestore connection check deferred while client is offline.');
+      }
     }
   }
 }

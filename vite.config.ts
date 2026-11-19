@@ -15,9 +15,16 @@ import {
   orchestrateRealtimeResearch,
   routeQueryIntent,
 } from './server/rtie';
-import { generateOAuthUrl, handleOAuthCallback, executeServerConnectorTool, isSafeUrl } from './server/connectorsService';
+import {
+  generateOAuthUrl,
+  handleOAuthCallback,
+  executeServerConnectorTool,
+  isSafeUrl,
+  refreshUserConnectorToken,
+} from './server/connectorsService';
 import { handleCloudSqlApiRequest } from './server/cloudSqlRoutes';
 import { searchVerifiedEntityImages } from './server/visualSearchService';
+import { resolveBackendGoogleIntegrations } from './server/workspaceIntegrationsHandler';
 import { checkSharedRateLimit } from './server/distributedRateLimiter';
 import { verifyBearerToken } from './src/middleware/auth';
 import { GoogleGenAI } from '@google/genai';
@@ -157,6 +164,44 @@ function geminiApiPlugin(): Plugin {
           return;
         }
 
+        // Google Workspace Active Integrations Endpoint
+        if (
+          url === '/api/workspace/integrations' ||
+          url === '/.netlify/functions/workspace-integrations'
+        ) {
+          res.setHeader('Content-Type', 'application/json');
+          const authHeader = (req.headers['authorization'] as string) || '';
+          const userEmailHeader = (req.headers['x-user-email'] as string) || '';
+          const disabledHeader = (req.headers['x-disabled-apps'] as string) || '';
+          const disabledAppIds = disabledHeader
+            ? disabledHeader.split(',').map((s) => s.trim()).filter(Boolean)
+            : [];
+
+          resolveBackendGoogleIntegrations({
+            authorizationHeader: authHeader,
+            userEmailHeader,
+            disabledAppIds,
+          })
+            .then((payload) => {
+              res.statusCode = 200;
+              res.end(JSON.stringify(payload));
+            })
+            .catch((err: any) => {
+              res.statusCode = 500;
+              res.end(
+                JSON.stringify({
+                  authenticated: false,
+                  accountEmail: null,
+                  checkedAt: new Date().toISOString(),
+                  source: 'backend',
+                  integrations: [],
+                  error: err?.message || 'Failed to inspect Google integrations',
+                })
+              );
+            });
+          return;
+        }
+
         // Connector API Endpoints
         if (url?.startsWith('/api/connectors')) {
           res.setHeader('Content-Type', 'application/json');
@@ -226,6 +271,40 @@ function geminiApiPlugin(): Plugin {
               } catch (e: any) {
                 res.statusCode = 500;
                 res.end(JSON.stringify({ error: 'EXECUTION_FAILED', message: e?.message || 'Server error' }));
+              }
+            });
+            return;
+          }
+
+          if (req.method === 'POST' && url.endsWith('/token/refresh')) {
+            let bodyStr = '';
+            req.on('data', chunk => { bodyStr += chunk; });
+            req.on('end', async () => {
+              try {
+                const body = bodyStr ? JSON.parse(bodyStr) : {};
+                const authHeader = (req.headers.authorization as string) || '';
+                const bearerToken = authHeader.toLowerCase().startsWith('bearer ')
+                  ? authHeader.slice(7).trim()
+                  : '';
+                const activeUser = body.userId || userId;
+                const connectorId = body.connectorId || 'google_workspace';
+                const refreshRes = await refreshUserConnectorToken(activeUser, connectorId, {
+                  force: Boolean(body.force),
+                  clientAccessToken: body.clientAccessToken || bearerToken || undefined,
+                  refreshToken: body.refreshToken || undefined,
+                  expiresInMs: typeof body.expiresInMs === 'number' ? body.expiresInMs : undefined,
+                  user: body.userEmail ? { email: body.userEmail } : undefined,
+                });
+                res.statusCode = refreshRes.success ? 200 : 400;
+                res.end(JSON.stringify(refreshRes));
+              } catch (e: any) {
+                res.statusCode = 500;
+                res.end(
+                  JSON.stringify({
+                    success: false,
+                    error: e?.message || 'Token refresh failed',
+                  })
+                );
               }
             });
             return;

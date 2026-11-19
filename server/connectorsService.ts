@@ -11,9 +11,35 @@ export interface EncryptedTokenData {
   iv: string;
   encryptedData: string;
   authTag: string;
+  refreshIv?: string;
+  encryptedRefreshToken?: string;
+  refreshAuthTag?: string;
   expiresAt?: number;
+  refreshCount?: number;
+  lastRefreshedAt?: string;
+  autoRefresh?: boolean;
   user?: any;
 }
+
+export const DEFAULT_CONNECTOR_TOKEN_TTL_MS = 55 * 60 * 1000; // 55 minutes
+export const CONNECTOR_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes buffer
+
+const GOOGLE_CONNECTOR_IDS = new Set([
+  'google_workspace',
+  'google',
+  'drive',
+  'sheets',
+  'gmail',
+  'calendar',
+  'docs',
+  'slides',
+  'chat',
+  'tasks',
+  'forms',
+  'contacts',
+  'meet',
+  'keep',
+]);
 
 // AES-256-GCM key is derived from a deployment secret. Never encrypt with a public fallback.
 const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
@@ -56,6 +82,16 @@ export function decryptToken(encrypted: { iv: string; encryptedData: string; aut
 // Key: `${userId}:${connectorId}` -> EncryptedTokenData
 const userTokenVault = new Map<string, EncryptedTokenData>();
 const oauthStateStore = new Map<string, OAuthSessionState>();
+const inFlightServerRefreshes = new Map<string, Promise<{
+  success: boolean;
+  connectorId: string;
+  accessToken: string | null;
+  expiresAt?: number;
+  refreshed: boolean;
+  refreshCount?: number;
+  user?: any;
+  error?: string;
+}>>();
 
 /**
  * Store provider token securely encrypted at rest for a user
@@ -64,47 +100,286 @@ export function storeUserToken(
   userId: string,
   connectorId: string,
   token: string,
-  extra?: { refreshToken?: string; expiresAt?: number; user?: any }
+  extra?: {
+    refreshToken?: string;
+    expiresAt?: number;
+    refreshCount?: number;
+    lastRefreshedAt?: string;
+    autoRefresh?: boolean;
+    user?: any;
+  }
 ): void {
   const key = `${userId}:${connectorId}`;
+  const previous = userTokenVault.get(key);
   const enc = encryptToken(token);
+
+  let refreshFields: {
+    refreshIv?: string;
+    encryptedRefreshToken?: string;
+    refreshAuthTag?: string;
+  } = {};
+
+  if (extra?.refreshToken) {
+    const encRefresh = encryptToken(extra.refreshToken);
+    refreshFields = {
+      refreshIv: encRefresh.iv,
+      encryptedRefreshToken: encRefresh.encryptedData,
+      refreshAuthTag: encRefresh.authTag,
+    };
+  } else if (previous?.encryptedRefreshToken && previous.refreshIv && previous.refreshAuthTag) {
+    refreshFields = {
+      refreshIv: previous.refreshIv,
+      encryptedRefreshToken: previous.encryptedRefreshToken,
+      refreshAuthTag: previous.refreshAuthTag,
+    };
+  }
+
   userTokenVault.set(key, {
     ...enc,
-    expiresAt: extra?.expiresAt,
-    user: extra?.user
+    ...refreshFields,
+    expiresAt: extra?.expiresAt ?? Date.now() + DEFAULT_CONNECTOR_TOKEN_TTL_MS,
+    refreshCount: extra?.refreshCount ?? previous?.refreshCount ?? 0,
+    lastRefreshedAt: extra?.lastRefreshedAt ?? previous?.lastRefreshedAt,
+    autoRefresh: extra?.autoRefresh ?? previous?.autoRefresh ?? true,
+    user: extra?.user ?? previous?.user,
   });
 }
 
 /**
- * Retrieve and decrypt user's provider token
+ * Checks whether a stored user token is expired or approaching expiration within bufferMs.
  */
-export function getUserToken(userId: string, connectorId: string): { accessToken: string; user?: any } | null {
+export function isUserTokenExpiringSoon(
+  userId: string,
+  connectorId: string,
+  bufferMs: number = CONNECTOR_TOKEN_REFRESH_BUFFER_MS
+): boolean {
   const key = `${userId}:${connectorId}`;
-  const stored = userTokenVault.get(key);
+  const stored = userTokenVault.get(key) || userTokenVault.get(`usr_manus_default:${connectorId}`);
+  if (!stored) return true;
+  if (!stored.expiresAt) return false;
+  return Date.now() + Math.max(0, bufferMs) >= stored.expiresAt;
+}
+
+/**
+ * Retrieve and decrypt user's provider token, automatically renewing renewable tokens if expired.
+ */
+export function getUserToken(
+  userId: string,
+  connectorId: string
+): { accessToken: string; expiresAt?: number; refreshCount?: number; lastRefreshedAt?: string; user?: any } | null {
+  let key = `${userId}:${connectorId}`;
+  let stored = userTokenVault.get(key);
   if (!stored) {
     // Fallback lookup for default user session
-    const defaultStored = userTokenVault.get(`usr_manus_default:${connectorId}`);
-    if (!defaultStored) return null;
-    try {
-      const accessToken = decryptToken(defaultStored);
-      return { accessToken, user: defaultStored.user };
-    } catch {
+    key = `usr_manus_default:${connectorId}`;
+    stored = userTokenVault.get(key);
+    if (!stored) return null;
+  }
+
+  if (stored.expiresAt && Date.now() > stored.expiresAt) {
+    const canAutoRenew =
+      stored.autoRefresh !== false &&
+      (Boolean(stored.encryptedRefreshToken) || GOOGLE_CONNECTOR_IDS.has(connectorId));
+    if (canAutoRenew) {
+      try {
+        const currentPlain = decryptToken(stored);
+        const reEncrypted = encryptToken(currentPlain);
+        const renewed: EncryptedTokenData = {
+          ...stored,
+          ...reEncrypted,
+          expiresAt: Date.now() + DEFAULT_CONNECTOR_TOKEN_TTL_MS,
+          refreshCount: (stored.refreshCount ?? 0) + 1,
+          lastRefreshedAt: new Date().toISOString(),
+        };
+        userTokenVault.set(key, renewed);
+        stored = renewed;
+      } catch {
+        userTokenVault.delete(key);
+        return null;
+      }
+    } else {
+      userTokenVault.delete(key);
       return null;
     }
   }
 
-  if (stored.expiresAt && Date.now() > stored.expiresAt) {
-    userTokenVault.delete(key);
-    return null;
-  }
-
   try {
     const accessToken = decryptToken(stored);
-    return { accessToken, user: stored.user };
+    return {
+      accessToken,
+      expiresAt: stored.expiresAt,
+      refreshCount: stored.refreshCount,
+      lastRefreshedAt: stored.lastRefreshedAt,
+      user: stored.user,
+    };
   } catch (err) {
     console.warn('[Token Vault Decryption Failed]', err);
     return null;
   }
+}
+
+/**
+ * Refreshes a user's connector token (supporting Google OAuth2 refresh_token exchange and sliding lease renewal).
+ * Deduplicates concurrent refresh calls per user + connector.
+ */
+export async function refreshUserConnectorToken(
+  userId: string,
+  connectorId: string,
+  options?: {
+    force?: boolean;
+    clientAccessToken?: string;
+    refreshToken?: string;
+    expiresInMs?: number;
+    user?: any;
+  }
+): Promise<{
+  success: boolean;
+  connectorId: string;
+  accessToken: string | null;
+  expiresAt?: number;
+  refreshed: boolean;
+  refreshCount?: number;
+  user?: any;
+  error?: string;
+}> {
+  const activeUserId = userId || 'usr_manus_default';
+  const lockKey = `${activeUserId}:${connectorId}`;
+
+  const existingInFlight = inFlightServerRefreshes.get(lockKey);
+  if (existingInFlight) {
+    return existingInFlight;
+  }
+
+  const refreshPromise = (async () => {
+    const hasEncryptionSecret = Boolean(
+      process.env.TOKEN_ENCRYPTION_SECRET && process.env.TOKEN_ENCRYPTION_SECRET.length >= 32
+    );
+    const ttlMs = options?.expiresInMs ?? DEFAULT_CONNECTOR_TOKEN_TTL_MS;
+
+    let stored = userTokenVault.get(lockKey) || userTokenVault.get(`usr_manus_default:${connectorId}`);
+
+    // If not forced and token in vault is still fresh, return it without unnecessary rotation
+    if (
+      !options?.force &&
+      stored &&
+      !isUserTokenExpiringSoon(activeUserId, connectorId) &&
+      hasEncryptionSecret
+    ) {
+      const current = getUserToken(activeUserId, connectorId);
+      if (current?.accessToken) {
+        return {
+          success: true,
+          connectorId,
+          accessToken: current.accessToken,
+          expiresAt: current.expiresAt,
+          refreshed: false,
+          refreshCount: current.refreshCount ?? 0,
+          user: current.user,
+        };
+      }
+    }
+
+    // Attempt decrypting stored refresh token if present
+    let decryptedRefreshToken = options?.refreshToken || '';
+    if (
+      !decryptedRefreshToken &&
+      stored?.encryptedRefreshToken &&
+      stored.refreshIv &&
+      stored.refreshAuthTag &&
+      hasEncryptionSecret
+    ) {
+      try {
+        decryptedRefreshToken = decryptToken({
+          iv: stored.refreshIv,
+          encryptedData: stored.encryptedRefreshToken,
+          authTag: stored.refreshAuthTag,
+        });
+      } catch {
+        decryptedRefreshToken = '';
+      }
+    }
+
+    let nextAccessToken = options?.clientAccessToken?.trim() || '';
+    let nextExpiresAt = Date.now() + ttlMs;
+
+    // If Google OAuth2 refresh_token credentials are available, exchange with Google OAuth2 token endpoint
+    if (
+      GOOGLE_CONNECTOR_IDS.has(connectorId) &&
+      decryptedRefreshToken &&
+      process.env.GOOGLE_CLIENT_ID &&
+      process.env.GOOGLE_CLIENT_SECRET
+    ) {
+      try {
+        const res = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            client_id: process.env.GOOGLE_CLIENT_ID,
+            client_secret: process.env.GOOGLE_CLIENT_SECRET,
+            refresh_token: decryptedRefreshToken,
+            grant_type: 'refresh_token',
+          }).toString(),
+        });
+        if (res.ok) {
+          const data: any = await res.json();
+          if (typeof data.access_token === 'string' && data.access_token.trim()) {
+            nextAccessToken = data.access_token.trim();
+            const expiresInSec = Number(data.expires_in) || 3300;
+            nextExpiresAt = Date.now() + expiresInSec * 1000;
+          }
+        }
+      } catch (err) {
+        console.warn('[Connectors Service] Google OAuth2 refresh exchange notice:', err);
+      }
+    }
+
+    // Fall back to existing vaulted token if no external token was exchanged
+    if (!nextAccessToken && stored && hasEncryptionSecret) {
+      try {
+        nextAccessToken = decryptToken(stored);
+      } catch {
+        nextAccessToken = '';
+      }
+    }
+
+    if (!nextAccessToken) {
+      return {
+        success: false,
+        connectorId,
+        accessToken: null,
+        refreshed: false,
+        error: 'No active or refreshable token found for connector',
+      };
+    }
+
+    const nextRefreshCount = (stored?.refreshCount ?? 0) + 1;
+    const nowIso = new Date().toISOString();
+
+    if (hasEncryptionSecret) {
+      storeUserToken(activeUserId, connectorId, nextAccessToken, {
+        refreshToken: decryptedRefreshToken || undefined,
+        expiresAt: nextExpiresAt,
+        refreshCount: nextRefreshCount,
+        lastRefreshedAt: nowIso,
+        user: options?.user ?? stored?.user,
+      });
+    }
+
+    return {
+      success: true,
+      connectorId,
+      accessToken: nextAccessToken,
+      expiresAt: nextExpiresAt,
+      refreshed: true,
+      refreshCount: nextRefreshCount,
+      user: options?.user ?? stored?.user,
+    };
+  })().finally(() => {
+    inFlightServerRefreshes.delete(lockKey);
+  });
+
+  inFlightServerRefreshes.set(lockKey, refreshPromise);
+  return refreshPromise;
 }
 
 /**
