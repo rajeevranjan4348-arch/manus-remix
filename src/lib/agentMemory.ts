@@ -36,8 +36,18 @@ export async function clearAgentMemory(userId: string): Promise<void> {
   if (userId) await longTermMemory.clearAllMemories(userId);
 }
 
-export function getAgentMemoryContext(userId: string, limit = 12): Promise<string> {
-  return longTermMemory.getRelevantContext(userId, '').then((context) =>
-    context.split('\n').slice(-Math.max(1, Math.min(limit, 30))).join('\n')
-  );
+export function getAgentMemoryContext(userId: string, limit = 12): string {
+  if (typeof window === 'undefined' || !userId) return '';
+  try {
+    const raw = window.localStorage.getItem('manus_long_term_memory_' + encodeURIComponent(userId));
+    const records = JSON.parse(raw || '[]');
+    if (!Array.isArray(records)) return '';
+    return records
+      .filter((record: any) => record && record.isEnabled !== false && typeof record.value === 'string')
+      .slice(0, Math.max(1, Math.min(limit, 30)))
+      .map((record: any, index: number) => `${index + 1}. ${record.value}`)
+      .join('\n');
+  } catch {
+    return '';
+  }
 }
