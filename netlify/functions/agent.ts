@@ -604,8 +604,12 @@ export default async (req: Request) => {
       'meta-llama/llama-3.3-70b-instruct',
     ];
 
+    // Reserve enough time for Netlify to send response headers; optional provider
+    // failover must not consume the whole synchronous request budget.
+    const openRouterFallbackDeadline = Date.now() + 7000;
     openRouterFallback: for (const orKey of openRouterKeys) {
       for (const orModel of orModels) {
+        if (Date.now() >= openRouterFallbackDeadline) break openRouterFallback;
         if (!openRouterCircuitBreaker.canAttempt()) {
           recoveryTelemetry.record({ component: 'openrouter', action: 'circuit_open', outcome: 'degraded', statusCode: 503, requestId });
           break openRouterFallback;
@@ -628,7 +632,7 @@ export default async (req: Request) => {
               stream: true,
               max_tokens: 4096,
             }),
-            signal: (typeof AbortSignal.any === 'function' ? AbortSignal.any([generationAbortController.signal, AbortSignal.timeout(8000)]) : AbortSignal.timeout(8000)),
+            signal: (typeof AbortSignal.any === 'function' ? AbortSignal.any([generationAbortController.signal, AbortSignal.timeout(Math.min(5000, Math.max(1, openRouterFallbackDeadline - Date.now())))]) : AbortSignal.timeout(Math.min(5000, Math.max(1, openRouterFallbackDeadline - Date.now())))),
           });
 
           if (!orRes.ok || !orRes.body) {
