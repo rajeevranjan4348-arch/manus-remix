@@ -524,6 +524,12 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
 
           if (!streamFinalized) {
             streamFinalized = true;
+            if (!finishEmitted) {
+              finishReason = 'error';
+              serviceFailureMessage = accumulatedText.trim()
+                ? 'The server closed the stream before confirming completion. Your partial response has been preserved.'
+                : 'The server closed the stream before a response was completed. Please retry.';
+            }
             if (!accumulatedText.trim()) {
               finishReason = 'error';
               emitTextDelta(serviceFailureMessage);
