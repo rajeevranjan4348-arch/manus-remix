@@ -25,7 +25,8 @@ import {
   Zap,
   AlertCircle,
   RotateCw,
-  Pencil
+  Pencil,
+  BookOpen
 } from 'lucide-react';
 import { ConnectorsPopupMenu } from '../chat/ConnectorsPopupMenu';
 import { CONNECTOR_CATALOG } from '../connectors/ConnectorsStorePanel';
@@ -420,8 +421,29 @@ export function ChatView({
   onStop,
   isLoading 
 }: ChatViewProps) {
+  const [memoryStatusByMessage, setMemoryStatusByMessage] = React.useState<Record<string, 'saving' | 'success' | 'error'>>({});
   const [input, setInput] = React.useState<string>(() => getChatViewDraft());
   const [perfProfile, setPerfProfile] = React.useState(() => getActivePerformanceProfile());
+
+  React.useEffect(() => {
+    const onMemoryStatus = (event: Event) => {
+      const detail = (event as CustomEvent<{ messageId?: string; status?: 'saving' | 'success' | 'error' }>).detail;
+      if (!detail?.messageId || !detail.status) return;
+      setMemoryStatusByMessage((current) => ({ ...current, [detail.messageId!]: detail.status! }));
+      if (detail.status !== 'saving') {
+        window.setTimeout(() => {
+          setMemoryStatusByMessage((current) => {
+            if (current[detail.messageId!] !== detail.status) return current;
+            const next = { ...current };
+            delete next[detail.messageId!];
+            return next;
+          });
+        }, detail.status === 'success' ? 4200 : 6000);
+      }
+    };
+    window.addEventListener('manus_memory_status', onMemoryStatus);
+    return () => window.removeEventListener('manus_memory_status', onMemoryStatus);
+  }, []);
 
   React.useEffect(() => {
     const onPerfChange = () => setPerfProfile(getActivePerformanceProfile());
@@ -1068,7 +1090,7 @@ export function ChatView({
           data-stagger-index={index}
           data-stagger-delay-ms={staggerDelayMs}
           style={staggerStyle}
-          className="flex justify-end my-2 chat-message-enter chat-message-user-enter group relative px-4 sm:px-20"
+          className="flex flex-col items-end my-2 chat-message-enter chat-message-user-enter group relative px-4 sm:px-20"
         >
           {isEditing ? (
             <div className="bg-card border border-border p-3 rounded-2xl max-w-[90%] sm:max-w-[80%] shadow-md w-full space-y-2">
@@ -1122,6 +1144,23 @@ export function ChatView({
                 )}
                 {cleanedText && <div className="whitespace-pre-wrap break-words">{cleanedText}</div>}
               </div>
+            </div>
+          )}
+          {memoryStatusByMessage[msgId] && (
+            <div
+              role="status"
+              aria-live="polite"
+              data-testid="memory-updated-confirmation"
+              className="mt-2 mr-1 flex items-center gap-2 text-sm font-medium text-muted-foreground animate-in fade-in slide-in-from-bottom-1 duration-300"
+            >
+              <BookOpen size={20} strokeWidth={1.8} className="shrink-0" />
+              <span>
+                {memoryStatusByMessage[msgId] === 'saving'
+                  ? 'Saving memory…'
+                  : memoryStatusByMessage[msgId] === 'success'
+                    ? 'Memory updated'
+                    : "Couldn't save memory"}
+              </span>
             </div>
           )}
         </div>
