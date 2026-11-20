@@ -3,6 +3,173 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import { useUltraLiteImage } from '@/hooks/useUltraLiteImage';
+import { Check, Copy } from 'lucide-react';
+import { codeToHtml } from 'shiki';
+import { useTheme } from '@/context/ThemeContext';
+
+
+
+const LANGUAGE_ALIASES: Record<string, string> = {
+  js: 'javascript', jsx: 'jsx', ts: 'typescript', tsx: 'tsx',
+  py: 'python', sh: 'bash', shell: 'bash', yml: 'yaml', md: 'markdown',
+  'c++': 'cpp', h: 'cpp', kt: 'kotlin', cs: 'csharp',
+};
+
+const LANGUAGE_EXTENSIONS: Record<string, string> = {
+  typescript: 'ts', tsx: 'tsx', javascript: 'js', jsx: 'jsx',
+  python: 'py', html: 'html', css: 'css', json: 'json', java: 'java',
+  kotlin: 'kt', bash: 'sh', shell: 'sh', sql: 'sql', cpp: 'cpp',
+  c: 'c', csharp: 'cs', go: 'go', rust: 'rs', yaml: 'yml',
+  markdown: 'md', xml: 'xml', yaml: 'yml', toml: 'toml',
+  plaintext: 'txt', text: 'txt',
+};
+
+function detectCodeLanguage(language: string, code: string): string {
+  const requested = language.trim().toLowerCase().replace(/^language-/, '');
+  if (requested) return LANGUAGE_ALIASES[requested] || requested;
+  if (/^\s*<(!doctype|html|head|body|div|main|section)\b/i.test(code)) return 'html';
+  if (/^\s*(import React|export (default |const |function)|interface |type )/m.test(code)) return /:\s*(React\.|JSX\.)/.test(code) || /<\w+[\s/>]/.test(code) ? 'tsx' : 'typescript';
+  if (/^\s*(def |class |from \w+ import |import \w+)/m.test(code)) return 'python';
+  if (/^\s*(SELECT|WITH|INSERT INTO|CREATE TABLE)\b/im.test(code)) return 'sql';
+  if (/^\s*(\$ |npm |pnpm |yarn |git |curl )/m.test(code)) return 'bash';
+  if (/^\s*\{[\s\S]*\}\s*$/.test(code)) {
+    try { JSON.parse(code); return 'json'; } catch { /* keep detection generic */ }
+  }
+  if (/^\s*fun main\s*\(/m.test(code)) return 'kotlin';
+  if (/^\s*public class |^\s*class \w+\s*\{/m.test(code)) return 'java';
+  return 'text';
+}
+
+function getCodeFilename(language: string, meta?: string): string {
+  const match = meta?.match(/(?:filename|file|title)\s*=\s*["']?([^"'\s]+)|["']([^"']+\.(?:tsx?|jsx?|py|html|css|json|java|kt|sh|sql|cpp|c|cs|go|rs|ya?ml|md|xml|toml))["']/i);
+  const explicit = match?.[1] || match?.[2];
+  if (explicit) return explicit.split('/').pop() || explicit;
+  const extension = LANGUAGE_EXTENSIONS[language] || 'txt';
+  const baseNames: Record<string, string> = {
+    json: 'data', html: 'index', css: 'styles', python: 'main',
+    java: 'Main', kotlin: 'Main', sql: 'query', bash: 'run',
+    typescript: 'index', tsx: 'App', javascript: 'index', jsx: 'App',
+  };
+  return `${baseNames[language] || 'snippet'}.${extension}`;
+}
+
+interface PremiumCodeBlockProps {
+  code: string;
+  language: string;
+  filename: string;
+}
+
+const PremiumCodeBlock = memo(function PremiumCodeBlock({
+  code,
+  language,
+  filename,
+}: PremiumCodeBlockProps) {
+  const { resolvedTheme } = useTheme();
+  const [highlightedHtml, setHighlightedHtml] = useState('');
+  const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isDark = resolvedTheme === 'dark';
+  const shouldHighlight = code.length <= 120_000 &&
+    document.documentElement.dataset.perfMode !== 'ultra-lite' &&
+    document.documentElement.dataset.perfMode !== 'saver';
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!shouldHighlight || language === 'text') {
+      setHighlightedHtml('');
+      return;
+    }
+    setHighlightedHtml('');
+    codeToHtml(code, {
+      lang: language,
+      theme: isDark ? 'github-dark' : 'github-light',
+    }).then((html) => {
+      if (!cancelled) setHighlightedHtml(html);
+    }).catch(() => {
+      if (!cancelled) setHighlightedHtml('');
+    });
+    return () => { cancelled = true; };
+  }, [code, language, isDark, shouldHighlight]);
+
+  useEffect(() => () => {
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+  }, []);
+
+  const handleCopy = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(code);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = code;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copiedSuccessfully = document.execCommand('copy');
+        textarea.remove();
+        if (!copiedSuccessfully) throw new Error('Clipboard copy failed');
+      }
+      setCopied(true);
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <section className="manus-code-block my-4 w-full max-w-full min-w-0" aria-label={`${language} code block`}>
+      <div className="manus-code-filename flex min-w-0 items-center gap-2 px-1 pb-2 text-xs font-medium text-muted-foreground">
+        <span className="truncate">{filename}</span>
+      </div>
+      <div className="manus-code-shell w-full min-w-0 overflow-hidden rounded-xl border border-border">
+        <div className="manus-code-toolbar flex min-h-10 items-center justify-between gap-3 border-b border-border px-3">
+          <span className="truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {language === 'text' ? 'Code' : language}
+          </span>
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="manus-code-copy inline-flex min-h-8 min-w-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label={copied ? 'Code copied' : 'Copy code'}
+            title={copied ? 'Copied' : 'Copy code'}
+          >
+            {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+            <span>{copied ? 'Copied' : 'Copy'}</span>
+          </button>
+        </div>
+        <div className="manus-code-scroll custom-scrollbar max-w-full overflow-x-auto overflow-y-auto">
+          {highlightedHtml ? (
+            <div className="manus-code-highlight" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+          ) : (
+            <pre className="manus-code-plain"><code>{code}</code></pre>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+});
+
+const MarkdownCodeFence = memo(function MarkdownCodeFence({
+  children,
+}: {
+  children?: React.ReactNode;
+}) {
+  const child = React.Children.toArray(children).find(React.isValidElement);
+  if (!child) return <pre className="manus-code-plain">{children}</pre>;
+  const childProps = child.props as { className?: string; children?: React.ReactNode; node?: { data?: { meta?: string } } };
+  const rawCode = typeof childProps.children === 'string'
+    ? childProps.children
+    : React.Children.toArray(childProps.children).join('');
+  const code = rawCode.replace(/\n$/, '');
+  const language = detectCodeLanguage(childProps.className || '', code);
+  const filename = getCodeFilename(language, childProps.node?.data?.meta);
+  return <PremiumCodeBlock code={code} language={language} filename={filename} />;
+});
+
 
 const UltraLiteMarkdownImage = memo(function UltraLiteMarkdownImage(
   props: React.ImgHTMLAttributes<HTMLImageElement>
@@ -59,6 +226,7 @@ const UltraLiteMarkdownImage = memo(function UltraLiteMarkdownImage(
 
 const MARKDOWN_COMPONENTS = {
   img: UltraLiteMarkdownImage,
+  pre: MarkdownCodeFence,
 };
 
 export type TypingSequencePhase = 'lead-in' | 'typing' | 'settled';
