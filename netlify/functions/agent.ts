@@ -245,7 +245,7 @@ export default async (req: Request) => {
     );
 
     try {
-      const researchDeadline = AbortSignal.timeout(9000);
+      const researchDeadline = AbortSignal.timeout(7000);
       const researchSignal = typeof AbortSignal.any === 'function'
         ? AbortSignal.any([generationAbortController.signal, researchDeadline])
         : researchDeadline;
@@ -342,7 +342,7 @@ export default async (req: Request) => {
             method: 'POST',
             headers: { Authorization: `Bearer ${firecrawlKey}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ query: latestUserText.slice(0, 1000), limit: 5, sources: [{ type: 'web' }] }),
-            signal: (typeof AbortSignal.any === 'function' ? AbortSignal.any([generationAbortController.signal, AbortSignal.timeout(5000)]) : AbortSignal.timeout(5000)),
+            signal: (typeof AbortSignal.any === 'function' ? AbortSignal.any([generationAbortController.signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000)),
           });
           if (!response.ok) throw new Error(`Firecrawl HTTP ${response.status}`);
           const payload: any = await response.json();
@@ -363,7 +363,7 @@ export default async (req: Request) => {
           if (process.env.AGENT_REACH_BRIDGE_TOKEN) headers.Authorization = `Bearer ${process.env.AGENT_REACH_BRIDGE_TOKEN}`;
           const response = await fetch(parsed.toString(), {
             method: 'POST', headers, body: JSON.stringify({ query: latestUserText.slice(0, 1000), limit: 5 }),
-            signal: (typeof AbortSignal.any === 'function' ? AbortSignal.any([generationAbortController.signal, AbortSignal.timeout(5000)]) : AbortSignal.timeout(5000)),
+            signal: (typeof AbortSignal.any === 'function' ? AbortSignal.any([generationAbortController.signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000)),
           });
           if (!response.ok) throw new Error(`Agent Reach bridge HTTP ${response.status}`);
           const payload: any = await response.json();
@@ -628,7 +628,7 @@ export default async (req: Request) => {
               stream: true,
               max_tokens: 4096,
             }),
-            signal: (typeof AbortSignal.any === 'function' ? AbortSignal.any([generationAbortController.signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000)),
+            signal: (typeof AbortSignal.any === 'function' ? AbortSignal.any([generationAbortController.signal, AbortSignal.timeout(8000)]) : AbortSignal.timeout(8000)),
           });
 
           if (!orRes.ok || !orRes.body) {
