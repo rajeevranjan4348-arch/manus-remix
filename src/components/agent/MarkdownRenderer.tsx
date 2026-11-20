@@ -19,7 +19,7 @@ const LANGUAGE_EXTENSIONS: Record<string, string> = {
   python: 'py', html: 'html', css: 'css', json: 'json', java: 'java',
   kotlin: 'kt', bash: 'sh', shell: 'sh', sql: 'sql', cpp: 'cpp',
   c: 'c', csharp: 'cs', go: 'go', rust: 'rs', yaml: 'yml',
-  markdown: 'md', xml: 'xml', yaml: 'yml', toml: 'toml',
+  markdown: 'md', xml: 'xml', toml: 'toml',
   plaintext: 'txt', text: 'txt',
 };
 
