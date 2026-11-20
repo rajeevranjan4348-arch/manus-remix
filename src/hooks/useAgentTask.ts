@@ -13,7 +13,7 @@ import { toast } from 'sonner';
 import { longTermMemory } from '@/lib/longTermMemory';
 import { knowledgeBase } from '@/lib/knowledgeBase';
 import { persistentKnowledgeStore } from '@/lib/persistentKnowledgeStore';
-import { captureExplicitMemory } from '@/lib/agentMemory';
+import { captureExplicitMemory, isExplicitMemoryRequest } from '@/lib/agentMemory';
 import { taskCheckpoint } from '@/lib/taskCheckpoint';
 import { notificationDispatcher } from '@/lib/notificationDispatcher';
 import { securityCenter } from '@/lib/securityCenter';
@@ -1324,6 +1324,13 @@ export function useAgentTask() {
     persistentMessagesRef.current = nextHistory;
     setPersistentMessages(nextHistory);
 
+    if (isExplicitMemoryRequest(content) && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('manus_memory_status', { detail: { messageId: userMsgId, status: 'saving' } }));
+      void captureExplicitMemory(user?.id || 'usr_manus_default', content).then((saved) => {
+        window.dispatchEvent(new CustomEvent('manus_memory_status', { detail: { messageId: userMsgId, status: saved ? 'success' : 'error' } }));
+      });
+    }
+
     setActiveStreamContext({
       requestId: streamReqId,
       taskId: activeId,
@@ -1562,7 +1569,11 @@ export function useAgentTask() {
           }
         }
         const userId = activeUser?.id || 'usr_manus_default';
-        captureExplicitMemory(userId, prompt);
+        if (isExplicitMemoryRequest(prompt) && typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('manus_memory_status', { detail: { messageId: userMsgId, status: 'saving' } }));
+          const saved = await captureExplicitMemory(userId, prompt);
+          window.dispatchEvent(new CustomEvent('manus_memory_status', { detail: { messageId: userMsgId, status: saved ? 'success' : 'error' } }));
+        }
 
         try {
           await (blink.db as any).tasks.create({

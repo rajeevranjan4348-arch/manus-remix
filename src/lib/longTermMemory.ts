@@ -183,30 +183,40 @@ class LongTermMemoryService {
   }
 
   private async persistMemories(userId: string, records: MemoryRecord[]) {
-    this.memoryCache.set(userId, records);
-    this.saveLocally(userId, records);
-
-    // Save to Firestore if authenticated
+    const localSaved = this.saveLocally(userId, records);
     const currentUser = auth.currentUser;
-    if (currentUser && currentUser.uid === userId) {
+    const canWriteFirestore = Boolean(currentUser && currentUser.uid === userId);
+
+    if (canWriteFirestore) {
       try {
         await setDoc(
           doc(db, 'users', userId, 'settings', 'memories'),
           { records, updatedAt: new Date().toISOString() },
           { merge: true }
         );
+        this.memoryCache.set(userId, records);
+        return;
       } catch (e) {
         console.warn('[LongTermMemory] Firestore persist notice:', e);
+        if (!localSaved) throw new Error('Memory could not be persisted to Firestore or local storage.');
       }
     }
+
+    if (!localSaved) {
+      throw new Error('Memory storage is unavailable. No memory confirmation should be shown.');
+    }
+    this.memoryCache.set(userId, records);
   }
 
-  private saveLocally(userId: string, records: MemoryRecord[]) {
-    if (typeof window === 'undefined') return;
+  private saveLocally(userId: string, records: MemoryRecord[]): boolean {
+    if (typeof window === 'undefined') return false;
     try {
       localStorage.setItem(this.getStorageKey(userId), JSON.stringify(records));
       window.dispatchEvent(new CustomEvent('manus_memory_updated', { detail: { userId } }));
-    } catch {}
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
