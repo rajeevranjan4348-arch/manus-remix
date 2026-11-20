@@ -25,7 +25,8 @@ import {
   Zap,
   AlertCircle,
   RotateCw,
-  Pencil
+  Pencil,
+  PhoneCall
 } from 'lucide-react';
 import { ConnectorsPopupMenu } from '../chat/ConnectorsPopupMenu';
 import { CONNECTOR_CATALOG } from '../connectors/ConnectorsStorePanel';
@@ -188,6 +189,7 @@ interface ChatViewProps {
   onReset: () => void;
   onExport?: (format?: ChatExportFormat) => void;
   onSubmit: (prompt: string) => void;
+  onVoiceCall?: () => void;
   onStop?: () => void;
   onReorderSteps?: (steps: Step[]) => void;
   isLoading: boolean;
@@ -417,6 +419,7 @@ export function ChatView({
   onReset, 
   onExport, 
   onSubmit,
+  onVoiceCall,
   onStop,
   isLoading 
 }: ChatViewProps) {
@@ -1966,6 +1969,7 @@ export function ChatView({
 
             {/* Right Controls: Mic & Circular Send Button */}
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto">
+              {onVoiceCall && <button type="button" onClick={onVoiceCall} title="Start voice call" aria-label="Start voice call" className="flex h-9 w-9 items-center justify-center rounded-full border border-orange-500/30 bg-orange-500/10 text-orange-500 transition hover:bg-orange-500/20"><PhoneCall size={17} /></button>}
               <VoiceInputButton
                 onListeningStateChange={(listening) => {
                   setIsListening(listening);
