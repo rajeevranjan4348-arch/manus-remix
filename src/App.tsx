@@ -40,6 +40,7 @@ const AndroidVoiceSettings = lazy(() =>
 const AndroidConnectorsSettings = lazy(() =>
   import('./components/settings/AndroidConnectorsSettings').then((m) => ({ default: m.AndroidConnectorsSettings }))
 );
+const VoiceCall = lazy(() => import('./components/voice/VoiceCall').then((m) => ({ default: m.VoiceCall })));
 const MyAIChat = lazy(() =>
   import('./components/chat/MyAIChat').then((m) => ({ default: m.MyAIChat }))
 );
@@ -63,6 +64,7 @@ function TaskView({
   onReset: () => void 
 }) {
   const { taskId } = useParams();
+  const navigate = useNavigate();
   const { loadTask, resetTask, stopTask, currentTask, messages, steps, reorderSteps, result, chartData, taskStatus, phase, exportToPDF, sendMessage, isLoading } = useAgentTaskResult;
 
   useEffect(() => {
@@ -91,11 +93,21 @@ function TaskView({
         onReset={onReset}
         onExport={exportToPDF}
         onSubmit={sendMessage}
+        onVoiceCall={() => taskId && navigate('/task/' + taskId + '/voice')}
         onStop={stopTask}
         isLoading={isLoading}
       />
     </ErrorBoundary>
   );
+}
+
+
+function VoiceTaskView({ useAgentTaskResult }: { useAgentTaskResult: ReturnType<typeof useAgentTask> }) {
+  const { taskId } = useParams();
+  const navigate = useNavigate();
+  const { loadTask, messages, sendMessage, isLoading } = useAgentTaskResult;
+  useEffect(() => { if (taskId) loadTask(taskId); }, [taskId, loadTask]);
+  return <VoiceCall messages={messages} isLoading={isLoading} onSubmit={sendMessage} onClose={() => navigate(taskId ? '/task/' + taskId : '/', { replace: true })} />;
 }
 
 function AppContent() {
@@ -340,6 +352,7 @@ function AppContent() {
                     <Route path="/login" element={<Navigate to="/" replace />} />
                     <Route path="/forgot-password" element={<Navigate to="/" replace />} />
                     <Route path="/signup" element={<Navigate to="/" replace />} />
+                    <Route path="/task/:taskId/voice" element={<VoiceTaskView useAgentTaskResult={agentTask} />} />
                     <Route 
                       path="/task/:taskId" 
                       element={
