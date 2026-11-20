@@ -438,11 +438,11 @@ export default async (req: Request) => {
             }
           };
           const sendEvent = (event: Record<string, unknown>) => {
-            sendRaw(`data: ${JSON.stringify(event)}\\n\\n`);
+            sendRaw(`data: ${JSON.stringify(event)}\n\n`);
           };
 
           heartbeatTimer = setInterval(() => {
-            sendRaw(': heartbeat\\n\\n');
+            sendRaw(': heartbeat\n\n');
           }, 12000);
 
           const sources = new Map<string, string>();
@@ -501,7 +501,7 @@ export default async (req: Request) => {
                     const groundingChunks = chunk?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
                     for (const groundingChunk of groundingChunks) {
                       const web = groundingChunk?.web;
-                      if (typeof web?.uri === 'string' && /^https?:\\/\\//i.test(web.uri)) {
+                      if (typeof web?.uri === 'string' && /^https?:\/\//i.test(web.uri)) {
                         sources.set(web.uri, typeof web.title === 'string' && web.title.trim() ? web.title : web.uri);
                       }
                     }
@@ -548,7 +548,7 @@ export default async (req: Request) => {
                 : 'Gemini returned an empty response. Please retry or choose another model.';
               sendEvent({ type: 'error', error: errorMessage, retryable: true, requestId });
               sendEvent({ type: 'finish', finishReason: 'error', error: errorMessage, requestId });
-              sendRaw('data: [DONE]\\n\\n');
+              sendRaw('data: [DONE]\n\n');
               return;
             }
 
@@ -556,26 +556,26 @@ export default async (req: Request) => {
               const errorMessage = 'The Gemini stream was interrupted. Your partial response has been preserved; retry to request a complete answer.';
               sendEvent({ type: 'error', error: errorMessage, retryable: true, requestId });
               sendEvent({ type: 'finish', finishReason: 'error', error: errorMessage, requestId });
-              sendRaw('data: [DONE]\\n\\n');
+              sendRaw('data: [DONE]\n\n');
               return;
             }
 
             if (useGoogleSearch && sources.size > 0) {
-              const sourceMarkdown = '\\n\\n**Sources**\\n' + Array.from(sources.entries())
+              const sourceMarkdown = '\n\n**Sources**\\n' + Array.from(sources.entries())
                 .slice(0, 8)
-                .map(([url, title]) => `- [${title.replace(/[\\[\\]]/g, '')}](${url})`)
+                .map(([url, title]) => `- [${title.replace(/[\[\]]/g, '')}](${url})`)
                 .join('\\n');
               sendEvent({ type: 'text-delta', delta: sourceMarkdown, textDelta: sourceMarkdown, requestId });
             }
 
             sendEvent({ type: 'finish', finishReason: 'stop', requestId });
-            sendRaw('data: [DONE]\\n\\n');
+            sendRaw('data: [DONE]\n\n');
           } catch (err: any) {
             if (!generationAbortController.signal.aborted) {
               const errorMessage = String(err?.message || 'Gemini stream interrupted').slice(0, 500);
               sendEvent({ type: 'error', error: errorMessage, retryable: true, requestId });
               sendEvent({ type: 'finish', finishReason: 'error', error: errorMessage, requestId });
-              sendRaw('data: [DONE]\\n\\n');
+              sendRaw('data: [DONE]\n\n');
             }
           } finally {
             if (heartbeatTimer) clearInterval(heartbeatTimer);
