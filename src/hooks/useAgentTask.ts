@@ -421,6 +421,41 @@ export function useAgentTask() {
     return () => { mounted = false; };
   }, [isAuthenticated, sandbox]);
 
+  const preservePartialAssistantResponse = useCallback((partialText: string, conversationId?: string | null) => {
+    const content = partialText.trim();
+    if (!content) return;
+
+    const messageId = activeAssistantMsgIdRef.current || ('msg_partial_' + Date.now());
+    const partialMessage = {
+      id: messageId,
+      role: 'assistant' as const,
+      content,
+      timestamp: new Date().toISOString(),
+      status: 'error' as const,
+      error: true,
+      retryable: true,
+      partial: true,
+    };
+    const previous = persistentMessagesRef.current;
+    const existingIndex = previous.findIndex(message => message?.id === messageId);
+    const next = existingIndex >= 0
+      ? previous.map((message, index) => index === existingIndex ? partialMessage : message)
+      : [...previous, partialMessage];
+
+    persistentMessagesRef.current = next;
+    setPersistentMessages(next);
+    if (conversationId) {
+      saveMessage({
+        id: messageId,
+        conversationId,
+        userId: user?.id || 'usr_manus_default',
+        role: 'assistant',
+        content,
+        status: 'failed',
+      }).catch(error => console.warn('Failed to persist interrupted assistant response:', error));
+    }
+  }, [user]);
+
   // Keep a safety watchdog, but measure inactivity rather than total generation time.
   // SSE heartbeats and token events refresh it so long generations are not aborted prematurely.
   useEffect(() => {
@@ -842,41 +877,6 @@ export function useAgentTask() {
 
     return true;
   }, [getCurrentTurnSdkAssistantText, markExistingSdkMessagesCompleted, taskId, user]);
-
-  const preservePartialAssistantResponse = useCallback((partialText: string, conversationId?: string | null) => {
-    const content = partialText.trim();
-    if (!content) return;
-
-    const messageId = activeAssistantMsgIdRef.current || ('msg_partial_' + Date.now());
-    const partialMessage = {
-      id: messageId,
-      role: 'assistant' as const,
-      content,
-      timestamp: new Date().toISOString(),
-      status: 'error' as const,
-      error: true,
-      retryable: true,
-      partial: true,
-    };
-    const previous = persistentMessagesRef.current;
-    const existingIndex = previous.findIndex(message => message?.id === messageId);
-    const next = existingIndex >= 0
-      ? previous.map((message, index) => index === existingIndex ? partialMessage : message)
-      : [...previous, partialMessage];
-
-    persistentMessagesRef.current = next;
-    setPersistentMessages(next);
-    if (conversationId) {
-      saveMessage({
-        id: messageId,
-        conversationId,
-        userId: user?.id || 'usr_manus_default',
-        role: 'assistant',
-        content,
-        status: 'failed',
-      }).catch(error => console.warn('Failed to persist interrupted assistant response:', error));
-    }
-  }, [user]);
 
   const useAgentResult = useAgent({
     agent,
