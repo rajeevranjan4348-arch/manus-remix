@@ -430,7 +430,7 @@ export default async (req: Request) => {
         async start(controller) {
           let heartbeatTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
             if (generationAbortController.signal.aborted) return;
-            try { controller.enqueue(encoder.encode(': heartbeat\\n\\n')); }
+            try { controller.enqueue(encoder.encode(': heartbeat\n\n')); }
             catch { generationAbortController.abort(new DOMException('Client disconnected.', 'AbortError')); }
           }, 12000);
           const sources = new Map<string, string>();
@@ -502,9 +502,9 @@ export default async (req: Request) => {
             if (!generationAbortController.signal.aborted) {
               try {
                 const errorMessage = String(err?.message || 'Gemini stream interrupted').slice(0, 500);
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: errorMessage, retryable: true, requestId })}\\n\\n`));
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error', error: errorMessage, requestId })}\\n\\n`));
-                controller.enqueue(encoder.encode('data: [DONE]\\n\\n'));
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: errorMessage, retryable: true, requestId })}\n\n`));
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error', error: errorMessage, requestId })}\n\n`));
+                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
               } catch {}
             }
           } finally {
@@ -585,7 +585,7 @@ export default async (req: Request) => {
               async start(controller) {
                 const heartbeatTimer = setInterval(() => {
                   if (generationAbortController.signal.aborted) return;
-                  try { controller.enqueue(encoder.encode(': heartbeat\\n\\n')); }
+                  try { controller.enqueue(encoder.encode(': heartbeat\n\n')); }
                   catch { generationAbortController.abort(new DOMException('Client disconnected.', 'AbortError')); }
                 }, 12000);
                 try {
