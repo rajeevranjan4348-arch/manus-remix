@@ -1093,7 +1093,7 @@ export function ChatView({
           data-stagger-index={index}
           data-stagger-delay-ms={staggerDelayMs}
           style={staggerStyle}
-          className="flex justify-end my-2 chat-message-enter chat-message-user-enter group relative px-4 sm:px-20"
+          className="flex flex-col items-end my-2 chat-message-enter chat-message-user-enter group relative px-4 sm:px-20"
         >
           {isEditing ? (
             <div className="bg-card border border-border p-3 rounded-2xl max-w-[90%] sm:max-w-[80%] shadow-md w-full space-y-2">
