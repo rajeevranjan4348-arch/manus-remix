@@ -7,11 +7,16 @@ import { getSettings } from '@/lib/settingsStore';
 import { getFirebaseAuthorizationHeader } from '@/lib/firebaseAuthorization';
 import { speakCleanHumanVoice } from '@/lib/speechSynthesis';
 import { hasActiveTextSelection } from '@/lib/clipboard';
+import { auth } from '@/lib/firebase';
+import { longTermMemory, type MessageMemoryUpdate } from '@/lib/longTermMemory';
 import { ConversationActionBar } from '../agent/ConversationActionBar';
+import { MemoryUpdatedIndicator } from '../agent/MemoryUpdatedIndicator';
 
 interface Message {
+  id?: string;
   role: 'user' | 'assistant';
   content: string;
+  memoryUpdate?: MessageMemoryUpdate;
 }
 
 interface MyAIChatProps {
@@ -249,7 +254,8 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
       setIsListening(false);
     }
 
-    const userMessage: Message = { role: 'user', content: query };
+    const userMsgId = `myai_u_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const userMessage: Message = { id: userMsgId, role: 'user', content: query };
     const updatedMessages = [...messages, userMessage];
     setMessages(updatedMessages);
     setInput('');
@@ -278,6 +284,37 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
     setMessages([...updatedMessages, assistantPlaceholder]);
 
     try {
+      const activeUserId = auth?.currentUser?.uid || 'usr_manus_default';
+      const captureRes = await longTermMemory.captureFromUserMessage({
+        userId: activeUserId,
+        message: query,
+        sourceMessageId: userMsgId,
+      });
+
+      if (captureRes.matched) {
+        const memoryUpdate: MessageMemoryUpdate = {
+          status: captureRes.persisted ? 'saved' : 'failed',
+          action: captureRes.action || 'save',
+          recordId: captureRes.record?.id,
+          summary: captureRes.summary,
+          error: captureRes.error,
+          updatedAt: new Date().toISOString(),
+          isFresh: true,
+        };
+        setMessages((prev) =>
+          prev.map((m) => (m.id === userMsgId ? { ...m, memoryUpdate } : m))
+        );
+      }
+
+      const memoryContext = await longTermMemory.getRelevantContext(activeUserId, query).catch(() => '');
+      const payloadMessages = updatedMessages.map((m, i) => ({
+        role: m.role,
+        content:
+          i === updatedMessages.length - 1 && memoryContext
+            ? `${m.content}\n\n[USER SAVED PREFERENCES & FACTUAL MEMORY]:\n${memoryContext}`
+            : m.content,
+      }));
+
       const authorization = await getFirebaseAuthorizationHeader();
       if (!authorization) {
         toast.error('Please sign in to use AI chat.');
@@ -289,7 +326,7 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
         signal: controller.signal,
         body: JSON.stringify({
           requestId: `myai_${Date.now()}_${reqId}`,
-          messages: updatedMessages,
+          messages: payloadMessages,
           model: 'gemini-3.8-flash',
         }),
       });
@@ -442,38 +479,44 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
         ) : (
           <section className="w-full max-w-[760px] mx-auto p-4 sm:p-5 flex flex-col gap-5 flex-1">
             {messages.map((msg, index) => (
-              <div
-                key={`myai-${msg.role}-${index}`}
-                className={`flex w-full animate-in fade-in duration-200 ${
-                  msg.role === 'user' ? 'justify-end' : 'justify-start group/ai-message relative'
-                }`}
-              >
-                <div className="flex flex-col items-start max-w-[88%] sm:max-w-[82%] gap-1">
-                  <div
-                    className={`w-full px-4 py-3 rounded-[18px] text-[15px] leading-relaxed break-words whitespace-pre-wrap select-text ${
-                      msg.role === 'user'
-                        ? 'bg-muted/80 dark:bg-card border border-border text-foreground rounded-br-xs'
-                        : 'bg-transparent text-foreground rounded-bl-xs'
-                    }`}
-                  >
-                    {msg.content || (
-                      <span className="inline-flex items-center gap-1 text-muted-foreground">
-                        <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce [animation-delay:-0.3s]" />
-                        <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce [animation-delay:-0.15s]" />
-                        <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce" />
-                      </span>
+              <React.Fragment key={msg.id || `myai-${msg.role}-${index}`}>
+                <div
+                  className={`flex w-full animate-in fade-in duration-200 ${
+                    msg.role === 'user' ? 'justify-end' : 'justify-start group/ai-message relative'
+                  }`}
+                >
+                  <div className="flex flex-col items-start max-w-[88%] sm:max-w-[82%] gap-1">
+                    <div
+                      className={`w-full px-4 py-3 rounded-[18px] text-[15px] leading-relaxed break-words whitespace-pre-wrap select-text ${
+                        msg.role === 'user'
+                          ? 'bg-muted/80 dark:bg-card border border-border text-foreground rounded-br-xs'
+                          : 'bg-transparent text-foreground rounded-bl-xs'
+                      }`}
+                    >
+                      {msg.content || (
+                        <span className="inline-flex items-center gap-1 text-muted-foreground">
+                          <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce [animation-delay:-0.3s]" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce [animation-delay:-0.15s]" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce" />
+                        </span>
+                      )}
+                    </div>
+                    {msg.role === 'assistant' && msg.content && (
+                      <div className="pl-3">
+                        <ConversationActionBar
+                          messageId={`myai-msg-${index}`}
+                          content={msg.content}
+                        />
+                      </div>
                     )}
                   </div>
-                  {msg.role === 'assistant' && msg.content && (
-                    <div className="pl-3">
-                      <ConversationActionBar
-                        messageId={`myai-msg-${index}`}
-                        content={msg.content}
-                      />
-                    </div>
-                  )}
                 </div>
-              </div>
+                {msg.role === 'user' && msg.memoryUpdate && (
+                  <div className="w-full -mt-3 flex justify-start">
+                    <MemoryUpdatedIndicator memoryUpdate={msg.memoryUpdate} />
+                  </div>
+                )}
+              </React.Fragment>
             ))}
             <div ref={messagesEndRef} />
           </section>

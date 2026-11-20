@@ -10,10 +10,14 @@ import { matchVoiceCommand, executeOpenUrl, executeDeviceCommand } from '@/lib/v
 import { detectToolIntent, executeConnectorTool, getConnectorState, handleConnectorError } from '@/lib/connectors';
 import { fetchWorkspaceContextSummary } from '@/lib/workspaceContextService';
 import { toast } from 'sonner';
-import { longTermMemory } from '@/lib/longTermMemory';
+import {
+  longTermMemory,
+  detectExplicitMemoryIntent,
+  type MessageMemoryUpdate,
+} from '@/lib/longTermMemory';
+import { auth } from '@/lib/firebase';
 import { knowledgeBase } from '@/lib/knowledgeBase';
 import { persistentKnowledgeStore } from '@/lib/persistentKnowledgeStore';
-import { captureExplicitMemory } from '@/lib/agentMemory';
 import { taskCheckpoint } from '@/lib/taskCheckpoint';
 import { notificationDispatcher } from '@/lib/notificationDispatcher';
 import { securityCenter } from '@/lib/securityCenter';
@@ -1102,9 +1106,92 @@ export function useAgentTask() {
 
   const processedInvocationsRef = useRef<Set<string>>(new Set());
 
+  const captureAndAttachUserMemory = useCallback(async (params: {
+    userId: string;
+    rawPrompt: string;
+    userMsgId: string;
+    conversationId?: string | null;
+  }): Promise<void> => {
+    const { userId, rawPrompt, userMsgId, conversationId } = params;
+    const intent = detectExplicitMemoryIntent(rawPrompt);
+    if (!intent.matched) return;
+
+    const memHandle = conversationId
+      ? agentActivityTracker.startActivity(conversationId, {
+          title: intent.action === 'clear' ? 'Clearing saved long-term memory' : 'Updating long-term memory',
+          description:
+            intent.action === 'clear'
+              ? 'Removing saved memory records from persistent storage'
+              : `Persisting memory entry (${intent.key || 'Saved memory'})`,
+          toolName: 'long_term_memory',
+          category: 'database',
+        })
+      : null;
+
+    const captureRes = await longTermMemory.captureFromUserMessage({
+      userId,
+      message: rawPrompt,
+      sourceMessageId: userMsgId,
+    });
+
+    if (!captureRes.matched) {
+      memHandle?.cancel('No memory change required');
+      return;
+    }
+
+    const memoryUpdate: MessageMemoryUpdate = {
+      status: captureRes.persisted ? 'saved' : 'failed',
+      action: captureRes.action || 'save',
+      recordId: captureRes.record?.id,
+      summary: captureRes.summary,
+      error: captureRes.error,
+      updatedAt: new Date().toISOString(),
+      isFresh: true,
+    };
+
+    if (captureRes.persisted) {
+      memHandle?.complete(captureRes.summary || 'Memory updated');
+    } else {
+      memHandle?.fail(captureRes.error || 'Failed to persist memory');
+    }
+
+    const attachUpdate = (list: any[]) =>
+      list.map((m) =>
+        m?.id === userMsgId
+          ? {
+              ...m,
+              metadata: {
+                ...(m.metadata || {}),
+                memoryUpdate,
+              },
+            }
+          : m
+      );
+
+    persistentMessagesRef.current = attachUpdate(persistentMessagesRef.current);
+    setPersistentMessages((prev) => attachUpdate(prev));
+
+    if (conversationId) {
+      saveMessage({
+        id: userMsgId,
+        conversationId,
+        userId,
+        role: 'user',
+        content: rawPrompt,
+        status: 'success',
+        metadata: {
+          memoryUpdate: {
+            ...memoryUpdate,
+            isFresh: false,
+          },
+        },
+      }).catch((err) => console.warn('[LongTermMemory] Failed to persist message memory metadata:', err));
+    }
+  }, []);
+
   const preparePromptWithConnectors = useCallback(async (prompt: string, taskIdOverride?: string | null) => {
     setPhase('tool-calling');
-    const activeUserId = user?.id || 'usr_manus_default';
+    const activeUserId = auth?.currentUser?.uid || user?.id || 'usr_manus_default';
     const activeActivityTaskId = taskIdOverride || currentTaskIdRef.current || taskId;
     const simplePrompt = isSimpleConversationalPrompt(prompt);
 
@@ -1469,6 +1556,17 @@ export function useAgentTask() {
         // Strip embedded base64 image data before running connector regexes / RAG enrichment
         // so multi-kilobyte base64 strings never stall main-thread text processing.
         const textWithoutImagePayload = content.replace(/\[IMAGE_DATA_URL:[^\]]+\]\n?/gi, '').trim();
+
+        // Persist explicit long-term memory requests BEFORE prompt enrichment and show
+        // "Memory updated" beneath this user message ONLY after persistence succeeds.
+        const activeMemoryUserId = auth?.currentUser?.uid || user?.id || 'usr_manus_default';
+        await captureAndAttachUserMemory({
+          userId: activeMemoryUserId,
+          rawPrompt: content,
+          userMsgId,
+          conversationId: activeId,
+        });
+
         const toolIntent = !isSimpleConversationalPrompt(textWithoutImagePayload) ? detectToolIntent(textWithoutImagePayload) : null;
         if (toolIntent) {
           if (toolIntent.status !== 'connected') {
@@ -1582,7 +1680,7 @@ export function useAgentTask() {
     };
 
     void runSendLifecycle();
-  }, [executeReliableAgentTurn, preparePromptWithConnectors, taskId, taskStatus, user, clearStepTimers, finalizeRequestTurn, markExistingSdkMessagesCompleted]);
+  }, [executeReliableAgentTurn, preparePromptWithConnectors, captureAndAttachUserMemory, taskId, taskStatus, user, clearStepTimers, finalizeRequestTurn, markExistingSdkMessagesCompleted]);
 
   const startTask = useCallback(async (prompt: string, options: any = {}) => {
     if (!prompt || !prompt.trim()) return null;
@@ -1682,8 +1780,7 @@ export function useAgentTask() {
             activeUser = null;
           }
         }
-        const userId = activeUser?.id || 'usr_manus_default';
-        captureExplicitMemory(userId, prompt);
+        const userId = auth?.currentUser?.uid || activeUser?.id || 'usr_manus_default';
 
         try {
           await (blink.db as any).tasks.create({
@@ -1849,6 +1946,16 @@ export function useAgentTask() {
     }
 
     try {
+      // Persist explicit long-term memory requests first so confirmation appears ONLY after
+      // real persistence succeeds and the newly saved memory is available in prompt context.
+      const activeMemoryUserId = auth?.currentUser?.uid || user?.id || 'usr_manus_default';
+      await captureAndAttachUserMemory({
+        userId: activeMemoryUserId,
+        rawPrompt: prompt,
+        userMsgId,
+        conversationId: newTaskId,
+      });
+
       const preparedPrompt = await preparePromptWithConnectors(enhancedPrompt, newTaskId);
       if (activeRequestIdRef.current === reqId) {
         setPhase('text-generation');
@@ -1950,7 +2057,8 @@ export function useAgentTask() {
           role: m.role,
           content: m.content,
           timestamp: m.timestamp,
-          status: m.status
+          status: m.status,
+          ...(m.metadata ? { metadata: m.metadata } : {}),
         }));
       }
 

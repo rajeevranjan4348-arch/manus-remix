@@ -56,7 +56,10 @@ export function captureExplicitMemory(userId: string, message: string): void {
     return;
   }
 
-  const explicitRequest = /\b(remember|save this|keep this in mind|keep in mind|don't forget|do not forget|my preference is|i prefer|always remember)\b/i.test(text);
+  const explicitRequest =
+    /\b(remember|reminder\s+one\s+thing|remind\s+yourself|save this|save to memory|add to memory|update memory|keep this in mind|keep in mind|don't forget|do not forget|note that|my preference is|i prefer|always remember|from now on)\b/i.test(
+      text
+    );
   if (!explicitRequest) return;
 
   const normalized = text.replace(/\s+/g, ' ').slice(0, MAX_ENTRY_LENGTH);

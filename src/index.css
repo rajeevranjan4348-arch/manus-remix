@@ -2077,3 +2077,42 @@ select,
   background-image: none !important;
 }
 
+/* Minimal ChatGPT-style "Memory updated" confirmation animation */
+@keyframes memory-updated-fade-slide {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes memory-book-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.memory-updated-enter {
+  animation: memory-updated-fade-slide 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.memory-book-icon-enter {
+  animation: memory-book-scale-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .memory-updated-enter,
+  .memory-book-icon-enter {
+    animation: none !important;
+    transform: none !important;
+  }
+}
+

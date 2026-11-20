@@ -58,6 +58,7 @@ import { fetchWorkspaceContextSummary } from '@/lib/workspaceContextService';
 import { Step } from '@/hooks/useAgentTask';
 import { AgentActivityEvent } from '@/lib/agentActivityTracker';
 import { AgentActivityFeed } from './AgentActivityFeed';
+import { MemoryUpdatedIndicator } from './MemoryUpdatedIndicator';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
 import { getChatViewDraft, saveChatViewDraft, clearChatViewDraft } from '@/lib/draftStorage';
@@ -1083,71 +1084,78 @@ export function ChatView({
       const isEditing = editingMessageId === msgId;
       const cleanedText = cleanUserMessage(msg.content);
       const attachedImageUrl = extractUserImageAttachment(msg.content);
+      const memoryUpdate = msg.metadata?.memoryUpdate;
 
       return (
-        <div
-          key={msgId}
-          data-message="user"
-          data-stagger-index={index}
-          data-stagger-delay-ms={staggerDelayMs}
-          style={staggerStyle}
-          className="flex justify-end my-2 chat-message-enter chat-message-user-enter group relative px-4 sm:px-20"
-        >
-          {isEditing ? (
-            <div className="bg-card border border-border p-3 rounded-2xl max-w-[90%] sm:max-w-[80%] shadow-md w-full space-y-2">
-              <textarea
-                value={editInputContent}
-                onChange={(e) => setEditInputContent(e.target.value)}
-                className="w-full bg-transparent border border-border rounded-lg p-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
-                rows={2}
-              />
-              <div className="flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingMessageId(null)}
-                  className="px-3 py-1 rounded-lg text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
-                >
-                  Cancel
-                </button>
+        <React.Fragment key={msgId}>
+          <div
+            data-message="user"
+            data-stagger-index={index}
+            data-stagger-delay-ms={staggerDelayMs}
+            style={staggerStyle}
+            className="flex justify-end my-2 chat-message-enter chat-message-user-enter group relative px-4 sm:px-20"
+          >
+            {isEditing ? (
+              <div className="bg-card border border-border p-3 rounded-2xl max-w-[90%] sm:max-w-[80%] shadow-md w-full space-y-2">
+                <textarea
+                  value={editInputContent}
+                  onChange={(e) => setEditInputContent(e.target.value)}
+                  className="w-full bg-transparent border border-border rounded-lg p-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                  rows={2}
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingMessageId(null)}
+                    className="px-3 py-1 rounded-lg text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (editInputContent.trim()) {
+                        onSubmit(editInputContent.trim());
+                        setEditingMessageId(null);
+                      }
+                    }}
+                    className="px-3 py-1 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+                  >
+                    Save & Send
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="relative flex items-center gap-2 max-w-[85%] sm:max-w-[75%]">
                 <button
                   type="button"
                   onClick={() => {
-                    if (editInputContent.trim()) {
-                      onSubmit(editInputContent.trim());
-                      setEditingMessageId(null);
-                    }
+                    setEditingMessageId(msgId);
+                    setEditInputContent(cleanedText);
                   }}
-                  className="px-3 py-1 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+                  className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-full bg-card/80 hover:bg-card border border-border shadow-xs text-muted-foreground hover:text-foreground shrink-0"
+                  title="Edit prompt"
                 >
-                  Save & Send
+                  <Pencil size={13} />
                 </button>
+                <div
+                  data-testid="user-message-bubble"
+                  className="bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium shadow-xs leading-relaxed space-y-2 overflow-hidden select-text"
+                >
+                  {attachedImageUrl && (
+                    <UserAttachedImagePreview imageUrl={attachedImageUrl} />
+                  )}
+                  {cleanedText && <div className="whitespace-pre-wrap break-words select-text">{cleanedText}</div>}
+                </div>
               </div>
-            </div>
-          ) : (
-            <div className="relative flex items-center gap-2 max-w-[85%] sm:max-w-[75%]">
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingMessageId(msgId);
-                  setEditInputContent(cleanedText);
-                }}
-                className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-full bg-card/80 hover:bg-card border border-border shadow-xs text-muted-foreground hover:text-foreground shrink-0"
-                title="Edit prompt"
-              >
-                <Pencil size={13} />
-              </button>
-              <div
-                data-testid="user-message-bubble"
-                className="bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium shadow-xs leading-relaxed space-y-2 overflow-hidden select-text"
-              >
-                {attachedImageUrl && (
-                  <UserAttachedImagePreview imageUrl={attachedImageUrl} />
-                )}
-                {cleanedText && <div className="whitespace-pre-wrap break-words select-text">{cleanedText}</div>}
-              </div>
+            )}
+          </div>
+          {memoryUpdate && (
+            <div className="max-w-3xl mx-auto px-4 sm:px-20 -mt-0.5 mb-2 flex justify-start">
+              <MemoryUpdatedIndicator memoryUpdate={memoryUpdate} />
             </div>
           )}
-        </div>
+        </React.Fragment>
       );
     }
 
