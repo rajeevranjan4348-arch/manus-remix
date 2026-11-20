@@ -18,6 +18,15 @@ import {
   isTechnicalVerificationTask,
   runTechnicalVerification,
 } from './agentVerificationService';
+import {
+  DEFAULT_TIMEOUT_BUDGETS,
+  resolveCandidateModels,
+  classifyGeminiError,
+  computeBackoffDelayMs,
+  abortableDelay,
+  createScopedAbortController,
+  iterateStreamWithTimeouts,
+} from './streamReliability';
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -263,34 +272,52 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     return { title: stage.label || 'Checking real-time research context', toolName: 'rtie_research', category: 'analysis' };
   };
 
-  const rtieResult = await orchestrateRealtimeResearch(latestUserText, {
-    signal: options.signal,
-    onProgress: (stageEvent) => {
-      options.onResearchProgress?.(stageEvent);
-      if (stageEvent.stage === 'completed') {
+  const researchScope = createScopedAbortController(
+    DEFAULT_TIMEOUT_BUDGETS.rtieResearchMaxMs,
+    options.signal,
+    'RTIE live research budget exceeded'
+  );
+  let rtieResult: Awaited<ReturnType<typeof orchestrateRealtimeResearch>>;
+  try {
+    rtieResult = await orchestrateRealtimeResearch(latestUserText, {
+      signal: researchScope.controller.signal,
+      onProgress: (stageEvent) => {
+        options.onResearchProgress?.(stageEvent);
+        if (stageEvent.stage === 'completed') {
+          if (activeResearchHandle) {
+            activeResearchHandle.complete(stageEvent.detail || 'Live research context collected');
+            activeResearchHandle = null;
+          }
+          return;
+        }
         if (activeResearchHandle) {
-          activeResearchHandle.complete(stageEvent.detail || 'Live research context collected');
+          activeResearchHandle.complete('Stage completed');
           activeResearchHandle = null;
         }
-        return;
-      }
-      if (activeResearchHandle) {
-        activeResearchHandle.complete('Stage completed');
-        activeResearchHandle = null;
-      }
-      const mapped = mapResearchStageTitle(stageEvent);
-      activeResearchHandle = agentActivityHub.startActivity(
-        activityTaskId,
-        {
-          title: mapped.title,
-          description: stageEvent.detail || 'Executing real-time research pipeline',
-          toolName: mapped.toolName,
-          category: mapped.category,
-        },
-        emitActivity
-      );
-    },
-  });
+        const mapped = mapResearchStageTitle(stageEvent);
+        activeResearchHandle = agentActivityHub.startActivity(
+          activityTaskId,
+          {
+            title: mapped.title,
+            description: stageEvent.detail || 'Executing real-time research pipeline',
+            toolName: mapped.toolName,
+            category: mapped.category,
+          },
+          emitActivity
+        );
+      },
+    });
+  } catch (researchErr) {
+    console.warn('[RTIE Research] Bounded research notice:', researchErr);
+    rtieResult = {
+      route: preRoute,
+      sources: [],
+      systemContextBlock: buildRealtimeTemporalSystemBlock(),
+      directFallbackMarkdown: undefined,
+    } as any;
+  } finally {
+    researchScope.cleanup();
+  }
 
   if (activeResearchHandle) {
     if (options.signal?.aborted) {
@@ -333,6 +360,8 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
   const enrichedSystemInstruction =
     (options.systemInstruction || '') + realtimeSnapshot.systemContextBlock;
 
+  const waterfallStartTimeMs = Date.now();
+
   if (apiKey) {
     const ai = new GoogleGenAI({
       apiKey,
@@ -343,15 +372,8 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
       },
     });
 
-    // Order candidate models prioritizing active high-speed models
-    const candidateModels = Array.from(new Set([
-      preferredModel,
-      'gemini-3-flash-preview',
-      'gemini-2.5-flash',
-      'gemini-flash-latest',
-      'gemini-3.1-flash-lite-preview',
-      'gemini-flash-lite-latest',
-    ]));
+    // Order candidate models prioritizing active high-speed models (max 3 valid models)
+    const candidateModels = resolveCandidateModels(preferredModel);
 
     const isComplexReasoningPrompt = Boolean(
       options.thinkHarder ||
@@ -413,39 +435,46 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
         agentActivityHub.cancelActiveActivities(activityTaskId, 'Request aborted by client');
         return;
       }
-      // Attempt with Google Search grounding if applicable, and if that fails, retry without tools
-      const toolConfigs = useGoogleSearch ? [{ tools: [{ googleSearch: {} }] }, {}] : [{}];
+
+      if (Date.now() - waterfallStartTimeMs > DEFAULT_TIMEOUT_BUDGETS.totalWaterfallBudgetMs) {
+        console.warn('[AI Model Router] Total waterfall budget reached; advancing to resilient completion.');
+        break modelLoop;
+      }
+
+      // Only attempt Google Search grounding on the primary fast model if RTIE did not already gather rich live sources
+      const needsModelSearchGrounding = useGoogleSearch && !realtimeSnapshot.hasLiveDomainData;
+      const toolConfigs = needsModelSearchGrounding ? [{ tools: [{ googleSearch: {} }] }, {}] : [{}];
       const supportsThinkingBudget = model.includes('gemini-2.5');
       const modelSystemInstruction = baseSystemPrompt + buildModelIdentityInstruction(model, 'Google Gemini');
 
       for (const toolConfig of toolConfigs) {
+        if (options.signal?.aborted) {
+          agentActivityHub.cancelActiveActivities(activityTaskId, 'Request aborted by client');
+          return;
+        }
+
         const hasSearchTool = Boolean((toolConfig as any).tools);
-        const modelHandle = agentActivityHub.startActivity(
-          activityTaskId,
-          {
-            title: hasSearchTool
-              ? `Querying ${model} with live web grounding`
-              : `Generating response with ${model}`,
-            description: hasSearchTool
-              ? 'Streaming grounded response from Gemini API with Google Search'
-              : 'Streaming response from Gemini API',
-            toolName: hasSearchTool ? 'gemini_google_search' : 'gemini_model',
-            category: 'model',
-          },
-          emitActivity
-        );
-        try {
-          const responseStream = await ai.models.generateContentStream({
-            model,
-            contents,
-            config: {
-              systemInstruction: modelSystemInstruction,
-              ...(supportsThinkingBudget && !options.thinkHarder
-                ? { thinkingConfig: { thinkingBudget: isComplexReasoningPrompt ? 512 : 0 } }
-                : {}),
-              ...toolConfig,
+        const firstTokenBudgetMs = hasSearchTool
+          ? DEFAULT_TIMEOUT_BUDGETS.firstTokenWithSearchTimeoutMs
+          : DEFAULT_TIMEOUT_BUDGETS.firstTokenTimeoutMs;
+
+        // Controlled retry loop (up to 2 attempts on the same model ONLY for transient 429/503 before any tokens are yielded)
+        const maxAttemptsForConfig = 2;
+        for (let attemptIdx = 0; attemptIdx < maxAttemptsForConfig; attemptIdx++) {
+          const modelHandle = agentActivityHub.startActivity(
+            activityTaskId,
+            {
+              title: hasSearchTool
+                ? `Querying ${model} with live web grounding`
+                : `Generating response with ${model}`,
+              description: hasSearchTool
+                ? 'Streaming grounded response from Gemini API with Google Search'
+                : 'Streaming response from Gemini API',
+              toolName: hasSearchTool ? 'gemini_google_search' : 'gemini_model',
+              category: 'model',
             },
-          });
+            emitActivity
+          );
 
           let hasYielded = false;
           let streamedChars = 0;
@@ -457,80 +486,131 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
           }
           const searchQueries = new Set<string>();
 
-          for await (const chunk of responseStream) {
-            if (options.signal?.aborted) {
-              modelHandle.cancel('Generation cancelled by client');
-              return;
-            }
-            const text = chunk.text;
-            if (text) {
-              hasYielded = true;
-              streamedChars += text.length;
-              yield text;
-            }
+          try {
+            const guardedStream = iterateStreamWithTimeouts(
+              () =>
+                ai.models.generateContentStream({
+                  model,
+                  contents,
+                  config: {
+                    systemInstruction: modelSystemInstruction,
+                    ...(supportsThinkingBudget && !options.thinkHarder
+                      ? { thinkingConfig: { thinkingBudget: isComplexReasoningPrompt ? 512 : 0 } }
+                      : {}),
+                    ...toolConfig,
+                  },
+                }),
+              {
+                firstTokenTimeoutMs: firstTokenBudgetMs,
+                chunkIdleTimeoutMs: DEFAULT_TIMEOUT_BUDGETS.chunkIdleTimeoutMs,
+                signal: options.signal,
+                extractText: (chunk: any) => String(chunk?.text || ''),
+              }
+            );
 
-            const groundingMetadata = chunk?.candidates?.[0]?.groundingMetadata;
-            const webSearchQueries = groundingMetadata?.webSearchQueries || [];
-            for (const q of webSearchQueries) {
-              if (typeof q === 'string' && q.trim()) {
-                searchQueries.add(q.trim());
+            for await (const chunk of guardedStream) {
+              if (options.signal?.aborted) {
+                modelHandle.cancel('Generation cancelled by client');
+                return;
+              }
+              const text = chunk.text;
+              if (text) {
+                hasYielded = true;
+                streamedChars += text.length;
+                yield text;
+              }
+
+              const groundingMetadata = chunk?.candidates?.[0]?.groundingMetadata;
+              const webSearchQueries = groundingMetadata?.webSearchQueries || [];
+              for (const q of webSearchQueries) {
+                if (typeof q === 'string' && q.trim()) {
+                  searchQueries.add(q.trim());
+                }
+              }
+
+              const groundingChunks = groundingMetadata?.groundingChunks || [];
+              for (const groundingChunk of groundingChunks) {
+                const web = groundingChunk?.web;
+                if (typeof web?.uri === 'string' && /^https?:\/\//i.test(web.uri)) {
+                  sources.set(web.uri, typeof web.title === 'string' && web.title.trim() ? web.title : web.uri);
+                }
               }
             }
 
-            const groundingChunks = groundingMetadata?.groundingChunks || [];
-            for (const groundingChunk of groundingChunks) {
-              const web = groundingChunk?.web;
-              if (typeof web?.uri === 'string' && /^https?:\/\//i.test(web.uri)) {
-                sources.set(web.uri, typeof web.title === 'string' && web.title.trim() ? web.title : web.uri);
+            if (useGoogleSearch && sources.size > 0 && hasYielded) {
+              if (searchQueries.size === 0 && latestUserText) {
+                searchQueries.add(latestUserText);
               }
-            }
-          }
-
-          if (useGoogleSearch && sources.size > 0) {
-            if (searchQueries.size === 0 && latestUserText) {
-              searchQueries.add(latestUserText);
-            }
-            if (searchQueries.size > 0) {
-              yield '\n\n**Search Queries**\n' + Array.from(searchQueries)
-                .slice(0, 6)
-                .map(q => `- ${q.replace(/\r?\n/g, ' ').trim()}`)
+              if (searchQueries.size > 0) {
+                yield '\n\n**Search Queries**\n' + Array.from(searchQueries)
+                  .slice(0, 6)
+                  .map(q => `- ${q.replace(/\r?\n/g, ' ').trim()}`)
+                  .join('\n');
+              }
+              yield '\n\n**Sources**\n' + Array.from(sources.entries())
+                .slice(0, 8)
+                .map(([url, title]) => `- [${title.replace(/[\[\]]/g, '')}](${url})`)
                 .join('\n');
             }
-            yield '\n\n**Sources**\n' + Array.from(sources.entries())
-              .slice(0, 8)
-              .map(([url, title]) => `- [${title.replace(/[\[\]]/g, '')}](${url})`)
-              .join('\n');
-          }
 
-          if (hasYielded) {
-            modelHandle.complete(
-              sources.size > 0
-                ? `Streamed ${streamedChars} chars with ${sources.size} cited source(s)`
-                : `Streamed ${streamedChars} chars from ${model}`
+            if (hasYielded) {
+              modelHandle.complete(
+                sources.size > 0
+                  ? `Streamed ${streamedChars} chars with ${sources.size} cited source(s)`
+                  : `Streamed ${streamedChars} chars from ${model}`
+              );
+              return; // Successfully streamed the response
+            }
+            modelHandle.fail('Model returned empty stream; trying fallback');
+            break; // Move to next toolConfig / model
+          } catch (err: any) {
+            if (options.signal?.aborted) {
+              modelHandle.cancel('Request aborted');
+              return;
+            }
+
+            // CRITICAL: If partial tokens were already yielded to the client before an interruption,
+            // preserve the partial response and complete gracefully instead of restarting another model
+            // (which would duplicate already-streamed tokens).
+            if (hasYielded && streamedChars > 0) {
+              if (useGoogleSearch && sources.size > 0) {
+                yield '\n\n**Sources**\n' + Array.from(sources.entries())
+                  .slice(0, 8)
+                  .map(([url, title]) => `- [${title.replace(/[\[\]]/g, '')}](${url})`)
+                  .join('\n');
+              }
+              modelHandle.complete(`Streamed ${streamedChars} chars (recovered partial stream)`);
+              return;
+            }
+
+            const classified = classifyGeminiError(err, Boolean(options.signal?.aborted));
+            modelHandle.fail(
+              classified.category === 'auth_error'
+                ? 'Gemini API authentication failed; checking fallback provider'
+                : `Model ${model} (${classified.category}); switching`
             );
-            return; // Successfully streamed the response
-          }
-          modelHandle.fail('Model returned empty stream; trying fallback');
-        } catch (err: any) {
-          const errMsg = String(err?.message || '');
-          const isAuthError = err?.status === 401 || err?.status === 403 || errMsg.includes('API_KEY_INVALID') || errMsg.includes('API key not valid');
-          if (options.signal?.aborted) {
-            modelHandle.cancel('Request aborted');
-            return;
-          }
-          modelHandle.fail(
-            isAuthError
-              ? 'Gemini API authentication failed; checking fallback provider'
-              : `Model ${model} unavailable (${err?.status || 'fallback'}); switching`
-          );
-          if (isAuthError) {
-            console.warn('[AI Model Router] Gemini API key invalid or unauthorized; skipping remaining Gemini models.');
-            break modelLoop;
-          }
-          const isRateLimit = err?.status === 429 || errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED');
-          console.log(`[AI Model Router] Model ${model} attempt notice (status: ${err?.status || (isRateLimit ? 429 : 'fallback')}). Trying fallback configuration...`);
-          if (isRateLimit) {
-            await new Promise(r => setTimeout(r, 200));
+
+            if (classified.abortWaterfall) {
+              console.warn(`[AI Model Router] Stopping Gemini waterfall (${classified.category}).`);
+              break modelLoop;
+            }
+
+            // Retry same model+config ONCE with exponential backoff if transient 429/503 and within budget
+            if (
+              classified.retrySameModel &&
+              attemptIdx + 1 < maxAttemptsForConfig &&
+              Date.now() - waterfallStartTimeMs < DEFAULT_TIMEOUT_BUDGETS.totalWaterfallBudgetMs - 4000
+            ) {
+              const delayMs = computeBackoffDelayMs(attemptIdx);
+              console.log(`[AI Model Router] Transient ${classified.category} on ${model}; retrying in ${delayMs}ms...`);
+              await abortableDelay(delayMs, options.signal);
+              continue;
+            }
+
+            if (classified.skipModelEntirely) {
+              continue modelLoop;
+            }
+            break; // Try next toolConfig (e.g. without googleSearch tool)
           }
         }
       }

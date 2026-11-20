@@ -273,17 +273,23 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
     }
     const controller = new AbortController();
     abortControllerRef.current = controller;
-    const timeoutId = setTimeout(() => {
-      try {
-        controller.abort();
-      } catch (_) {}
-    }, 38000);
+    let inactivityTimerId: ReturnType<typeof setTimeout> | null = null;
+    const resetInactivityTimer = () => {
+      if (inactivityTimerId !== null) clearTimeout(inactivityTimerId);
+      inactivityTimerId = setTimeout(() => {
+        try {
+          controller.abort();
+        } catch (_) {}
+      }, 45000);
+    };
+    resetInactivityTimer();
 
     setIsGenerating(true);
 
     const assistantPlaceholder: Message = { role: 'assistant', content: '' };
     setMessages([...updatedMessages, assistantPlaceholder]);
 
+    let accumulated = '';
     try {
       const activeUserId = auth?.currentUser?.uid || 'usr_manus_default';
       const captureRes = await longTermMemory.captureFromUserMessage({
@@ -331,6 +337,7 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
           model: 'gemini-3.8-flash',
         }),
       });
+      resetInactivityTimer();
 
       if (!res.ok) throw new Error(`API returned ${res.status}`);
       if (!res.body) {
@@ -342,11 +349,11 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let accumulated = '';
       let lineBuffer = '';
 
       const processLine = (rawLine: string) => {
         if (activeRequestIdRef.current !== reqId) return;
+        resetInactivityTimer();
         const line = rawLine.trim();
         if (!line.startsWith('data:')) return;
         const dataStr = line.slice(5).trim();
@@ -354,6 +361,9 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
 
         try {
           const parsed = JSON.parse(dataStr);
+          if (parsed.type === 'heartbeat' || parsed.type === 'ping' || parsed.type === 'stream-open') {
+            return;
+          }
           const deltaText = parsed.textDelta ?? parsed.delta ?? parsed.content ?? '';
           if (deltaText && parsed.type !== 'finish') {
             accumulated += String(deltaText);
@@ -380,6 +390,7 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
+          resetInactivityTimer();
           lineBuffer += decoder.decode(value, { stream: true });
           const lines = lineBuffer.split('\n');
           lineBuffer = lines.pop() || '';
@@ -416,7 +427,7 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
         }
       }
     } catch (err) {
-      if (activeRequestIdRef.current === reqId) {
+      if (activeRequestIdRef.current === reqId && !accumulated.trim()) {
         setMessages(prev => {
           const next = [...prev];
           next[next.length - 1] = {
@@ -427,7 +438,7 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
         });
       }
     } finally {
-      clearTimeout(timeoutId);
+      if (inactivityTimerId !== null) clearTimeout(inactivityTimerId);
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null;
       }

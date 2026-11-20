@@ -425,32 +425,55 @@ export function useAgentTask() {
     return () => { mounted = false; };
   }, [isAuthenticated, sandbox]);
 
-  // Synchronize typing indicator in topbar and watchdog timer
+  // Synchronize typing indicator in topbar and activity-resetting watchdog timer
+  const finalizeRequestTurnRef = useRef<((reqId: number, explicitActiveId?: string | null, explicitText?: string, rawResponse?: any) => boolean) | null>(null);
   useEffect(() => {
-    let watchdogTimer: any = null;
-    if (taskStatus === 'running') {
-      window.dispatchEvent(new CustomEvent('manus_agent_generating', {
-        detail: { isGenerating: true, mode: 'work', text: 'Manus is typing...' }
-      }));
-      // 40-second watchdog to guarantee no permanently stuck loading states
+    let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const resetWatchdog = () => {
+      if (watchdogTimer) clearTimeout(watchdogTimer);
+      if (taskStatus !== 'running') return;
       watchdogTimer = setTimeout(() => {
-        console.warn('[useAgentTask] Watchdog: Task ran past timeout, recovering to terminal state');
+        const reqId = activeRequestIdRef.current;
+        const activeId = currentTaskIdRef.current || taskId;
+        const partialText = liveStreamTextRef.current.trim();
+        console.warn('[useAgentTask] Watchdog: No stream activity for 50s, recovering to terminal state');
         abortActiveAutonomousStreams();
         isSubmittingRef.current = false;
         clearStepTimers();
+
+        if (partialText && finalizeRequestTurnRef.current) {
+          // Preserve partial streamed content rather than discarding or overwriting it
+          finalizeRequestTurnRef.current(reqId, activeId, partialText);
+          return;
+        }
+
+        const timeoutMsg = 'The AI response timed out. Please try again.';
         setTaskStatus('error');
         setPhase('error');
         setResult({
           type: currentTask?.options?.format || 'chat',
-          content: 'This request timed out before the AI service finished. Please retry, or check the selected model and server configuration.',
+          content: timeoutMsg,
           error: true,
           retryable: true,
         });
         setSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'error' as const } : s));
+        agentActivityTracker.failActiveActivities(activeId, timeoutMsg);
         window.dispatchEvent(new CustomEvent('manus_agent_generating', {
           detail: { isGenerating: false, mode: 'work' }
         }));
-      }, 40000);
+      }, 50000);
+    };
+
+    if (taskStatus === 'running') {
+      window.dispatchEvent(new CustomEvent('manus_agent_generating', {
+        detail: { isGenerating: true, mode: 'work', text: 'Manus is typing...' }
+      }));
+      resetWatchdog();
+      window.addEventListener('manus_stream_heartbeat', resetWatchdog);
+      window.addEventListener('manus_stream_delta', resetWatchdog);
+      window.addEventListener('manus_research_stage', resetWatchdog);
+      window.addEventListener('manus_agent_activity', resetWatchdog);
     } else {
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
         detail: { isGenerating: false, mode: 'work' }
@@ -458,8 +481,12 @@ export function useAgentTask() {
     }
     return () => {
       if (watchdogTimer) clearTimeout(watchdogTimer);
+      window.removeEventListener('manus_stream_heartbeat', resetWatchdog);
+      window.removeEventListener('manus_stream_delta', resetWatchdog);
+      window.removeEventListener('manus_research_stage', resetWatchdog);
+      window.removeEventListener('manus_agent_activity', resetWatchdog);
     };
-  }, [taskStatus, clearStepTimers, currentTask]);
+  }, [taskStatus, clearStepTimers, currentTask, taskId]);
 
   // Clear stale loading indicator when switching between Chat and Work modes while idle
   useEffect(() => {
@@ -822,6 +849,7 @@ export function useAgentTask() {
 
     return true;
   }, [getCurrentTurnSdkAssistantText, markExistingSdkMessagesCompleted, taskId, user]);
+  finalizeRequestTurnRef.current = finalizeRequestTurn;
 
   const useAgentResult = useAgent({
     agent,
@@ -878,6 +906,15 @@ export function useAgentTask() {
       console.error('[Manus Agent] onError triggered:', err);
       clearStepTimers();
       markExistingSdkMessagesCompleted();
+
+      const partialText = liveStreamTextRef.current.trim();
+      const activeId = currentTaskIdRef.current || taskId;
+      if (partialText) {
+        // Preserve already-generated partial content instead of discarding it
+        finalizeRequestTurn(reqId, activeId, partialText);
+        return;
+      }
+
       finalizedRequestIdsRef.current.add(reqId);
       setActiveStreamContext(null);
       isSubmittingRef.current = false;
@@ -886,7 +923,7 @@ export function useAgentTask() {
       const message = err instanceof Error && err.message
         ? err.message
         : 'The selected AI provider could not complete this request.';
-      const failureText = `AI response failed: ${message}. Please retry or check the selected model and server configuration.`;
+      const failureText = lastStreamErrorRef.current || `AI response failed: ${message}. Please retry or check the selected model and server configuration.`;
       setResult({
         type: currentTaskRef.current?.options?.format || 'chat',
         content: failureText,
@@ -899,34 +936,13 @@ export function useAgentTask() {
         ? { ...step, status: 'error' as const }
         : step));
       emitRobotEvent('TASK_FAILED');
-      agentActivityTracker.failActiveActivities(currentTaskIdRef.current || taskId, failureText);
+      agentActivityTracker.failActiveActivities(activeId, failureText);
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
         detail: { isGenerating: false, mode: 'work' }
       }));
       toast.error('AI response failed. You can retry the request.');
 
-      const activeId = currentTaskIdRef.current || taskId;
       if (activeId) {
-        const errorMsgId = 'msg_error_' + Date.now();
-        setPersistentMessages(prev => prev.some(m => m.role === 'assistant' && m.error && m.content === failureText)
-          ? prev
-          : [...prev, {
-              id: errorMsgId,
-              role: 'assistant' as const,
-              content: failureText,
-              timestamp: new Date().toISOString(),
-              status: 'error' as const,
-              error: true,
-              retryable: true,
-            }]);
-        saveMessage({
-          id: errorMsgId,
-          conversationId: activeId,
-          userId: user?.id || 'usr_manus_default',
-          role: 'assistant',
-          content: failureText,
-          status: 'failed',
-        }).catch(() => {});
         (blink.db as any).tasks.update(activeId, {
           status: 'error',
           result: JSON.stringify({ type: currentTaskRef.current?.options?.format || 'chat', content: failureText, error: true, retryable: true }),
@@ -995,7 +1011,7 @@ export function useAgentTask() {
           if (!payloadStr || payloadStr === '[DONE]') continue;
           try {
             const json = JSON.parse(payloadStr);
-            if (json.type === 'text-delta' || json.type === 'text') {
+            if ((json.type === 'text-delta' || json.type === 'text') && !json.errorDelta) {
               const delta = json.delta ?? json.textDelta ?? json.text ?? '';
               if (delta) {
                 accumulated += String(delta);
@@ -1514,10 +1530,16 @@ export function useAgentTask() {
       m => m && !(m.role === 'assistant' && (m.error || m.status === 'error'))
     );
     const lastExisting = cleanedHistory[cleanedHistory.length - 1];
-    const nextHistory =
+    const isRetryOfLastUserTurn = Boolean(
       lastExisting && lastExisting.role === 'user' && lastExisting.content.trim() === content.trim()
-        ? cleanedHistory
-        : [...cleanedHistory, userMsg];
+    );
+    const nextHistory = isRetryOfLastUserTurn
+      ? cleanedHistory
+      : [...cleanedHistory, userMsg];
+
+    if (isRetryOfLastUserTurn && lastExisting?.id) {
+      activeUserMsgIdRef.current = lastExisting.id;
+    }
 
     persistentMessagesRef.current = nextHistory;
     setPersistentMessages(nextHistory);
@@ -1530,7 +1552,7 @@ export function useAgentTask() {
         .map(m => ({ role: m.role, content: m.content.trim() })),
     });
 
-    if (activeId) {
+    if (activeId && !isRetryOfLastUserTurn) {
       saveMessage({
         id: userMsgId,
         conversationId: activeId,

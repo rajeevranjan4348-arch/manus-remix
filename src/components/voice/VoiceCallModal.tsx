@@ -559,7 +559,20 @@ export function VoiceCallModal({
 
       const controller = new AbortController();
       abortControllerRef.current = controller;
+      let voiceInactivityTimer: ReturnType<typeof setTimeout> | null = null;
+      const resetVoiceInactivity = () => {
+        if (voiceInactivityTimer !== null) clearTimeout(voiceInactivityTimer);
+        voiceInactivityTimer = setTimeout(() => {
+          try {
+            controller.abort(new DOMException('Voice stream timed out', 'TimeoutError'));
+          } catch {
+            controller.abort();
+          }
+        }, 45000);
+      };
+      resetVoiceInactivity();
 
+      let fullReply = '';
       try {
         const authHeader = await getFirebaseAuthorizationHeader();
         const memoryContext = await longTermMemory
@@ -586,6 +599,7 @@ export function VoiceCallModal({
           }),
           signal: controller.signal,
         });
+        resetVoiceInactivity();
 
         if (!response.ok || !response.body) {
           const errPayload = await response.json().catch(() => null);
@@ -600,7 +614,6 @@ export function VoiceCallModal({
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let sseBuffer = '';
-        let fullReply = '';
         let startedSpeakingStream = false;
 
         sentenceQueueRef.current?.startStream();
@@ -609,6 +622,7 @@ export function VoiceCallModal({
           const { done, value } = await reader.read();
           if (done) break;
           if (controller.signal.aborted) break;
+          resetVoiceInactivity();
 
           sseBuffer += decoder.decode(value, { stream: true });
           const lines = sseBuffer.split('\n');
@@ -622,6 +636,9 @@ export function VoiceCallModal({
 
             try {
               const parsed = JSON.parse(dataStr);
+              if (parsed.type === 'heartbeat' || parsed.type === 'ping' || parsed.type === 'stream-open') {
+                continue;
+              }
               if (parsed.type === 'text-delta' && typeof parsed.delta === 'string') {
                 fullReply += parsed.delta;
                 setActiveCaption(fullReply);
@@ -631,7 +648,7 @@ export function VoiceCallModal({
                   setCallState('speaking');
                 }
                 sentenceQueueRef.current?.pushDelta(parsed.delta);
-              } else if (parsed.type === 'error') {
+              } else if (parsed.type === 'error' && !fullReply.trim()) {
                 throw new Error(parsed.error || 'Streaming AI response failed.');
               }
             } catch (parseErr) {
@@ -644,7 +661,7 @@ export function VoiceCallModal({
           }
         }
 
-        if (controller.signal.aborted) {
+        if (controller.signal.aborted && !fullReply.trim()) {
           return;
         }
 
@@ -659,7 +676,17 @@ export function VoiceCallModal({
         setCallState('speaking');
         sentenceQueueRef.current?.finishStream();
       } catch (err: any) {
-        if (err?.name === 'AbortError' || controller.signal.aborted) {
+        if (fullReply.trim()) {
+          // Preserve partial voice response cleanly
+          finalizeTurn(fullReply.trim());
+          isProcessingRef.current = false;
+          isSpeakingRef.current = true;
+          setCallState('speaking');
+          sentenceQueueRef.current?.finishStream();
+          return;
+        }
+        const abortReasonName = controller.signal.reason?.name || err?.name || '';
+        if (abortReasonName === 'AbortError' && abortReasonName !== 'TimeoutError') {
           isProcessingRef.current = false;
           return;
         }
@@ -669,9 +696,12 @@ export function VoiceCallModal({
         setCallState('error');
         setLastFailedPrompt(query);
         setErrorMessage(
-          err?.message || 'Unable to reach the AI assistant right now. Please try again.'
+          abortReasonName === 'TimeoutError'
+            ? 'The AI response timed out. Tap Retry to try again.'
+            : (err?.message || 'Unable to reach the AI assistant right now. Please try again.')
         );
       } finally {
+        if (voiceInactivityTimer !== null) clearTimeout(voiceInactivityTimer);
         if (abortControllerRef.current === controller) {
           abortControllerRef.current = null;
         }

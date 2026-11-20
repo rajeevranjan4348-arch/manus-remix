@@ -1122,77 +1122,108 @@ function geminiApiPlugin(): Plugin {
                 ? body.taskId.trim().slice(0, 120)
                 : requestId;
               const abortController = new AbortController();
-              res.on('close', () => {
-                if (!res.writableEnded) {
-                  abortController.abort();
-                  agentActivityHub.cancelActiveActivities(taskId, 'Client closed stream');
-                }
-              });
 
-              const inputMessages = body.messages || (body.prompt ? [{ role: 'user', content: body.prompt }] : []);
-              console.info(`[AI Stream] reqId=${requestId} taskId=${taskId} status=started messages=${Array.isArray(inputMessages) ? inputMessages.length : 0}`);
-
-              const stream = streamGeminiResponse({
-                messages: inputMessages,
-                systemInstruction: body.systemInstruction,
-                model: body.model || 'gemini-3-flash-preview',
-                thinkHarder: Boolean(body.thinkHarder),
-                signal: abortController.signal,
-                taskId,
-                onResearchProgress: (stageEvent) => {
-                  if (!clientAborted && !res.writableEnded) {
-                    res.write(`data: ${JSON.stringify({ type: 'research-stage', requestId, ...stageEvent })}\n\n`);
-                    if (typeof (res as any).flush === 'function') {
-                      (res as any).flush();
-                    }
-                  }
-                },
-                onActivity: (activityEvent) => {
-                  if (!clientAborted && !res.writableEnded) {
-                    res.write(`data: ${JSON.stringify({ type: 'agent-activity', requestId, taskId, event: activityEvent })}\n\n`);
-                    if (typeof (res as any).flush === 'function') {
-                      (res as any).flush();
-                    }
-                  }
-                },
-              });
-
-              for await (const delta of stream) {
-                if (clientAborted || res.writableEnded) break;
-                if (delta) {
-                  res.write(`data: ${JSON.stringify({ type: 'text-delta', delta, textDelta: delta, requestId })}\n\n`);
+              const safeWrite = (payload: string) => {
+                if (clientAborted || res.writableEnded) return;
+                try {
+                  res.write(payload);
                   if (typeof (res as any).flush === 'function') {
                     (res as any).flush();
                   }
+                } catch {
+                  clientAborted = true;
                 }
-              }
+              };
 
-              if (!clientAborted && !res.writableEnded) {
-                streamCircuitBreaker.recordSuccess();
-                console.info(`[AI Stream] reqId=${requestId} status=completed`);
-                res.write(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId })}\n\n`);
-                res.write('data: [DONE]\n\n');
-                res.end();
-              }
-            } catch (err: any) {
-              if (!clientAborted) {
-                streamCircuitBreaker.recordFailure();
-              }
-              console.error('[AI Stream Error]', err?.message || err);
+              // Immediate initial SSE event + periodic 5s heartbeat so proxies/clients never idle out
+              safeWrite(`data: ${JSON.stringify({ type: 'stream-open', requestId, taskId, timestamp: Date.now() })}\n\n`);
+              const heartbeatTimer = setInterval(() => {
+                if (clientAborted || res.writableEnded) return;
+                safeWrite(`: heartbeat ${Date.now()}\n\n`);
+                safeWrite(`data: ${JSON.stringify({ type: 'heartbeat', requestId, taskId, timestamp: Date.now() })}\n\n`);
+              }, 5000);
 
-              let userErrorMsg = '⚠️ Stream processing failed. Please verify your connection or try again.';
-              const errMsg = String(err?.message || err).toLowerCase();
-              if (errMsg.includes('quota') || errMsg.includes('429') || errMsg.includes('resource_exhausted')) {
-                userErrorMsg = '⚠️ API Rate limit or Quota exceeded. Please check your Gemini API plan or wait a few moments before retrying.';
-              } else if (errMsg.includes('timeout') || errMsg.includes('abort')) {
-                userErrorMsg = '⚠️ Stream connection timed out waiting for AI model. Please retry your request.';
-              } else if (err?.message) {
-                userErrorMsg = `⚠️ ${err.message}`;
-              }
+              const handleClose = () => {
+                if (!res.writableEnded) {
+                  clientAborted = true;
+                  clearInterval(heartbeatTimer);
+                  abortController.abort();
+                  agentActivityHub.cancelActiveActivities(taskId, 'Client closed stream');
+                }
+              };
+              res.on('close', handleClose);
+              req.on('close', handleClose);
+
+              let hasEmittedDeltas = false;
 
               try {
-                res.write(`data: ${JSON.stringify({ type: 'text-delta', delta: userErrorMsg })}\n\n`);
-                res.write(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error' })}\n\n`);
+                const inputMessages = body.messages || (body.prompt ? [{ role: 'user', content: body.prompt }] : []);
+                console.info(`[AI Stream] reqId=${requestId} taskId=${taskId} status=started messages=${Array.isArray(inputMessages) ? inputMessages.length : 0}`);
+
+                const stream = streamGeminiResponse({
+                  messages: inputMessages,
+                  systemInstruction: body.systemInstruction,
+                  model: body.model || 'gemini-3-flash-preview',
+                  thinkHarder: Boolean(body.thinkHarder),
+                  signal: abortController.signal,
+                  taskId,
+                  onResearchProgress: (stageEvent) => {
+                    safeWrite(`data: ${JSON.stringify({ type: 'research-stage', requestId, ...stageEvent })}\n\n`);
+                  },
+                  onActivity: (activityEvent) => {
+                    safeWrite(`data: ${JSON.stringify({ type: 'agent-activity', requestId, taskId, event: activityEvent })}\n\n`);
+                  },
+                });
+
+                for await (const delta of stream) {
+                  if (clientAborted || res.writableEnded) break;
+                  if (delta) {
+                    hasEmittedDeltas = true;
+                    safeWrite(`data: ${JSON.stringify({ type: 'text-delta', delta, textDelta: delta, requestId })}\n\n`);
+                  }
+                }
+
+                if (!clientAborted && !res.writableEnded) {
+                  streamCircuitBreaker.recordSuccess();
+                  console.info(`[AI Stream] reqId=${requestId} status=completed`);
+                  safeWrite(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId })}\n\n`);
+                  safeWrite('data: [DONE]\n\n');
+                  res.end();
+                }
+              } catch (streamErr: any) {
+                if (!clientAborted && !hasEmittedDeltas) {
+                  streamCircuitBreaker.recordFailure();
+                }
+                console.error('[AI Stream Error]', streamErr?.message || streamErr);
+
+                if (!clientAborted && !res.writableEnded) {
+                  if (hasEmittedDeltas) {
+                    // Preserve already-streamed partial tokens cleanly instead of overwriting with an error
+                    safeWrite(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', partialRecovery: true, requestId })}\n\n`);
+                    safeWrite('data: [DONE]\n\n');
+                    res.end();
+                  } else {
+                    let userErrorMsg = 'Stream processing failed. Please verify your connection or try again.';
+                    const errMsg = String(streamErr?.message || streamErr).toLowerCase();
+                    if (errMsg.includes('quota') || errMsg.includes('429') || errMsg.includes('resource_exhausted')) {
+                      userErrorMsg = 'API Rate limit or Quota exceeded. Please check your Gemini API plan or wait a few moments before retrying.';
+                    } else if (errMsg.includes('timeout') || errMsg.includes('abort')) {
+                      userErrorMsg = 'Stream connection timed out waiting for AI model. Please retry your request.';
+                    } else if (streamErr?.message) {
+                      userErrorMsg = streamErr.message;
+                    }
+                    safeWrite(`data: ${JSON.stringify({ type: 'error', error: userErrorMsg, requestId })}\n\n`);
+                    safeWrite(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error', error: userErrorMsg, requestId })}\n\n`);
+                    safeWrite('data: [DONE]\n\n');
+                    res.end();
+                  }
+                }
+              } finally {
+                clearInterval(heartbeatTimer);
+              }
+            } catch (err: any) {
+              try {
+                res.write(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error', error: err?.message || 'Invalid request payload' })}\n\n`);
                 res.write('data: [DONE]\n\n');
                 res.end();
               } catch {

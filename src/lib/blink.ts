@@ -101,13 +101,41 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
 
       const streamAbortController = new AbortController();
       activeStreamControllers.add(streamAbortController);
-      const timeoutId = setTimeout(() => {
+
+      const INACTIVITY_TIMEOUT_MS = 45000;
+      const MAX_CEILING_TIMEOUT_MS = 180000;
+      let inactivityTimerId: ReturnType<typeof setTimeout> | null = null;
+
+      const triggerTimeoutAbort = () => {
         try {
           streamAbortController.abort(new DOMException('The AI response timed out.', 'TimeoutError'));
         } catch {
           streamAbortController.abort();
         }
-      }, 38000);
+      };
+
+      const resetInactivityWatchdog = () => {
+        if (inactivityTimerId !== null) {
+          clearTimeout(inactivityTimerId);
+        }
+        inactivityTimerId = setTimeout(triggerTimeoutAbort, INACTIVITY_TIMEOUT_MS);
+        if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+          try {
+            window.dispatchEvent(new CustomEvent('manus_stream_heartbeat', { detail: { requestId, timestamp: Date.now() } }));
+          } catch {}
+        }
+      };
+
+      resetInactivityWatchdog();
+      const ceilingTimerId = setTimeout(triggerTimeoutAbort, MAX_CEILING_TIMEOUT_MS);
+
+      const clearAllWatchdogs = () => {
+        if (inactivityTimerId !== null) {
+          clearTimeout(inactivityTimerId);
+          inactivityTimerId = null;
+        }
+        clearTimeout(ceilingTimerId);
+      };
 
       if (normalizedOptions?.signal) {
         if (normalizedOptions.signal.aborted) {
@@ -218,12 +246,41 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
         const idToken = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => null) : null;
         const requestHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
         if (idToken) requestHeaders.Authorization = `Bearer ${idToken}`;
-        let res = await activeFetch('/api/gemini/stream', {
-          method: 'POST',
-          headers: requestHeaders,
-          signal: streamAbortController.signal,
-          body: payloadStr,
-        });
+
+        const fetchWithSafePreTokenRetry = async (url: string): Promise<Response> => {
+          const firstRes = await activeFetch(url, {
+            method: 'POST',
+            headers: requestHeaders,
+            signal: streamAbortController.signal,
+            body: payloadStr,
+          });
+          if (
+            firstRes &&
+            (firstRes.status === 502 || firstRes.status === 503 || firstRes.status === 504) &&
+            !streamAbortController.signal.aborted
+          ) {
+            await new Promise(r => setTimeout(r, 250));
+            resetInactivityWatchdog();
+            try {
+              const retryRes = await activeFetch(url, {
+                method: 'POST',
+                headers: requestHeaders,
+                signal: streamAbortController.signal,
+                body: payloadStr,
+              });
+              if (retryRes && typeof retryRes.status === 'number') {
+                try { await firstRes.body?.cancel(); } catch {}
+                return retryRes;
+              }
+            } catch {
+              // Keep original firstRes if retry fetch failed or was unmocked
+            }
+          }
+          return firstRes;
+        };
+
+        let res = await fetchWithSafePreTokenRetry('/api/gemini/stream');
+        resetInactivityWatchdog();
 
         const contentType = (res.headers?.get?.('content-type') || '').toLowerCase();
         if ((!res.ok || contentType.includes('text/html')) && !streamAbortController.signal.aborted) {
@@ -231,12 +288,16 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
           if (res.status === 404 || contentType.includes('text/html')) {
             try { await res.body?.cancel(); } catch {}
             try {
-              res = await activeFetch('/.netlify/functions/agent', {
+              const fallbackRes = await activeFetch('/.netlify/functions/agent', {
                 method: 'POST',
                 headers: requestHeaders,
                 signal: streamAbortController.signal,
                 body: payloadStr,
               });
+              if (fallbackRes && typeof fallbackRes.status === 'number') {
+                res = fallbackRes;
+                resetInactivityWatchdog();
+              }
             } catch {}
           }
         }
@@ -379,6 +440,7 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
           let currentSseEventType = '';
 
           const processSseLine = (rawLine: string) => {
+            resetInactivityWatchdog();
             const trimmed = rawLine.trim();
             if (!trimmed) {
               currentSseEventType = '';
@@ -408,6 +470,11 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
             try {
               const parsed = JSON.parse(jsonStr);
               const eventType = String(parsed.type || currentSseEventType || '').toLowerCase();
+
+              // Ignore keep-alive heartbeat and stream-open metadata frames (they already reset the watchdog)
+              if (eventType === 'heartbeat' || eventType === 'ping' || eventType === 'stream-open') {
+                return;
+              }
 
               if (eventType === 'agent-activity') {
                 const rawEvent = parsed.event && typeof parsed.event === 'object' ? parsed.event : parsed;
@@ -468,22 +535,34 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
                 return;
               }
               if (eventType === 'error') {
-                finishReason = 'error';
                 const errMsg = parsed.error || parsed.message || serviceFailureMessage;
                 serviceFailureMessage = String(errMsg);
-                if (!accumulatedText.trim()) {
-                  emitTextDelta(String(errMsg));
+                if (accumulatedText.trim().length > 0) {
+                  // Preserve partial response if tokens were already generated
+                  finishReason = 'stop';
+                  sendEvent({ type: 'finish', finishReason: 'stop', partialRecovery: true });
+                } else {
+                  finishReason = 'error';
+                  sendEvent({
+                    type: 'text-delta',
+                    textDelta: String(errMsg),
+                    delta: String(errMsg),
+                    content: String(errMsg),
+                    errorDelta: true,
+                  });
+                  sendEvent({ type: 'finish', finishReason: 'error', error: String(errMsg) });
                 }
-                sendEvent({ type: 'finish', finishReason: 'error', error: String(errMsg) });
                 return;
               }
               if (eventType === 'finish' || eventType === 'done') {
                 finishEmitted = true;
-                if (parsed.finishReason === 'error') {
+                if (parsed.finishReason === 'error' && !accumulatedText.trim()) {
                   finishReason = 'error';
                   if (parsed.error) serviceFailureMessage = String(parsed.error);
+                } else if (accumulatedText.trim().length > 0) {
+                  finishReason = 'stop';
                 }
-                sendEvent({ ...parsed, type: 'finish', finishReason: parsed.finishReason || finishReason });
+                sendEvent({ ...parsed, type: 'finish', finishReason });
                 return;
               }
               sendEvent(parsed);
@@ -496,6 +575,7 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
+              resetInactivityWatchdog();
               lineBuffer += decoder.decode(value, { stream: true });
               const lines = lineBuffer.split('\n');
               lineBuffer = lines.pop() || '';
@@ -517,7 +597,17 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
             streamFinalized = true;
             if (!accumulatedText.trim()) {
               finishReason = 'error';
-              emitTextDelta(serviceFailureMessage);
+              // Emit SDK-stream error frame without dispatching manus_stream_delta to the live chat bubble
+              sendEvent({
+                type: 'text-delta',
+                textDelta: serviceFailureMessage,
+                delta: serviceFailureMessage,
+                content: serviceFailureMessage,
+                errorDelta: true,
+              });
+            } else {
+              // Preserve partial or completed response even if finish event was not explicitly sent
+              finishReason = 'stop';
             }
             if (!finishEmitted) {
               sendEvent({
@@ -538,23 +628,36 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
           return;
         }
       } catch (err: any) {
-        finishReason = 'error';
-        const errName = err?.name || streamAbortController.signal.reason?.name || '';
-        if (errName === 'TimeoutError') {
-          serviceFailureMessage = 'The AI response timed out. Please try again.';
-        } else if (errName === 'AbortError') {
-          serviceFailureMessage = 'Generation was stopped.';
-        } else if (err instanceof TypeError) {
-          serviceFailureMessage = 'Could not reach the AI server. Check your internet connection and try again.';
+        if (accumulatedText.trim().length > 0) {
+          // Partial content was already streamed before interruption — preserve it cleanly!
+          finishReason = 'stop';
+          console.info('[AI Studio] Preserved partial streamed response after connection interruption.');
+        } else {
+          finishReason = 'error';
+          const errName = err?.name || streamAbortController.signal.reason?.name || '';
+          if (errName === 'TimeoutError') {
+            serviceFailureMessage = 'The AI response timed out. Please try again.';
+          } else if (errName === 'AbortError') {
+            serviceFailureMessage = 'Generation was stopped.';
+          } else if (err instanceof TypeError) {
+            serviceFailureMessage = 'Could not reach the AI server. Check your internet connection and try again.';
+          }
+          console.warn('[AI Studio] Gemini stream request failed:', err?.message || err);
         }
-        console.warn('[AI Studio] Gemini stream request failed:', err?.message || err);
       } finally {
-        clearTimeout(timeoutId);
+        clearAllWatchdogs();
         activeStreamControllers.delete(streamAbortController);
         if (!streamFinalized && !streamClosed) {
           streamFinalized = true;
-          if (!accumulatedText.trim()) {
-            emitTextDelta(serviceFailureMessage);
+          if (!accumulatedText.trim() && finishReason === 'error') {
+            // Emit SDK-stream error frame WITHOUT dispatching manus_stream_delta to live chat bubble
+            sendEvent({
+              type: 'text-delta',
+              textDelta: serviceFailureMessage,
+              delta: serviceFailureMessage,
+              content: serviceFailureMessage,
+              errorDelta: true,
+            });
           }
           if (!finishEmitted) {
             sendEvent({

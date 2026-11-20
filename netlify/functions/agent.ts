@@ -15,6 +15,15 @@ import { geminiCircuitBreaker, openRouterCircuitBreaker } from '../../server/cir
 import { recoveryTelemetry } from '../../server/recoveryTelemetry';
 import { parseJsonBodyLimited } from '../../server/limitedJsonBody';
 import { agentActivityHub, AgentActivityEvent } from '../../server/agentActivityService';
+import {
+  DEFAULT_TIMEOUT_BUDGETS,
+  resolveCandidateModels,
+  classifyGeminiError,
+  computeBackoffDelayMs,
+  abortableDelay,
+  createScopedAbortController,
+  iterateStreamWithTimeouts,
+} from '../../server/streamReliability';
 
 const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -238,8 +247,14 @@ export default async (req: Request) => {
       pushBufferedActivity
     );
 
+    const researchScope = createScopedAbortController(
+      DEFAULT_TIMEOUT_BUDGETS.rtieResearchMaxMs,
+      req.signal,
+      'RTIE research budget exceeded'
+    );
     try {
       realtimeSnapshot = await orchestrateRealtimeResearch(latestUserText, {
+        signal: researchScope.controller.signal,
         onProgress: (ev) => {
           collectedStages.push(ev);
           agentActivityHub.emit({
@@ -265,8 +280,10 @@ export default async (req: Request) => {
           : `Intent: ${realtimeSnapshot.route.category}`
       );
     } catch (rtErr) {
-      analyzeHandle.fail(rtErr);
+      analyzeHandle.complete('Intent analysis completed (bounded research)');
       console.warn('[Netlify RTIE] Research orchestration notice:', rtErr);
+    } finally {
+      researchScope.cleanup();
     }
 
     const useGoogleSearch = Boolean(
@@ -293,14 +310,7 @@ export default async (req: Request) => {
       });
     }
 
-    const candidateModels = Array.from(new Set([
-      configuredModelId,
-      'gemini-3-flash-preview',
-      'gemini-2.5-flash',
-      'gemini-flash-latest',
-      'gemini-3.1-flash-lite-preview',
-      'gemini-3.1-pro-preview'
-    ]));
+    const candidateModels = resolveCandidateModels(configuredModelId);
 
     let systemInstruction = body.systemInstruction ||
       'You are Manus, an intelligent AI workspace agent. Provide direct, helpful, and high-quality responses. Answer factual questions directly. Do not generate fake reports or fake charts unless specifically asked for them. Never expose private internal chain-of-thought.';
@@ -331,7 +341,7 @@ export default async (req: Request) => {
             method: 'POST',
             headers: { Authorization: `Bearer ${firecrawlKey}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ query: latestUserText.slice(0, 1000), limit: 5, sources: [{ type: 'web' }] }),
-            signal: AbortSignal.timeout(8000),
+            signal: AbortSignal.timeout(4500),
           });
           if (!response.ok) throw new Error(`Firecrawl HTTP ${response.status}`);
           const payload: any = await response.json();
@@ -352,7 +362,7 @@ export default async (req: Request) => {
           if (process.env.AGENT_REACH_BRIDGE_TOKEN) headers.Authorization = `Bearer ${process.env.AGENT_REACH_BRIDGE_TOKEN}`;
           const response = await fetch(parsed.toString(), {
             method: 'POST', headers, body: JSON.stringify({ query: latestUserText.slice(0, 1000), limit: 5 }),
-            signal: AbortSignal.timeout(8000),
+            signal: AbortSignal.timeout(4500),
           });
           if (!response.ok) throw new Error(`Agent Reach bridge HTTP ${response.status}`);
           const payload: any = await response.json();
@@ -420,136 +430,195 @@ export default async (req: Request) => {
           const sources = new Map<string, string>();
           for (const [url, title] of externalSources) sources.set(url, title);
           let hasEmittedText = false;
+          let streamClosed = false;
+
+          const safeEnqueue = (payload: string) => {
+            if (streamClosed || req.signal?.aborted) return;
+            try {
+              controller.enqueue(encoder.encode(payload));
+            } catch {
+              streamClosed = true;
+            }
+          };
+
+          // Immediate stream-open frame + periodic SSE heartbeats
+          safeEnqueue(`data: ${JSON.stringify({ type: 'stream-open', requestId, taskId, timestamp: Date.now() })}\n\n`);
+          const heartbeatTimer = setInterval(() => {
+            if (streamClosed || req.signal?.aborted) return;
+            safeEnqueue(`: heartbeat ${Date.now()}\n\n`);
+            safeEnqueue(`data: ${JSON.stringify({ type: 'heartbeat', requestId, taskId, timestamp: Date.now() })}\n\n`);
+          }, DEFAULT_TIMEOUT_BUDGETS.sseHeartbeatIntervalMs);
 
           const emitSseActivity = (act: AgentActivityEvent) => {
-            controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify({ type: 'agent-activity', requestId, taskId, event: act })}\n\n`)
-            );
+            safeEnqueue(`data: ${JSON.stringify({ type: 'agent-activity', requestId, taskId, event: act })}\n\n`);
           };
 
           for (const act of bufferedActivities) {
             emitSseActivity(act);
           }
 
+          const waterfallStartMs = Date.now();
+
           try {
-            const toolConfigs = useGoogleSearch ? [{ tools: [{ googleSearch: {} }] }, {}] : [{}];
+            const needsModelSearchGrounding = useGoogleSearch && externalSources.size === 0 && !realtimeSnapshot?.directFallbackMarkdown;
+            const toolConfigs = needsModelSearchGrounding ? [{ tools: [{ googleSearch: {} }] }, {}] : [{}];
+
             modelLoop: for (const model of candidateModels) {
+              if (req.signal?.aborted) break modelLoop;
+              if (Date.now() - waterfallStartMs > DEFAULT_TIMEOUT_BUDGETS.totalWaterfallBudgetMs) {
+                break modelLoop;
+              }
+
               for (const toolCfg of toolConfigs) {
+                if (req.signal?.aborted) break modelLoop;
                 if (!geminiCircuitBreaker.canAttempt()) {
                   recoveryTelemetry.record({ component: 'gemini', action: 'circuit_open', outcome: 'degraded', statusCode: 503, requestId });
                   break modelLoop;
                 }
                 const hasSearchTool = Boolean((toolCfg as any).tools);
-                const modelHandle = agentActivityHub.startActivity(
-                  taskId,
-                  {
-                    title: hasSearchTool ? `Querying ${model} with live web grounding` : `Generating response with ${model}`,
-                    description: 'Streaming completion from Gemini API',
-                    toolName: hasSearchTool ? 'gemini_google_search' : 'gemini_model',
-                    category: 'model',
-                  },
-                  emitSseActivity
-                );
-                try {
-                  const responseStream = await ai!.models.generateContentStream({
-                    model,
-                    contents,
-                    config: {
-                      systemInstruction,
-                      ...toolCfg,
+                const firstTokenBudgetMs = hasSearchTool
+                  ? DEFAULT_TIMEOUT_BUDGETS.firstTokenWithSearchTimeoutMs
+                  : DEFAULT_TIMEOUT_BUDGETS.firstTokenTimeoutMs;
+
+                const maxAttemptsForConfig = 2;
+                for (let attemptIdx = 0; attemptIdx < maxAttemptsForConfig; attemptIdx++) {
+                  const modelHandle = agentActivityHub.startActivity(
+                    taskId,
+                    {
+                      title: hasSearchTool ? `Querying ${model} with live web grounding` : `Generating response with ${model}`,
+                      description: 'Streaming completion from Gemini API',
+                      toolName: hasSearchTool ? 'gemini_google_search' : 'gemini_model',
+                      category: 'model',
                     },
-                  });
-
+                    emitSseActivity
+                  );
                   let charCount = 0;
-                  for await (const chunk of responseStream) {
-                    const text = chunk.text;
-                    if (text) {
-                      hasEmittedText = true;
-                      charCount += text.length;
-                      controller.enqueue(
-                        encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: text, textDelta: text, requestId })}\n\n`)
-                      );
-                    }
+                  try {
+                    const guardedStream = iterateStreamWithTimeouts(
+                      () =>
+                        ai!.models.generateContentStream({
+                          model,
+                          contents,
+                          config: {
+                            systemInstruction,
+                            ...toolCfg,
+                          },
+                        }),
+                      {
+                        firstTokenTimeoutMs: firstTokenBudgetMs,
+                        chunkIdleTimeoutMs: DEFAULT_TIMEOUT_BUDGETS.chunkIdleTimeoutMs,
+                        signal: req.signal,
+                        extractText: (chunk: any) => String(chunk?.text || ''),
+                      }
+                    );
 
-                    const groundingChunks = chunk?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-                    for (const groundingChunk of groundingChunks) {
-                      const web = groundingChunk?.web;
-                      if (typeof web?.uri === 'string' && /^https?:\/\//i.test(web.uri)) {
-                        sources.set(web.uri, typeof web.title === 'string' && web.title.trim() ? web.title : web.uri);
+                    for await (const chunk of guardedStream) {
+                      if (req.signal?.aborted) {
+                        modelHandle.cancel('Generation cancelled by client');
+                        break modelLoop;
+                      }
+                      const text = chunk.text;
+                      if (text) {
+                        hasEmittedText = true;
+                        charCount += text.length;
+                        safeEnqueue(`data: ${JSON.stringify({ type: 'text-delta', delta: text, textDelta: text, requestId })}\n\n`);
+                      }
+
+                      const groundingChunks = chunk?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+                      for (const groundingChunk of groundingChunks) {
+                        const web = groundingChunk?.web;
+                        if (typeof web?.uri === 'string' && /^https?:\/\//i.test(web.uri)) {
+                          sources.set(web.uri, typeof web.title === 'string' && web.title.trim() ? web.title : web.uri);
+                        }
                       }
                     }
-                  }
 
-                  geminiCircuitBreaker.recordSuccess();
-                  recoveryTelemetry.record({ component: 'gemini', action: 'provider_recovered', outcome: 'success', requestId });
-                  if (hasEmittedText) {
-                    modelHandle.complete(`Streamed ${charCount} chars from ${model}`);
-                    break modelLoop;
-                  }
-                  modelHandle.fail('Empty stream response; trying fallback');
-                } catch (err: any) {
-                  modelHandle.fail(`Model ${model} unavailable; trying fallback`);
-                  geminiCircuitBreaker.recordFailure(err);
-                  recoveryTelemetry.record({
-                    component: 'gemini',
-                    action: 'provider_fallback',
-                    outcome: 'failed',
-                    statusCode: Number.isInteger(err?.status) ? err.status : undefined,
-                    requestId,
-                  });
-                  const errMsg = String(err?.message || '');
-                  if (err?.status === 401 || err?.status === 403 || errMsg.includes('API_KEY_INVALID') || errMsg.includes('API key not valid')) {
-                    break modelLoop;
-                  }
-                  if (hasEmittedText) {
-                    break modelLoop;
+                    geminiCircuitBreaker.recordSuccess();
+                    recoveryTelemetry.record({ component: 'gemini', action: 'provider_recovered', outcome: 'success', requestId });
+                    if (hasEmittedText) {
+                      modelHandle.complete(`Streamed ${charCount} chars from ${model}`);
+                      break modelLoop;
+                    }
+                    modelHandle.fail('Empty stream response; trying fallback');
+                    break;
+                  } catch (err: any) {
+                    if (req.signal?.aborted) {
+                      modelHandle.cancel('Generation cancelled by client');
+                      break modelLoop;
+                    }
+                    if (hasEmittedText && charCount > 0) {
+                      modelHandle.complete(`Streamed ${charCount} chars (recovered partial stream)`);
+                      break modelLoop;
+                    }
+
+                    const classified = classifyGeminiError(err, Boolean(req.signal?.aborted));
+                    modelHandle.fail(`Model ${model} (${classified.category}); trying fallback`);
+                    geminiCircuitBreaker.recordFailure(err);
+                    recoveryTelemetry.record({
+                      component: 'gemini',
+                      action: 'provider_fallback',
+                      outcome: 'failed',
+                      statusCode: classified.statusCode,
+                      requestId,
+                    });
+
+                    if (classified.abortWaterfall) {
+                      break modelLoop;
+                    }
+
+                    if (
+                      classified.retrySameModel &&
+                      attemptIdx + 1 < maxAttemptsForConfig &&
+                      Date.now() - waterfallStartMs < DEFAULT_TIMEOUT_BUDGETS.totalWaterfallBudgetMs - 4000
+                    ) {
+                      const delayMs = computeBackoffDelayMs(attemptIdx);
+                      await abortableDelay(delayMs, req.signal);
+                      continue;
+                    }
+
+                    if (classified.skipModelEntirely) {
+                      continue modelLoop;
+                    }
+                    break;
                   }
                 }
               }
             }
 
-            if (!hasEmittedText) {
+            if (!hasEmittedText && !req.signal?.aborted) {
               const fallback = buildFallbackAnswer(latestUserText, configuredModelId, realtimeSnapshot);
-              controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: fallback, textDelta: fallback, requestId })}\n\n`)
-              );
+              safeEnqueue(`data: ${JSON.stringify({ type: 'text-delta', delta: fallback, textDelta: fallback, requestId })}\n\n`);
+              hasEmittedText = true;
             }
 
-            if (useGoogleSearch && sources.size > 0) {
+            if (useGoogleSearch && sources.size > 0 && hasEmittedText && !req.signal?.aborted) {
               const sourceMarkdown = '\n\n**Sources**\n' + Array.from(sources.entries())
                 .slice(0, 8)
                 .map(([url, title]) => `- [${title.replace(/[\[\]]/g, '')}](${url})`)
                 .join('\n');
-              controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: sourceMarkdown, textDelta: sourceMarkdown, requestId })}\n\n`)
-              );
+              safeEnqueue(`data: ${JSON.stringify({ type: 'text-delta', delta: sourceMarkdown, textDelta: sourceMarkdown, requestId })}\n\n`);
             }
 
-            controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId })}\n\n`)
-            );
-            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+            safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId })}\n\n`);
+            safeEnqueue('data: [DONE]\n\n');
           } catch (err: any) {
             try {
-              if (!hasEmittedText) {
+              if (!hasEmittedText && !req.signal?.aborted) {
                 const fallback = buildFallbackAnswer(latestUserText, configuredModelId, realtimeSnapshot);
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: fallback, textDelta: fallback, requestId })}\n\n`)
-                );
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId })}\n\n`)
-                );
+                safeEnqueue(`data: ${JSON.stringify({ type: 'text-delta', delta: fallback, textDelta: fallback, requestId })}\n\n`);
+                safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId })}\n\n`);
+              } else if (hasEmittedText) {
+                // Preserve already-streamed tokens cleanly
+                safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', partialRecovery: true, requestId })}\n\n`);
               } else {
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({ type: 'error', error: err?.message || 'Stream error', requestId })}\n\n`)
-                );
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error', requestId })}\n\n`)
-                );
+                safeEnqueue(`data: ${JSON.stringify({ type: 'error', error: err?.message || 'Stream error', requestId })}\n\n`);
+                safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error', requestId })}\n\n`);
               }
-              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+              safeEnqueue('data: [DONE]\n\n');
             } catch {}
           } finally {
+            clearInterval(heartbeatTimer);
+            streamClosed = true;
             try { controller.close(); } catch {}
           }
         },
