@@ -1765,6 +1765,13 @@ export function ChatView({
                 activePlugins={activePlugins}
                 onTogglePlugin={handleTogglePlugin}
                 onSendMessageToChat={(text) => onSubmit(text)}
+                voiceContextMessages={messages
+                  .filter((message: any) =>
+                    (message?.role === 'user' || message?.role === 'assistant') &&
+                    typeof message?.content === 'string' && message.content.trim(),
+                  )
+                  .slice(-12)
+                  .map((message: any) => ({ role: message.role, content: message.content }))}
                 onOpenGoogleDrivePicker={() => setIsDrivePickerOpen(true)}
                 onOpenConnectors={() => setIsConnectorsMenuOpen(true)}
               >

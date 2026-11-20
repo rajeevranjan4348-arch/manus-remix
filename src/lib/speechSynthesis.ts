@@ -13,6 +13,8 @@ export interface SpeakOptions {
   pitch?: number;
   volume?: number;
   voicePersona?: string;
+  /** Queue this utterance behind current speech instead of interrupting it. */
+  queue?: boolean;
   onStart?: () => void;
   onEnd?: () => void;
   onError?: (err: any) => void;
@@ -229,8 +231,9 @@ export function speakCleanHumanVoice(text: string, options: SpeakOptions = {}): 
   }
 
   const synth = window.speechSynthesis;
-  // Cancel any ongoing speech for an immediate, crisp start
-  synth.cancel();
+  // Normal replies replace the previous utterance; streamed replies opt into
+  // queueing short chunks so audio can start before the model finishes.
+  if (!options.queue) synth.cancel();
 
   const cleaned = cleanTextForSpeech(text);
   if (!cleaned) return false;

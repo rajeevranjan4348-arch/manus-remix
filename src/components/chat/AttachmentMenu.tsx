@@ -3,7 +3,9 @@ import { Camera, Image, Paperclip, Brain, Check, PhoneCall, Plug } from 'lucide-
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import { VoiceCallModal } from '../voice/VoiceCallModal';
+const VoiceCallModal = React.lazy(() =>
+  import('../voice/VoiceCallModal').then((module) => ({ default: module.VoiceCallModal }))
+);
 import { LiveCameraModal } from '../camera/LiveCameraModal';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
 import { validateFile } from '@/lib/fileValidation';
@@ -15,6 +17,7 @@ export interface AttachmentMenuProps {
   activePlugins?: string[];
   onTogglePlugin?: (pluginId: string) => void;
   onSendMessageToChat?: (text: string) => void;
+  voiceContextMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
   onOpenGoogleDrivePicker?: () => void;
   onOpenConnectors?: () => void;
   children?: React.ReactNode;
@@ -27,6 +30,7 @@ export function AttachmentMenu({
   activePlugins = ['web_search', 'code_sandbox', 'charts'],
   onTogglePlugin,
   onSendMessageToChat,
+  voiceContextMessages,
   onOpenGoogleDrivePicker,
   onOpenConnectors,
   children,
@@ -264,11 +268,16 @@ export function AttachmentMenu({
       </Popover>
 
       {/* Fullscreen Voice Call Modal (Matches Reference Screenshots) */}
-      <VoiceCallModal
-        isOpen={isVoiceCallOpen}
-        onClose={() => setIsVoiceCallOpen(false)}
-        onSendMessageToChat={onSendMessageToChat}
-      />
+      {isVoiceCallOpen && (
+        <React.Suspense fallback={<div role="status" className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 text-sm text-white">Opening voice call…</div>}>
+          <VoiceCallModal
+            isOpen
+            onClose={() => setIsVoiceCallOpen(false)}
+            onSendMessageToChat={onSendMessageToChat}
+            initialContextMessages={voiceContextMessages}
+          />
+        </React.Suspense>
+      )}
 
       {/* Live Camera Modal (Real-time preview, front/rear toggle, photo capture) */}
       <LiveCameraModal

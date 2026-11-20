@@ -1,107 +1,88 @@
 import React from 'react';
 
+type VoiceCallVisualState = 'connecting' | 'listening' | 'thinking' | 'searching' | 'speaking' | 'ready' | 'paused' | 'error';
+
 type VoicePulseOrbProps = {
-  callStatus: 'listening' | 'speaking' | 'thinking' | 'paused';
+  callStatus: VoiceCallVisualState;
   audioLevel?: number;
   className?: string;
 };
 
-/**
- * Soft, organic voice-call orb inspired by the supplied reference clip.
- * Dynamic CSS variables sync scale, aura expansion, glow and morphing speed with live audio input levels.
- */
-export function VoicePulseOrb({ callStatus, audioLevel = 0, className = '' }: VoicePulseOrbProps) {
-  // Normalize and scale audio input level for smooth visual responsiveness
-  const effectiveLevel = callStatus === 'speaking' 
-    ? Math.max(audioLevel, 0.45) 
-    : callStatus === 'thinking'
-      ? 0.2
-      : Math.min(1.0, Math.max(0, audioLevel));
+const ORB_STYLES = `
+  .voice-pulse-orb-stage { width: min(78vw, 390px); height: min(78vw, 390px); isolation: isolate; contain: layout paint; }
+  .voice-pulse-orb-stage::before, .voice-pulse-orb-stage::after { content: ""; position: absolute; inset: 4%; border-radius: 50%; pointer-events: none; }
+  .voice-pulse-orb-stage::before {
+    inset: 8%; background: radial-gradient(circle, rgba(251, 119, 32, .38) 0%, rgba(193, 49, 24, .19) 38%, transparent 72%);
+    filter: blur(28px); opacity: .7; transform: scale(var(--aura-scale, 1.05));
+    animation: voice-orb-aura 4s ease-in-out infinite; will-change: transform, opacity;
+  }
+  .voice-pulse-orb-stage::after {
+    inset: 2%; border: 1px solid rgba(255, 173, 83, .13);
+    box-shadow: inset 0 0 54px rgba(255, 110, 30, .055), 0 0 44px rgba(193, 48, 20, .08);
+  }
+  .voice-pulse-orb-halo { position: absolute; width: 80%; aspect-ratio: 1; border: 1px solid rgba(255, 174, 99, .16); border-radius: 50%; transform: rotateX(68deg) rotate(-16deg); box-shadow: 0 0 18px rgba(255, 118, 40, .1); }
+  .voice-pulse-orb-shell {
+    position: relative; width: 70%; aspect-ratio: 1; z-index: 1; border-radius: 50%; display: grid; place-items: center;
+    background: radial-gradient(circle at 32% 20%, rgba(255,255,255,.26), transparent 26%), radial-gradient(circle at 72% 78%, rgba(202,45,25,.24), transparent 47%), #140c0a;
+    box-shadow: 0 0 30px rgba(255, 105, 30, .32), 0 0 100px rgba(196, 39, 20, .18), inset 0 0 17px rgba(255,255,255,.11), inset -12px -18px 30px rgba(0,0,0,.62);
+    transform: scale(var(--orb-scale, 1)); transition: transform 100ms ease-out, box-shadow 220ms ease-out;
+    animation: voice-orb-float 5s ease-in-out infinite; will-change: transform;
+  }
+  .voice-pulse-orb-core {
+    position: absolute; inset: 7%; overflow: hidden; border-radius: 50%;
+    background: radial-gradient(ellipse at 30% 23%, #fff6df 0%, #ffd189 8%, #ff9b43 21%, #f36b29 39%, #d64128 62%, #761d18 83%, #2a100e 100%);
+    box-shadow: inset 5px 7px 18px rgba(255,255,255,.34), inset -18px -24px 32px rgba(56,11,10,.58), 0 0 42px rgba(255,104,34,.43);
+    animation: voice-orb-light 8s ease-in-out infinite; will-change: background-position, transform;
+  }
+  .voice-pulse-orb-core::before {
+    content: ""; position: absolute; inset: 0; border-radius: inherit;
+    background: radial-gradient(ellipse at 29% 23%, rgba(255,255,255,.76) 0%, rgba(255,245,219,.27) 9%, transparent 28%), radial-gradient(ellipse at 75% 78%, rgba(39,8,8,.6) 0%, transparent 40%);
+  }
+  .voice-pulse-orb-core::after {
+    content: ""; position: absolute; width: 60%; height: 23%; top: 13%; left: 15%; border-radius: 50%;
+    background: linear-gradient(105deg, rgba(255,255,255,.42), rgba(255,255,255,.07) 48%, transparent 75%); filter: blur(6px); transform: rotate(-28deg);
+  }
+  .voice-pulse-orb-stage[data-status="connecting"] .voice-pulse-orb-halo { animation: voice-orb-connect 1.8s ease-out infinite; }
+  .voice-pulse-orb-stage[data-status="listening"] .voice-pulse-orb-shell { box-shadow: 0 0 34px rgba(255, 128, 37, .42), 0 0 104px rgba(215, 52, 25, .24), inset 0 0 17px rgba(255,255,255,.12), inset -12px -18px 30px rgba(0,0,0,.62); }
+  .voice-pulse-orb-stage[data-status="thinking"] .voice-pulse-orb-core,
+  .voice-pulse-orb-stage[data-status="searching"] .voice-pulse-orb-core { animation: voice-orb-think 3s linear infinite; }
+  .voice-pulse-orb-stage[data-status="speaking"] .voice-pulse-orb-shell { animation: voice-orb-speak 1.15s ease-in-out infinite; }
+  .voice-pulse-orb-stage[data-status="ready"] .voice-pulse-orb-shell { animation-duration: 6s; }
+  .voice-pulse-orb-stage[data-status="paused"] .voice-pulse-orb-shell { animation-play-state: paused; opacity: .72; filter: saturate(.62); }
+  .voice-pulse-orb-stage[data-status="error"] .voice-pulse-orb-shell { box-shadow: 0 0 38px rgba(239, 68, 68, .38), 0 0 100px rgba(185, 28, 28, .24), inset 0 0 16px rgba(255,255,255,.08); }
+  .voice-pulse-orb-stage[data-status="error"] .voice-pulse-orb-core { background: radial-gradient(ellipse at 30% 23%, #ffe1d7 0%, #ff9a73 15%, #e84732 43%, #7a1718 78%, #250b0b 100%); }
+  @keyframes voice-orb-float { 0%,100% { transform: translateY(0) scale(var(--orb-scale, 1)); } 50% { transform: translateY(-7px) scale(var(--float-scale, 1.025)); } }
+  @keyframes voice-orb-speak { 0%,100% { transform: translateY(0) scale(1.01); } 50% { transform: translateY(-4px) scale(1.065); } }
+  @keyframes voice-orb-light { 0%,100% { filter: saturate(1); } 50% { filter: saturate(1.14) brightness(1.05); } }
+  @keyframes voice-orb-think { to { transform: rotate(360deg); } }
+  @keyframes voice-orb-aura { 0%,100% { opacity: .56; transform: scale(1); } 50% { opacity: .84; transform: scale(1.12); } }
+  @keyframes voice-orb-connect { 0% { transform: rotateX(68deg) rotate(-16deg) scale(.84); opacity: .25; } 70%,100% { transform: rotateX(68deg) rotate(-16deg) scale(1.18); opacity: .85; } }
+  @media (prefers-reduced-motion: reduce) {
+    .voice-pulse-orb-stage::before, .voice-pulse-orb-halo, .voice-pulse-orb-shell, .voice-pulse-orb-core { animation-duration: 12s !important; }
+  }
+`;
 
-  const orbScale = 1 + effectiveLevel * 0.35;
-  const auraScale = 1.1 + effectiveLevel * 0.55;
-  const auraOpacity = 0.5 + effectiveLevel * 0.45;
-  const glowSize = 18 + effectiveLevel * 38;
-  const morphDuration = Math.max(1.0, 4.8 - effectiveLevel * 3.2);
+/** Warm, layered voice orb. Listening reactivity is driven by real microphone input. */
+export function VoicePulseOrb({ callStatus, audioLevel = 0, className = '' }: VoicePulseOrbProps) {
+  const normalizedLevel = callStatus === 'listening'
+    ? Math.min(1, Math.max(0, audioLevel))
+    : 0;
+  const orbScale = 1 + normalizedLevel * 0.16;
+  const auraScale = 1.05 + normalizedLevel * 0.2;
+  const floatScale = orbScale + 0.025;
 
   return (
     <div
       className={`voice-pulse-orb-stage relative flex items-center justify-center select-none ${className}`}
       data-status={callStatus}
-      style={{
-        '--audio-level': effectiveLevel,
-        '--orb-scale': orbScale,
-        '--aura-scale': auraScale,
-        '--aura-opacity': auraOpacity,
-        '--glow-size': `${glowSize}px`,
-        '--morph-duration': `${morphDuration}s`,
-      } as React.CSSProperties}
+      style={{ '--audio-level': normalizedLevel, '--orb-scale': orbScale, '--aura-scale': auraScale, '--float-scale': floatScale } as React.CSSProperties}
       role="img"
-      aria-label={callStatus === 'speaking' ? 'Assistant speaking' : callStatus === 'thinking' ? 'Assistant thinking' : callStatus === 'paused' ? 'Voice call paused' : 'Listening'}
+      aria-label={`AI voice orb, ${callStatus}`}
     >
-      <style>{`
-        .voice-pulse-orb-stage { width: min(68vw, 280px); height: min(68vw, 280px); isolation: isolate; }
-        .voice-pulse-orb-stage::before, .voice-pulse-orb-stage::after {
-          content: ""; position: absolute; inset: 9%; border-radius: 50%; pointer-events: none;
-        }
-        .voice-pulse-orb-stage::before {
-          background: radial-gradient(circle, rgba(236,72,153,.28) 0%, rgba(168,85,247,.16) 35%, transparent 72%);
-          filter: blur(25px);
-          transform: scale(var(--aura-scale, 1.25));
-          opacity: var(--aura-opacity, 0.55);
-          transition: transform 0.08s ease-out, opacity 0.08s ease-out;
-          animation: voice-orb-aura 3.2s ease-in-out infinite;
-        }
-        .voice-pulse-orb-stage::after {
-          inset: 4%; border: 1px solid rgba(255,255,255,.055);
-          box-shadow: 0 0 38px rgba(168,85,247,.05), inset 0 0 32px rgba(0,0,0,.08);
-        }
-        .voice-pulse-orb-shell {
-          position: relative; width: 31%; aspect-ratio: 1; z-index: 1; border-radius: 50%;
-          display: grid; place-items: center;
-          background: radial-gradient(circle at 35% 25%, rgba(255,255,255,.28), transparent 38%);
-          box-shadow: 0 0 var(--glow-size, 18px) rgba(236,72,153,.45), 0 0 45px rgba(168,85,247,.28), inset 0 0 12px rgba(255,255,255,.18);
-          transform: scale(var(--orb-scale, 1));
-          transition: transform 0.08s cubic-bezier(0.1, 0.9, 0.2, 1), box-shadow 0.1s ease-out;
-          animation: voice-orb-float 3s ease-in-out infinite;
-        }
-        .voice-pulse-orb-core {
-          position: absolute; inset: 9%; border-radius: 42% 58% 55% 45% / 46% 42% 58% 54%;
-          background: radial-gradient(ellipse at 34% 25%, #ffb7a3 0%, #ff718e 24%, #ed4eaa 52%, #a83ce1 78%, #6539bd 100%);
-          box-shadow: inset 2px 3px 9px rgba(255,255,255,.36), inset -7px -10px 16px rgba(73,20,119,.38), 0 0 var(--glow-size, 22px) rgba(236,72,153,.58);
-          filter: saturate(calc(1.08 + var(--audio-level, 0) * 0.6));
-          animation: voice-orb-morph var(--morph-duration, 4.8s) ease-in-out infinite, voice-orb-color 9s linear infinite;
-        }
-        .voice-pulse-orb-highlight {
-          position: absolute; width: 35%; height: 22%; top: 16%; left: 19%; border-radius: 50%;
-          background: rgba(255,255,255,.48); filter: blur(5px); transform: rotate(-28deg);
-        }
-        .voice-pulse-orb-stage[data-status="speaking"] .voice-pulse-orb-shell { animation-duration: 1.05s; }
-        .voice-pulse-orb-stage[data-status="speaking"] .voice-pulse-orb-core { animation-duration: 1.35s, 7s; box-shadow: inset 2px 3px 9px rgba(255,255,255,.4), inset -7px -10px 16px rgba(73,20,119,.38), 0 0 30px rgba(236,72,153,.68); }
-        .voice-pulse-orb-stage[data-status="thinking"] .voice-pulse-orb-core { animation-duration: 2.1s, 5s; }
-        .voice-pulse-orb-stage[data-status="paused"] .voice-pulse-orb-shell { animation-play-state: paused; opacity: .65; filter: saturate(.65); }
-        .voice-pulse-orb-stage[data-status="paused"] .voice-pulse-orb-core { animation-play-state: paused; }
-        @keyframes voice-orb-morph {
-          0%,100% { border-radius: 42% 58% 55% 45% / 46% 42% 58% 54%; transform: scale(.96) rotate(-8deg); }
-          25% { border-radius: 57% 43% 42% 58% / 52% 58% 42% 48%; transform: scale(1.04) rotate(7deg); }
-          50% { border-radius: 48% 52% 60% 40% / 39% 48% 52% 61%; transform: scale(1.01) rotate(14deg); }
-          75% { border-radius: 38% 62% 48% 52% / 57% 39% 61% 43%; transform: scale(1.06) rotate(2deg); }
-        }
-        @keyframes voice-orb-color {
-          0%,100% { filter: hue-rotate(0deg) saturate(1.08); }
-          33% { filter: hue-rotate(28deg) saturate(1.18); }
-          66% { filter: hue-rotate(-28deg) saturate(1.15); }
-        }
-        @keyframes voice-orb-float { 0%,100% { transform: translateY(0) scale(.98); } 50% { transform: translateY(-5px) scale(1.04); } }
-        @keyframes voice-orb-aura { 0%,100% { opacity: var(--aura-opacity, .55); transform: scale(var(--aura-scale, 1.1)); } 50% { opacity: calc(var(--aura-opacity, .55) * 1.25); transform: scale(calc(var(--aura-scale, 1.1) * 1.15)); } }
-        @media (prefers-reduced-motion: reduce) {
-          .voice-pulse-orb-stage::before, .voice-pulse-orb-shell, .voice-pulse-orb-core { animation-duration: 12s !important; }
-        }
-      `}</style>
-      <div className="voice-pulse-orb-shell">
-        <div className="voice-pulse-orb-core">
-          <span className="voice-pulse-orb-highlight" />
-        </div>
+      <style>{ORB_STYLES}</style>
+      <div className="voice-pulse-orb-halo" aria-hidden="true" />
+      <div className="voice-pulse-orb-shell" aria-hidden="true">
+        <div className="voice-pulse-orb-core" />
       </div>
     </div>
   );
