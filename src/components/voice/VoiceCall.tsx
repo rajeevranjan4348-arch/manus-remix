@@ -36,7 +36,8 @@ export function VoiceCall({ messages, isLoading, onSubmit, onClose }: VoiceCallP
   const [error, setError] = useState('');
   const recognitionRef = useRef<RecognitionInstance | null>(null);
   const listeningRef = useRef(false);
-  const lastSpokenRef = useRef('');
+  const initialAssistant = [...(messages || [])].reverse().find(message => message?.role === 'assistant' && typeof message.content === 'string' && message.content.trim());
+  const lastSpokenRef = useRef(initialAssistant ? String(initialAssistant.id || initialAssistant.content) : '');
   const statusRef = useRef(status);
   statusRef.current = status;
 
@@ -142,13 +143,6 @@ export function VoiceCall({ messages, isLoading, onSubmit, onClose }: VoiceCallP
     if (!started) setStatus('ready');
   }, [messages, isLoading, stopListening]);
 
-  useEffect(() => {
-    const interrupt = () => {
-      if (statusRef.current === 'speaking') stopCleanSpeech();
-    };
-    window.addEventListener('pointerdown', interrupt, { passive: true });
-    return () => window.removeEventListener('pointerdown', interrupt);
-  }, []);
 
   const submitText = (event: React.FormEvent) => {
     event.preventDefault();
