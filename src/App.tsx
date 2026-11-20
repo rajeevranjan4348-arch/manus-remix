@@ -51,7 +51,7 @@ function TaskView({
   onReset: () => void 
 }) {
   const { taskId } = useParams();
-  const { loadTask, resetTask, stopTask, currentTask, messages, steps, reorderSteps, result, chartData, taskStatus, phase, exportToPDF, sendMessage, isLoading } = useAgentTaskResult;
+  const { taskId: activeTaskId, loadTask, resetTask, stopTask, currentTask, messages, steps, reorderSteps, result, chartData, taskStatus, phase, exportToPDF, sendMessage, isLoading } = useAgentTaskResult;
 
   useEffect(() => {
     if (taskId) {
@@ -76,6 +76,7 @@ function TaskView({
         chartData={chartData}
         status={isLoading && taskStatus === 'idle' ? 'running' : taskStatus as any}
         phase={phase}
+        activityTaskId={activeTaskId || taskId || null}
         onReset={onReset}
         onExport={exportToPDF}
         onSubmit={sendMessage}

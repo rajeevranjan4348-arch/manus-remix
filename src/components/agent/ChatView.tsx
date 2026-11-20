@@ -63,6 +63,7 @@ import {
   scheduleDebouncedStorageWrite,
 } from '@/lib/performanceEngine';
 import { useUltraLiteImage } from '@/hooks/useUltraLiteImage';
+import { AgentActivityFeed } from './AgentActivityFeed';
 
 // Lazy-load heavy chart, map, Drive picker, and connector store modals
 const ChartResult = React.lazy(() =>
@@ -180,6 +181,7 @@ interface ChatViewProps {
   chartData?: any;
   status: 'idle' | 'running' | 'completed' | 'error';
   phase?: string;
+  activityTaskId?: string | null;
   onReset: () => void;
   onExport?: (format?: ChatExportFormat) => void;
   onSubmit: (prompt: string) => void;
@@ -374,6 +376,7 @@ export function ChatView({
   chartData,
   status, 
   phase,
+  activityTaskId,
   onReset, 
   onExport, 
   onSubmit,
@@ -1425,6 +1428,7 @@ export function ChatView({
   const footerSubscribersRef = useRef<Set<() => void>>(new Set());
   footerRenderRef.current = () => (
     <div className="px-4 sm:px-20 space-y-3 pb-28 pt-2">
+      <AgentActivityFeed taskId={activityTaskId} />
       {/* Final Result */}
       {(() => {
         const hasChart = Boolean(

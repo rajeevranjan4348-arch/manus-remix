@@ -35,7 +35,7 @@ import {
   getActivePerformanceProfile,
   loadAIProviderIntegrationOnDemand,
 } from '@/lib/performanceEngine';
-
+import { AGENT_ACTIVITY_CANCEL_EVENT, AGENT_ACTIVITY_EVENT, AgentActivityStatus, parseAgentActivityEvent, publishAgentActivity, summarizeToolActivity } from '@/lib/agentActivity';
 export type AgentTaskPhase = 'idle' | 'sending' | 'thinking' | 'tool-calling' | 'text-generation' | 'streaming' | 'completed' | 'error';
 
 type ConnectorRegistryEntry = { id?: string; name?: string; slug?: string; key?: string; keywords?: string[]; status?: string; connected?: boolean; authenticated?: boolean; isAuthenticated?: boolean; isConnected?: boolean; authStatus?: string; connectionStatus?: string; };
@@ -77,10 +77,14 @@ export function isSimpleConversationalPrompt(prompt: string): boolean {
   return false;
 }
 
-async function executeMatchingConnector(prompt: string): Promise<{ matched: boolean; connectorName?: string; result?: unknown }> {
+async function executeMatchingConnector(
+  prompt: string,
+  onActivity?: (activity: { connectorId: string; connectorName: string; toolName: string; status: 'running' | 'completed' | 'failed' }) => void
+): Promise<{ matched: boolean; connectorName?: string; result?: unknown }> {
   if (isSimpleConversationalPrompt(prompt)) {
     return { matched: false };
   }
+  let startedActivity: { connectorId: string; connectorName: string; toolName: string } | null = null;
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 1000);
@@ -109,6 +113,12 @@ async function executeMatchingConnector(prompt: string): Promise<{ matched: bool
     if (!connector) return { matched: false };
     const connectorId = connector.id || connector.slug || connector.key;
     if (!connectorId) return { matched: false };
+    startedActivity = {
+      connectorId,
+      connectorName: connector.name || connector.slug || connectorId,
+      toolName: 'connected-app',
+    };
+    onActivity?.({ ...startedActivity, status: 'running' });
     const execController = new AbortController();
     const execTimer = setTimeout(() => execController.abort(), 2500);
     let response: Response;
@@ -129,8 +139,11 @@ async function executeMatchingConnector(prompt: string): Promise<{ matched: bool
     }
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(typeof result?.error === 'string' ? result.error : 'Connector execution failed (HTTP ' + response.status + ').');
-    return { matched: true, connectorName: connector.name || connector.slug || connectorId, result };
+    const hasError = result?.success === false || (typeof result?.error === 'string' && result.error.trim());
+    onActivity?.({ ...startedActivity, status: hasError ? 'failed' : 'completed' });
+    return { matched: true, connectorName: startedActivity.connectorName, result };
   } catch (err) {
+    if (startedActivity) onActivity?.({ ...startedActivity, status: 'failed' });
     console.warn('[useAgentTask] Connector lookup skipped:', err);
     return { matched: false };
   }
@@ -253,6 +266,51 @@ export function useAgentTask() {
   const streamRafRef = useRef<number | null>(null);
   const lastStreamFinishReasonRef = useRef<'stop' | 'error' | null>(null);
   const lastStreamErrorRef = useRef<string | null>(null);
+  const cancelledActivityRequestIdsRef = useRef<Set<string>>(new Set());
+  const cancelledActivityTaskIdsRef = useRef<Map<string, string>>(new Map());
+  const activeToolActivitiesRef = useRef<Map<string, { key: string; title: string; toolName: string }>>(new Map());
+  const activityStatusByIdRef = useRef<Map<string, AgentActivityStatus>>(new Map());
+
+  const rememberActivityStatus = useCallback((activityId: string, status: AgentActivityStatus) => {
+    const previous = activityStatusByIdRef.current.get(activityId);
+    const isTerminal = (value: AgentActivityStatus) => value === 'completed' || value === 'failed' || value === 'cancelled';
+    if (previous && isTerminal(previous) && previous !== status) return;
+    if (previous && !isTerminal(previous) && isTerminal(status) === false && previous === 'running' && status === 'queued') return;
+    activityStatusByIdRef.current.set(activityId, status);
+    while (activityStatusByIdRef.current.size > 500) {
+      const oldest = activityStatusByIdRef.current.keys().next().value;
+      if (oldest) activityStatusByIdRef.current.delete(oldest);
+      else break;
+    }
+  }, []);
+
+  const publishTaskActivity = useCallback((
+    key: string,
+    title: string,
+    description: string,
+    toolName: string,
+    status: AgentActivityStatus,
+    requestIdOverride?: string,
+    extra?: { resultSummary?: string; details?: string; errorStatus?: string; taskId?: string }
+  ) => {
+    const requestId = requestIdOverride || activeStreamRequestIdRef.current || `req_${activeRequestIdRef.current}`;
+    const activityTaskId = extra?.taskId || currentTaskIdRef.current || taskId || requestId;
+    const safeExtra = extra ? { ...extra } : {};
+    delete safeExtra.taskId;
+    const activityId = `${requestId}:${key}`;
+    rememberActivityStatus(activityId, status);
+    return publishAgentActivity({
+      taskId: activityTaskId,
+      eventId: undefined,
+      activityId,
+      title,
+      description,
+      toolName,
+      status,
+      timestamp: new Date().toISOString(),
+      ...safeExtra,
+    });
+  }, [rememberActivityStatus, taskId]);
 
   const clearStepTimers = useCallback(() => {
     for (const timer of stepTimersRef.current) {
@@ -284,6 +342,10 @@ export function useAgentTask() {
       }
     });
 
+    const handleActivity = (e: Event) => {
+      const activity = parseAgentActivityEvent((e as CustomEvent)?.detail);
+      if (activity) rememberActivityStatus(activity.activityId, activity.status);
+    };
     const handleStreamStarted = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
       if (detail?.requestId && activeStreamRequestIdRef.current && detail.requestId !== activeStreamRequestIdRef.current) {
@@ -324,8 +386,37 @@ export function useAgentTask() {
     };
     const handleStreamDone = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
-      if (detail?.requestId && activeStreamRequestIdRef.current && detail.requestId !== activeStreamRequestIdRef.current) {
+      const streamRequestId = typeof detail?.requestId === 'string'
+        ? detail.requestId
+        : activeStreamRequestIdRef.current;
+      const wasCancelled = Boolean(streamRequestId && cancelledActivityRequestIdsRef.current.has(streamRequestId));
+      if (detail?.requestId && detail.requestId !== activeStreamRequestIdRef.current && !wasCancelled) {
         return;
+      }
+      const terminalStatus: AgentActivityStatus = wasCancelled
+        ? 'cancelled'
+        : detail?.finishReason === 'error' ? 'failed' : 'completed';
+      const terminalDescription = terminalStatus === 'cancelled'
+        ? 'Generation was stopped before the response stream finished.'
+        : terminalStatus === 'failed'
+          ? 'The response stream ended with an error.'
+          : 'The response stream finished successfully.';
+      if (streamRequestId) {
+        const activityTaskId = cancelledActivityTaskIdsRef.current.get(streamRequestId);
+        const finalizeIfActive = (key: string, title: string, toolName: string) => {
+          const previousStatus = activityStatusByIdRef.current.get(`${streamRequestId}:${key}`);
+          if (previousStatus !== 'running' && previousStatus !== 'queued') return;
+          publishTaskActivity(key, title, terminalDescription, toolName, terminalStatus, streamRequestId, {
+            ...(activityTaskId ? { taskId: activityTaskId } : {}),
+            ...(terminalStatus === 'failed' ? { errorStatus: 'stream_failed' } : {}),
+            ...(terminalStatus === 'cancelled' ? { errorStatus: 'user_cancelled' } : {}),
+          });
+        };
+        finalizeIfActive('model', 'Generating AI response', 'ai-model');
+        finalizeIfActive('response-preparation', 'Preparing response', 'response-preparation');
+        finalizeIfActive('rtie:preparing_answer', 'Preparing response', 'response-preparation');
+        cancelledActivityRequestIdsRef.current.delete(streamRequestId);
+        cancelledActivityTaskIdsRef.current.delete(streamRequestId);
       }
       clearStepTimers();
       synthesizedMarked = false;
@@ -375,11 +466,13 @@ export function useAgentTask() {
         })
       );
     };
+    window.addEventListener(AGENT_ACTIVITY_EVENT, handleActivity);
     window.addEventListener('manus_stream_started', handleStreamStarted);
     window.addEventListener('manus_stream_delta', handleDelta);
     window.addEventListener('manus_stream_done', handleStreamDone);
     window.addEventListener('manus_research_stage', handleResearchStage);
     return () => {
+      window.removeEventListener(AGENT_ACTIVITY_EVENT, handleActivity);
       window.removeEventListener('manus_stream_started', handleStreamStarted);
       window.removeEventListener('manus_stream_delta', handleDelta);
       window.removeEventListener('manus_stream_done', handleStreamDone);
@@ -390,7 +483,7 @@ export function useAgentTask() {
         streamRafRef.current = null;
       }
     };
-  }, [clearStepTimers]);
+  }, [clearStepTimers, publishTaskActivity, rememberActivityStatus]);
 
   // Clean up in-flight streams and loading indicators on component unmount
   useEffect(() => {
@@ -722,6 +815,10 @@ export function useAgentTask() {
     setPhase('completed');
     const completedSteps = stepsRef.current.map(s => ({ ...s, status: 'completed' as const }));
     setSteps(completedSteps);
+    const activeStreamRequestId = activeStreamRequestIdRef.current;
+    if (!activeStreamRequestId || !cancelledActivityRequestIdsRef.current.has(activeStreamRequestId)) {
+      publishTaskActivity('response-finalized', 'Finalizing response', 'The complete response was added to this task.', 'response-finalizer', 'completed');
+    }
     emitRobotEvent('TASK_SUCCEEDED');
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
@@ -812,7 +909,7 @@ export function useAgentTask() {
     });
 
     return true;
-  }, [getCurrentTurnSdkAssistantText, markExistingSdkMessagesCompleted, taskId, user]);
+  }, [getCurrentTurnSdkAssistantText, markExistingSdkMessagesCompleted, publishTaskActivity, taskId, user]);
 
   const useAgentResult = useAgent({
     agent,
@@ -835,6 +932,9 @@ export function useAgentTask() {
       if (!text || isErrorFinish) {
         const errorContent = lastStreamErrorRef.current || (isErrorFinish && text ? text : "I didn't receive an answer from the AI service. Please try again.");
         console.error('[Manus AI] Provider finished with error or empty text:', errorContent);
+        const streamRequestId = activeStreamRequestIdRef.current || `req_${reqId}`;
+        publishTaskActivity('model', 'Generating AI response', 'The AI service did not return a usable response.', 'ai-model', 'failed', streamRequestId, { errorStatus: 'empty_or_failed_response' });
+        publishTaskActivity('response-preparation', 'Preparing response', 'Response generation could not be completed.', 'response-preparation', 'failed', streamRequestId, { errorStatus: 'empty_or_failed_response' });
         finalizedRequestIdsRef.current.add(reqId);
         setActiveStreamContext(null);
         isSubmittingRef.current = false;
@@ -865,6 +965,9 @@ export function useAgentTask() {
     },
     onError: async (err) => {
       const reqId = activeRequestIdRef.current;
+      const streamRequestId = activeStreamRequestIdRef.current || `req_${reqId}`;
+      publishTaskActivity('model', 'Generating AI response', 'The AI service request failed.', 'ai-model', 'failed', streamRequestId, { errorStatus: 'provider_error' });
+      publishTaskActivity('response-preparation', 'Preparing response', 'Response generation could not be completed.', 'response-preparation', 'failed', streamRequestId, { errorStatus: 'provider_error' });
       console.error('[Manus Agent] onError triggered:', err);
       clearStepTimers();
       markExistingSdkMessagesCompleted();
@@ -933,6 +1036,9 @@ export function useAgentTask() {
   messagesRef.current = messages;
 
   const executeReliableAgentTurn = useCallback(async (promptText: string, reqId: number) => {
+    const streamRequestId = activeStreamRequestIdRef.current || `req_${Date.now()}_${reqId}`;
+    publishTaskActivity('request-route', 'Analyzing user request', 'Request routing and context preparation finished.', 'agent-router', 'completed', streamRequestId);
+    publishTaskActivity('model', 'Sending request to AI', 'The request was submitted to the configured AI service.', 'ai-model', 'running', streamRequestId);
     try {
       await agentSendMessageRef.current(promptText);
     } catch (sdkErr) {
@@ -1007,7 +1113,7 @@ export function useAgentTask() {
     } finally {
       try { reader.releaseLock(); } catch {}
     }
-  }, [agent, getCurrentTurnSdkAssistantText]);
+  }, [agent, getCurrentTurnSdkAssistantText, publishTaskActivity]);
 
   const finalizeAssistantTurnIfMissing = useCallback((activeId: string | null, reqIdOverride?: number) => {
     const reqId = reqIdOverride ?? activeRequestIdRef.current;
@@ -1016,6 +1122,42 @@ export function useAgentTask() {
 
   const stopTask = useCallback(() => {
     const interruptedReqId = activeRequestIdRef.current;
+    const streamRequestId = activeStreamRequestIdRef.current;
+    if (streamRequestId) {
+      const cancelledTaskId = currentTaskIdRef.current || taskId || streamRequestId;
+      cancelledActivityRequestIdsRef.current.add(streamRequestId);
+      cancelledActivityTaskIdsRef.current.set(streamRequestId, cancelledTaskId);
+      while (cancelledActivityRequestIdsRef.current.size > 20) {
+        const oldest = cancelledActivityRequestIdsRef.current.values().next().value;
+        if (oldest) {
+          cancelledActivityRequestIdsRef.current.delete(oldest);
+          cancelledActivityTaskIdsRef.current.delete(oldest);
+        }
+        else break;
+      }
+      const cancelIfActive = (key: string, title: string, toolName: string) => {
+        const state = activityStatusByIdRef.current.get(`${streamRequestId}:${key}`);
+        if (state !== 'queued' && state !== 'running') return;
+        publishTaskActivity(key, title, 'The activity was cancelled by the user.', toolName, 'cancelled', streamRequestId, {
+          taskId: cancelledTaskId,
+          errorStatus: 'user_cancelled',
+        });
+      };
+      cancelIfActive('request-route', 'Analyzing user request', 'agent-router');
+      cancelIfActive('model', 'Generating AI response', 'ai-model');
+      cancelIfActive('response-preparation', 'Preparing response', 'response-preparation');
+      cancelIfActive('rtie:preparing_answer', 'Preparing response', 'response-preparation');
+      for (const activity of activeToolActivitiesRef.current.values()) {
+        publishTaskActivity(activity.key, activity.title, 'The tool invocation was cancelled by the user.', activity.toolName, 'cancelled', streamRequestId, {
+          taskId: cancelledTaskId,
+          errorStatus: 'user_cancelled',
+        });
+      }
+      window.dispatchEvent(new CustomEvent(AGENT_ACTIVITY_CANCEL_EVENT, {
+        detail: { taskId: cancelledTaskId, requestId: streamRequestId },
+      }));
+      activeToolActivitiesRef.current.clear();
+    }
     const partialText = liveStreamTextRef.current.trim();
     if (partialText) {
       finalizeRequestTurn(interruptedReqId, currentTaskIdRef.current || taskId, partialText);
@@ -1043,7 +1185,7 @@ export function useAgentTask() {
     }));
     window.dispatchEvent(new CustomEvent('manus_robot_state_change', { detail: 'idle' }));
     toast.info('Generation stopped');
-  }, [useAgentResult, clearStepTimers, finalizeRequestTurn, markExistingSdkMessagesCompleted, taskId]);
+  }, [useAgentResult, clearStepTimers, finalizeRequestTurn, markExistingSdkMessagesCompleted, publishTaskActivity, taskId]);
 
   const lastSubmitRef = useRef<{ prompt: string; timestamp: number }>({ prompt: '', timestamp: 0 });
 
@@ -1084,7 +1226,7 @@ export function useAgentTask() {
     }
   }, [isLoading, taskStatus, taskId, clearStepTimers, finalizeRequestTurn]);
 
-  const processedInvocationsRef = useRef<Set<string>>(new Set());
+  const processedInvocationsRef = useRef<Map<string, string>>(new Map());
 
   const preparePromptWithConnectors = useCallback(async (prompt: string) => {
     setPhase('tool-calling');
@@ -1129,12 +1271,18 @@ export function useAgentTask() {
       // 3. Inject Live Google Workspace Context ONLY when explicit @mentions are present
       const detectedMentions = prompt.match(/@[\w_]+/g) || [];
       if (detectedMentions.length > 0) {
+        const requestId = activeStreamRequestIdRef.current || `req_${activeRequestIdRef.current}`;
+        publishTaskActivity('workspace-context', 'Checking requested workspace context', 'Fetching context for the connected workspace sources you referenced.', 'workspace-context', 'running', requestId);
         try {
           const workspaceContext = await fetchWorkspaceContextSummary(detectedMentions);
+          publishTaskActivity('workspace-context', 'Checking requested workspace context', 'Workspace context lookup finished.', 'workspace-context', 'completed', requestId, {
+            resultSummary: workspaceContext ? 'Workspace context was returned.' : 'No matching workspace context was returned.',
+          });
           if (workspaceContext) {
             enriched += workspaceContext;
           }
         } catch (wsErr) {
+          publishTaskActivity('workspace-context', 'Checking requested workspace context', 'Workspace context lookup failed.', 'workspace-context', 'failed', requestId, { errorStatus: 'context_lookup_failed' });
           console.warn('[Workspace Context] Notice:', wsErr);
         }
       }
@@ -1146,7 +1294,26 @@ export function useAgentTask() {
           if (toolIntent && toolIntent.matched && !toolIntent.requiresConfirmation) {
             const state = getConnectorState(toolIntent.connectorId);
             if (state.status === 'connected') {
-              const toolResult = await executeConnectorTool(toolIntent.toolName, toolIntent.args);
+              const requestId = activeStreamRequestIdRef.current || `req_${activeRequestIdRef.current}`;
+              const connectorKey = `connector-action:prepare:${toolIntent.connectorId}:${toolIntent.toolName}`;
+              publishTaskActivity(connectorKey, `Running ${toolIntent.connectorName} action`, 'The connected tool call started.', toolIntent.toolName, 'running', requestId);
+              activeToolActivitiesRef.current.set(`${requestId}:${connectorKey}`, {
+                key: connectorKey,
+                title: `Running ${toolIntent.connectorName} action`,
+                toolName: toolIntent.toolName,
+              });
+              let toolResult: any;
+              try {
+                toolResult = await executeConnectorTool(toolIntent.toolName, toolIntent.args);
+              } catch (toolError) {
+                activeToolActivitiesRef.current.delete(`${requestId}:${connectorKey}`);
+                publishTaskActivity(connectorKey, `Running ${toolIntent.connectorName} action`, 'The connected tool call failed.', toolIntent.toolName, 'failed', requestId, { errorStatus: 'connector_failed' });
+                throw toolError;
+              }
+              activeToolActivitiesRef.current.delete(`${requestId}:${connectorKey}`);
+              publishTaskActivity(connectorKey, `Running ${toolIntent.connectorName} action`, toolResult.success ? 'The connected tool returned a result.' : 'The connected tool returned an error.', toolIntent.toolName, toolResult.success ? 'completed' : 'failed', requestId, {
+                ...(toolResult.success ? { resultSummary: 'Connected app data was returned.' } : { errorStatus: 'connector_failed' }),
+              });
               if (toolResult.success) {
                 enriched += `\n\n[Google Workspace Action Executed via ${toolIntent.connectorName} - ${toolIntent.suggestedAction}]\nResult: ${JSON.stringify(toolResult.data || toolResult.message)}\nUse this live data to complete the user's request.`;
               }
@@ -1159,18 +1326,39 @@ export function useAgentTask() {
 
       // 5. Autonomous Built-in Computational Skills Execution
       try {
+        const requestId = activeStreamRequestIdRef.current || `req_${activeRequestIdRef.current}`;
+        publishTaskActivity('built-in-skill', 'Checking available analysis skills', 'Matching the request against available built-in computations.', 'skills-registry', 'running', requestId);
         const skillRes = await skillsRegistry.detectAndExecute(prompt);
         if (skillRes && skillRes.success) {
+          publishTaskActivity('built-in-skill', 'Running a built-in analysis', 'A built-in computation returned a result.', 'built-in-skill', 'completed', requestId, { resultSummary: 'Computed result was added to the response context.' });
           enriched += `\n\n[AUTONOMOUS COMPUTATIONAL SKILL EXECUTED]:\nSummary: ${skillRes.summary}\nData: ${JSON.stringify(skillRes.output)}\n[INSTRUCTION: Directly cite these exact computed numbers or converted measurements in your response.]`;
+        } else {
+          publishTaskActivity('built-in-skill', 'Checking available analysis skills', 'No matching built-in computation was required.', 'skills-registry', 'completed', requestId);
         }
       } catch (skillErr) {
+        const requestId = activeStreamRequestIdRef.current || `req_${activeRequestIdRef.current}`;
+        publishTaskActivity('built-in-skill', 'Checking available analysis skills', 'The built-in skill check failed.', 'skills-registry', 'failed', requestId, { errorStatus: 'skill_check_failed' });
         console.warn('[Autonomous Skill Execution] Notice:', skillErr);
       }
 
       // 6. External connector dispatch (skipped automatically for simple conversational prompts)
       if (!simplePrompt) {
         try {
-          const dispatch = await executeMatchingConnector(prompt);
+          const requestId = activeStreamRequestIdRef.current || `req_${activeRequestIdRef.current}`;
+          const dispatch = await executeMatchingConnector(prompt, (activity) => {
+            const key = `external-connector:${activity.connectorId}`;
+            const isRunning = activity.status === 'running';
+            const isFailed = activity.status === 'failed';
+            publishTaskActivity(
+              key,
+              `Using ${activity.connectorName}`,
+              isRunning ? 'The connected app action started.' : isFailed ? 'The connected app action failed.' : 'The connected app action returned a result.',
+              activity.toolName,
+              activity.status,
+              requestId,
+              isFailed ? { errorStatus: 'connector_failed' } : activity.status === 'completed' ? { resultSummary: 'Connected app data was returned.' } : undefined
+            );
+          });
           if (dispatch.matched) {
             return enriched + '\n\n[Connected app result from ' + dispatch.connectorName + ']\n' +
               JSON.stringify(dispatch.result) + '\n\nUse this returned data as the source for your answer.';
@@ -1190,7 +1378,7 @@ export function useAgentTask() {
     } finally {
       setPhase('text-generation');
     }
-  }, [user]);
+  }, [publishTaskActivity, taskId, user]);
 
 
   // Track tool calls and update steps dynamically without duplicate traces
@@ -1204,16 +1392,59 @@ export function useAgentTask() {
           ?.filter((p: any) => p.type === 'tool-invocation')
           .map((p: any) => ({
             toolName: p.toolName,
+            toolCallId: p.toolCallId,
+            state: p.state,
+            output: p.output,
             args: p.input,
           }));
       if (lastMessage.role === 'assistant' && toolInvocations && toolInvocations.length > 0) {
-        toolInvocations.forEach((invocation: any) => {
-          const toolName = invocation.toolName;
-          const invocationKey = `${lastMessage.id || 'last'}_${toolName}_${JSON.stringify(invocation.args || {})}`;
-          if (processedInvocationsRef.current.has(invocationKey)) {
+        toolInvocations.forEach((invocation: any, index: number) => {
+          const toolName = String(invocation.toolName || 'agent-tool');
+          const requestId = activeStreamRequestIdRef.current || `req_${activeRequestIdRef.current}`;
+          const toolCallId = String(invocation.toolCallId || `${lastMessage.id || 'assistant'}_${toolName}_${index}`);
+          const invocationKey = `${requestId}:${toolCallId}`;
+          const invocationState = String(invocation.state || 'pending');
+          if (processedInvocationsRef.current.get(invocationKey) === invocationState) {
             return;
           }
-          processedInvocationsRef.current.add(invocationKey);
+          processedInvocationsRef.current.set(invocationKey, invocationState);
+
+          const output = invocation.output ?? invocation.result;
+          const outputRecord = output && typeof output === 'object' ? output as Record<string, unknown> : {};
+          const exitCode = outputRecord.exitCode ?? outputRecord.returnCode ?? outputRecord.code;
+          const responseStatus = outputRecord.statusCode ?? outputRecord.status;
+          const toolCommand = typeof invocation.args?.command === 'string'
+            ? invocation.args.command
+            : typeof invocation.args?.cmd === 'string' ? invocation.args.cmd : '';
+          const toolOutputText = typeof output === 'string'
+            ? output
+            : [outputRecord.stdout, outputRecord.output, outputRecord.text, outputRecord.result, outputRecord.stderr]
+                .filter(value => typeof value === 'string').join('\n');
+          const testCommandFailed = /\b(npm|pnpm|bun|yarn)\s+(?:run\s+)?test\b|\b(vitest|jest|playwright|cypress)\b/i.test(toolCommand) && /\b[1-9]\d*\s+failed\b/i.test(toolOutputText);
+          const checkCommandFailed = /\b(tsc|typescript|typecheck|type-check|lint|build|vite)\b/i.test(toolCommand) && (/(^|\n)\s*(?:error|failed)\b|:\s*error\b/im.test(toolOutputText) || /\b(?:found|reported)\s+[1-9]\d*\s+errors?\b/i.test(toolOutputText));
+          const hasToolError = testCommandFailed || checkCommandFailed ||
+            (typeof output === 'string' && /^\s*(?:error|failed)\b/i.test(output)) || Boolean(output && typeof output === 'object' && (
+            output.isError === true || output.success === false || output.ok === false ||
+            (typeof responseStatus === 'number' && responseStatus >= 400) ||
+            (typeof output.error === 'string' && output.error.trim()) ||
+            (typeof exitCode === 'number' && exitCode !== 0)
+          )) || invocationState === 'error' || invocationState === 'failed';
+          const activityStatus: AgentActivityStatus = invocationState === 'queued'
+            ? 'queued'
+            : invocationState === 'pending'
+              ? 'running'
+              : hasToolError ? 'failed' : 'completed';
+          const toolActivity = summarizeToolActivity(toolName, invocation.args, output, activityStatus);
+          const activityKey = `tool:${toolCallId}`;
+          publishTaskActivity(activityKey, toolActivity.title, toolActivity.description, toolName, activityStatus, requestId, {
+            ...(toolActivity.resultSummary ? { resultSummary: toolActivity.resultSummary } : {}),
+            ...(activityStatus === 'failed' ? { errorStatus: 'tool_failed' } : {}),
+          });
+          if (activityStatus === 'running' || activityStatus === 'queued') {
+            activeToolActivitiesRef.current.set(invocationKey, { key: activityKey, title: toolActivity.title, toolName });
+          } else {
+            activeToolActivitiesRef.current.delete(invocationKey);
+          }
 
           let stepLabel = '';
           let trace: string[] = [];
@@ -1233,20 +1464,24 @@ export function useAgentTask() {
           }
           
           if (stepLabel) {
-            emitRobotEvent(toolName === 'web_search' ? 'SEARCH_STARTED' : 'TOOL_STARTED');
+            if (activityStatus === 'running' || activityStatus === 'queued') {
+              emitRobotEvent(toolName === 'web_search' ? 'SEARCH_STARTED' : 'TOOL_STARTED');
+            }
+            const stepStatus = activityStatus === 'failed' ? 'error' as const
+              : activityStatus === 'completed' ? 'completed' as const : 'running' as const;
             setSteps(prev => {
               const nextSteps: Step[] = prev.map(s => {
                 if (s.label === stepLabel) {
                   const existingTraces = s.trace || [];
                   const newItems = trace.filter(t => !existingTraces.includes(t));
-                  return { ...s, status: 'running' as const, trace: [...existingTraces, ...newItems] };
+                  return { ...s, status: stepStatus, trace: [...existingTraces, ...newItems] };
                 }
                 return s;
               });
               
               const exists = prev.find(s => s.label === stepLabel);
               if (!exists) {
-                nextSteps.push({ id: String(prev.length + 1), label: stepLabel, status: 'running' as const, trace });
+                nextSteps.push({ id: String(prev.length + 1), label: stepLabel, status: stepStatus, trace });
               }
               
               if (taskId && nextSteps.length !== prev.length) {
@@ -1261,7 +1496,7 @@ export function useAgentTask() {
         });
       }
     }
-  }, [messages, taskId, isAuthenticated]);
+  }, [messages, taskId, isAuthenticated, publishTaskActivity]);
 
   const sendMessage = useCallback((content: string) => {
     if (!content || !content.trim()) return;
@@ -1296,6 +1531,9 @@ export function useAgentTask() {
     setSteps(createInitialWorkflowSteps(hasImageAttachment));
 
     const activeId = currentTaskIdRef.current || taskId;
+    publishTaskActivity('request-route', 'Analyzing user request', 'The submitted request is queued for routing.', 'agent-router', 'queued', streamReqId);
+    processedInvocationsRef.current.clear();
+    activeToolActivitiesRef.current.clear();
     const userMsgId = 'msg_' + now + '_' + Math.random().toString(36).substring(2, 8);
     const assistantMsgId = 'msg_assistant_' + now + '_' + Math.random().toString(36).substring(2, 8);
     activeUserMsgIdRef.current = userMsgId;
@@ -1352,6 +1590,7 @@ export function useAgentTask() {
 
     const runSendLifecycle = async () => {
       try {
+        publishTaskActivity('request-route', 'Analyzing user request', 'Checking connector intent and available context.', 'agent-router', 'running', streamReqId);
         // Strip embedded base64 image data before running connector regexes / RAG enrichment
         // so multi-kilobyte base64 strings never stall main-thread text processing.
         const textWithoutImagePayload = content.replace(/\[IMAGE_DATA_URL:[^\]]+\]\n?/gi, '').trim();
@@ -1372,7 +1611,28 @@ export function useAgentTask() {
             { id: String(prev.length + 1), label: toolIntent.suggestedAction, status: 'running', trace: [`Executing ${toolIntent.toolName}...`] }
           ]);
 
-          const res = await executeConnectorTool(toolIntent.toolName, toolIntent.args);
+          const connectorActivityKey = `connector-action:send:${toolIntent.connectorId}:${toolIntent.toolName}`;
+          publishTaskActivity(connectorActivityKey, `Running ${toolIntent.connectorName} action`, 'The connected tool call started.', toolIntent.toolName, 'running', streamReqId);
+          activeToolActivitiesRef.current.set(`${streamReqId}:${connectorActivityKey}`, {
+            key: connectorActivityKey,
+            title: `Running ${toolIntent.connectorName} action`,
+            toolName: toolIntent.toolName,
+          });
+          let res: any;
+          try {
+            res = await executeConnectorTool(toolIntent.toolName, toolIntent.args);
+          } catch (connectorError) {
+            activeToolActivitiesRef.current.delete(`${streamReqId}:${connectorActivityKey}`);
+            if (activeRequestIdRef.current === reqId) {
+              publishTaskActivity(connectorActivityKey, `Running ${toolIntent.connectorName} action`, 'The connected tool call failed.', toolIntent.toolName, 'failed', streamReqId, { errorStatus: 'connector_failed' });
+            }
+            throw connectorError;
+          }
+          activeToolActivitiesRef.current.delete(`${streamReqId}:${connectorActivityKey}`);
+          if (activeRequestIdRef.current !== reqId) return;
+          publishTaskActivity(connectorActivityKey, `Running ${toolIntent.connectorName} action`, res.success ? 'The connected tool returned a result.' : 'The connected tool returned an error.', toolIntent.toolName, res.success ? 'completed' : 'failed', streamReqId, {
+            ...(res.success ? { resultSummary: 'Connected app data was returned.' } : { errorStatus: 'connector_failed' }),
+          });
           setSteps(prev => prev.map(s => s.label === toolIntent.suggestedAction ? { ...s, status: 'completed' } : s));
           if (res.success) {
             const augmentedPrompt = `${textWithoutImagePayload}\n\n[EXECUTED CONNECTED TOOL: ${toolIntent.connectorName} (${toolIntent.toolName})]\n[RESULT DATA]:\n${JSON.stringify(res.data, null, 2)}\n\n[INSTRUCTION: Synthesize a clear, verified answer based on the retrieved data above. Highlight key documents/messages/events and provide links where applicable.]`;
@@ -1396,6 +1656,7 @@ export function useAgentTask() {
         await executeReliableAgentTurn(preparedPrompt, reqId);
       } catch (error) {
         if (activeRequestIdRef.current !== reqId) return;
+        publishTaskActivity('request-route', 'Analyzing user request', 'Request preparation failed before the AI request started.', 'agent-router', 'failed', streamReqId, { errorStatus: 'request_preparation_failed' });
         console.error('[Manus AI] Failed to send chat message:', error);
         finalizedRequestIdsRef.current.add(reqId);
         setActiveStreamContext(null);
@@ -1458,7 +1719,7 @@ export function useAgentTask() {
     };
 
     void runSendLifecycle();
-  }, [executeReliableAgentTurn, preparePromptWithConnectors, taskId, taskStatus, user, clearStepTimers, finalizeRequestTurn, markExistingSdkMessagesCompleted]);
+  }, [executeReliableAgentTurn, preparePromptWithConnectors, taskId, taskStatus, user, clearStepTimers, finalizeRequestTurn, markExistingSdkMessagesCompleted, publishTaskActivity]);
 
   const startTask = useCallback(async (prompt: string, options: any = {}) => {
     if (!prompt || !prompt.trim()) return null;
@@ -1517,6 +1778,9 @@ export function useAgentTask() {
     newTaskId = generatedId;
     setTaskId(newTaskId);
     currentTaskIdRef.current = newTaskId;
+    publishTaskActivity('request-route', 'Analyzing user request', 'The new task is queued for routing.', 'agent-router', 'queued', streamReqId);
+    activeToolActivitiesRef.current.clear();
+    cancelledActivityRequestIdsRef.current.delete(streamReqId);
 
     setActiveStreamContext({
       requestId: streamReqId,
@@ -1530,6 +1794,7 @@ export function useAgentTask() {
     setCurrentTask(nextTaskObj);
     setTaskStatus('running');
     setPhase('tool-calling');
+    publishTaskActivity('request-route', 'Analyzing user request', 'Checking the request type and available context.', 'agent-router', 'running', streamReqId);
     setResult(null);
     setChartData(null);
     emitRobotEvent('USER_SUBMITTED');
@@ -1693,7 +1958,19 @@ export function useAgentTask() {
             status: 'running',
             trace: [`Executing ${toolIntent.toolName}...`]
           });
+          const connectorActivityKey = `connector-action:start:${toolIntent.connectorId}:${toolIntent.toolName}`;
+          publishTaskActivity(connectorActivityKey, `Running ${toolIntent.connectorName} action`, 'The connected tool call started.', toolIntent.toolName, 'running', streamReqId);
+          activeToolActivitiesRef.current.set(`${streamReqId}:${connectorActivityKey}`, {
+            key: connectorActivityKey,
+            title: `Running ${toolIntent.connectorName} action`,
+            toolName: toolIntent.toolName,
+          });
           const res = await executeConnectorTool(toolIntent.toolName, toolIntent.args);
+          activeToolActivitiesRef.current.delete(`${streamReqId}:${connectorActivityKey}`);
+          if (activeRequestIdRef.current !== reqId) return newTaskId;
+          publishTaskActivity(connectorActivityKey, `Running ${toolIntent.connectorName} action`, res.success ? 'The connected tool returned a result.' : 'The connected tool returned an error.', toolIntent.toolName, res.success ? 'completed' : 'failed', streamReqId, {
+            ...(res.success ? { resultSummary: 'Connected app data was returned.' } : { errorStatus: 'connector_failed' }),
+          });
           initialSteps = initialSteps.map(s => s.label === toolIntent.suggestedAction ? { ...s, status: 'completed' } : s);
           if (res.success) {
             enhancedPrompt = `${prompt}\n\n[EXECUTED CONNECTED TOOL: ${toolIntent.connectorName} (${toolIntent.toolName})]\n[RESULT DATA]:\n${JSON.stringify(res.data, null, 2)}\n\n[INSTRUCTION: Synthesize a clear, verified answer based on the retrieved data above. Highlight key documents/messages/events and provide direct links where applicable.]`;
@@ -1701,6 +1978,10 @@ export function useAgentTask() {
             enhancedPrompt = `${prompt}\n\n[CONNECTOR TOOL ERROR: ${res.error || 'Execution failed'}]\n${res.message}\nProvide a helpful explanation of the failure.`;
           }
         } catch (e: any) {
+          activeToolActivitiesRef.current.delete(`${streamReqId}:connector-action:start:${toolIntent.connectorId}:${toolIntent.toolName}`);
+          if (activeRequestIdRef.current === reqId) {
+            publishTaskActivity(`connector-action:start:${toolIntent.connectorId}:${toolIntent.toolName}`, `Running ${toolIntent.connectorName} action`, 'The connected tool call failed.', toolIntent.toolName, 'failed', streamReqId, { errorStatus: 'connector_failed' });
+          }
           console.warn('[startTask Connector Tool Error]', e);
         }
       }
@@ -1733,6 +2014,7 @@ export function useAgentTask() {
       }
     } catch (error) {
       if (activeRequestIdRef.current === reqId) {
+        publishTaskActivity('request-route', 'Analyzing user request', 'Task preparation failed before the AI request started.', 'agent-router', 'failed', streamReqId, { errorStatus: 'task_preparation_failed' });
         console.error('[Manus AI] Failed to start generation:', error);
         finalizedRequestIdsRef.current.add(reqId);
         setActiveStreamContext(null);
@@ -1795,7 +2077,7 @@ export function useAgentTask() {
     }
 
     return newTaskId;
-  }, [isAuthenticated, user, taskStatus, executeReliableAgentTurn, preparePromptWithConnectors, clearMessages, setMessages, clearStepTimers, finalizeRequestTurn, markExistingSdkMessagesCompleted]);
+  }, [isAuthenticated, user, taskStatus, executeReliableAgentTurn, preparePromptWithConnectors, clearMessages, setMessages, clearStepTimers, finalizeRequestTurn, markExistingSdkMessagesCompleted, publishTaskActivity]);
 
   const loadTask = useCallback(async (id: string) => {
     try {

@@ -1,4 +1,5 @@
 import { createClient, Agent } from '@blinkdotnew/sdk';
+import { dispatchAgentActivity } from './agentActivity';
 
 const PROJECT_ID = (import.meta as any).env?.VITE_BLINK_PROJECT_ID || 'manus-agent-clone-tkzhogvs';
 const PUBLISHABLE_KEY = (import.meta as any).env?.VITE_BLINK_PUBLISHABLE_KEY || '';
@@ -198,6 +199,7 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
 
         const payloadStr = JSON.stringify({
           requestId,
+          taskId: ctx?.taskId || ctx?.requestId || requestId,
           messages: sanitizedMsgs,
           prompt: lastUserMsg,
           systemInstruction: agentConfig?.system,
@@ -298,6 +300,15 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
             try {
               const parsed = JSON.parse(jsonStr);
               const eventType = String(parsed.type || currentSseEventType || '').toLowerCase();
+
+              if (eventType === 'activity') {
+                const activity = dispatchAgentActivity({
+                  ...parsed,
+                  taskId: parsed.taskId || ctx?.taskId || ctx?.requestId || requestId,
+                });
+                if (activity) sendEvent({ type: 'activity', ...activity });
+                return;
+              }
 
               if (
                 eventType === 'text-delta' ||

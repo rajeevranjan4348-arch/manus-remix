@@ -18,6 +18,7 @@ import {
 import { generateOAuthUrl, handleOAuthCallback, executeServerConnectorTool, isSafeUrl } from './server/connectorsService';
 import { handleCloudSqlApiRequest } from './server/cloudSqlRoutes';
 import { GoogleGenAI } from '@google/genai';
+import { makeResearchActivities } from './src/lib/agentActivity';
 
 class StreamCircuitBreaker {
   private failureCount = 0;
@@ -721,6 +722,10 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
               const requestId = typeof body?.requestId === 'string' && body.requestId.trim()
                 ? body.requestId.trim().slice(0, 120)
                 : `srv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+              const taskId = typeof body?.taskId === 'string' && /^[A-Za-z0-9_.:-]{1,160}$/.test(body.taskId)
+                ? body.taskId
+                : requestId;
+              let activitySequence = 0;
               const abortController = new AbortController();
               res.on('close', () => {
                 if (!res.writableEnded) {
@@ -739,6 +744,9 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
                 signal: abortController.signal,
                 onResearchProgress: (stageEvent) => {
                   if (!clientAborted && !res.writableEnded) {
+                    for (const activity of makeResearchActivities(stageEvent, taskId, requestId, ++activitySequence)) {
+                      res.write(`data: ${JSON.stringify({ type: 'activity', ...activity })}\n\n`);
+                    }
                     res.write(`data: ${JSON.stringify({ type: 'research-stage', requestId, ...stageEvent })}\n\n`);
                     if (typeof (res as any).flush === 'function') {
                       (res as any).flush();

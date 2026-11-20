@@ -10,6 +10,7 @@ import {
   ResearchOrchestrationResult,
   ResearchProgressEvent,
 } from '../../server/rtie';
+import { makeResearchActivities } from '../../src/lib/agentActivity';
 
 const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -74,6 +75,15 @@ export default async (req: Request) => {
   const requestId = typeof body.requestId === 'string' && body.requestId.trim()
     ? body.requestId.trim().slice(0, 120)
     : `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const taskId = typeof body.taskId === 'string' && /^[A-Za-z0-9_.:-]{1,160}$/.test(body.taskId)
+    ? body.taskId
+    : requestId;
+  let activitySequence = 0;
+
+  const runAgentPipeline = async (
+    emitEvent: (event: Record<string, unknown>) => void,
+    signal: AbortSignal
+  ): Promise<Response> => {
 
   function normalizeModel(modelName?: string): string {
     if (!modelName || typeof modelName !== 'string') return 'gemini-3-flash-preview';
@@ -197,7 +207,14 @@ export default async (req: Request) => {
 
     try {
       realtimeSnapshot = await orchestrateRealtimeResearch(latestUserText, {
-        onProgress: (ev) => collectedStages.push(ev),
+        signal,
+        onProgress: (ev) => {
+          collectedStages.push(ev);
+          for (const activity of makeResearchActivities(ev, taskId, requestId, ++activitySequence)) {
+            emitEvent({ type: 'activity', ...activity });
+          }
+          emitEvent({ type: 'research-stage', requestId, ...ev });
+        },
       });
       for (const src of realtimeSnapshot.sources) {
         if (src.url && /^https?:\/\//i.test(src.url)) {
@@ -205,7 +222,26 @@ export default async (req: Request) => {
         }
       }
     } catch (rtErr) {
+      if (collectedStages.some(stage => stage.stage === 'searching_sources') && !collectedStages.some(stage => stage.stage === 'reading_information')) {
+        const cancelled = signal.aborted;
+        emitEvent({
+          type: 'activity',
+          taskId,
+          eventId: `${requestId}:rtie:search-failed:${++activitySequence}`,
+          activityId: `${requestId}:rtie:searching_sources`,
+          title: 'Searching for relevant sources',
+          description: cancelled ? 'The live source lookup was cancelled.' : 'The live source lookup failed.',
+          toolName: 'live-search',
+          status: cancelled ? 'cancelled' : 'failed',
+          timestamp: new Date().toISOString(),
+          errorStatus: cancelled ? 'user_cancelled' : 'research_failed',
+        });
+      }
       console.warn('[Netlify RTIE] Research orchestration notice:', rtErr);
+    }
+
+    if (signal.aborted) {
+      return new Response(null, { status: 204 });
     }
 
     const useGoogleSearch = Boolean(
@@ -303,6 +339,7 @@ export default async (req: Request) => {
         } catch (error) { console.warn('[Web Search] Agent Reach bridge failed:', error); }
       })());
       await Promise.all(searchJobs);
+      if (signal.aborted) return new Response(null, { status: 204 });
       if (externalSources.size) {
         const sourceContext = Array.from(externalSources.entries()).slice(0, 8)
           .map(([url, title]) => `- ${title.slice(0, 250)}: ${url}`).join('\n');
@@ -572,4 +609,71 @@ export default async (req: Request) => {
       code: 'INTERNAL_ERROR',
     }, 500);
   }
+  };
+
+  const encoder = new TextEncoder();
+  const abortController = new AbortController();
+  let cancelled = false;
+  let activeReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  const eventStream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const writeRaw = (text: string) => {
+        if (cancelled) return;
+        try { controller.enqueue(encoder.encode(text)); } catch { cancelled = true; }
+      };
+      const writeEvent = (event: Record<string, unknown>) => {
+        writeRaw(`data: ${JSON.stringify(event)}\n\n`);
+      };
+      void (async () => {
+        try {
+          const response = await runAgentPipeline((event) => writeEvent(event), abortController.signal);
+          if (cancelled) return;
+          const contentType = (response.headers.get('content-type') || '').toLowerCase();
+          if (response.ok && response.body && contentType.includes('text/event-stream')) {
+            activeReader = response.body.getReader();
+            while (!cancelled) {
+              const { done, value } = await activeReader.read();
+              if (done) break;
+              if (value) {
+                try { controller.enqueue(value); } catch { cancelled = true; break; }
+              }
+            }
+          } else {
+            const payload = await response.json().catch(() => ({}));
+            const message = typeof payload?.error === 'string' && payload.error.trim()
+              ? payload.error.trim()
+              : 'The AI service could not complete the request.';
+            writeEvent({ type: 'error', requestId, error: message });
+            writeEvent({ type: 'finish', requestId, finishReason: 'error' });
+            writeRaw('data: [DONE]\n\n');
+          }
+        } catch (error: any) {
+          if (!cancelled) {
+            writeEvent({ type: 'error', requestId, error: error?.message || 'The AI service could not complete the request.' });
+            writeEvent({ type: 'finish', requestId, finishReason: 'error' });
+            writeRaw('data: [DONE]\n\n');
+          }
+        } finally {
+          try { activeReader?.releaseLock(); } catch {}
+          if (!cancelled) {
+            try { controller.close(); } catch {}
+          }
+        }
+      })();
+    },
+    cancel() {
+      cancelled = true;
+      abortController.abort();
+      try { void activeReader?.cancel(); } catch {}
+    },
+  });
+
+  return new Response(eventStream, {
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
+  });
 };
