@@ -4,7 +4,6 @@ import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import { useUltraLiteImage } from '@/hooks/useUltraLiteImage';
 import { Check, Copy } from 'lucide-react';
-import { codeToHtml } from 'shiki';
 import { useTheme } from '@/context/ThemeContext';
 
 
@@ -80,14 +79,17 @@ const PremiumCodeBlock = memo(function PremiumCodeBlock({
       return;
     }
     setHighlightedHtml('');
-    codeToHtml(code, {
-      lang: language,
-      theme: isDark ? 'github-dark' : 'github-light',
-    }).then((html) => {
-      if (!cancelled) setHighlightedHtml(html);
-    }).catch(() => {
-      if (!cancelled) setHighlightedHtml('');
-    });
+    void import('shiki')
+      .then(({ codeToHtml }) => codeToHtml(code, {
+        lang: language as never,
+        theme: isDark ? 'github-dark' : 'github-light',
+      }))
+      .then((html) => {
+        if (!cancelled) setHighlightedHtml(html);
+      })
+      .catch(() => {
+        if (!cancelled) setHighlightedHtml('');
+      });
     return () => { cancelled = true; };
   }, [code, language, isDark, shouldHighlight]);
 
