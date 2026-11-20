@@ -3,7 +3,7 @@ import { longTermMemory } from '@/lib/longTermMemory';
 
 export function isExplicitMemoryRequest(message: string): boolean {
   if (typeof message !== 'string' || !message.trim()) return false;
-  return /\b(remember|save this|keep this in mind|keep in mind|don't forget|do not forget|my preference is|i prefer|always remember)\b/i.test(message);
+  return /\b(remember|reminder|remind me|save this|keep this in mind|keep in mind|don't forget|do not forget|my preference is|i prefer|always remember)\b/i.test(message);
 }
 
 /** Returns null for ordinary messages and true only after persistence succeeds. */
