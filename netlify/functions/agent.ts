@@ -428,33 +428,46 @@ export default async (req: Request) => {
       const encoder = new TextEncoder();
       const stream = new ReadableStream({
         async start(controller) {
-          let heartbeatTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
+          let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+          const sendRaw = (value: string) => {
             if (generationAbortController.signal.aborted) return;
-            try { controller.enqueue(encoder.encode(': heartbeat\n\n')); }
-            catch { generationAbortController.abort(new DOMException('Client disconnected.', 'AbortError')); }
+            try {
+              controller.enqueue(encoder.encode(value));
+            } catch {
+              generationAbortController.abort(new DOMException('Client disconnected.', 'AbortError'));
+            }
+          };
+          const sendEvent = (event: Record<string, unknown>) => {
+            sendRaw(`data: ${JSON.stringify(event)}\\n\\n`);
+          };
+
+          heartbeatTimer = setInterval(() => {
+            sendRaw(': heartbeat\\n\\n');
           }, 12000);
+
           const sources = new Map<string, string>();
           for (const [url, title] of externalSources) sources.set(url, title);
           let hasEmittedText = false;
+          let streamFailedAfterPartial = false;
+          let lastGeminiError = '';
 
           const emitSseActivity = (act: AgentActivityEvent) => {
-            controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify({ type: 'agent-activity', requestId, taskId, event: act })}\n\n`)
-            );
+            sendEvent({ type: 'agent-activity', requestId, taskId, event: act });
           };
 
-          for (const act of bufferedActivities) {
-            emitSseActivity(act);
-          }
-
           try {
+            for (const act of bufferedActivities) emitSseActivity(act);
+
             const toolConfigs = useGoogleSearch ? [{ tools: [{ googleSearch: {} }] }, {}] : [{}];
             modelLoop: for (const model of candidateModels) {
               for (const toolCfg of toolConfigs) {
+                if (generationAbortController.signal.aborted) break modelLoop;
                 if (!geminiCircuitBreaker.canAttempt()) {
+                  lastGeminiError = 'Gemini is temporarily unavailable while the provider circuit breaker recovers.';
                   recoveryTelemetry.record({ component: 'gemini', action: 'circuit_open', outcome: 'degraded', statusCode: 503, requestId });
                   break modelLoop;
                 }
+
                 const hasSearchTool = Boolean((toolCfg as any).tools);
                 const modelHandle = agentActivityHub.startActivity(
                   taskId,
@@ -466,46 +479,103 @@ export default async (req: Request) => {
                   },
                   emitSseActivity
                 );
+
                 try {
                   let charCount = 0;
                   for await (const chunk of streamGeminiWithRetry(ai!, {
                     model,
                     contents,
-                    config: { systemInstruction, ...toolCfg },
+                    config: {
+                      systemInstruction,
+                      ...toolCfg,
+                    },
                   }, generationAbortController.signal)) {
+                    if (generationAbortController.signal.aborted) break modelLoop;
                     const text = chunk.text;
                     if (text) {
                       hasEmittedText = true;
                       charCount += text.length;
-                      controller.enqueue(
-                        encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: text, textDelta: text, requestId })}\n\n`)
-                      );
+                      sendEvent({ type: 'text-delta', delta: text, textDelta: text, requestId });
                     }
 
                     const groundingChunks = chunk?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
                     for (const groundingChunk of groundingChunks) {
                       const web = groundingChunk?.web;
-                      if (typeof web?.uri === 'string' && /^https?:\/\//i.test(web.uri)) {
+                      if (typeof web?.uri === 'string' && /^https?:\\/\\//i.test(web.uri)) {
                         sources.set(web.uri, typeof web.title === 'string' && web.title.trim() ? web.title : web.uri);
                       }
                     }
                   }
 
+                  if (generationAbortController.signal.aborted) break modelLoop;
                   geminiCircuitBreaker.recordSuccess();
                   recoveryTelemetry.record({ component: 'gemini', action: 'provider_recovered', outcome: 'success', requestId });
                   if (hasEmittedText) {
                     modelHandle.complete(`Streamed ${charCount} chars from ${model}`);
                     break modelLoop;
                   }
-                  modelHandle.fail('Empty stream response; trying fallback');
+                  modelHandle.fail('Empty stream response; trying fallback model');
                 } catch (err: any) {
+                  lastGeminiError = String(err?.message || 'Gemini provider request failed').slice(0, 500);
+                  modelHandle.fail(`Model ${model} unavailable; trying fallback`);
+                  geminiCircuitBreaker.recordFailure(err);
+                  recoveryTelemetry.record({
+                    component: 'gemini',
+                    action: 'provider_fallback',
+                    outcome: 'failed',
+                    statusCode: Number.isInteger(err?.status) ? err.status : undefined,
+                    requestId,
+                  });
+
+                  if (generationAbortController.signal.aborted) break modelLoop;
+                  const errMsg = String(err?.message || '');
+                  if (err?.status === 401 || err?.status === 403 || errMsg.includes('API_KEY_INVALID') || errMsg.includes('API key not valid')) {
+                    break modelLoop;
+                  }
+                  if (hasEmittedText) {
+                    streamFailedAfterPartial = true;
+                    break modelLoop;
+                  }
+                }
+              }
+            }
+
+            if (generationAbortController.signal.aborted) return;
+
+            if (!hasEmittedText) {
+              const errorMessage = lastGeminiError
+                ? `Gemini could not complete this response: ${lastGeminiError}`
+                : 'Gemini returned an empty response. Please retry or choose another model.';
+              sendEvent({ type: 'error', error: errorMessage, retryable: true, requestId });
+              sendEvent({ type: 'finish', finishReason: 'error', error: errorMessage, requestId });
+              sendRaw('data: [DONE]\\n\\n');
+              return;
+            }
+
+            if (streamFailedAfterPartial) {
+              const errorMessage = 'The Gemini stream was interrupted. Your partial response has been preserved; retry to request a complete answer.';
+              sendEvent({ type: 'error', error: errorMessage, retryable: true, requestId });
+              sendEvent({ type: 'finish', finishReason: 'error', error: errorMessage, requestId });
+              sendRaw('data: [DONE]\\n\\n');
+              return;
+            }
+
+            if (useGoogleSearch && sources.size > 0) {
+              const sourceMarkdown = '\\n\\n**Sources**\\n' + Array.from(sources.entries())
+                .slice(0, 8)
+                .map(([url, title]) => `- [${title.replace(/[\\[\\]]/g, '')}](${url})`)
+                .join('\\n');
+              sendEvent({ type: 'text-delta', delta: sourceMarkdown, textDelta: sourceMarkdown, requestId });
+            }
+
+            sendEvent({ type: 'finish', finishReason: 'stop', requestId });
+            sendRaw('data: [DONE]\\n\\n');
+          } catch (err: any) {
             if (!generationAbortController.signal.aborted) {
-              try {
-                const errorMessage = String(err?.message || 'Gemini stream interrupted').slice(0, 500);
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: errorMessage, retryable: true, requestId })}\n\n`));
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error', error: errorMessage, requestId })}\n\n`));
-                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-              } catch {}
+              const errorMessage = String(err?.message || 'Gemini stream interrupted').slice(0, 500);
+              sendEvent({ type: 'error', error: errorMessage, retryable: true, requestId });
+              sendEvent({ type: 'finish', finishReason: 'error', error: errorMessage, requestId });
+              sendRaw('data: [DONE]\\n\\n');
             }
           } finally {
             if (heartbeatTimer) clearInterval(heartbeatTimer);
