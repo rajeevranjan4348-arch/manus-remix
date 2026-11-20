@@ -469,8 +469,9 @@ export function useAgentTask() {
       const partialText = liveStreamTextRef.current.trim();
       const activeId = currentTaskIdRef.current || taskId;
       preservePartialAssistantResponse(partialText, activeId);
+      lastStreamFinishReasonRef.current = 'error';
+      lastStreamErrorRef.current = 'The AI connection stopped sending updates. Any partial response has been preserved. Please retry the request.';
       finalizedRequestIdsRef.current.add(activeRequestIdRef.current);
-      activeRequestIdRef.current += 1;
       activeStreamRequestIdRef.current = '';
       abortActiveAutonomousStreams();
       isSubmittingRef.current = false;
