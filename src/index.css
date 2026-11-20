@@ -1958,3 +1958,73 @@ select,
 [data-perf-mode="saver"] [data-virtuoso-scroller="true"] {
   scroll-behavior: auto;
 }
+
+
+/* Premium fenced-code renderer: scoped styles preserve the surrounding chat UI. */
+.manus-code-block {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  contain: layout paint;
+}
+.manus-code-filename {
+  line-height: 1.35;
+}
+.manus-code-shell {
+  background: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+}
+.manus-code-toolbar {
+  background: hsl(var(--muted) / 0.55);
+}
+.manus-code-scroll {
+  max-height: min(68vh, 720px);
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  background: hsl(var(--card));
+}
+.manus-code-highlight pre,
+.manus-code-plain {
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 1rem 1.125rem;
+  overflow: visible;
+  background: transparent !important;
+  color: hsl(var(--card-foreground));
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  tab-size: 2;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.manus-code-highlight code,
+.manus-code-plain code {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+.manus-code-highlight .shiki {
+  background: transparent !important;
+}
+.manus-code-copy {
+  touch-action: manipulation;
+}
+@media (max-width: 640px) {
+  .manus-code-scroll {
+    max-height: min(60vh, 560px);
+  }
+  .manus-code-highlight pre,
+  .manus-code-plain {
+    padding: 0.875rem;
+    font-size: 0.75rem;
+    line-height: 1.65;
+  }
+}
+[data-perf-mode="ultra-lite"] .manus-code-highlight,
+[data-perf-mode="saver"] .manus-code-highlight {
+  display: none;
+}
