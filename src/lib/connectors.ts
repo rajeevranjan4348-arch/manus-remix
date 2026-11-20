@@ -29,7 +29,7 @@ import {
   getAccessToken,
   googleSignIn,
   getCurrentUser,
-  logoutWorkspace,
+  clearWorkspaceAccessTokenOnly,
   getWorkspaceTokenMetadata,
   isWorkspaceTokenExpiringSoon,
   refreshWorkspaceAccessToken,
@@ -2468,7 +2468,7 @@ export async function disconnectConnector(connectorId: string): Promise<boolean>
   const item = CONNECTOR_CATALOG.find(c => c.id === connectorId);
   
   if (item?.isWorkspaceAuth) {
-    await logoutWorkspace();
+    clearWorkspaceAccessTokenOnly();
   }
 
   updateConnectorState(connectorId, {

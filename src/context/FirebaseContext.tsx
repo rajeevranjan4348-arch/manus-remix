@@ -3,16 +3,26 @@ import type { User as FirebaseUser } from 'firebase/auth';
 import {
   auth,
   createEmailAccount,
+  ensureAuthPersistence,
+  getFreshFirebaseIdToken,
+  getInMemoryGoogleOAuthToken,
+  getSingletonAuthSnapshot,
+  markSingletonAuthResolved,
+  onAuthStateChanged,
   refreshCurrentUser,
   requestPasswordReset,
   resendEmailVerification,
+  resolvePendingRedirectResult,
   setRememberMePersistence,
   signInAnonymouslyUser,
   signInWithEmail,
   signInWithGoogle,
   signOutUser,
 } from '@/lib/firebase';
-import { logoutWorkspace } from '@/lib/workspaceAuth';
+import {
+  clearWorkspaceAccessTokenOnly,
+  setCachedAccessToken,
+} from '@/lib/workspaceAuth';
 import { syncUserProfile } from '@/lib/firestoreService';
 import { syncUserToCloudSql } from '@/lib/cloudSqlClient';
 import { toast } from 'sonner';
@@ -20,6 +30,8 @@ import { toast } from 'sonner';
 interface FirebaseContextType {
   user: FirebaseUser | null;
   loading: boolean;
+  authReady: boolean;
+  isAuthenticated: boolean;
   signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string, password: string, rememberMe: boolean) => Promise<void>;
   createAccount: (email: string, password: string, displayName: string, rememberMe: boolean) => Promise<void>;
@@ -34,6 +46,8 @@ interface FirebaseContextType {
 const FirebaseContext = createContext<FirebaseContextType>({
   user: null,
   loading: true,
+  authReady: false,
+  isAuthenticated: false,
   signInWithGoogle: async () => {},
   signInWithEmail: async () => {},
   createAccount: async () => {},
@@ -60,48 +74,102 @@ function syncVerifiedUser(user: FirebaseUser): void {
 }
 
 export function FirebaseProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<FirebaseUser | null>(auth.currentUser);
-  const [loading, setLoading] = useState(true);
+  // Restore from in-memory singleton snapshot immediately on HMR/remounts to avoid auth flicker.
+  // On a cold browser load or full page refresh, initialized is false and loading remains true
+  // until Firebase finishes confirming authentication persistence & redirect state.
+  const initialSnapshot = getSingletonAuthSnapshot();
+  const [user, setUser] = useState<FirebaseUser | null>(initialSnapshot.user);
+  const [loading, setLoading] = useState<boolean>(!initialSnapshot.initialized);
 
   useEffect(() => {
     let isSubscribed = true;
-    let hasResolvedAuth = false;
+    let unsubscribeAuth: (() => void) | null = null;
+    let hasReceivedAuthEvent = false;
 
-    const unsubscribe = auth.onAuthStateChanged(
-      (currentUser) => {
-        if (!isSubscribed) return;
-        hasResolvedAuth = true;
-        setUser(currentUser);
-        if (currentUser) syncVerifiedUser(currentUser);
-        setLoading(false);
-      },
-      (error) => {
-        if (!isSubscribed) return;
-        console.warn('[Firebase Auth] State listener notice:', (error as any)?.code || 'state-listener-error');
-        // Keep only the user Firebase itself has restored; never trust a local profile cache as a session.
-        setUser(auth.currentUser);
-        setLoading(false);
-      },
-    );
+    const initializeAuthSession = async () => {
+      // 1. Guarantee browserLocalPersistence is configured before reading session state.
+      await ensureAuthPersistence();
 
-    const fallbackTimer = setTimeout(() => {
-      if (isSubscribed && !hasResolvedAuth) {
-        setUser(auth.currentUser);
-        setLoading(false);
+      // 2. Complete any pending OAuth redirect flow once per page load.
+      const redirectUser = await resolvePendingRedirectResult();
+      const redirectOAuthToken = getInMemoryGoogleOAuthToken();
+      if (redirectOAuthToken) {
+        setCachedAccessToken(redirectOAuthToken, { source: 'google_oauth' });
       }
-    }, 5000);
 
+      if (!isSubscribed) return;
+
+      // 3. Wait for Firebase SDK to finish hydrating persisted credentials from IndexedDB/localStorage.
+      if (typeof auth.authStateReady === 'function') {
+        try {
+          await auth.authStateReady();
+        } catch (err) {
+          console.warn('[Firebase Auth] authStateReady notice:', (err as any)?.code || 'auth-ready-error');
+        }
+      }
+
+      if (!isSubscribed) return;
+
+      // 4. Attach centralized onAuthStateChanged listener on the singleton Firebase Auth instance.
+      unsubscribeAuth = onAuthStateChanged(
+        auth,
+        (currentUser) => {
+          if (!isSubscribed) return;
+          hasReceivedAuthEvent = true;
+          markSingletonAuthResolved(currentUser);
+          setUser(currentUser);
+          if (currentUser) {
+            syncVerifiedUser(currentUser);
+          } else {
+            // Only clear in-memory Workspace OAuth cache when Firebase confirms signed-out state.
+            clearWorkspaceAccessTokenOnly();
+          }
+          setLoading(false);
+        },
+        (error) => {
+          if (!isSubscribed) return;
+          hasReceivedAuthEvent = true;
+          console.warn('[Firebase Auth] State listener notice:', (error as any)?.code || 'state-listener-error');
+          const confirmedUser = auth.currentUser ?? redirectUser ?? null;
+          markSingletonAuthResolved(confirmedUser);
+          setUser(confirmedUser);
+          setLoading(false);
+        },
+      );
+
+      // If authStateReady already resolved and onAuthStateChanged hasn't fired synchronously,
+      // wait briefly for the initial onAuthStateChanged event, then settle using Firebase's own currentUser.
+      if (!hasReceivedAuthEvent && typeof auth.authStateReady === 'function') {
+        const confirmedUser = auth.currentUser ?? redirectUser ?? null;
+        if (confirmedUser) {
+          markSingletonAuthResolved(confirmedUser);
+          setUser(confirmedUser);
+          syncVerifiedUser(confirmedUser);
+          setLoading(false);
+        }
+      }
+    };
+
+    void initializeAuthSession();
+
+    // CRITICAL: Never call signOut() on unmount, cleanup, or Vite HMR!
     return () => {
       isSubscribed = false;
-      unsubscribe();
-      clearTimeout(fallbackTimer);
+      if (unsubscribeAuth) {
+        unsubscribeAuth();
+      }
     };
   }, []);
 
   const handleSignInWithGoogle = async () => {
     const loggedUser = await signInWithGoogle();
     if (loggedUser) {
+      markSingletonAuthResolved(loggedUser);
       setUser(loggedUser);
+      const oauthToken = getInMemoryGoogleOAuthToken();
+      if (oauthToken) {
+        setCachedAccessToken(oauthToken, { source: 'google_oauth' });
+      }
       syncVerifiedUser(loggedUser);
       toast.success(`Welcome${loggedUser.displayName ? `, ${loggedUser.displayName}` : ''}!`);
     }
@@ -109,12 +177,14 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
 
   const handleSignInWithEmail = async (email: string, password: string, rememberMe: boolean) => {
     const loggedUser = await signInWithEmail(email, password, rememberMe);
+    markSingletonAuthResolved(loggedUser);
     setUser(loggedUser);
     syncVerifiedUser(loggedUser);
   };
 
   const handleCreateAccount = async (email: string, password: string, displayName: string, rememberMe: boolean) => {
     const newUser = await createEmailAccount(email, password, displayName, rememberMe);
+    markSingletonAuthResolved(newUser);
     setUser(newUser);
   };
 
@@ -129,6 +199,7 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
 
   const handleRefreshVerification = async (): Promise<boolean> => {
     const refreshedUser = await refreshCurrentUser();
+    markSingletonAuthResolved(refreshedUser);
     setUser(refreshedUser);
     if (refreshedUser?.emailVerified) {
       syncVerifiedUser(refreshedUser);
@@ -142,6 +213,7 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
       await setRememberMePersistence(true);
       const guestUser = await signInAnonymouslyUser();
       if (!guestUser) throw new Error('Firebase anonymous sign-in is unavailable.');
+      markSingletonAuthResolved(guestUser);
       setUser(guestUser);
       toast.success('Signed in as Guest');
     } catch (error) {
@@ -152,8 +224,9 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
 
   const handleSignOut = async () => {
     try {
+      clearWorkspaceAccessTokenOnly();
       await signOutUser();
-      await logoutWorkspace();
+      markSingletonAuthResolved(null);
       setUser(null);
       toast.success('Signed out successfully');
     } catch (error) {
@@ -163,20 +236,18 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
   };
 
   const getIdToken = async (forceRefresh = false): Promise<string | null> => {
-    if (!auth.currentUser) return null;
-    try {
-      return await auth.currentUser.getIdToken(forceRefresh);
-    } catch (error) {
-      console.warn('[Firebase Auth] Token refresh notice:', (error as any)?.code || 'token-refresh-error');
-      return null;
-    }
+    return getFreshFirebaseIdToken(forceRefresh);
   };
+
+  const isAuthenticated = Boolean(user && (user.isAnonymous || user.emailVerified !== false));
 
   return (
     <FirebaseContext.Provider
       value={{
         user,
         loading,
+        authReady: !loading,
+        isAuthenticated,
         signInWithGoogle: handleSignInWithGoogle,
         signInWithEmail: handleSignInWithEmail,
         createAccount: handleCreateAccount,

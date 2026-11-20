@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { categorizeSessionWithGemini } from '../../server/geminiService';
 
 const jsonResponse = (data: any, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -22,51 +22,55 @@ export default async (req: Request) => {
     return jsonResponse({ error: 'Invalid JSON payload' }, 400);
   }
 
-  const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : '';
-  const content = typeof body?.content === 'string' ? body.content.trim() : '';
-
-  if (!prompt) {
-    return jsonResponse({ error: 'Prompt is required' }, 400);
-  }
-
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return jsonResponse({ tags: [] });
-  }
-
   try {
-    const ai = new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
+    if (Array.isArray(body?.sessions)) {
+      const batchEntries = body.sessions.slice(0, 25);
+      const results: Record<string, string[]> = {};
+      await Promise.all(
+        batchEntries.map(async (entry: any) => {
+          const sessionId =
+            typeof entry?.id === 'string'
+              ? entry.id
+              : typeof entry?.sessionId === 'string'
+                ? entry.sessionId
+                : '';
+          if (!sessionId) return;
+          const categorized = await categorizeSessionWithGemini({
+            sessionId,
+            title: typeof entry?.title === 'string' ? entry.title : undefined,
+            prompt: typeof entry?.prompt === 'string' ? entry.prompt : undefined,
+            content: typeof entry?.content === 'string' ? entry.content : undefined,
+            messages: Array.isArray(entry?.messages) ? entry.messages : undefined,
+          });
+          results[sessionId] = categorized.tags;
+        })
+      );
+      return jsonResponse({ results });
+    }
+
+    const title = typeof body?.title === 'string' ? body.title.trim() : '';
+    const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : '';
+    const content = typeof body?.content === 'string' ? body.content.trim() : '';
+    const messages = Array.isArray(body?.messages) ? body.messages : undefined;
+
+    if (!prompt && !title && !content && (!messages || messages.length === 0)) {
+      return jsonResponse({ error: 'Task prompt or content is required' }, 400);
+    }
+
+    const categorized = await categorizeSessionWithGemini({
+      sessionId: typeof body?.sessionId === 'string' ? body.sessionId : undefined,
+      title,
+      prompt,
+      content,
+      messages,
     });
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: `Analyze the user's task prompt and generated response below. Select 1 to 3 relevant concise tags from this allowed set: ["Research", "Coding", "Analysis", "Design", "Writing", "Automation", "General"].
-
-Prompt: "${prompt.slice(0, 1500)}"
-Response Preview: "${content.slice(0, 1500)}"
-
-Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "Coding"]}.`,
-      config: {
-        responseMimeType: 'application/json',
-      },
+    return jsonResponse({
+      tags: categorized.tags,
+      primaryCategory: categorized.primaryCategory,
+      source: categorized.source,
     });
-
-    const textOut = response.text?.trim() || '';
-    try {
-      const parsed = JSON.parse(textOut);
-      if (Array.isArray(parsed?.tags) && parsed.tags.length > 0) {
-        return jsonResponse({ tags: parsed.tags });
-      }
-    } catch {}
-
-    return jsonResponse({ tags: [] });
   } catch (err: any) {
-    return jsonResponse({ tags: [] });
+    return jsonResponse({ error: err?.message || 'Failed to categorize task session', tags: [] }, 500);
   }
 };

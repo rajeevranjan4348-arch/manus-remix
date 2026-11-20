@@ -14,6 +14,7 @@ import { verifyBearerToken } from '../../src/middleware/auth';
 import { geminiCircuitBreaker, openRouterCircuitBreaker } from '../../server/circuitBreaker';
 import { recoveryTelemetry } from '../../server/recoveryTelemetry';
 import { parseJsonBodyLimited } from '../../server/limitedJsonBody';
+import { agentActivityHub, AgentActivityEvent } from '../../server/agentActivityService';
 
 const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -75,6 +76,13 @@ export default async (req: Request) => {
   const requestId = typeof body.requestId === 'string' && body.requestId.trim()
     ? body.requestId.trim().slice(0, 120)
     : `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const taskId = typeof body.taskId === 'string' && body.taskId.trim()
+    ? body.taskId.trim().slice(0, 120)
+    : requestId;
+  const bufferedActivities: AgentActivityEvent[] = [];
+  const pushBufferedActivity = (ev: AgentActivityEvent) => {
+    bufferedActivities.push(ev);
+  };
 
   function normalizeModel(modelName?: string): string {
     if (!modelName || typeof modelName !== 'string') return 'gemini-3-flash-preview';
@@ -165,6 +173,11 @@ export default async (req: Request) => {
     const stream = new ReadableStream({
       start(controller) {
         try {
+          for (const act of bufferedActivities) {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ type: 'agent-activity', requestId, taskId, event: act })}\n\n`)
+            );
+          }
           for (const st of stageEvents) {
             controller.enqueue(
               encoder.encode(`data: ${JSON.stringify({ type: 'research-stage', ...st, requestId })}\n\n`)
@@ -214,16 +227,45 @@ export default async (req: Request) => {
     let realtimeSnapshot: ResearchOrchestrationResult | null = null;
     const externalSources = new Map<string, string>();
 
+    const analyzeHandle = agentActivityHub.startActivity(
+      taskId,
+      {
+        title: 'Analyzing user request and intent',
+        description: latestUserText ? `Inspecting prompt (${latestUserText.slice(0, 80)})` : 'Inspecting incoming prompt',
+        toolName: 'intent_router',
+        category: 'analysis',
+      },
+      pushBufferedActivity
+    );
+
     try {
       realtimeSnapshot = await orchestrateRealtimeResearch(latestUserText, {
-        onProgress: (ev) => collectedStages.push(ev),
+        onProgress: (ev) => {
+          collectedStages.push(ev);
+          agentActivityHub.emit({
+            taskId,
+            title: ev.label || 'Executing live web research',
+            description: ev.detail || 'Collecting verified real-time sources',
+            toolName: ev.stage === 'extracting_content' ? 'page_extractor' : 'web_search',
+            status: ev.stage === 'completed' ? 'COMPLETED' : 'RUNNING',
+            category: ev.stage === 'verifying_sources' ? 'verification' : 'search',
+          });
+          const latest = agentActivityHub.getEvents(taskId).slice(-1)[0];
+          if (latest) pushBufferedActivity(latest);
+        },
       });
       for (const src of realtimeSnapshot.sources) {
         if (src.url && /^https?:\/\//i.test(src.url)) {
           externalSources.set(src.url, src.title || src.url);
         }
       }
+      analyzeHandle.complete(
+        realtimeSnapshot.route.requiresLiveResearch
+          ? `Intent: ${realtimeSnapshot.route.category} (${externalSources.size} live source(s))`
+          : `Intent: ${realtimeSnapshot.route.category}`
+      );
     } catch (rtErr) {
+      analyzeHandle.fail(rtErr);
       console.warn('[Netlify RTIE] Research orchestration notice:', rtErr);
     }
 
@@ -379,6 +421,16 @@ export default async (req: Request) => {
           for (const [url, title] of externalSources) sources.set(url, title);
           let hasEmittedText = false;
 
+          const emitSseActivity = (act: AgentActivityEvent) => {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ type: 'agent-activity', requestId, taskId, event: act })}\n\n`)
+            );
+          };
+
+          for (const act of bufferedActivities) {
+            emitSseActivity(act);
+          }
+
           try {
             const toolConfigs = useGoogleSearch ? [{ tools: [{ googleSearch: {} }] }, {}] : [{}];
             modelLoop: for (const model of candidateModels) {
@@ -387,6 +439,17 @@ export default async (req: Request) => {
                   recoveryTelemetry.record({ component: 'gemini', action: 'circuit_open', outcome: 'degraded', statusCode: 503, requestId });
                   break modelLoop;
                 }
+                const hasSearchTool = Boolean((toolCfg as any).tools);
+                const modelHandle = agentActivityHub.startActivity(
+                  taskId,
+                  {
+                    title: hasSearchTool ? `Querying ${model} with live web grounding` : `Generating response with ${model}`,
+                    description: 'Streaming completion from Gemini API',
+                    toolName: hasSearchTool ? 'gemini_google_search' : 'gemini_model',
+                    category: 'model',
+                  },
+                  emitSseActivity
+                );
                 try {
                   const responseStream = await ai!.models.generateContentStream({
                     model,
@@ -397,10 +460,12 @@ export default async (req: Request) => {
                     },
                   });
 
+                  let charCount = 0;
                   for await (const chunk of responseStream) {
                     const text = chunk.text;
                     if (text) {
                       hasEmittedText = true;
+                      charCount += text.length;
                       controller.enqueue(
                         encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: text, textDelta: text, requestId })}\n\n`)
                       );
@@ -418,9 +483,12 @@ export default async (req: Request) => {
                   geminiCircuitBreaker.recordSuccess();
                   recoveryTelemetry.record({ component: 'gemini', action: 'provider_recovered', outcome: 'success', requestId });
                   if (hasEmittedText) {
+                    modelHandle.complete(`Streamed ${charCount} chars from ${model}`);
                     break modelLoop;
                   }
+                  modelHandle.fail('Empty stream response; trying fallback');
                 } catch (err: any) {
+                  modelHandle.fail(`Model ${model} unavailable; trying fallback`);
                   geminiCircuitBreaker.recordFailure(err);
                   recoveryTelemetry.record({
                     component: 'gemini',

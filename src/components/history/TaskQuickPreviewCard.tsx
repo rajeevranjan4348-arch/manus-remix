@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card';
 import { Sparkles, Calendar, ArrowUpRight, Copy, Check, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { classifyTaskTags, getTagStyle } from '@/lib/taskTaggingService';
+import { getTagStyle, resolveTaskTags, TaskTag } from '@/lib/taskTaggingService';
 import { getStoredSessionSummaries, generateSessionSummary } from '@/lib/sessionSummaryService';
 import { getMessages } from '@/lib/chatDatabase';
 import { toast } from 'sonner';
@@ -24,12 +24,16 @@ export function TaskQuickPreviewCard({
     if (!task?.id) return undefined;
     return getStoredSessionSummaries()[task.id];
   });
+  const [resolvedTags, setResolvedTags] = useState<TaskTag[]>(() =>
+    task ? resolveTaskTags(task) : ['General']
+  );
   const [isGenerating, setIsGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!task?.id) return;
     setStoredSummary(getStoredSessionSummaries()[task.id]);
+    setResolvedTags(resolveTaskTags(task));
 
     const handleSummaryUpdate = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
@@ -38,22 +42,29 @@ export function TaskQuickPreviewCard({
       }
     };
 
+    const handleTagUpdate = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (!detail || detail.sessionId === task.id || detail.taskId === task.id) {
+        setResolvedTags(resolveTaskTags(task));
+      }
+    };
+
     window.addEventListener('manus_session_summaries_updated', handleSummaryUpdate);
+    window.addEventListener('manus_session_tags_updated', handleTagUpdate);
+    window.addEventListener('task_tagged', handleTagUpdate);
     return () => {
       window.removeEventListener('manus_session_summaries_updated', handleSummaryUpdate);
+      window.removeEventListener('manus_session_tags_updated', handleTagUpdate);
+      window.removeEventListener('task_tagged', handleTagUpdate);
     };
-  }, [task?.id]);
+  }, [task]);
 
   if (!task) return <>{children}</>;
 
   const promptText = task.prompt || task.title || 'Untitled Task';
   const status = task.status || 'completed';
   const activeSummary = storedSummary || task.summary;
-  const taskTags = Array.isArray(task.tags) && task.tags.length > 0
-    ? task.tags
-    : typeof task.tags === 'string'
-      ? JSON.parse(task.tags)
-      : classifyTaskTags(promptText, task.result);
+  const taskTags = resolvedTags.length > 0 ? resolvedTags : resolveTaskTags(task);
   const createdAtFormatted = (task.createdAt || task.created_at)
     ? new Date(task.createdAt || task.created_at).toLocaleDateString(undefined, { 
         month: 'short', 

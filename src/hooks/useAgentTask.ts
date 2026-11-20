@@ -36,6 +36,7 @@ import {
   loadAIProviderIntegrationOnDemand,
 } from '@/lib/performanceEngine';
 import { SUPPORT_ISSUE_RESPONSE_GUIDANCE } from '@/lib/aiSupportGuidance';
+import { agentActivityTracker, useTaskActivities } from '@/lib/agentActivityTracker';
 
 export type AgentTaskPhase = 'idle' | 'sending' | 'thinking' | 'tool-calling' | 'text-generation' | 'streaming' | 'completed' | 'error';
 
@@ -756,6 +757,7 @@ export function useAgentTask() {
 
       taskTagger.processTaskTags(activeId, activeTask?.prompt || cleanedText, cleanedText).catch(() => {});
       taskCheckpoint.clearCheckpoint(activeId);
+      agentActivityTracker.completeActiveActivities(activeId, 'Response completed');
 
       // Persist verified research knowledge if response includes cited sources
       if (cleanedText.includes('**Sources**')) {
@@ -857,6 +859,7 @@ export function useAgentTask() {
           status: step.status === 'completed' ? 'completed' as const : 'error' as const,
         })));
         emitRobotEvent('TASK_FAILED');
+        agentActivityTracker.failActiveActivities(currentTaskIdRef.current || taskId, errorContent);
         window.dispatchEvent(new CustomEvent('manus_agent_generating', {
           detail: { isGenerating: false, mode: 'work' }
         }));
@@ -892,6 +895,7 @@ export function useAgentTask() {
         ? { ...step, status: 'error' as const }
         : step));
       emitRobotEvent('TASK_FAILED');
+      agentActivityTracker.failActiveActivities(currentTaskIdRef.current || taskId, failureText);
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
         detail: { isGenerating: false, mode: 'work' }
       }));
@@ -1019,9 +1023,18 @@ export function useAgentTask() {
 
   const stopTask = useCallback(() => {
     const interruptedReqId = activeRequestIdRef.current;
+    const activeId = currentTaskIdRef.current || taskId;
     const partialText = liveStreamTextRef.current.trim();
     if (partialText) {
-      finalizeRequestTurn(interruptedReqId, currentTaskIdRef.current || taskId, partialText);
+      finalizeRequestTurn(interruptedReqId, activeId, partialText);
+    }
+    agentActivityTracker.cancelTaskActivities(activeId, 'Stopped by user');
+    if (activeId && typeof fetch === 'function') {
+      fetch('/api/agent/activity/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId: activeId, reason: 'Stopped by user' }),
+      }).catch(() => {});
     }
     finalizedRequestIdsRef.current.add(interruptedReqId);
     activeRequestIdRef.current += 1;
@@ -1089,9 +1102,10 @@ export function useAgentTask() {
 
   const processedInvocationsRef = useRef<Set<string>>(new Set());
 
-  const preparePromptWithConnectors = useCallback(async (prompt: string) => {
+  const preparePromptWithConnectors = useCallback(async (prompt: string, taskIdOverride?: string | null) => {
     setPhase('tool-calling');
     const activeUserId = user?.id || 'usr_manus_default';
+    const activeActivityTaskId = taskIdOverride || currentTaskIdRef.current || taskId;
     const simplePrompt = isSimpleConversationalPrompt(prompt);
 
     const buildEnrichedPrompt = async (): Promise<string> => {
@@ -1100,6 +1114,17 @@ export function useAgentTask() {
       try {
         const memoryContext = await longTermMemory.getRelevantContext(activeUserId, prompt);
         if (memoryContext) {
+          if (activeActivityTaskId) {
+            agentActivityTracker.ingestEvent({
+              taskId: activeActivityTaskId,
+              title: 'Loaded saved user context from memory',
+              description: 'Retrieved matching preferences and factual memory entries',
+              toolName: 'long_term_memory',
+              status: 'COMPLETED',
+              category: 'database',
+              resultSummary: 'Injected relevant user memory context',
+            }, false);
+          }
           enriched += `\n\n[USER SAVED PREFERENCES & FACTUAL MEMORY]:\n${memoryContext}`;
         }
       } catch {}
@@ -1108,6 +1133,17 @@ export function useAgentTask() {
       try {
         const ragPassages = knowledgeBase.retrieve(prompt, activeUserId, 3);
         if (ragPassages.length > 0) {
+          if (activeActivityTaskId) {
+            agentActivityTracker.ingestEvent({
+              taskId: activeActivityTaskId,
+              title: `Retrieved ${ragPassages.length} workspace document passage(s)`,
+              description: 'Matched relevant files from local workspace knowledge base',
+              toolName: 'knowledge_base_rag',
+              status: 'COMPLETED',
+              category: 'file',
+              resultSummary: ragPassages.map(r => r.citation.title).slice(0, 3).join(', '),
+            }, false);
+          }
           const textPassages = ragPassages
             .map(r => `Document "${r.citation.title}":\n${r.chunk.content}`)
             .join('\n\n');
@@ -1120,6 +1156,17 @@ export function useAgentTask() {
         try {
           const cachedResearch = await persistentKnowledgeStore.findFreshRecord(activeUserId, prompt);
           if (cachedResearch && cachedResearch.sources.length > 0) {
+            if (activeActivityTaskId) {
+              agentActivityTracker.ingestEvent({
+                taskId: activeActivityTaskId,
+                title: 'Loaded verified research cache record',
+                description: `Found ${cachedResearch.sources.length} previously verified source(s)`,
+                toolName: 'knowledge_cache',
+                status: 'COMPLETED',
+                category: 'database',
+                resultSummary: `Verified at ${cachedResearch.lastVerifiedAt}`,
+              }, false);
+            }
             const srcList = cachedResearch.sources
               .slice(0, 5)
               .map(s => `- [${s.title}](${s.url})`)
@@ -1132,12 +1179,24 @@ export function useAgentTask() {
       // 3. Inject Live Google Workspace Context ONLY when explicit @mentions are present
       const detectedMentions = prompt.match(/@[\w_]+/g) || [];
       if (detectedMentions.length > 0) {
+        const wsHandle = activeActivityTaskId
+          ? agentActivityTracker.startActivity(activeActivityTaskId, {
+              title: `Inspecting Google Workspace context (${detectedMentions.join(', ')})`,
+              description: 'Querying authorized Google Workspace APIs for mentioned resources',
+              toolName: 'google_workspace',
+              category: 'api',
+            })
+          : null;
         try {
           const workspaceContext = await fetchWorkspaceContextSummary(detectedMentions);
           if (workspaceContext) {
+            wsHandle?.complete('Retrieved live Workspace context');
             enriched += workspaceContext;
+          } else {
+            wsHandle?.complete('No matching Workspace items returned');
           }
         } catch (wsErr) {
+          wsHandle?.fail(wsErr);
           console.warn('[Workspace Context] Notice:', wsErr);
         }
       }
@@ -1149,9 +1208,20 @@ export function useAgentTask() {
           if (toolIntent && toolIntent.matched && !toolIntent.requiresConfirmation) {
             const state = getConnectorState(toolIntent.connectorId);
             if (state.status === 'connected') {
+              const toolHandle = activeActivityTaskId
+                ? agentActivityTracker.startActivity(activeActivityTaskId, {
+                    title: `Executing ${toolIntent.connectorName} (${toolIntent.toolName})`,
+                    description: toolIntent.suggestedAction || 'Running connected Workspace action',
+                    toolName: toolIntent.toolName,
+                    category: 'api',
+                  })
+                : null;
               const toolResult = await executeConnectorTool(toolIntent.toolName, toolIntent.args);
               if (toolResult.success) {
+                toolHandle?.complete(toolResult.message || 'Workspace action succeeded');
                 enriched += `\n\n[Google Workspace Action Executed via ${toolIntent.connectorName} - ${toolIntent.suggestedAction}]\nResult: ${JSON.stringify(toolResult.data || toolResult.message)}\nUse this live data to complete the user's request.`;
+              } else {
+                toolHandle?.fail(toolResult.error || toolResult.message || 'Workspace tool failed');
               }
             }
           }
@@ -1164,6 +1234,17 @@ export function useAgentTask() {
       try {
         const skillRes = await skillsRegistry.detectAndExecute(prompt);
         if (skillRes && skillRes.success) {
+          if (activeActivityTaskId) {
+            agentActivityTracker.ingestEvent({
+              taskId: activeActivityTaskId,
+              title: 'Executed built-in computational skill',
+              description: skillRes.summary || 'Computed verified deterministic output',
+              toolName: 'computational_skill',
+              status: 'COMPLETED',
+              category: 'code',
+              resultSummary: skillRes.summary,
+            }, false);
+          }
           enriched += `\n\n[AUTONOMOUS COMPUTATIONAL SKILL EXECUTED]:\nSummary: ${skillRes.summary}\nData: ${JSON.stringify(skillRes.output)}\n[INSTRUCTION: Directly cite these exact computed numbers or converted measurements in your response.]`;
         }
       } catch (skillErr) {
@@ -1175,6 +1256,17 @@ export function useAgentTask() {
         try {
           const dispatch = await executeMatchingConnector(prompt);
           if (dispatch.matched) {
+            if (activeActivityTaskId) {
+              agentActivityTracker.ingestEvent({
+                taskId: activeActivityTaskId,
+                title: `Queried connected app: ${dispatch.connectorName}`,
+                description: 'Fetched live data from authorized external connector',
+                toolName: String(dispatch.connectorName || 'connector'),
+                status: 'COMPLETED',
+                category: 'api',
+                resultSummary: 'Connector returned structured response',
+              }, false);
+            }
             return enriched + '\n\n[Connected app result from ' + dispatch.connectorName + ']\n' +
               JSON.stringify(dispatch.result) + '\n\nUse this returned data as the source for your answer.';
           }
@@ -1193,7 +1285,7 @@ export function useAgentTask() {
     } finally {
       setPhase('text-generation');
     }
-  }, [user]);
+  }, [user, taskId]);
 
 
   // Track tool calls and update steps dynamically without duplicate traces
@@ -1237,6 +1329,25 @@ export function useAgentTask() {
           
           if (stepLabel) {
             emitRobotEvent(toolName === 'web_search' ? 'SEARCH_STARTED' : 'TOOL_STARTED');
+            const actTaskId = currentTaskIdRef.current || taskId;
+            if (actTaskId) {
+              agentActivityTracker.ingestEvent({
+                taskId: actTaskId,
+                eventId: `sdk_tool_${invocationKey.slice(0, 80)}`,
+                title: stepLabel,
+                description: trace[0] || `Running ${toolName}`,
+                toolName,
+                status: 'RUNNING',
+                category:
+                  toolName === 'web_search'
+                    ? 'search'
+                    : toolName === 'fetch_url'
+                      ? 'browser'
+                      : toolName === 'read_file'
+                        ? 'file'
+                        : 'terminal',
+              }, false);
+            }
             setSteps(prev => {
               const nextSteps: Step[] = prev.map(s => {
                 if (s.label === stepLabel) {
@@ -1370,6 +1481,14 @@ export function useAgentTask() {
             return;
           }
 
+          const connToolHandle = activeId
+            ? agentActivityTracker.startActivity(activeId, {
+                title: toolIntent.suggestedAction || `Executing ${toolIntent.toolName}`,
+                description: `Calling ${toolIntent.connectorName} (${toolIntent.toolName})`,
+                toolName: toolIntent.toolName,
+                category: 'api',
+              })
+            : null;
           setSteps(prev => [
             ...prev,
             { id: String(prev.length + 1), label: toolIntent.suggestedAction, status: 'running', trace: [`Executing ${toolIntent.toolName}...`] }
@@ -1378,9 +1497,11 @@ export function useAgentTask() {
           const res = await executeConnectorTool(toolIntent.toolName, toolIntent.args);
           setSteps(prev => prev.map(s => s.label === toolIntent.suggestedAction ? { ...s, status: 'completed' } : s));
           if (res.success) {
+            connToolHandle?.complete(res.message || `${toolIntent.connectorName} returned data`);
             const augmentedPrompt = `${textWithoutImagePayload}\n\n[EXECUTED CONNECTED TOOL: ${toolIntent.connectorName} (${toolIntent.toolName})]\n[RESULT DATA]:\n${JSON.stringify(res.data, null, 2)}\n\n[INSTRUCTION: Synthesize a clear, verified answer based on the retrieved data above. Highlight key documents/messages/events and provide links where applicable.]`;
             await executeReliableAgentTurn(augmentedPrompt, reqId);
           } else {
+            connToolHandle?.fail(res.error || res.message || 'Connector execution failed');
             const errorPrompt = `${textWithoutImagePayload}\n\n[CONNECTOR TOOL ERROR: ${res.error || 'Execution failed'}]\n${res.message}\nProvide a helpful explanation of the failure.`;
             await executeReliableAgentTurn(errorPrompt, reqId);
           }
@@ -1392,7 +1513,7 @@ export function useAgentTask() {
           ? `${textWithoutImagePayload}\n\n[INSTRUCTION: Format your chart data as a JSON code block using the format below so it renders as an interactive chart]\n\`\`\`json\n{\n  "graph": {\n    "type": "bar",\n    "labels": ["Category A", "Category B", "Category C", "Category D"],\n    "datasets": [{\n      "label": "Metric",\n      "data": [45, 72, 88, 95]\n    }]\n  }\n}\n\`\`\``
           : textWithoutImagePayload;
 
-        const preparedPrompt = await preparePromptWithConnectors(targetPrompt);
+        const preparedPrompt = await preparePromptWithConnectors(targetPrompt, activeId);
         if (activeRequestIdRef.current !== reqId) return;
         setPhase('text-generation');
         setSteps(prev => advanceWorkflowSteps(prev, 'synthesizing'));
@@ -1728,7 +1849,7 @@ export function useAgentTask() {
     }
 
     try {
-      const preparedPrompt = await preparePromptWithConnectors(enhancedPrompt);
+      const preparedPrompt = await preparePromptWithConnectors(enhancedPrompt, newTaskId);
       if (activeRequestIdRef.current === reqId) {
         setPhase('text-generation');
         setSteps(prev => advanceWorkflowSteps(prev, 'synthesizing'));
@@ -2039,6 +2160,11 @@ export function useAgentTask() {
     setSteps(newSteps);
   }, []);
 
+  const activities = useTaskActivities(
+    taskId || currentTaskIdRef.current,
+    Boolean(isLoading || taskStatus === 'running')
+  );
+
   return {
     taskId,
     loadTask,
@@ -2057,6 +2183,7 @@ export function useAgentTask() {
     chartData,
     messages: displayMessages,
     isLoading,
-    phase
+    phase,
+    activities
   };
 }

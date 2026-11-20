@@ -1,78 +1,191 @@
 import { Capacitor } from '@capacitor/core';
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
 import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
   signInWithCredential,
+  getRedirectResult,
   signInAnonymously as fbSignInAnonymously,
   signOut as fbSignOut,
   onAuthStateChanged,
   setPersistence,
   browserLocalPersistence,
-  browserSessionPersistence,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   sendEmailVerification,
   sendPasswordResetEmail,
   updateProfile,
   reload,
-  User as FirebaseUser,
+  type Auth,
+  type User as FirebaseUser,
 } from 'firebase/auth';
 import {
   getFirestore,
   initializeFirestore,
   doc,
   getDocFromServer,
+  type Firestore,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-// Initialize Firebase App safely so restricted iframe environments never crash on import.
-export const app = (() => {
-  try {
-    return initializeApp(firebaseConfig);
-  } catch (err) {
-    console.warn('[Firebase] App initialization notice:', err);
-    return initializeApp(firebaseConfig, 'manus-fallback-' + Date.now());
-  }
-})();
+interface FirebaseSingletonStore {
+  app: FirebaseApp;
+  db: Firestore;
+  auth: Auth;
+  persistencePromise: Promise<void> | null;
+  redirectResultPromise: Promise<FirebaseUser | null> | null;
+  lastOAuthAccessToken: string | null;
+  lastResolvedUser: FirebaseUser | null;
+  authStateInitialized: boolean;
+}
 
-// Initialize Firestore with the configured named database and automatic long-polling detection for iframe environments.
-export const db = (() => {
+const SINGLETON_KEY = '__MANUS_FIREBASE_SINGLETON_V1__';
+
+function getOrCreateFirebaseSingleton(): FirebaseSingletonStore {
+  const g = globalThis as Record<string, unknown>;
+  const existing = g[SINGLETON_KEY] as FirebaseSingletonStore | undefined;
+  if (existing?.app && existing?.auth && existing?.db) {
+    return existing;
+  }
+
+  // Always reuse the canonical [DEFAULT] Firebase app if already initialized (critical for Vite HMR / reloads).
+  const appInstance: FirebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+
+  // Initialize Firestore once with configured named database and long-polling auto-detection for iframe previews.
   const databaseId = (firebaseConfig as any).firestoreDatabaseId as string | undefined;
-  try {
-    return databaseId
-      ? initializeFirestore(app, { experimentalAutoDetectLongPolling: true }, databaseId)
-      : initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
-  } catch {
+  const dbInstance: Firestore = (() => {
     try {
-      return databaseId ? getFirestore(app, databaseId) : getFirestore(app);
-    } catch (err) {
-      console.warn('[Firebase] Firestore initialization notice:', err);
-      return getFirestore(app);
+      return databaseId
+        ? initializeFirestore(appInstance, { experimentalAutoDetectLongPolling: true }, databaseId)
+        : initializeFirestore(appInstance, { experimentalAutoDetectLongPolling: true });
+    } catch {
+      return databaseId ? getFirestore(appInstance, databaseId) : getFirestore(appInstance);
     }
-  }
-})();
+  })();
 
-// Firebase Auth owns credentials and refresh tokens; passwords are never persisted by the app.
-export const auth: ReturnType<typeof getAuth> = (() => {
-  try {
-    const instance = getAuth(app);
-    setPersistence(instance, browserLocalPersistence).catch((err) => {
-      console.warn('[Firebase Auth] Persistence initialization notice:', err?.code || 'persistence-unavailable');
+  // Initialize Firebase Auth strictly once on the singleton app instance.
+  const authInstance: Auth = getAuth(appInstance);
+
+  const store: FirebaseSingletonStore = {
+    app: appInstance,
+    db: dbInstance,
+    auth: authInstance,
+    persistencePromise: null,
+    redirectResultPromise: null,
+    lastOAuthAccessToken: null,
+    lastResolvedUser: authInstance.currentUser ?? null,
+    authStateInitialized: false,
+  };
+
+  g[SINGLETON_KEY] = store;
+  return store;
+}
+
+const firebaseSingleton = getOrCreateFirebaseSingleton();
+
+export const app: FirebaseApp = firebaseSingleton.app;
+export const db: Firestore = firebaseSingleton.db;
+export const auth: Auth = firebaseSingleton.auth;
+
+/**
+ * Ensures Firebase Auth is configured with browserLocalPersistence before any login or session check.
+ * Safe to call repeatedly; shares a single cached promise across the session and HMR cycles.
+ */
+export function ensureAuthPersistence(): Promise<void> {
+  if (!firebaseSingleton.persistencePromise) {
+    firebaseSingleton.persistencePromise = setPersistence(auth, browserLocalPersistence).catch((err) => {
+      console.warn('[Firebase Auth] browserLocalPersistence notice:', (err as any)?.code || err);
     });
-    return instance;
-  } catch (err) {
-    console.warn('[Firebase Auth] Auth initialization fallback notice:', err);
-    return {
-      currentUser: null,
-      onAuthStateChanged: (cb: any) => {
-        if (typeof cb === 'function') Promise.resolve().then(() => cb(null));
-        return () => {};
-      },
-    } as any;
   }
-})();
+  return firebaseSingleton.persistencePromise;
+}
+
+// Kick off browserLocalPersistence immediately on singleton creation in browser environments.
+if (typeof window !== 'undefined') {
+  void ensureAuthPersistence();
+}
+
+/**
+ * Returns the last Google OAuth access token obtained in-memory during sign-in/redirect (never persisted to localStorage).
+ */
+export function getInMemoryGoogleOAuthToken(): string | null {
+  return firebaseSingleton.lastOAuthAccessToken;
+}
+
+export function setInMemoryGoogleOAuthToken(token: string | null): void {
+  firebaseSingleton.lastOAuthAccessToken = token;
+}
+
+export function getSingletonAuthSnapshot(): { user: FirebaseUser | null; initialized: boolean } {
+  return {
+    user: auth.currentUser ?? firebaseSingleton.lastResolvedUser,
+    initialized: firebaseSingleton.authStateInitialized,
+  };
+}
+
+export function markSingletonAuthResolved(user: FirebaseUser | null): void {
+  firebaseSingleton.lastResolvedUser = user;
+  firebaseSingleton.authStateInitialized = true;
+}
+
+/**
+ * Resolves any pending OAuth redirect sign-in result once per page load.
+ * Captures both the authenticated Firebase user and any Google OAuth access token in memory.
+ */
+export function resolvePendingRedirectResult(): Promise<FirebaseUser | null> {
+  if (typeof window === 'undefined') {
+    return Promise.resolve(null);
+  }
+  if (!firebaseSingleton.redirectResultPromise) {
+    firebaseSingleton.redirectResultPromise = (async () => {
+      await ensureAuthPersistence();
+      try {
+        const result = await getRedirectResult(auth);
+        if (result?.user) {
+          const credential = GoogleAuthProvider.credentialFromResult(result);
+          if (credential?.accessToken) {
+            firebaseSingleton.lastOAuthAccessToken = credential.accessToken;
+          }
+          firebaseSingleton.lastResolvedUser = result.user;
+          return result.user;
+        }
+        return null;
+      } catch (error: any) {
+        if (
+          error?.code !== 'auth/no-auth-event' &&
+          error?.code !== 'auth/popup-closed-by-user' &&
+          error?.code !== 'auth/cancelled-popup-request'
+        ) {
+          console.warn('[Firebase Auth] Redirect result notice:', error?.code || 'redirect-result-error');
+        }
+        return null;
+      }
+    })();
+  }
+  return firebaseSingleton.redirectResultPromise;
+}
+
+/**
+ * Retrieves a valid Firebase ID token for backend authentication, refreshing via Firebase SDK if requested or expired.
+ */
+export async function getFreshFirebaseIdToken(forceRefresh = false): Promise<string | null> {
+  const currentUser = auth.currentUser;
+  if (!currentUser) return null;
+  try {
+    return await currentUser.getIdToken(forceRefresh);
+  } catch (error) {
+    if (!forceRefresh) {
+      try {
+        return await currentUser.getIdToken(true);
+      } catch {
+        return null;
+      }
+    }
+    console.warn('[Firebase Auth] ID token refresh notice:', (error as any)?.code || 'id-token-error');
+    return null;
+  }
+}
 
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.addScope('email');
@@ -86,21 +199,25 @@ function getAuthContinueUrl(): string | undefined {
   return `${window.location.origin}/login`;
 }
 
-export async function setRememberMePersistence(rememberMe: boolean): Promise<void> {
-  await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+/**
+ * Normal user authentication always uses browserLocalPersistence so sessions survive browser restarts,
+ * page refreshes, and preview reloads.
+ */
+export async function setRememberMePersistence(_rememberMe = true): Promise<void> {
+  await ensureAuthPersistence();
 }
 
 export async function createEmailAccount(
   email: string,
   password: string,
   displayName?: string,
-  rememberMe = true,
+  _rememberMe = true,
 ): Promise<FirebaseUser> {
   if (password.length < 8) {
     throw Object.assign(new Error('Choose a password with at least 8 characters.'), { code: 'app/password-too-short' });
   }
 
-  await setRememberMePersistence(rememberMe);
+  await ensureAuthPersistence();
   const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
   const cleanName = displayName?.trim();
   if (cleanName) {
@@ -115,9 +232,9 @@ export async function createEmailAccount(
 export async function signInWithEmail(
   email: string,
   password: string,
-  rememberMe = true,
+  _rememberMe = true,
 ): Promise<FirebaseUser> {
-  await setRememberMePersistence(rememberMe);
+  await ensureAuthPersistence();
   const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
   return credential.user;
 }
@@ -145,6 +262,7 @@ async function signInWithNativeGoogle(): Promise<FirebaseUser> {
     throw Object.assign(new Error('Google sign-in is not configured for this app.'), { code: 'app/google-client-not-configured' });
   }
 
+  await ensureAuthPersistence();
   const { SocialLogin } = await import('@capgo/capacitor-social-login');
   if (!nativeGoogleInitialization) {
     nativeGoogleInitialization = SocialLogin.initialize({
@@ -171,20 +289,29 @@ async function signInWithNativeGoogle(): Promise<FirebaseUser> {
     });
   }
 
-  const credential = GoogleAuthProvider.credential(
-    response.result.idToken,
-    response.result.accessToken?.token ?? undefined,
-  );
+  const accessToken = response.result.accessToken?.token ?? undefined;
+  if (accessToken) {
+    firebaseSingleton.lastOAuthAccessToken = accessToken;
+  }
+  const credential = GoogleAuthProvider.credential(response.result.idToken, accessToken);
   return (await signInWithCredential(auth, credential)).user;
 }
 
 export async function signInWithGoogle(): Promise<FirebaseUser | null> {
   try {
+    // Always guarantee browserLocalPersistence is active BEFORE starting Google sign-in.
+    await ensureAuthPersistence();
+
     if (Capacitor.getPlatform() === 'android') {
       return await signInWithNativeGoogle();
     }
 
     const result = await signInWithPopup(auth, googleProvider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    if (credential?.accessToken) {
+      firebaseSingleton.lastOAuthAccessToken = credential.accessToken;
+    }
+    firebaseSingleton.lastResolvedUser = result.user;
     return result.user;
   } catch (error: any) {
     if (
@@ -199,7 +326,9 @@ export async function signInWithGoogle(): Promise<FirebaseUser | null> {
 
 export async function signInAnonymouslyUser(): Promise<FirebaseUser | null> {
   try {
+    await ensureAuthPersistence();
     const result = await fbSignInAnonymously(auth);
+    firebaseSingleton.lastResolvedUser = result.user;
     return result.user;
   } catch (error) {
     console.warn('[Firebase Auth] Anonymous sign-in notice:', (error as any)?.code || 'provider-error');
@@ -217,12 +346,16 @@ export async function signOutUser(): Promise<void> {
         // The native Google account may not be signed in (e.g. this was an email login).
       }
     }
+    firebaseSingleton.lastOAuthAccessToken = null;
+    firebaseSingleton.lastResolvedUser = null;
     await fbSignOut(auth);
   } catch (error) {
     console.error('[Firebase Auth] Sign-out failed:', (error as any)?.code || 'sign-out-error');
     throw error;
   }
 }
+
+export { onAuthStateChanged };
 
 // Structured Firestore error handling as mandated by Firebase Integration Skill
 export enum OperationType {

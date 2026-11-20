@@ -1,25 +1,21 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  onAuthStateChanged, 
-  setPersistence,
-  browserLocalPersistence,
-  User, 
-  signOut 
+import {
+  signInWithPopup,
+  GoogleAuthProvider,
+  User,
+  signOut,
 } from 'firebase/auth';
 import { toast } from 'sonner';
 import firebaseConfig from '../../firebase-applet-config.json';
+import {
+  auth,
+  ensureAuthPersistence,
+  getInMemoryGoogleOAuthToken,
+  setInMemoryGoogleOAuthToken,
+  onAuthStateChanged,
+} from './firebase';
 
-// Initialize or get Firebase App instance
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-export const auth = getAuth(app);
-
-// Explicitly set browserLocalPersistence to ensure workspace auth session persists
-setPersistence(auth, browserLocalPersistence).catch((err) => {
-  console.warn('[Workspace Auth] Persistence initialization notice:', err);
-});
+// Re-export the single canonical Firebase Auth instance (never initialize a second auth system)
+export { auth };
 
 // Configure Google Auth Provider with all requested Google Workspace Scopes
 export const workspaceGoogleProvider = new GoogleAuthProvider();
@@ -99,8 +95,10 @@ export const SCOPES = [
 
 SCOPES.forEach(scope => workspaceGoogleProvider.addScope(scope));
 
-const WORKSPACE_TOKEN_KEY = 'manus_workspace_access_token';
-const WORKSPACE_TOKEN_META_KEY = 'manus_workspace_token_meta_v1';
+const LEGACY_WORKSPACE_TOKEN_KEY = 'manus_workspace_access_token';
+const LEGACY_WORKSPACE_TOKEN_META_KEY = 'manus_workspace_token_meta_v1';
+const MEMORY_STORE_KEY = '__MANUS_WORKSPACE_TOKEN_MEMORY_V1__';
+
 export const DEFAULT_GOOGLE_TOKEN_TTL_MS = 55 * 60 * 1000; // 55 minutes default validity window
 export const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // Refresh 5 minutes before expiration
 
@@ -130,68 +128,61 @@ export interface RefreshWorkspaceTokenResult {
   error?: string;
 }
 
+interface WorkspaceMemoryStore {
+  accessToken: string | null;
+  tokenMeta: WorkspaceTokenMetadata | null;
+  currentUser: User | null;
+}
+
+function getWorkspaceMemoryStore(): WorkspaceMemoryStore {
+  const g = globalThis as Record<string, unknown>;
+  let store = g[MEMORY_STORE_KEY] as WorkspaceMemoryStore | undefined;
+  if (!store) {
+    store = {
+      accessToken: null,
+      tokenMeta: null,
+      currentUser: auth.currentUser ?? null,
+    };
+    g[MEMORY_STORE_KEY] = store;
+  }
+  return store;
+}
+
+/**
+ * Removes any legacy manually-cached OAuth token keys from browser storage without ever touching Firebase Auth storage.
+ */
+function purgeLegacyBrowserTokenKeys(): void {
+  const storages: Storage[] = [];
+  if (typeof sessionStorage !== 'undefined') storages.push(sessionStorage);
+  if (typeof localStorage !== 'undefined') storages.push(localStorage);
+
+  for (const storage of storages) {
+    try {
+      storage.removeItem(LEGACY_WORKSPACE_TOKEN_KEY);
+      storage.removeItem(LEGACY_WORKSPACE_TOKEN_META_KEY);
+    } catch {
+      // ignore storage cleanup errors
+    }
+  }
+}
+
+if (typeof window !== 'undefined') {
+  purgeLegacyBrowserTokenKeys();
+}
+
 let isSigningIn = false;
-let cachedAccessToken: string | null = null;
-let cachedTokenMeta: WorkspaceTokenMetadata | null = null;
-let currentUser: User | null = null;
 let activeRefreshPromise: Promise<RefreshWorkspaceTokenResult> | null = null;
 let proactiveRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
-function readStoredTokenMetadata(): WorkspaceTokenMetadata | null {
-  const storages: Storage[] = [];
-  if (typeof sessionStorage !== 'undefined') storages.push(sessionStorage);
-  if (typeof localStorage !== 'undefined') storages.push(localStorage);
-
-  for (const storage of storages) {
-    try {
-      const raw = storage.getItem(WORKSPACE_TOKEN_META_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed.accessToken === 'string' && typeof parsed.expiresAt === 'number') {
-          return parsed as WorkspaceTokenMetadata;
-        }
-      }
-    } catch {
-      // ignore storage read errors
-    }
-  }
-  return null;
-}
-
-function writeStoredTokenMetadata(meta: WorkspaceTokenMetadata | null): void {
-  const storages: Storage[] = [];
-  if (typeof sessionStorage !== 'undefined') storages.push(sessionStorage);
-  if (typeof localStorage !== 'undefined') storages.push(localStorage);
-
-  for (const storage of storages) {
-    try {
-      if (meta) {
-        storage.setItem(WORKSPACE_TOKEN_META_KEY, JSON.stringify(meta));
-      } else {
-        storage.removeItem(WORKSPACE_TOKEN_META_KEY);
-      }
-    } catch {
-      // ignore storage write errors
-    }
-  }
-}
-
 export const getWorkspaceTokenMetadata = (): WorkspaceTokenMetadata | null => {
-  if (cachedTokenMeta && cachedAccessToken === cachedTokenMeta.accessToken) {
-    return cachedTokenMeta;
-  }
-  const storedMeta = readStoredTokenMetadata();
-  if (storedMeta) {
-    cachedTokenMeta = storedMeta;
-    if (!cachedAccessToken) {
-      cachedAccessToken = storedMeta.accessToken;
-    }
-    return storedMeta;
+  const store = getWorkspaceMemoryStore();
+  if (store.tokenMeta && store.accessToken === store.tokenMeta.accessToken) {
+    return store.tokenMeta;
   }
   const rawToken = getAccessToken();
   if (rawToken) {
     const now = Date.now();
-    cachedTokenMeta = {
+    store.tokenMeta = {
       accessToken: rawToken,
       issuedAt: now,
       expiresAt: now + DEFAULT_GOOGLE_TOKEN_TTL_MS,
@@ -199,31 +190,18 @@ export const getWorkspaceTokenMetadata = (): WorkspaceTokenMetadata | null => {
       lastRefreshedAt: null,
       source: 'manual',
     };
-    writeStoredTokenMetadata(cachedTokenMeta);
-    return cachedTokenMeta;
+    return store.tokenMeta;
   }
   return null;
 };
 
 export const getAccessToken = (): string | null => {
-  if (cachedAccessToken) return cachedAccessToken;
-  if (typeof sessionStorage !== 'undefined') {
-    try {
-      const stored = sessionStorage.getItem(WORKSPACE_TOKEN_KEY);
-      if (stored) {
-        cachedAccessToken = stored;
-        return stored;
-      }
-    } catch {}
-  }
-  if (typeof localStorage !== 'undefined') {
-    try {
-      const stored = localStorage.getItem(WORKSPACE_TOKEN_KEY);
-      if (stored) {
-        cachedAccessToken = stored;
-        return stored;
-      }
-    } catch {}
+  const store = getWorkspaceMemoryStore();
+  if (store.accessToken) return store.accessToken;
+  const firebaseOAuthToken = getInMemoryGoogleOAuthToken();
+  if (firebaseOAuthToken) {
+    store.accessToken = firebaseOAuthToken;
+    return firebaseOAuthToken;
   }
   return null;
 };
@@ -237,27 +215,13 @@ export const setCachedAccessToken = (
     incrementRefresh?: boolean;
   }
 ) => {
-  const previousMeta = cachedTokenMeta || readStoredTokenMetadata();
-  cachedAccessToken = token;
+  const store = getWorkspaceMemoryStore();
+  const previousMeta = store.tokenMeta;
+  store.accessToken = token;
+  setInMemoryGoogleOAuthToken(token);
 
-  if (typeof sessionStorage !== 'undefined') {
-    try {
-      if (token) {
-        sessionStorage.setItem(WORKSPACE_TOKEN_KEY, token);
-      } else {
-        sessionStorage.removeItem(WORKSPACE_TOKEN_KEY);
-      }
-    } catch {}
-  }
-  if (typeof localStorage !== 'undefined') {
-    try {
-      if (token) {
-        localStorage.setItem(WORKSPACE_TOKEN_KEY, token);
-      } else {
-        localStorage.removeItem(WORKSPACE_TOKEN_KEY);
-      }
-    } catch {}
-  }
+  // Never store OAuth access tokens, refresh tokens, or credentials in localStorage/sessionStorage.
+  purgeLegacyBrowserTokenKeys();
 
   if (token) {
     const now = Date.now();
@@ -269,7 +233,7 @@ export const setCachedAccessToken = (
       ? (previousMeta?.refreshCount ?? 0) + 1
       : previousMeta?.refreshCount ?? 0;
 
-    cachedTokenMeta = {
+    store.tokenMeta = {
       accessToken: token,
       issuedAt: now,
       expiresAt,
@@ -279,11 +243,9 @@ export const setCachedAccessToken = (
         : previousMeta?.lastRefreshedAt ?? null,
       source: options?.source || previousMeta?.source || 'google_oauth',
     };
-    writeStoredTokenMetadata(cachedTokenMeta);
     scheduleProactiveWorkspaceTokenRefresh();
   } else {
-    cachedTokenMeta = null;
-    writeStoredTokenMetadata(null);
+    store.tokenMeta = null;
     if (proactiveRefreshTimer) {
       clearTimeout(proactiveRefreshTimer);
       proactiveRefreshTimer = null;
@@ -346,7 +308,7 @@ async function trySilentGisTokenRefresh(): Promise<{
         client_id: clientId,
         scope: SCOPES.join(' '),
         prompt: '',
-        hint: currentUser?.email || auth.currentUser?.email || undefined,
+        hint: getWorkspaceMemoryStore().currentUser?.email || auth.currentUser?.email || undefined,
         callback: (response: any) => {
           clearTimeout(timeout);
           if (response && response.access_token && !response.error) {
@@ -624,8 +586,10 @@ export const initWorkspaceAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
+  void ensureAuthPersistence();
   return onAuthStateChanged(auth, async (user: User | null) => {
-    currentUser = user;
+    const store = getWorkspaceMemoryStore();
+    store.currentUser = user;
     if (user) {
       const activeToken = getAccessToken();
       if (activeToken) {
@@ -653,7 +617,7 @@ export const initWorkspaceAuth = (
       }
     } else {
       setCachedAccessToken(null);
-      currentUser = null;
+      store.currentUser = null;
       if (onAuthFailure) onAuthFailure();
     }
   });
@@ -661,19 +625,21 @@ export const initWorkspaceAuth = (
 
 /**
  * Sign in with Google to obtain access token for Google Workspace APIs.
+ * Always awaits browserLocalPersistence on the singleton Firebase Auth instance before launching OAuth.
  */
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
   try {
     isSigningIn = true;
+    await ensureAuthPersistence();
     workspaceGoogleProvider.setCustomParameters({
       prompt: 'consent',
-      access_type: 'offline'
+      access_type: 'offline',
     });
-    
+
     const result = await signInWithPopup(auth, workspaceGoogleProvider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
-    
-    const token = credential?.accessToken || await result.user.getIdToken();
+
+    const token = credential?.accessToken || (await result.user.getIdToken());
     if (!token) {
       throw new Error('Failed to retrieve access token from Google authentication');
     }
@@ -682,7 +648,7 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
       expiresInMs: DEFAULT_GOOGLE_TOKEN_TTL_MS,
       source: 'google_oauth',
     });
-    currentUser = result.user;
+    getWorkspaceMemoryStore().currentUser = result.user;
     return { user: result.user, accessToken: token };
   } catch (error: any) {
     if (
@@ -711,14 +677,21 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 };
 
 /**
- * Get current authenticated user.
+ * Get current authenticated user from the canonical Firebase Auth singleton.
  */
 export const getCurrentUser = (): User | null => {
-  return currentUser || auth.currentUser;
+  return auth.currentUser || getWorkspaceMemoryStore().currentUser;
 };
 
 /**
- * Logout and clear token cache.
+ * Clears only the in-memory Google Workspace OAuth access token cache without signing out of Firebase Auth.
+ */
+export const clearWorkspaceAccessTokenOnly = (): void => {
+  setCachedAccessToken(null);
+};
+
+/**
+ * Explicit logout: signs out of Firebase Auth and clears the in-memory Workspace token cache.
  */
 export const logoutWorkspace = async () => {
   try {
@@ -727,5 +700,5 @@ export const logoutWorkspace = async () => {
     console.warn('[Workspace Auth] Logout notice:', e);
   }
   setCachedAccessToken(null);
-  currentUser = null;
+  getWorkspaceMemoryStore().currentUser = null;
 };

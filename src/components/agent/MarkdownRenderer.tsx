@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
+import { hasActiveTextSelection } from '@/lib/clipboard';
 import { useUltraLiteImage } from '@/hooks/useUltraLiteImage';
 
 const UltraLiteMarkdownImage = memo(function UltraLiteMarkdownImage(
@@ -200,8 +201,11 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     };
   }, [animateTypewriter]);
 
-  // Allow user to click to immediately finish typing
+  // Allow user to click to immediately finish typing (never interrupt active text selection)
   const handleSkip = () => {
+    if (hasActiveTextSelection()) {
+      return;
+    }
     if (isTyping) {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
@@ -325,7 +329,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     <div 
       data-typing-phase={sequenceState.phase}
       className={cn(
-        "manus-markdown relative select-text contain-content",
+        "manus-markdown relative select-text",
         isTyping ? "manus-markdown-typing cursor-pointer" : "manus-markdown-settled",
         className
       )}

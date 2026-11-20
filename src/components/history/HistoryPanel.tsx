@@ -38,7 +38,16 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { syncTasksToLibrary, getLibraryItems } from '@/lib/libraryStore';
 import { listConversations, deleteConversation, exportAllChatHistory, recoverChatHistory, getAllMessages, getMessages } from '@/lib/chatDatabase';
-import { classifyTaskTags, getTagStyle, getAvailableTags, TaskTag } from '@/lib/taskTaggingService';
+import {
+  classifyTaskTags,
+  getTagStyle,
+  getAvailableTags,
+  getStoredSessionTags,
+  removeSessionTags,
+  resolveTaskTags,
+  autoTagSessionBatch,
+  TaskTag,
+} from '@/lib/taskTaggingService';
 import { getTagColorHex, TagSummaryMetric } from '@/lib/tagAnalyticsService';
 import { generateSessionSummary, getStoredSessionSummaries, removeSessionSummary } from '@/lib/sessionSummaryService';
 import { TaskQuickPreviewCard } from './TaskQuickPreviewCard';
@@ -283,14 +292,11 @@ export function filterTasks(
   selectedTag: string = 'all'
 ): TaskHistoryItem[] {
   return tasks.filter(task => {
+    const resolvedTags = resolveTaskTags(task);
+
     // Tag Filter
     if (selectedTag && selectedTag !== 'all') {
-      const taskTags = Array.isArray(task.tags) && task.tags.length > 0
-        ? task.tags
-        : typeof task.tags === 'string'
-          ? JSON.parse(task.tags)
-          : classifyTaskTags(task.prompt || task.title || '', (task as any).result);
-      if (!taskTags.includes(selectedTag)) {
+      if (!resolvedTags.includes(selectedTag as TaskTag)) {
         return false;
       }
     }
@@ -333,7 +339,7 @@ export function filterTasks(
     const summary = (task.summary || '').toLowerCase();
     const status = (task.status || '').toLowerCase();
     const mode = ((task as any).mode || '').toLowerCase();
-    const tagsStr = (Array.isArray(task.tags) ? task.tags.join(' ') : '').toLowerCase();
+    const tagsStr = resolvedTags.join(' ').toLowerCase();
 
     const dateFormatted = created.toLocaleDateString('en-US', {
       month: 'short',
@@ -431,6 +437,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   const [sessionSummaries, setSessionSummaries] = useState<Record<string, string>>(() => getStoredSessionSummaries());
+  const [sessionTags, setSessionTags] = useState<Record<string, TaskTag[]>>(() => getStoredSessionTags());
   const [summarizingIds, setSummarizingIds] = useState<Record<string, boolean>>({});
   const [copiedSummaryId, setCopiedSummaryId] = useState<string | null>(null);
   const [collapsedSummaryIds, setCollapsedSummaryIds] = useState<Record<string, boolean>>({});
@@ -445,9 +452,16 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
     const handleSummariesUpdated = () => {
       setSessionSummaries(getStoredSessionSummaries());
     };
+    const handleTagsUpdated = () => {
+      setSessionTags(getStoredSessionTags());
+    };
     window.addEventListener('manus_session_summaries_updated', handleSummariesUpdated);
+    window.addEventListener('manus_session_tags_updated', handleTagsUpdated);
+    window.addEventListener('task_tagged', handleTagsUpdated);
     return () => {
       window.removeEventListener('manus_session_summaries_updated', handleSummariesUpdated);
+      window.removeEventListener('manus_session_tags_updated', handleTagsUpdated);
+      window.removeEventListener('task_tagged', handleTagsUpdated);
     };
   }, []);
 
@@ -458,6 +472,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
         setActiveTab(initialTab);
       }
       setSessionSummaries(getStoredSessionSummaries());
+      setSessionTags(getStoredSessionTags());
       loadLibraryData();
     } else {
       setSelectedTaskIds(new Set());
@@ -518,6 +533,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
           outputFormat: c.outputFormat,
           mode: c.mode,
           content: messagesMap[c.id] || (c.title || ''),
+          tags: c.metadata?.tags,
         }));
       } catch (err) {
         console.warn('IndexedDB list error:', err);
@@ -538,6 +554,9 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
           if (!existing.content && conv.content) {
             existing.content = conv.content;
           }
+          if ((!existing.tags || existing.tags.length === 0) && conv.tags) {
+            existing.tags = conv.tags;
+          }
         } else {
           combined.push(conv);
         }
@@ -549,6 +568,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
       // Automatically convert task artifacts & shared docs into Library items
       if (combined.length > 0) {
         syncTasksToLibrary(combined);
+        void autoTagSessionBatch(combined);
       }
 
       // 3. Load voice transcripts
@@ -833,6 +853,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
         try {
           await deleteConversation(itemToDelete.id);
         } catch {}
+        removeSessionTags(itemToDelete.id);
         setTasks(prev => prev.filter(t => t.id !== itemToDelete.id));
         toast.success('Session deleted from history');
       } else {
@@ -915,6 +936,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
           try {
             await deleteConversation(id);
           } catch {}
+          removeSessionTags(id);
         })
       );
 
@@ -1036,8 +1058,9 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
     return tasks.map((t) => ({
       ...t,
       summary: sessionSummaries[t.id] || t.summary,
+      tags: resolveTaskTags(t, sessionTags),
     }));
-  }, [tasks, sessionSummaries]);
+  }, [tasks, sessionSummaries, sessionTags]);
 
   const filteredTasks = useMemo(() => {
     return filterTasks(tasksWithSummaries, searchQuery, dateFilter, startDate, endDate, new Date(), selectedTagFilter);
@@ -1045,7 +1068,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
 
   // Compute tag summaries for Tag Distribution based on active date range & search filter
   const inlineTagSummaries: TagSummaryMetric[] = useMemo(() => {
-    const dateFilteredTasks = filterTasks(tasks, searchQuery, dateFilter, startDate, endDate, new Date(), 'all');
+    const dateFilteredTasks = filterTasks(tasksWithSummaries, searchQuery, dateFilter, startDate, endDate, new Date(), 'all');
     const available = getAvailableTags();
     const counts: Record<TaskTag, number> = available.reduce((acc, t) => {
       acc[t] = 0;
@@ -1053,18 +1076,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
     }, {} as Record<TaskTag, number>);
 
     dateFilteredTasks.forEach((t) => {
-      const tTags: string[] =
-        Array.isArray(t.tags) && t.tags.length > 0
-          ? t.tags
-          : typeof t.tags === 'string'
-            ? (() => {
-                try {
-                  return JSON.parse(t.tags);
-                } catch {
-                  return classifyTaskTags(t.prompt || t.title || '');
-                }
-              })()
-            : classifyTaskTags(t.prompt || t.title || '');
+      const tTags = resolveTaskTags(t, sessionTags);
       tTags.forEach((tag) => {
         if (available.includes(tag as TaskTag)) {
           counts[tag as TaskTag] = (counts[tag as TaskTag] || 0) + 1;
@@ -1085,7 +1097,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
         color: getTagColorHex(tag),
       }))
       .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
-  }, [tasks, searchQuery, dateFilter, startDate, endDate, visibleChartTags]);
+  }, [tasksWithSummaries, sessionTags, searchQuery, dateFilter, startDate, endDate, visibleChartTags]);
 
   // Automatically group task sessions by date periods ('Today', 'This Week', 'Older')
   const groupedTasks = useMemo(() => {

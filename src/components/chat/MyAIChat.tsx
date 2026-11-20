@@ -6,6 +6,7 @@ import { VoiceTranscriptionIndicator } from '@/components/voice/VoiceTranscripti
 import { getSettings } from '@/lib/settingsStore';
 import { getFirebaseAuthorizationHeader } from '@/lib/firebaseAuthorization';
 import { speakCleanHumanVoice } from '@/lib/speechSynthesis';
+import { hasActiveTextSelection } from '@/lib/clipboard';
 import { ConversationActionBar } from '../agent/ConversationActionBar';
 
 interface Message {
@@ -36,7 +37,7 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
 
   const scrollToBottom = () => {
     requestAnimationFrame(() => {
-      if (mainRef.current) {
+      if (mainRef.current && !hasActiveTextSelection(mainRef.current)) {
         mainRef.current.scrollTop = mainRef.current.scrollHeight;
       }
     });
@@ -402,7 +403,7 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
   const showWelcome = messages.length === 0;
 
   return (
-    <div className="h-screen h-[100dvh] flex flex-col overflow-hidden bg-background text-foreground antialiased selection:bg-neutral-800 selection:text-white font-sans">
+    <div className="h-screen h-[100dvh] flex flex-col overflow-hidden bg-background text-foreground antialiased font-sans">
       {/* Header */}
       <header className="min-h-[54px] max-h-[54px] flex items-center justify-between px-4 border-b border-border bg-background z-10 shrink-0">
         <div className="flex items-center gap-2">
@@ -442,14 +443,14 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
           <section className="w-full max-w-[760px] mx-auto p-4 sm:p-5 flex flex-col gap-5 flex-1">
             {messages.map((msg, index) => (
               <div
-                key={index}
+                key={`myai-${msg.role}-${index}`}
                 className={`flex w-full animate-in fade-in duration-200 ${
                   msg.role === 'user' ? 'justify-end' : 'justify-start group/ai-message relative'
                 }`}
               >
                 <div className="flex flex-col items-start max-w-[88%] sm:max-w-[82%] gap-1">
                   <div
-                    className={`w-full px-4 py-3 rounded-[18px] text-[15px] leading-relaxed break-words whitespace-pre-wrap ${
+                    className={`w-full px-4 py-3 rounded-[18px] text-[15px] leading-relaxed break-words whitespace-pre-wrap select-text ${
                       msg.role === 'user'
                         ? 'bg-muted/80 dark:bg-card border border-border text-foreground rounded-br-xs'
                         : 'bg-transparent text-foreground rounded-bl-xs'

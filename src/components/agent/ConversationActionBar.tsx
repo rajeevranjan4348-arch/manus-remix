@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { speakCleanHumanVoice, stopCleanSpeech } from '@/lib/speechSynthesis';
 import {
   MessageReactionType,
@@ -83,6 +84,20 @@ export const ConversationActionBar = memo(function ConversationActionBar({
 
   const [poppingReaction, setPoppingReaction] = useState<MessageReactionType | 'copy' | null>(null);
   const popTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (popTimerRef.current) {
+        clearTimeout(popTimerRef.current);
+        popTimerRef.current = null;
+      }
+      if (copyTimerRef.current) {
+        clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const triggerSpringPop = (type: MessageReactionType | 'copy') => {
     if (popTimerRef.current) {
@@ -100,12 +115,18 @@ export const ConversationActionBar = memo(function ConversationActionBar({
   const handleCopy = async () => {
     if (!content) return;
     triggerSpringPop('copy');
-    try {
-      await navigator.clipboard.writeText(content);
+    const ok = await copyTextToClipboard(content);
+    if (ok) {
       setCopied(true);
       toast.success('Copied to clipboard');
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
+      if (copyTimerRef.current) {
+        clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = setTimeout(() => {
+        setCopied(false);
+        copyTimerRef.current = null;
+      }, 2000);
+    } else {
       toast.error('Failed to copy text');
     }
   };
@@ -190,11 +211,11 @@ export const ConversationActionBar = memo(function ConversationActionBar({
       }
     }
 
-    // Fallback: Copy formatted text to clipboard
-    try {
-      await navigator.clipboard.writeText(`${content}\n\n— Shared from Manus AI`);
+    // Fallback: Copy formatted text to clipboard without disturbing selection or scroll
+    const ok = await copyTextToClipboard(`${content}\n\n— Shared from Manus AI`);
+    if (ok) {
       toast.success('Response copied to clipboard for sharing');
-    } catch {
+    } else {
       toast.error('Could not copy share content');
     }
   };
@@ -228,6 +249,7 @@ export const ConversationActionBar = memo(function ConversationActionBar({
       {/* 1. Copy button */}
       <button
         type="button"
+        onMouseDown={(e) => e.preventDefault()}
         onClick={handleCopy}
         data-testid="action-bar-copy"
         data-popping={poppingReaction === 'copy' ? 'true' : 'false'}
@@ -418,6 +440,7 @@ export const ConversationActionBar = memo(function ConversationActionBar({
 
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 setShowMenu(false);
                 void handleCopy();

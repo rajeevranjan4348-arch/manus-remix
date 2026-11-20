@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Type } from '@google/genai';
 import {
   buildRealtimeTemporalSystemBlock,
   getLiveTemporalContext,
@@ -9,6 +9,15 @@ import {
   ResearchProgressEvent,
   routeQueryIntent,
 } from './rtie';
+import {
+  agentActivityHub,
+  AgentActivityEvent,
+  ActivityHandle,
+} from './agentActivityService';
+import {
+  isTechnicalVerificationTask,
+  runTechnicalVerification,
+} from './agentVerificationService';
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -22,7 +31,9 @@ export interface StreamChatOptions {
   thinkHarder?: boolean;
   mode?: 'chat' | 'work';
   signal?: AbortSignal;
+  taskId?: string;
   onResearchProgress?: (event: ResearchProgressEvent) => void;
+  onActivity?: (event: AgentActivityEvent) => void;
 }
 
 export interface VerifiedModelConfig {
@@ -209,15 +220,107 @@ export function generateResilientResponse(
 export async function* streamGeminiResponse(options: StreamChatOptions) {
   const apiKey = process.env.GEMINI_API_KEY;
   const preferredModel = normalizeModel(options.model);
+  const activityTaskId = options.taskId || `srv_task_${Date.now()}`;
+  const emitActivity = options.onActivity;
   const latestUserText = ([...options.messages].reverse()
     .find(m => m.role === 'user')?.content || '')
     .replace(/\[IMAGE_DATA_URL:[^\]]+\]\s*/gi, '')
     .trim();
 
+  // 1. Real intent analysis activity
+  const analyzeHandle = agentActivityHub.startActivity(
+    activityTaskId,
+    {
+      title: 'Analyzing user request and intent',
+      description: latestUserText
+        ? `Inspecting query scope (${latestUserText.slice(0, 80)})`
+        : 'Inspecting incoming prompt',
+      toolName: 'intent_router',
+      category: 'analysis',
+    },
+    emitActivity
+  );
+  const preRoute = routeQueryIntent(latestUserText);
+  analyzeHandle.complete(
+    `Intent: ${preRoute.category}${preRoute.requiresLiveResearch ? ' (live web search required)' : ' (direct reasoning)'}`
+  );
+
+  // 2. Real-time web research orchestration (only emits search activities when RTIE actually executes them)
+  let activeResearchHandle: ActivityHandle | null = null;
+  const mapResearchStageTitle = (stage: ResearchProgressEvent): { title: string; toolName: string; category: 'search' | 'browser' | 'verification' | 'analysis' } => {
+    if (stage.stage === 'searching_web') {
+      return { title: stage.label || 'Searching the web for relevant information', toolName: 'web_search', category: 'search' };
+    }
+    if (stage.stage === 'fetching_live_data') {
+      return { title: stage.label || 'Fetching live API data feeds', toolName: 'live_data_api', category: 'search' };
+    }
+    if (stage.stage === 'extracting_content') {
+      return { title: stage.label || 'Opening and inspecting source pages', toolName: 'page_extractor', category: 'browser' };
+    }
+    if (stage.stage === 'verifying_sources') {
+      return { title: stage.label || 'Verifying source reliability and freshness', toolName: 'source_verifier', category: 'verification' };
+    }
+    return { title: stage.label || 'Checking real-time research context', toolName: 'rtie_research', category: 'analysis' };
+  };
+
   const rtieResult = await orchestrateRealtimeResearch(latestUserText, {
     signal: options.signal,
-    onProgress: options.onResearchProgress,
+    onProgress: (stageEvent) => {
+      options.onResearchProgress?.(stageEvent);
+      if (stageEvent.stage === 'completed') {
+        if (activeResearchHandle) {
+          activeResearchHandle.complete(stageEvent.detail || 'Live research context collected');
+          activeResearchHandle = null;
+        }
+        return;
+      }
+      if (activeResearchHandle) {
+        activeResearchHandle.complete('Stage completed');
+        activeResearchHandle = null;
+      }
+      const mapped = mapResearchStageTitle(stageEvent);
+      activeResearchHandle = agentActivityHub.startActivity(
+        activityTaskId,
+        {
+          title: mapped.title,
+          description: stageEvent.detail || 'Executing real-time research pipeline',
+          toolName: mapped.toolName,
+          category: mapped.category,
+        },
+        emitActivity
+      );
+    },
   });
+
+  if (activeResearchHandle) {
+    if (options.signal?.aborted) {
+      activeResearchHandle.cancel('Research cancelled');
+    } else {
+      activeResearchHandle.complete(
+        rtieResult.sources.length > 0
+          ? `Collected ${rtieResult.sources.length} verified source(s)`
+          : 'Research pass completed'
+      );
+    }
+    activeResearchHandle = null;
+  }
+
+  // 3. Technical workspace inspection when user asks a technical/code/config question
+  if (!options.signal?.aborted && isTechnicalVerificationTask(latestUserText)) {
+    try {
+      await runTechnicalVerification({
+        taskId: activityTaskId,
+        prompt: latestUserText,
+        runTypeCheck: false,
+        runTests: false,
+        runBuild: false,
+        onActivity: emitActivity,
+      });
+    } catch (verifyErr) {
+      console.warn('[Agent Verification] Non-fatal inspection notice:', verifyErr);
+    }
+  }
+
   const useGoogleSearch = rtieResult.route.requiresLiveResearch || isRealtimeOrLiveFactQuery(latestUserText);
   const realtimeSnapshot = {
     temporal: getLiveTemporalContext(),
@@ -306,12 +409,31 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     }
 
     modelLoop: for (const model of candidateModels) {
+      if (options.signal?.aborted) {
+        agentActivityHub.cancelActiveActivities(activityTaskId, 'Request aborted by client');
+        return;
+      }
       // Attempt with Google Search grounding if applicable, and if that fails, retry without tools
       const toolConfigs = useGoogleSearch ? [{ tools: [{ googleSearch: {} }] }, {}] : [{}];
       const supportsThinkingBudget = model.includes('gemini-2.5');
       const modelSystemInstruction = baseSystemPrompt + buildModelIdentityInstruction(model, 'Google Gemini');
 
       for (const toolConfig of toolConfigs) {
+        const hasSearchTool = Boolean((toolConfig as any).tools);
+        const modelHandle = agentActivityHub.startActivity(
+          activityTaskId,
+          {
+            title: hasSearchTool
+              ? `Querying ${model} with live web grounding`
+              : `Generating response with ${model}`,
+            description: hasSearchTool
+              ? 'Streaming grounded response from Gemini API with Google Search'
+              : 'Streaming response from Gemini API',
+            toolName: hasSearchTool ? 'gemini_google_search' : 'gemini_model',
+            category: 'model',
+          },
+          emitActivity
+        );
         try {
           const responseStream = await ai.models.generateContentStream({
             model,
@@ -326,6 +448,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
           });
 
           let hasYielded = false;
+          let streamedChars = 0;
           const sources = new Map<string, string>();
           for (const src of realtimeSnapshot.sources) {
             if (src.url && /^https?:\/\//i.test(src.url)) {
@@ -335,9 +458,14 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
           const searchQueries = new Set<string>();
 
           for await (const chunk of responseStream) {
+            if (options.signal?.aborted) {
+              modelHandle.cancel('Generation cancelled by client');
+              return;
+            }
             const text = chunk.text;
             if (text) {
               hasYielded = true;
+              streamedChars += text.length;
               yield text;
             }
 
@@ -375,11 +503,26 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
           }
 
           if (hasYielded) {
+            modelHandle.complete(
+              sources.size > 0
+                ? `Streamed ${streamedChars} chars with ${sources.size} cited source(s)`
+                : `Streamed ${streamedChars} chars from ${model}`
+            );
             return; // Successfully streamed the response
           }
+          modelHandle.fail('Model returned empty stream; trying fallback');
         } catch (err: any) {
           const errMsg = String(err?.message || '');
           const isAuthError = err?.status === 401 || err?.status === 403 || errMsg.includes('API_KEY_INVALID') || errMsg.includes('API key not valid');
+          if (options.signal?.aborted) {
+            modelHandle.cancel('Request aborted');
+            return;
+          }
+          modelHandle.fail(
+            isAuthError
+              ? 'Gemini API authentication failed; checking fallback provider'
+              : `Model ${model} unavailable (${err?.status || 'fallback'}); switching`
+          );
           if (isAuthError) {
             console.warn('[AI Model Router] Gemini API key invalid or unauthorized; skipping remaining Gemini models.');
             break modelLoop;
@@ -405,27 +548,58 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
   const uniqueKeys = Array.from(new Set(apiKeys));
 
   for (const openRouterKey of uniqueKeys) {
+    const orHandle = agentActivityHub.startActivity(
+      activityTaskId,
+      {
+        title: 'Routing request via fallback model provider',
+        description: 'Streaming completion through OpenRouter fallback gateway',
+        toolName: 'openrouter_model',
+        category: 'model',
+      },
+      emitActivity
+    );
     try {
-      yield* streamOpenRouterResponse(
+      let orChars = 0;
+      for await (const delta of streamOpenRouterResponse(
         { ...options, systemInstruction: enrichedSystemInstruction },
         openRouterKey
-      );
+      )) {
+        orChars += delta.length;
+        yield delta;
+      }
+      orHandle.complete(`Streamed ${orChars} chars via fallback gateway`);
       return;
     } catch (orErr: any) {
+      orHandle.fail('Fallback provider unavailable; continuing');
       console.log('[AI Model Router] OpenRouter key unavailable, attempting fallback...');
     }
   }
 
   // Graceful resilient synthesizer fallback ensures user requests never receive unhandled 500 crashes
+  const synthHandle = agentActivityHub.startActivity(
+    activityTaskId,
+    {
+      title: 'Composing local resilient response',
+      description: 'Synthesizing response from verified live snapshot and local knowledge',
+      toolName: 'resilient_synthesizer',
+      category: 'model',
+    },
+    emitActivity
+  );
   console.log('[AI Model Router] Using resilient response synthesizer for user query');
   const fallbackText =
     realtimeSnapshot.directFallbackMarkdown ||
     generateResilientResponse(latestUserText, options.messages, preferredModel);
   const words = fallbackText.split(/(\s+)/);
   for (let i = 0; i < words.length; i += 3) {
+    if (options.signal?.aborted) {
+      synthHandle.cancel('Generation stopped');
+      return;
+    }
     yield words.slice(i, i + 3).join('');
     await new Promise(r => setTimeout(r, 20));
   }
+  synthHandle.complete(`Completed response (${fallbackText.length} chars)`);
 }
 
 export async function* streamOpenRouterResponse(
@@ -650,4 +824,363 @@ export async function summarizeSessionHistory(options: SessionSummaryOptions): P
     cleanTopic
   );
 }
+
+export const ALLOWED_TASK_CATEGORIES = [
+  'Research',
+  'Coding',
+  'Analysis',
+  'Design',
+  'Writing',
+  'Automation',
+  'General',
+] as const;
+
+export type TaskCategory = (typeof ALLOWED_TASK_CATEGORIES)[number];
+
+export interface SessionCategorizationOptions {
+  sessionId?: string;
+  title?: string;
+  prompt?: string;
+  content?: string;
+  messages?: Array<{ role: string; content: string }>;
+}
+
+export interface SessionCategorizationResult {
+  tags: TaskCategory[];
+  primaryCategory: TaskCategory;
+  source: 'gemini' | 'fallback';
+}
+
+const CATEGORY_SYNONYM_MAP: Record<string, TaskCategory> = {
+  research: 'Research',
+  search: 'Research',
+  web_search: 'Research',
+  investigation: 'Research',
+  study: 'Research',
+  coding: 'Coding',
+  code: 'Coding',
+  programming: 'Coding',
+  development: 'Coding',
+  engineering: 'Coding',
+  debugging: 'Coding',
+  software: 'Coding',
+  analysis: 'Analysis',
+  analytics: 'Analysis',
+  data: 'Analysis',
+  data_analysis: 'Analysis',
+  finance: 'Analysis',
+  statistics: 'Analysis',
+  design: 'Design',
+  ui: 'Design',
+  ux: 'Design',
+  ui_ux: 'Design',
+  styling: 'Design',
+  graphic: 'Design',
+  writing: 'Writing',
+  write: 'Writing',
+  content: 'Writing',
+  copywriting: 'Writing',
+  drafting: 'Writing',
+  documentation: 'Writing',
+  editing: 'Writing',
+  automation: 'Automation',
+  workflow: 'Automation',
+  integration: 'Automation',
+  workspace: 'Automation',
+  scheduling: 'Automation',
+  general: 'General',
+  chat: 'General',
+  other: 'General',
+};
+
+export function classifySessionCategoriesFallback(
+  promptText = '',
+  contentText = ''
+): TaskCategory[] {
+  const lowerPrompt = String(promptText || '').toLowerCase();
+  const lowerContent = String(contentText || '').toLowerCase();
+  const combined = `${lowerPrompt} ${lowerContent}`.trim();
+  if (!combined) return ['General'];
+
+  const scores: Record<TaskCategory, number> = {
+    Research: 0,
+    Coding: 0,
+    Analysis: 0,
+    Design: 0,
+    Writing: 0,
+    Automation: 0,
+    General: 0,
+  };
+
+  const addMatches = (category: TaskCategory, keywords: string[]) => {
+    for (const kw of keywords) {
+      if (lowerPrompt.includes(kw)) scores[category] += 3;
+      else if (lowerContent.includes(kw)) scores[category] += 1;
+    }
+  };
+
+  addMatches('Coding', [
+    'code', 'function', 'typescript', 'javascript', 'react', 'python', 'html', 'css',
+    'bug', 'fix', 'refactor', 'api', 'endpoint', 'json', 'sql', 'database', 'git',
+    'repository', 'script', 'algorithm', 'syntax', 'error', 'compile', 'build',
+    'class', 'import', 'export', 'node', 'express', 'vite', 'component', 'props', 'state',
+  ]);
+  if (/```(ts|tsx|js|jsx|py|json|html|css|sql|sh|bash)/i.test(combined)) {
+    scores.Coding += 5;
+  }
+
+  addMatches('Research', [
+    'search', 'research', 'find', 'who is', 'what is', 'latest', 'news', 'url', 'http',
+    'https', 'article', 'wikipedia', 'google', 'lookup', 'compare', 'review', 'source',
+    'citations', 'history', 'biography', 'study', 'explore', 'investigate', 'facts', 'summary',
+  ]);
+
+  addMatches('Analysis', [
+    'analyze', 'analysis', 'csv', 'data', 'chart', 'graph', 'plot', 'statistics',
+    'dataset', 'table', 'metrics', 'trend', 'report', 'forecast', 'sales', 'revenue',
+    'growth', 'percent', 'percentage', 'insights', 'benchmark', 'correlation',
+  ]);
+
+  addMatches('Design', [
+    'design', 'ui', 'ux', 'layout', 'tailwind', 'theme', 'color', 'palette',
+    'icon', 'logo', 'mockup', 'wireframe', 'styling', 'shadow', 'font', 'typography',
+    'responsive', 'banner', 'illustration', 'image', 'svg',
+  ]);
+
+  addMatches('Writing', [
+    'write', 'essay', 'draft', 'blog', 'email', 'letter', 'poem', 'story', 'document',
+    'doc', 'article', 'paraphrase', 'translate', 'headline', 'copywrite', 'scriptwriter',
+    'outline', 'proofread', 'grammar', 'rewrite',
+  ]);
+
+  addMatches('Automation', [
+    'automate', 'connector', 'workspace', 'calendar', 'gmail', 'drive', 'sheets', 'webhook',
+    'schedule', 'bot', 'integration', 'workflow', 'task queue', 'action', 'trigger',
+  ]);
+
+  const ranked = (ALLOWED_TASK_CATEGORIES.filter((c) => c !== 'General') as TaskCategory[])
+    .filter((tag) => scores[tag] >= 3)
+    .sort((a, b) => scores[b] - scores[a]);
+
+  if (ranked.length > 0) {
+    return ranked.slice(0, 2);
+  }
+
+  const topSingle = (ALLOWED_TASK_CATEGORIES.filter((c) => c !== 'General') as TaskCategory[])
+    .sort((a, b) => scores[b] - scores[a])[0];
+  if (topSingle && scores[topSingle] > 0) {
+    return [topSingle];
+  }
+
+  return ['General'];
+}
+
+export function normalizeTaskCategories(
+  rawTags: unknown,
+  fallbackPrompt = '',
+  fallbackContent = ''
+): TaskCategory[] {
+  const candidates: string[] = [];
+
+  if (Array.isArray(rawTags)) {
+    for (const item of rawTags) {
+      if (typeof item === 'string') candidates.push(item);
+    }
+  } else if (typeof rawTags === 'string' && rawTags.trim()) {
+    const trimmed = rawTags.trim();
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (typeof item === 'string') candidates.push(item);
+        }
+      } else if (Array.isArray(parsed?.tags)) {
+        for (const item of parsed.tags) {
+          if (typeof item === 'string') candidates.push(item);
+        }
+      } else {
+        candidates.push(...trimmed.split(/[,;|]+/));
+      }
+    } catch {
+      candidates.push(...trimmed.split(/[,;|]+/));
+    }
+  }
+
+  const normalized: TaskCategory[] = [];
+  for (const raw of candidates) {
+    const clean = raw
+      .replace(/[*_`#"'\[\]]+/g, '')
+      .trim();
+    if (!clean) continue;
+
+    const exact = ALLOWED_TASK_CATEGORIES.find(
+      (cat) => cat.toLowerCase() === clean.toLowerCase()
+    );
+    if (exact) {
+      if (!normalized.includes(exact)) normalized.push(exact);
+      continue;
+    }
+
+    const synonymKey = clean.toLowerCase().replace(/[\s/-]+/g, '_');
+    const mapped = CATEGORY_SYNONYM_MAP[synonymKey];
+    if (mapped && !normalized.includes(mapped)) {
+      normalized.push(mapped);
+    }
+  }
+
+  const specificTags = normalized.filter((t) => t !== 'General');
+  if (specificTags.length > 0) {
+    return specificTags.slice(0, 2);
+  }
+  if (normalized.includes('General')) {
+    const fallback = classifySessionCategoriesFallback(fallbackPrompt, fallbackContent);
+    return fallback[0] !== 'General' ? fallback : ['General'];
+  }
+
+  return classifySessionCategoriesFallback(fallbackPrompt, fallbackContent);
+}
+
+/**
+ * Analyzes task/session content using the server-side Gemini API (@google/genai)
+ * to categorize the session into 'Research', 'Coding', 'Writing', 'Analysis', 'Design', 'Automation', or 'General'.
+ */
+export async function categorizeSessionWithGemini(
+  options: SessionCategorizationOptions
+): Promise<SessionCategorizationResult> {
+  const title = (options.title || '').trim();
+  const prompt = (options.prompt || '').trim();
+  const content = (options.content || '').trim();
+  const messages = Array.isArray(options.messages) ? options.messages : [];
+
+  const excerpts: string[] = [];
+  if (title) excerpts.push(`Task Title: ${title.slice(0, 300)}`);
+  if (prompt) excerpts.push(`User Prompt: ${prompt.slice(0, 1200)}`);
+  if (messages.length > 0) {
+    for (const msg of messages.slice(0, 10)) {
+      if (msg && typeof msg.content === 'string' && msg.content.trim()) {
+        const cleanMsg = msg.content
+          .replace(/\[IMAGE_DATA_URL:[^\]]+\]\s*/gi, '[Image] ')
+          .replace(/<think>[\s\S]*?<\/think>/gi, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 450);
+        excerpts.push(`${msg.role === 'assistant' ? 'Assistant' : 'User'}: ${cleanMsg}`);
+      }
+    }
+  } else if (content) {
+    const cleanContent = content
+      .replace(/\[IMAGE_DATA_URL:[^\]]+\]\s*/gi, '[Image] ')
+      .replace(/<think>[\s\S]*?<\/think>/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 1500);
+    excerpts.push(`Task Content / Output: ${cleanContent}`);
+  }
+
+  const combinedPrompt = [title, prompt, ...messages.filter((m) => m.role === 'user').map((m) => m.content)]
+    .filter(Boolean)
+    .join(' ');
+  const combinedContent = [content, ...messages.filter((m) => m.role === 'assistant').map((m) => m.content)]
+    .filter(Boolean)
+    .join(' ');
+
+  const transcript = excerpts.join('\n').trim();
+  if (!transcript) {
+    const fallbackTags = classifySessionCategoriesFallback(combinedPrompt, combinedContent);
+    return {
+      tags: fallbackTags,
+      primaryCategory: fallbackTags[0] || 'General',
+      source: 'fallback',
+    };
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (apiKey) {
+    try {
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
+        },
+      });
+
+      const candidateModels = [
+        'gemini-4-hydrogen',
+        'gemini-3-flash-preview',
+        'gemini-3.1-flash-lite',
+      ];
+
+      for (const model of candidateModels) {
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents:
+              `Analyze the following task session content and categorize it into 1 or 2 most accurate categories from this exact list: ` +
+              `["Research", "Coding", "Analysis", "Design", "Writing", "Automation", "General"].\n\n` +
+              `Category Guidelines:\n` +
+              `- "Research": Web search, fact-finding, biographies, news, literature reviews, exploring concepts.\n` +
+              `- "Coding": Software engineering, writing/debugging code, APIs, databases, TypeScript, React, Python, SQL.\n` +
+              `- "Writing": Drafting essays, emails, blog posts, stories, documentation, editing, translation, copywriting.\n` +
+              `- "Analysis": Data analysis, CSV/spreadsheet processing, charts, financial metrics, statistics, forecasting.\n` +
+              `- "Design": UI/UX design, layouts, CSS/Tailwind styling, color palettes, wireframes, visual assets.\n` +
+              `- "Automation": Google Workspace connectors (Drive, Gmail, Calendar, Sheets), webhooks, scheduled workflows.\n` +
+              `- "General": Casual greetings or general conversation that does not fit a specialized category.\n\n` +
+              `Session Content:\n${transcript}`,
+            config: {
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  tags: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: '1 to 2 categories chosen strictly from the allowed category list.',
+                  },
+                  primaryCategory: {
+                    type: Type.STRING,
+                    description: 'The single primary category for this session.',
+                  },
+                },
+                required: ['tags'],
+              },
+            },
+          });
+
+          const textOut = response.text?.trim() || '';
+          if (textOut) {
+            const parsed = JSON.parse(textOut);
+            const rawList = Array.isArray(parsed?.tags) && parsed.tags.length > 0
+              ? parsed.tags
+              : typeof parsed?.primaryCategory === 'string'
+                ? [parsed.primaryCategory]
+                : [];
+            const tags = normalizeTaskCategories(rawList, combinedPrompt, combinedContent);
+            return {
+              tags,
+              primaryCategory: tags[0] || 'General',
+              source: 'gemini',
+            };
+          }
+        } catch (modelErr: any) {
+          const msg = String(modelErr?.message || '');
+          if (modelErr?.status === 401 || modelErr?.status === 403 || msg.includes('API_KEY_INVALID')) {
+            break;
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Session Categorization] Gemini tagging fallback:', err?.message || err);
+    }
+  }
+
+  const fallbackTags = classifySessionCategoriesFallback(combinedPrompt, combinedContent);
+  return {
+    tags: fallbackTags,
+    primaryCategory: fallbackTags[0] || 'General',
+    source: 'fallback',
+  };
+}
+
 

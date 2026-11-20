@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, memo } from 'react';
 import { ThumbsUp, ThumbsDown, Copy, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import {
   MessageReactionType,
   getMessageReaction,
@@ -27,6 +28,7 @@ export const MessageHoverReactions = memo(function MessageHoverReactions({
   const [poppingReaction, setPoppingReaction] = useState<MessageReactionType | null>(null);
   const [copied, setCopied] = useState(false);
   const popTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setReaction(getMessageReaction(messageId));
@@ -43,6 +45,9 @@ export const MessageHoverReactions = memo(function MessageHoverReactions({
       window.removeEventListener('manus_message_reactions_updated', handleReactionUpdate);
       if (popTimerRef.current) {
         clearTimeout(popTimerRef.current);
+      }
+      if (copyTimerRef.current) {
+        clearTimeout(copyTimerRef.current);
       }
     };
   }, [messageId]);
@@ -82,12 +87,18 @@ export const MessageHoverReactions = memo(function MessageHoverReactions({
     e.stopPropagation();
     e.preventDefault();
     if (!content) return;
-    try {
-      await navigator.clipboard.writeText(content);
+    const ok = await copyTextToClipboard(content);
+    if (ok) {
       setCopied(true);
       toast.success('Copied response');
-      setTimeout(() => setCopied(false), 1800);
-    } catch {
+      if (copyTimerRef.current) {
+        clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = setTimeout(() => {
+        setCopied(false);
+        copyTimerRef.current = null;
+      }, 1800);
+    } else {
       toast.error('Failed to copy response');
     }
   };
@@ -190,6 +201,7 @@ export const MessageHoverReactions = memo(function MessageHoverReactions({
             data-testid="hover-reaction-copy"
             aria-label="Copy response"
             title={copied ? 'Copied' : 'Copy response'}
+            onMouseDown={(e) => e.preventDefault()}
             onClick={handleQuickCopy}
             className="inline-flex items-center justify-center rounded-md p-1 text-[#000000] dark:text-[#FFFFFF] hover:bg-[#F2F2F2] dark:hover:bg-[#111111] transition-colors cursor-pointer"
           >

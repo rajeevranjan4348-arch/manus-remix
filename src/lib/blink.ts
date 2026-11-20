@@ -1,5 +1,6 @@
 import { createClient, Agent } from '@blinkdotnew/sdk';
 import { auth } from './firebase';
+import { agentActivityTracker } from './agentActivityTracker';
 
 const PROJECT_ID = (import.meta as any).env?.VITE_BLINK_PROJECT_ID || 'manus-agent-clone-tkzhogvs';
 const PUBLISHABLE_KEY = (import.meta as any).env?.VITE_BLINK_PUBLISHABLE_KEY || '';
@@ -85,6 +86,10 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
     normalizedOptions.requestId ||
     ctx?.requestId ||
     `req_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const activeTaskId =
+    normalizedOptions.taskId ||
+    ctx?.taskId ||
+    requestId;
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -199,6 +204,7 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
 
         const payloadStr = JSON.stringify({
           requestId,
+          taskId: activeTaskId,
           messages: sanitizedMsgs,
           prompt: lastUserMsg,
           systemInstruction: agentConfig?.system,
@@ -402,6 +408,26 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
             try {
               const parsed = JSON.parse(jsonStr);
               const eventType = String(parsed.type || currentSseEventType || '').toLowerCase();
+
+              if (eventType === 'agent-activity') {
+                const rawEvent = parsed.event && typeof parsed.event === 'object' ? parsed.event : parsed;
+                const normalizedTaskId = String(rawEvent.taskId || parsed.taskId || activeTaskId);
+                const ingested = agentActivityTracker.ingestEvent(
+                  {
+                    ...rawEvent,
+                    taskId: normalizedTaskId,
+                  },
+                  true
+                );
+                if (ingested) {
+                  emitWindowEvent('manus_agent_activity', {
+                    requestId,
+                    taskId: normalizedTaskId,
+                    event: ingested,
+                  });
+                }
+                return;
+              }
 
               if (
                 eventType === 'text-delta' ||

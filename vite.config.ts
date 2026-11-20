@@ -1,7 +1,11 @@
 import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { streamGeminiResponse, summarizeSessionHistory } from './server/geminiService';
+import {
+  categorizeSessionWithGemini,
+  streamGeminiResponse,
+  summarizeSessionHistory,
+} from './server/geminiService';
 import {
   enrichQueryWithRealtimeData,
   fetchLiveCryptoPrices,
@@ -28,6 +32,8 @@ import { resolveBackendGoogleIntegrations } from './server/workspaceIntegrations
 import { checkSharedRateLimit } from './server/distributedRateLimiter';
 import { verifyBearerToken } from './src/middleware/auth';
 import { GoogleGenAI } from '@google/genai';
+import { agentActivityHub } from './server/agentActivityService';
+import { runTechnicalVerification } from './server/agentVerificationService';
 
 class StreamCircuitBreaker {
   private failureCount = 0;
@@ -93,8 +99,153 @@ function geminiApiPlugin(): Plugin {
 
         // Server-Side Cloud SQL Relational Data Endpoints
         if (url && url.startsWith('/api/sql/')) {
-          const handled = await handleCloudSqlApiRequest(req, res, url);
-          if (handled) return;
+          const sqlTaskId = (req.headers['x-task-id'] as string) || '';
+          const sqlHandle = sqlTaskId
+            ? agentActivityHub.startActivity(sqlTaskId, {
+                title: 'Checking database connection and query',
+                description: `Executing ${req.method || 'GET'} ${url}`,
+                toolName: 'cloud_sql',
+                category: 'database',
+              })
+            : null;
+          try {
+            const handled = await handleCloudSqlApiRequest(req, res, url);
+            if (handled) {
+              sqlHandle?.complete(`Completed ${url}`);
+              return;
+            }
+            sqlHandle?.cancel('Route not handled');
+          } catch (sqlErr: any) {
+            sqlHandle?.fail(sqlErr);
+            throw sqlErr;
+          }
+        }
+
+        // Real-Time Agent Activity SSE Stream, Snapshot, Cancellation & Verification Endpoints
+        if (url === '/api/agent/activity/stream' && req.method === 'GET') {
+          const queryParams = new URLSearchParams(req.url?.split('?')[1] || '');
+          const taskId = String(queryParams.get('taskId') || '').trim().slice(0, 120);
+          if (!taskId) {
+            res.statusCode = 400;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: 'taskId query parameter is required.' }));
+            return;
+          }
+
+          const lastEventIdHeader = req.headers['last-event-id'];
+          const rawSince =
+            (typeof lastEventIdHeader === 'string' && lastEventIdHeader.trim()) ||
+            queryParams.get('sinceSeq') ||
+            '0';
+          const sinceSeq = Number.parseInt(rawSince, 10) || 0;
+
+          res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-cache, no-transform');
+          res.setHeader('Connection', 'keep-alive');
+          res.setHeader('X-Accel-Buffering', 'no');
+          if (typeof (res as any).flushHeaders === 'function') {
+            (res as any).flushHeaders();
+          }
+
+          const writeActivityFrame = (activityEvent: any) => {
+            if (res.writableEnded) return;
+            res.write(`id: ${activityEvent.seq}\n`);
+            res.write(`event: agent-activity\n`);
+            res.write(`data: ${JSON.stringify({ type: 'agent-activity', event: activityEvent })}\n\n`);
+            if (typeof (res as any).flush === 'function') {
+              (res as any).flush();
+            }
+          };
+
+          // Replay missed events cleanly without duplicates
+          const missed = agentActivityHub.getEvents(taskId, sinceSeq);
+          for (const ev of missed) {
+            writeActivityFrame(ev);
+          }
+
+          const unsubscribe = agentActivityHub.subscribe(taskId, writeActivityFrame);
+          const heartbeat = setInterval(() => {
+            if (res.writableEnded) {
+              clearInterval(heartbeat);
+              unsubscribe();
+              return;
+            }
+            res.write(': heartbeat\n\n');
+          }, 15000);
+
+          const cleanup = () => {
+            clearInterval(heartbeat);
+            unsubscribe();
+          };
+          req.on('close', cleanup);
+          res.on('close', cleanup);
+          return;
+        }
+
+        if (url === '/api/agent/activity' && req.method === 'GET') {
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          const queryParams = new URLSearchParams(req.url?.split('?')[1] || '');
+          const taskId = String(queryParams.get('taskId') || '').trim().slice(0, 120);
+          const sinceSeq = Number.parseInt(queryParams.get('sinceSeq') || '0', 10) || 0;
+          if (!taskId) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'taskId is required', events: [] }));
+            return;
+          }
+          res.end(
+            JSON.stringify({
+              taskId,
+              latestSeq: agentActivityHub.getLatestSeq(taskId),
+              events: agentActivityHub.getEvents(taskId, sinceSeq),
+            })
+          );
+          return;
+        }
+
+        if (url === '/api/agent/activity/cancel' && req.method === 'POST') {
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          let bodyStr = '';
+          req.on('data', (chunk: any) => { bodyStr += chunk; });
+          req.on('end', () => {
+            try {
+              const body = bodyStr ? JSON.parse(bodyStr) : {};
+              const taskId = String(body?.taskId || '').trim().slice(0, 120);
+              const reason = typeof body?.reason === 'string' ? body.reason : 'Cancelled by user';
+              const cancelled = taskId ? agentActivityHub.cancelActiveActivities(taskId, reason) : [];
+              res.end(JSON.stringify({ ok: true, cancelledCount: cancelled.length }));
+            } catch (err: any) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ ok: false, error: err?.message || 'Invalid cancel payload' }));
+            }
+          });
+          return;
+        }
+
+        if (url === '/api/agent/verify' && req.method === 'POST') {
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          let bodyStr = '';
+          req.on('data', (chunk: any) => { bodyStr += chunk; });
+          req.on('end', async () => {
+            try {
+              const body = bodyStr ? JSON.parse(bodyStr) : {};
+              const taskId = String(body?.taskId || `verify_${Date.now()}`).trim().slice(0, 120);
+              const prompt = typeof body?.prompt === 'string' ? body.prompt : 'Verify project configuration';
+              const report = await runTechnicalVerification({
+                taskId,
+                prompt,
+                targetPaths: Array.isArray(body?.targetPaths) ? body.targetPaths : undefined,
+                runTypeCheck: Boolean(body?.runTypeCheck),
+                runTests: Boolean(body?.runTests),
+                runBuild: Boolean(body?.runBuild),
+              });
+              res.end(JSON.stringify({ ok: true, report }));
+            } catch (err: any) {
+              res.statusCode = 500;
+              res.end(JSON.stringify({ ok: false, error: err?.message || 'Verification failed' }));
+            }
+          });
+          return;
         }
 
         // Server-Side Real-Time Data & RTIE Intelligence Endpoint
@@ -252,8 +403,9 @@ function geminiApiPlugin(): Plugin {
             req.on('end', async () => {
               try {
                 const body = bodyStr ? JSON.parse(bodyStr) : {};
-                const { connectorId, toolName, args, customUrl, userId: bodyUserId } = body;
+                const { connectorId, toolName, args, customUrl, userId: bodyUserId, taskId: bodyTaskId } = body;
                 const activeUser = bodyUserId || userId;
+                const activeTaskId = String(bodyTaskId || req.headers['x-task-id'] || '').trim();
 
                 if (customUrl && !isSafeUrl(customUrl)) {
                   res.statusCode = 400;
@@ -261,12 +413,26 @@ function geminiApiPlugin(): Plugin {
                   return;
                 }
 
+                const connHandle = activeTaskId
+                  ? agentActivityHub.startActivity(activeTaskId, {
+                      title: `Executing ${connectorId || 'connector'} tool (${toolName || 'query'})`,
+                      description: `Running backend connector action on ${connectorId || 'custom'}`,
+                      toolName: String(toolName || connectorId || 'connector'),
+                      category: 'api',
+                    })
+                  : null;
+
                 const execResult = await executeServerConnectorTool(
                   connectorId || 'custom', 
                   toolName || 'query', 
                   args || {}, 
                   activeUser
                 );
+                if (execResult?.success === false) {
+                  connHandle?.fail(execResult?.error || execResult?.message || 'Connector tool failed');
+                } else {
+                  connHandle?.complete(`Connector ${connectorId || 'custom'} completed`);
+                }
                 res.end(JSON.stringify(execResult));
               } catch (e: any) {
                 res.statusCode = 500;
@@ -316,55 +482,71 @@ function geminiApiPlugin(): Plugin {
           }
         }
 
-        // Server-Side Task AI Tagging Endpoint
-        if (url === '/api/tag-task' && req.method === 'POST') {
+        // Server-Side Task AI Tagging Endpoint (Gemini API)
+        if (
+          (url === '/api/tag-task' ||
+            url === '/api/gemini/tag-task' ||
+            url === '/.netlify/functions/tag-task') &&
+          req.method === 'POST'
+        ) {
           res.setHeader('Content-Type', 'application/json');
           let bodyStr = '';
           req.on('data', chunk => { bodyStr += chunk; });
           req.on('end', async () => {
             try {
               const body = bodyStr ? JSON.parse(bodyStr) : {};
-              const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : '';
-              const content = typeof body?.content === 'string' ? body.content.trim() : '';
 
-              if (!prompt) {
-                res.statusCode = 400;
-                res.end(JSON.stringify({ error: 'Prompt is required' }));
+              // Support batch session categorization for HistoryPanel automated tagging
+              if (Array.isArray(body?.sessions)) {
+                const batchEntries = body.sessions.slice(0, 25);
+                const results: Record<string, string[]> = {};
+                await Promise.all(
+                  batchEntries.map(async (entry: any) => {
+                    const sessionId = typeof entry?.id === 'string' ? entry.id : typeof entry?.sessionId === 'string' ? entry.sessionId : '';
+                    if (!sessionId) return;
+                    const categorized = await categorizeSessionWithGemini({
+                      sessionId,
+                      title: typeof entry?.title === 'string' ? entry.title : undefined,
+                      prompt: typeof entry?.prompt === 'string' ? entry.prompt : undefined,
+                      content: typeof entry?.content === 'string' ? entry.content : undefined,
+                      messages: Array.isArray(entry?.messages) ? entry.messages : undefined,
+                    });
+                    results[sessionId] = categorized.tags;
+                  })
+                );
+                res.end(JSON.stringify({ results }));
                 return;
               }
 
-              if (process.env.GEMINI_API_KEY) {
-                const ai = new GoogleGenAI({
-                  apiKey: process.env.GEMINI_API_KEY,
-                  httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
-                });
+              const title = typeof body?.title === 'string' ? body.title.trim() : '';
+              const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : '';
+              const content = typeof body?.content === 'string' ? body.content.trim() : '';
+              const messages = Array.isArray(body?.messages) ? body.messages : undefined;
 
-                const tagRes = await ai.models.generateContent({
-                  model: 'gemini-3-flash-preview',
-                  contents: `Analyze the user's task prompt and generated response below. Select 1 to 3 relevant concise tags from this allowed set: ["Research", "Coding", "Analysis", "Design", "Writing", "Automation", "General"].
-
-Prompt: "${prompt.slice(0, 1500)}"
-Response Preview: "${content.slice(0, 1500)}"
-
-Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "Coding"]}.`,
-                  config: {
-                    responseMimeType: 'application/json',
-                  },
-                });
-
-                const textOut = tagRes.text?.trim() || '';
-                try {
-                  const parsed = JSON.parse(textOut);
-                  if (Array.isArray(parsed?.tags) && parsed.tags.length > 0) {
-                    res.end(JSON.stringify({ tags: parsed.tags }));
-                    return;
-                  }
-                } catch {}
+              if (!prompt && !title && !content && (!messages || messages.length === 0)) {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ error: 'Task prompt or content is required' }));
+                return;
               }
 
-              res.end(JSON.stringify({ tags: [] }));
+              const categorized = await categorizeSessionWithGemini({
+                sessionId: typeof body?.sessionId === 'string' ? body.sessionId : undefined,
+                title,
+                prompt,
+                content,
+                messages,
+              });
+
+              res.end(
+                JSON.stringify({
+                  tags: categorized.tags,
+                  primaryCategory: categorized.primaryCategory,
+                  source: categorized.source,
+                })
+              );
             } catch (err: any) {
-              res.end(JSON.stringify({ tags: [] }));
+              res.statusCode = 500;
+              res.end(JSON.stringify({ error: err?.message || 'Failed to categorize task session', tags: [] }));
             }
           });
           return;
@@ -936,15 +1118,19 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
               const requestId = typeof body?.requestId === 'string' && body.requestId.trim()
                 ? body.requestId.trim().slice(0, 120)
                 : `srv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+              const taskId = typeof body?.taskId === 'string' && body.taskId.trim()
+                ? body.taskId.trim().slice(0, 120)
+                : requestId;
               const abortController = new AbortController();
               res.on('close', () => {
                 if (!res.writableEnded) {
                   abortController.abort();
+                  agentActivityHub.cancelActiveActivities(taskId, 'Client closed stream');
                 }
               });
 
               const inputMessages = body.messages || (body.prompt ? [{ role: 'user', content: body.prompt }] : []);
-              console.info(`[AI Stream] reqId=${requestId} status=started messages=${Array.isArray(inputMessages) ? inputMessages.length : 0}`);
+              console.info(`[AI Stream] reqId=${requestId} taskId=${taskId} status=started messages=${Array.isArray(inputMessages) ? inputMessages.length : 0}`);
 
               const stream = streamGeminiResponse({
                 messages: inputMessages,
@@ -952,9 +1138,18 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
                 model: body.model || 'gemini-3-flash-preview',
                 thinkHarder: Boolean(body.thinkHarder),
                 signal: abortController.signal,
+                taskId,
                 onResearchProgress: (stageEvent) => {
                   if (!clientAborted && !res.writableEnded) {
                     res.write(`data: ${JSON.stringify({ type: 'research-stage', requestId, ...stageEvent })}\n\n`);
+                    if (typeof (res as any).flush === 'function') {
+                      (res as any).flush();
+                    }
+                  }
+                },
+                onActivity: (activityEvent) => {
+                  if (!clientAborted && !res.writableEnded) {
+                    res.write(`data: ${JSON.stringify({ type: 'agent-activity', requestId, taskId, event: activityEvent })}\n\n`);
                     if (typeof (res as any).flush === 'function') {
                       (res as any).flush();
                     }

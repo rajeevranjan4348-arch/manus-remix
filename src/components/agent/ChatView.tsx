@@ -33,6 +33,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { saveSharedFileToLibrary } from '@/lib/libraryStore';
 import { readFileForAI, formatFileSize } from '@/lib/fileValidation';
 import { cn } from '@/lib/utils';
+import { hasActiveTextSelection } from '@/lib/clipboard';
 import { ManusLogo } from '../layout/Logo';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { FileAttachments } from './FileAttachments';
@@ -55,6 +56,8 @@ import { GoogleDriveFileItem } from '@/lib/workspaceTools';
 import { WorkspaceMentionPicker, WORKSPACE_CONNECTOR_OPTIONS, WorkspaceConnectorOption } from '../chat/WorkspaceMentionPicker';
 import { fetchWorkspaceContextSummary } from '@/lib/workspaceContextService';
 import { Step } from '@/hooks/useAgentTask';
+import { AgentActivityEvent } from '@/lib/agentActivityTracker';
+import { AgentActivityFeed } from './AgentActivityFeed';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
 import { getChatViewDraft, saveChatViewDraft, clearChatViewDraft } from '@/lib/draftStorage';
@@ -191,6 +194,8 @@ interface ChatViewProps {
   onStop?: () => void;
   onReorderSteps?: (steps: Step[]) => void;
   isLoading: boolean;
+  taskId?: string | null;
+  activities?: AgentActivityEvent[];
 }
 
 const CHAT_BUBBLE_STAGGER_STEP_MS = 45;
@@ -418,7 +423,9 @@ export function ChatView({
   onExport, 
   onSubmit,
   onStop,
-  isLoading 
+  isLoading,
+  taskId,
+  activities = [],
 }: ChatViewProps) {
   const [input, setInput] = React.useState<string>(() => getChatViewDraft());
   const [perfProfile, setPerfProfile] = React.useState(() => getActivePerformanceProfile());
@@ -948,7 +955,12 @@ export function ChatView({
       });
     } else if (msgCountIncreased && shouldAutoScrollRef.current && !userScrolledUpRef.current) {
       requestAnimationFrame(() => {
-        if (containerRef.current && shouldAutoScrollRef.current && !userScrolledUpRef.current) {
+        if (
+          containerRef.current &&
+          shouldAutoScrollRef.current &&
+          !userScrolledUpRef.current &&
+          !hasActiveTextSelection(containerRef.current)
+        ) {
           containerRef.current.scrollTop = containerRef.current.scrollHeight;
           lastScrollTopRef.current = containerRef.current.scrollTop;
         }
@@ -957,15 +969,26 @@ export function ChatView({
     prevStreamingRef.current = isStreamingResponse;
   }, [isStreamingResponse, displayMessages, resumeAutoScroll]);
 
-  // Keep scroll position at the bottom during active streaming token/step updates ONLY if user hasn't scrolled up.
+  // Keep scroll position at the bottom during active streaming token/step updates ONLY if user hasn't scrolled up or selected text.
   // Coalesce frame updates via requestAnimationFrame for 60/120fps smoothness without double synchronous reflows.
   const scrollRafRef = useRef<number | null>(null);
   useEffect(() => {
-    if (isStreamingResponse && shouldAutoScrollRef.current && !userScrolledUpRef.current && containerRef.current) {
+    if (
+      isStreamingResponse &&
+      shouldAutoScrollRef.current &&
+      !userScrolledUpRef.current &&
+      containerRef.current &&
+      !hasActiveTextSelection(containerRef.current)
+    ) {
       if (scrollRafRef.current === null) {
         scrollRafRef.current = requestAnimationFrame(() => {
           scrollRafRef.current = null;
-          if (containerRef.current && shouldAutoScrollRef.current && !userScrolledUpRef.current) {
+          if (
+            containerRef.current &&
+            shouldAutoScrollRef.current &&
+            !userScrolledUpRef.current &&
+            !hasActiveTextSelection(containerRef.current)
+          ) {
             containerRef.current.scrollTop = containerRef.current.scrollHeight;
             lastScrollTopRef.current = containerRef.current.scrollTop;
           }
@@ -1115,12 +1138,12 @@ export function ChatView({
               </button>
               <div
                 data-testid="user-message-bubble"
-                className="bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium shadow-xs leading-relaxed space-y-2 overflow-hidden"
+                className="bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium shadow-xs leading-relaxed space-y-2 overflow-hidden select-text"
               >
                 {attachedImageUrl && (
                   <UserAttachedImagePreview imageUrl={attachedImageUrl} />
                 )}
-                {cleanedText && <div className="whitespace-pre-wrap break-words">{cleanedText}</div>}
+                {cleanedText && <div className="whitespace-pre-wrap break-words select-text">{cleanedText}</div>}
               </div>
             </div>
           )}
@@ -1153,7 +1176,7 @@ export function ChatView({
       if (!cleanedContent && raw && (result || chartData)) return null;
       if (!cleanedContent) return null;
 
-      const msgKey = msg.id || `msg-${index}-${cleanedContent.slice(0, 20)}`;
+      const msgKey = msg.id || `msg-${index}`;
       const isCompleted = Boolean(completedTypewriters[msgKey]);
       const isLatestAssistant = index === displayMessages.length - 1 || (index === displayMessages.length - 2 && displayMessages[displayMessages.length - 1]?.role !== 'assistant');
       const shouldAnimate = !isCompleted && isLatestAssistant;
@@ -1543,6 +1566,14 @@ export function ChatView({
 
   footerRenderRef.current = () => (
     <div className="px-4 sm:px-20 space-y-3 pb-28 pt-2">
+      {Array.isArray(activities) && activities.length > 0 && (
+        <AgentActivityFeed
+          taskId={taskId}
+          activities={activities}
+          isRunning={isAssistantWorking}
+        />
+      )}
+
       {shouldShowThinkingIndicator && (
         <div
           data-testid="chat-thinking-indicator"
@@ -1657,12 +1688,14 @@ export function ChatView({
     result,
     chartData,
     messagesCount: displayMessages.length,
+    activities,
   }), [
     isAssistantWorking,
     status,
     result,
     chartData,
     displayMessages.length,
+    activities,
   ]);
 
   useEffect(() => {

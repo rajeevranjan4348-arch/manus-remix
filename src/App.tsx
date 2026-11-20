@@ -17,7 +17,9 @@ import {
 import { startRecoveryMonitoring } from './lib/recoveryController';
 
 import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { AuthLoadingScreen, ProtectedRoute, PublicOnlyRoute } from './components/auth/AuthGuard';
 
+const AuthScreen = lazy(() => import('./pages/AuthScreen'));
 const Home = lazy(() =>
   import('./pages/Home').then((m) => ({ default: m.Home }))
 );
@@ -63,7 +65,7 @@ function TaskView({
   onReset: () => void 
 }) {
   const { taskId } = useParams();
-  const { loadTask, resetTask, stopTask, currentTask, messages, steps, reorderSteps, result, chartData, taskStatus, phase, exportToPDF, sendMessage, isLoading } = useAgentTaskResult;
+  const { loadTask, resetTask, stopTask, currentTask, messages, steps, reorderSteps, result, chartData, taskStatus, phase, exportToPDF, sendMessage, isLoading, activities } = useAgentTaskResult;
 
   useEffect(() => {
     if (taskId) {
@@ -80,6 +82,8 @@ function TaskView({
       onReset={resetTask}
     >
       <ChatView
+        taskId={taskId || useAgentTaskResult.taskId}
+        activities={activities}
         prompt={currentTask?.prompt || ''}
         messages={messages}
         steps={steps}
@@ -337,9 +341,6 @@ function AppContent() {
                 <Suspense fallback={<RouteLoadingFallback />}>
                   <Routes>
                     <Route path="/" element={<Home onStartTask={handleStartTask} />} />
-                    <Route path="/login" element={<Navigate to="/" replace />} />
-                    <Route path="/forgot-password" element={<Navigate to="/" replace />} />
-                    <Route path="/signup" element={<Navigate to="/" replace />} />
                     <Route 
                       path="/task/:taskId" 
                       element={
@@ -414,8 +415,6 @@ function AppContent() {
           />
         </Suspense>
       )}
-
-      <Toaster />
     </div>
   );
 }
@@ -434,7 +433,38 @@ export default function App() {
           >
             <BlinkAuthProvider>
               <BrowserRouter>
-                <AppContent />
+                <Routes>
+                  <Route
+                    path="/login"
+                    element={
+                      <PublicOnlyRoute>
+                        <Suspense fallback={<AuthLoadingScreen />}>
+                          <AuthScreen />
+                        </Suspense>
+                      </PublicOnlyRoute>
+                    }
+                  />
+                  <Route
+                    path="/forgot-password"
+                    element={
+                      <PublicOnlyRoute>
+                        <Suspense fallback={<AuthLoadingScreen />}>
+                          <AuthScreen />
+                        </Suspense>
+                      </PublicOnlyRoute>
+                    }
+                  />
+                  <Route path="/signup" element={<Navigate to="/login" replace />} />
+                  <Route
+                    path="/*"
+                    element={
+                      <ProtectedRoute>
+                        <AppContent />
+                      </ProtectedRoute>
+                    }
+                  />
+                </Routes>
+                <Toaster />
               </BrowserRouter>
             </BlinkAuthProvider>
           </BlinkProvider>

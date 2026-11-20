@@ -129,7 +129,7 @@
     min-height: 100dvh;
   }
   body {
-    @apply bg-background text-foreground antialiased selection:bg-primary/10 selection:text-primary;
+    @apply bg-background text-foreground antialiased;
     font-family: var(--font-sans);
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
@@ -139,6 +139,54 @@
     max-width: 100vw;
     min-height: 100vh;
     min-height: 100dvh;
+  }
+
+  /* High-contrast text selection rules — prevents invisible white-on-white / black-on-black text during copy */
+  ::selection {
+    background-color: rgba(37, 99, 235, 0.24);
+    color: #000000;
+  }
+  ::-moz-selection {
+    background-color: rgba(37, 99, 235, 0.24);
+    color: #000000;
+  }
+  .dark ::selection {
+    background-color: rgba(96, 165, 250, 0.36);
+    color: #FFFFFF;
+  }
+  .dark ::-moz-selection {
+    background-color: rgba(96, 165, 250, 0.36);
+    color: #FFFFFF;
+  }
+
+  /* Inverted user message bubbles: light mode is black bg / white text; dark mode is white bg / black text */
+  [data-testid="user-message-bubble"],
+  [data-testid="user-message-bubble"] *,
+  [data-message="assistant"] .manus-markdown,
+  [data-message="assistant"] .manus-markdown * {
+    user-select: text;
+    -webkit-user-select: text;
+    -webkit-touch-callout: default;
+  }
+  [data-testid="user-message-bubble"]::selection,
+  [data-testid="user-message-bubble"] *::selection {
+    background-color: rgba(96, 165, 250, 0.45) !important;
+    color: #FFFFFF !important;
+  }
+  [data-testid="user-message-bubble"]::-moz-selection,
+  [data-testid="user-message-bubble"] *::-moz-selection {
+    background-color: rgba(96, 165, 250, 0.45) !important;
+    color: #FFFFFF !important;
+  }
+  .dark [data-testid="user-message-bubble"]::selection,
+  .dark [data-testid="user-message-bubble"] *::selection {
+    background-color: rgba(37, 99, 235, 0.28) !important;
+    color: #000000 !important;
+  }
+  .dark [data-testid="user-message-bubble"]::-moz-selection,
+  .dark [data-testid="user-message-bubble"] *::-moz-selection {
+    background-color: rgba(37, 99, 235, 0.28) !important;
+    color: #000000 !important;
   }
   #root {
     width: 100%;
@@ -258,11 +306,8 @@
   will-change: transform, opacity;
 }
 
-/* GPU-composited chat message entrance compatible with virtualized lists */
+/* Smooth chat message entrance compatible with virtualized lists and Android WebView text selection */
 .chat-message-enter {
-  contain: layout style;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
   animation: chat-message-slide-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
   animation-delay: var(--chat-stagger-delay, 0ms);
 }
@@ -1037,8 +1082,6 @@
   animation: chat-message-slide-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
   animation-delay: var(--chat-stagger-delay, 0ms);
   transform-origin: center bottom;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
 }
 
 @keyframes chat-message-slide-in {
@@ -1051,7 +1094,7 @@
   }
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
+    transform: none;
   }
 }
 
@@ -1248,7 +1291,7 @@ html {
   }
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0);
+    transform: none;
   }
 }
 
@@ -1259,7 +1302,7 @@ html {
   }
   100% {
     opacity: 1;
-    transform: translate3d(0, 0, 0);
+    transform: none;
   }
 }
 
@@ -1435,7 +1478,7 @@ html {
   }
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
+    transform: none;
   }
 }
 
@@ -1446,7 +1489,7 @@ html {
   }
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
+    transform: none;
   }
 }
 
@@ -1958,3 +2001,79 @@ select,
 [data-perf-mode="saver"] [data-virtuoso-scroller="true"] {
   scroll-behavior: auto;
 }
+
+/* Real-Time Agent Activity Feed: Subtle Text Shimmer & Expressive Eye Animation */
+@keyframes agentActivityShimmer {
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -120% 0;
+  }
+}
+
+@keyframes agentActivityPupilScan {
+  0%, 100% {
+    transform: translate3d(0px, 0px, 0);
+  }
+  25% {
+    transform: translate3d(-0.6px, 0px, 0);
+  }
+  65% {
+    transform: translate3d(0.7px, -0.25px, 0);
+  }
+}
+
+@keyframes agentActivityEyeBlink {
+  0%, 92%, 100% {
+    transform: scaleY(1);
+  }
+  96% {
+    transform: scaleY(0.15);
+  }
+}
+
+.agent-activity-shimmer-text {
+  color: #e5e5e5;
+  background-image: linear-gradient(
+    90deg,
+    #8e8e8e 0%,
+    #f5f5f5 42%,
+    #9a9a9a 72%,
+    #f5f5f5 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: agentActivityShimmer 2.4s linear infinite;
+}
+
+.agent-activity-eyes-animated {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: agentActivityEyeBlink 4.2s ease-in-out infinite;
+}
+
+.agent-activity-pupil {
+  animation: agentActivityPupilScan 2.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-activity-shimmer-text,
+  .agent-activity-eyes-animated,
+  .agent-activity-pupil {
+    animation: none !important;
+    -webkit-text-fill-color: currentColor !important;
+    background-image: none !important;
+  }
+}
+
+[data-perf-mode="ultra-lite"] .agent-activity-shimmer-text,
+[data-perf-mode="ultra-lite"] .agent-activity-eyes-animated,
+[data-perf-mode="ultra-lite"] .agent-activity-pupil {
+  animation: none !important;
+  -webkit-text-fill-color: currentColor !important;
+  background-image: none !important;
+}
+
