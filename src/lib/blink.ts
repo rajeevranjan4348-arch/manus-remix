@@ -101,13 +101,20 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
 
       const streamAbortController = new AbortController();
       activeStreamControllers.add(streamAbortController);
-      const timeoutId = setTimeout(() => {
-        try {
-          streamAbortController.abort(new DOMException('The AI response timed out.', 'TimeoutError'));
-        } catch {
-          streamAbortController.abort();
-        }
-      }, 38000);
+      // Use an inactivity deadline, not a fixed total-generation deadline.
+      // The server sends SSE heartbeats while Gemini is thinking or streaming.
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      const armInactivityTimeout = () => {
+        if (timeoutId) clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          try {
+            streamAbortController.abort(new DOMException('The AI stream was inactive for too long.', 'TimeoutError'));
+          } catch {
+            streamAbortController.abort();
+          }
+        }, 45000);
+      };
+      armInactivityTimeout();
 
       if (normalizedOptions?.signal) {
         if (normalizedOptions.signal.aborted) {
@@ -496,6 +503,8 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
+              armInactivityTimeout();
+              emitWindowEvent('manus_stream_activity', { requestId });
               lineBuffer += decoder.decode(value, { stream: true });
               const lines = lineBuffer.split('\n');
               lineBuffer = lines.pop() || '';
@@ -515,6 +524,12 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
 
           if (!streamFinalized) {
             streamFinalized = true;
+            if (!finishEmitted) {
+              finishReason = 'error';
+              serviceFailureMessage = accumulatedText.trim()
+                ? 'The server closed the stream before confirming completion. Your partial response has been preserved.'
+                : 'The server closed the stream before a response was completed. Please retry.';
+            }
             if (!accumulatedText.trim()) {
               finishReason = 'error';
               emitTextDelta(serviceFailureMessage);
@@ -549,7 +564,7 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
         }
         console.warn('[AI Studio] Gemini stream request failed:', err?.message || err);
       } finally {
-        clearTimeout(timeoutId);
+        if (timeoutId) clearTimeout(timeoutId);
         activeStreamControllers.delete(streamAbortController);
         if (!streamFinalized && !streamClosed) {
           streamFinalized = true;

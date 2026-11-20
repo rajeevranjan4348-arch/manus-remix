@@ -15,6 +15,7 @@ import { geminiCircuitBreaker, openRouterCircuitBreaker } from '../../server/cir
 import { recoveryTelemetry } from '../../server/recoveryTelemetry';
 import { parseJsonBodyLimited } from '../../server/limitedJsonBody';
 import { agentActivityHub, AgentActivityEvent } from '../../server/agentActivityService';
+import { streamGeminiWithRetry } from '../../server/geminiStreamReliability';
 
 const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -79,6 +80,10 @@ export default async (req: Request) => {
   const taskId = typeof body.taskId === 'string' && body.taskId.trim()
     ? body.taskId.trim().slice(0, 120)
     : requestId;
+
+  const generationAbortController = new AbortController();
+  if (req.signal.aborted) generationAbortController.abort(req.signal.reason);
+  else req.signal.addEventListener('abort', () => generationAbortController.abort(req.signal.reason), { once: true });
   const bufferedActivities: AgentActivityEvent[] = [];
   const pushBufferedActivity = (ev: AgentActivityEvent) => {
     bufferedActivities.push(ev);
@@ -202,6 +207,7 @@ export default async (req: Request) => {
         'Content-Type': 'text/event-stream; charset=utf-8',
         'Cache-Control': 'no-cache, no-transform',
         'Connection': 'keep-alive',
+          'X-Accel-Buffering': 'no',
       },
     });
   }
@@ -239,7 +245,12 @@ export default async (req: Request) => {
     );
 
     try {
+      const researchDeadline = AbortSignal.timeout(7000);
+      const researchSignal = typeof AbortSignal.any === 'function'
+        ? AbortSignal.any([generationAbortController.signal, researchDeadline])
+        : researchDeadline;
       realtimeSnapshot = await orchestrateRealtimeResearch(latestUserText, {
+        signal: researchSignal,
         onProgress: (ev) => {
           collectedStages.push(ev);
           agentActivityHub.emit({
@@ -331,7 +342,7 @@ export default async (req: Request) => {
             method: 'POST',
             headers: { Authorization: `Bearer ${firecrawlKey}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ query: latestUserText.slice(0, 1000), limit: 5, sources: [{ type: 'web' }] }),
-            signal: AbortSignal.timeout(8000),
+            signal: (typeof AbortSignal.any === 'function' ? AbortSignal.any([generationAbortController.signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000)),
           });
           if (!response.ok) throw new Error(`Firecrawl HTTP ${response.status}`);
           const payload: any = await response.json();
@@ -352,7 +363,7 @@ export default async (req: Request) => {
           if (process.env.AGENT_REACH_BRIDGE_TOKEN) headers.Authorization = `Bearer ${process.env.AGENT_REACH_BRIDGE_TOKEN}`;
           const response = await fetch(parsed.toString(), {
             method: 'POST', headers, body: JSON.stringify({ query: latestUserText.slice(0, 1000), limit: 5 }),
-            signal: AbortSignal.timeout(8000),
+            signal: (typeof AbortSignal.any === 'function' ? AbortSignal.any([generationAbortController.signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000)),
           });
           if (!response.ok) throw new Error(`Agent Reach bridge HTTP ${response.status}`);
           const payload: any = await response.json();
@@ -417,28 +428,46 @@ export default async (req: Request) => {
       const encoder = new TextEncoder();
       const stream = new ReadableStream({
         async start(controller) {
+          let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+          const sendRaw = (value: string) => {
+            if (generationAbortController.signal.aborted) return;
+            try {
+              controller.enqueue(encoder.encode(value));
+            } catch {
+              generationAbortController.abort(new DOMException('Client disconnected.', 'AbortError'));
+            }
+          };
+          const sendEvent = (event: Record<string, unknown>) => {
+            sendRaw(`data: ${JSON.stringify(event)}\n\n`);
+          };
+
+          heartbeatTimer = setInterval(() => {
+            sendRaw(': heartbeat\n\n');
+          }, 12000);
+
           const sources = new Map<string, string>();
           for (const [url, title] of externalSources) sources.set(url, title);
           let hasEmittedText = false;
+          let streamFailedAfterPartial = false;
+          let lastGeminiError = '';
 
           const emitSseActivity = (act: AgentActivityEvent) => {
-            controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify({ type: 'agent-activity', requestId, taskId, event: act })}\n\n`)
-            );
+            sendEvent({ type: 'agent-activity', requestId, taskId, event: act });
           };
 
-          for (const act of bufferedActivities) {
-            emitSseActivity(act);
-          }
-
           try {
+            for (const act of bufferedActivities) emitSseActivity(act);
+
             const toolConfigs = useGoogleSearch ? [{ tools: [{ googleSearch: {} }] }, {}] : [{}];
             modelLoop: for (const model of candidateModels) {
               for (const toolCfg of toolConfigs) {
+                if (generationAbortController.signal.aborted) break modelLoop;
                 if (!geminiCircuitBreaker.canAttempt()) {
+                  lastGeminiError = 'Gemini is temporarily unavailable while the provider circuit breaker recovers.';
                   recoveryTelemetry.record({ component: 'gemini', action: 'circuit_open', outcome: 'degraded', statusCode: 503, requestId });
                   break modelLoop;
                 }
+
                 const hasSearchTool = Boolean((toolCfg as any).tools);
                 const modelHandle = agentActivityHub.startActivity(
                   taskId,
@@ -450,25 +479,23 @@ export default async (req: Request) => {
                   },
                   emitSseActivity
                 );
+
                 try {
-                  const responseStream = await ai!.models.generateContentStream({
+                  let charCount = 0;
+                  for await (const chunk of streamGeminiWithRetry(ai!, {
                     model,
                     contents,
                     config: {
                       systemInstruction,
                       ...toolCfg,
                     },
-                  });
-
-                  let charCount = 0;
-                  for await (const chunk of responseStream) {
+                  }, generationAbortController.signal)) {
+                    if (generationAbortController.signal.aborted) break modelLoop;
                     const text = chunk.text;
                     if (text) {
                       hasEmittedText = true;
                       charCount += text.length;
-                      controller.enqueue(
-                        encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: text, textDelta: text, requestId })}\n\n`)
-                      );
+                      sendEvent({ type: 'text-delta', delta: text, textDelta: text, requestId });
                     }
 
                     const groundingChunks = chunk?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
@@ -480,14 +507,16 @@ export default async (req: Request) => {
                     }
                   }
 
+                  if (generationAbortController.signal.aborted) break modelLoop;
                   geminiCircuitBreaker.recordSuccess();
                   recoveryTelemetry.record({ component: 'gemini', action: 'provider_recovered', outcome: 'success', requestId });
                   if (hasEmittedText) {
                     modelHandle.complete(`Streamed ${charCount} chars from ${model}`);
                     break modelLoop;
                   }
-                  modelHandle.fail('Empty stream response; trying fallback');
+                  modelHandle.fail('Empty stream response; trying fallback model');
                 } catch (err: any) {
+                  lastGeminiError = String(err?.message || 'Gemini provider request failed').slice(0, 500);
                   modelHandle.fail(`Model ${model} unavailable; trying fallback`);
                   geminiCircuitBreaker.recordFailure(err);
                   recoveryTelemetry.record({
@@ -497,61 +526,64 @@ export default async (req: Request) => {
                     statusCode: Number.isInteger(err?.status) ? err.status : undefined,
                     requestId,
                   });
+
+                  if (generationAbortController.signal.aborted) break modelLoop;
                   const errMsg = String(err?.message || '');
                   if (err?.status === 401 || err?.status === 403 || errMsg.includes('API_KEY_INVALID') || errMsg.includes('API key not valid')) {
                     break modelLoop;
                   }
                   if (hasEmittedText) {
+                    streamFailedAfterPartial = true;
                     break modelLoop;
                   }
                 }
               }
             }
 
+            if (generationAbortController.signal.aborted) return;
+
             if (!hasEmittedText) {
-              const fallback = buildFallbackAnswer(latestUserText, configuredModelId, realtimeSnapshot);
-              controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: fallback, textDelta: fallback, requestId })}\n\n`)
-              );
+              const errorMessage = lastGeminiError
+                ? `Gemini could not complete this response: ${lastGeminiError}`
+                : 'Gemini returned an empty response. Please retry or choose another model.';
+              sendEvent({ type: 'error', error: errorMessage, retryable: true, requestId });
+              sendEvent({ type: 'finish', finishReason: 'error', error: errorMessage, requestId });
+              sendRaw('data: [DONE]\n\n');
+              return;
+            }
+
+            if (streamFailedAfterPartial) {
+              const errorMessage = 'The Gemini stream was interrupted. Your partial response has been preserved; retry to request a complete answer.';
+              sendEvent({ type: 'error', error: errorMessage, retryable: true, requestId });
+              sendEvent({ type: 'finish', finishReason: 'error', error: errorMessage, requestId });
+              sendRaw('data: [DONE]\n\n');
+              return;
             }
 
             if (useGoogleSearch && sources.size > 0) {
-              const sourceMarkdown = '\n\n**Sources**\n' + Array.from(sources.entries())
+              const sourceMarkdown = '\n\n**Sources**\\n' + Array.from(sources.entries())
                 .slice(0, 8)
                 .map(([url, title]) => `- [${title.replace(/[\[\]]/g, '')}](${url})`)
-                .join('\n');
-              controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: sourceMarkdown, textDelta: sourceMarkdown, requestId })}\n\n`)
-              );
+                .join('\\n');
+              sendEvent({ type: 'text-delta', delta: sourceMarkdown, textDelta: sourceMarkdown, requestId });
             }
 
-            controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId })}\n\n`)
-            );
-            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+            sendEvent({ type: 'finish', finishReason: 'stop', requestId });
+            sendRaw('data: [DONE]\n\n');
           } catch (err: any) {
-            try {
-              if (!hasEmittedText) {
-                const fallback = buildFallbackAnswer(latestUserText, configuredModelId, realtimeSnapshot);
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: fallback, textDelta: fallback, requestId })}\n\n`)
-                );
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId })}\n\n`)
-                );
-              } else {
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({ type: 'error', error: err?.message || 'Stream error', requestId })}\n\n`)
-                );
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error', requestId })}\n\n`)
-                );
-              }
-              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-            } catch {}
+            if (!generationAbortController.signal.aborted) {
+              const errorMessage = String(err?.message || 'Gemini stream interrupted').slice(0, 500);
+              sendEvent({ type: 'error', error: errorMessage, retryable: true, requestId });
+              sendEvent({ type: 'finish', finishReason: 'error', error: errorMessage, requestId });
+              sendRaw('data: [DONE]\n\n');
+            }
           } finally {
+            if (heartbeatTimer) clearInterval(heartbeatTimer);
             try { controller.close(); } catch {}
           }
+        },
+        cancel(reason) {
+          generationAbortController.abort(reason || new DOMException('Client cancelled generation.', 'AbortError'));
         },
       });
 
@@ -560,6 +592,7 @@ export default async (req: Request) => {
           'Content-Type': 'text/event-stream; charset=utf-8',
           'Cache-Control': 'no-cache, no-transform',
           'Connection': 'keep-alive',
+          'X-Accel-Buffering': 'no',
         },
       });
     }
@@ -571,8 +604,12 @@ export default async (req: Request) => {
       'meta-llama/llama-3.3-70b-instruct',
     ];
 
+    // Reserve enough time for Netlify to send response headers; optional provider
+    // failover must not consume the whole synchronous request budget.
+    const openRouterFallbackDeadline = Date.now() + 7000;
     openRouterFallback: for (const orKey of openRouterKeys) {
       for (const orModel of orModels) {
+        if (Date.now() >= openRouterFallbackDeadline) break openRouterFallback;
         if (!openRouterCircuitBreaker.canAttempt()) {
           recoveryTelemetry.record({ component: 'openrouter', action: 'circuit_open', outcome: 'degraded', statusCode: 503, requestId });
           break openRouterFallback;
@@ -595,7 +632,7 @@ export default async (req: Request) => {
               stream: true,
               max_tokens: 4096,
             }),
-            signal: AbortSignal.timeout(25000),
+            signal: (typeof AbortSignal.any === 'function' ? AbortSignal.any([generationAbortController.signal, AbortSignal.timeout(Math.min(5000, Math.max(1, openRouterFallbackDeadline - Date.now())))]) : AbortSignal.timeout(Math.min(5000, Math.max(1, openRouterFallbackDeadline - Date.now())))),
           });
 
           if (!orRes.ok || !orRes.body) {
@@ -620,6 +657,11 @@ export default async (req: Request) => {
 
             const stream = new ReadableStream({
               async start(controller) {
+                const heartbeatTimer = setInterval(() => {
+                  if (generationAbortController.signal.aborted) return;
+                  try { controller.enqueue(encoder.encode(': heartbeat\n\n')); }
+                  catch { generationAbortController.abort(new DOMException('Client disconnected.', 'AbortError')); }
+                }, 12000);
                 try {
                   while (true) {
                     const { done, value } = await reader.read();
@@ -676,9 +718,13 @@ export default async (req: Request) => {
                     controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                   } catch {}
                 } finally {
+                  clearInterval(heartbeatTimer);
                   try { reader.releaseLock(); } catch {}
                   try { controller.close(); } catch {}
                 }
+              },
+              cancel(reason) {
+                generationAbortController.abort(reason || new DOMException('Client cancelled generation.', 'AbortError'));
               }
             });
 
@@ -687,6 +733,7 @@ export default async (req: Request) => {
                 'Content-Type': 'text/event-stream; charset=utf-8',
                 'Cache-Control': 'no-cache, no-transform',
                 'Connection': 'keep-alive',
+          'X-Accel-Buffering': 'no',
               },
             });
           }

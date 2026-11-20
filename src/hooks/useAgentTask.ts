@@ -421,41 +421,101 @@ export function useAgentTask() {
     return () => { mounted = false; };
   }, [isAuthenticated, sandbox]);
 
-  // Synchronize typing indicator in topbar and watchdog timer
+  const preservePartialAssistantResponse = useCallback((partialText: string, conversationId?: string | null) => {
+    const content = partialText.trim();
+    if (!content) return;
+
+    const messageId = activeAssistantMsgIdRef.current || ('msg_partial_' + Date.now());
+    const partialMessage = {
+      id: messageId,
+      role: 'assistant' as const,
+      content,
+      timestamp: new Date().toISOString(),
+      status: 'error' as const,
+      error: true,
+      retryable: true,
+      partial: true,
+    };
+    const previous = persistentMessagesRef.current;
+    const existingIndex = previous.findIndex(message => message?.id === messageId);
+    const next = existingIndex >= 0
+      ? previous.map((message, index) => index === existingIndex ? partialMessage : message)
+      : [...previous, partialMessage];
+
+    persistentMessagesRef.current = next;
+    setPersistentMessages(next);
+    if (conversationId) {
+      saveMessage({
+        id: messageId,
+        conversationId,
+        userId: user?.id || 'usr_manus_default',
+        role: 'assistant',
+        content,
+        status: 'failed',
+      }).catch(error => console.warn('Failed to persist interrupted assistant response:', error));
+    }
+  }, [user]);
+
+  // Keep a safety watchdog, but measure inactivity rather than total generation time.
+  // SSE heartbeats and token events refresh it so long generations are not aborted prematurely.
   useEffect(() => {
-    let watchdogTimer: any = null;
+    let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearWatchdog = () => {
+      if (watchdogTimer) clearTimeout(watchdogTimer);
+      watchdogTimer = null;
+    };
+    const recoverStalledTask = () => {
+      console.warn('[useAgentTask] Inactivity watchdog: recovering a stalled request');
+      const partialText = liveStreamTextRef.current.trim();
+      const activeId = currentTaskIdRef.current || taskId;
+      preservePartialAssistantResponse(partialText, activeId);
+      lastStreamFinishReasonRef.current = 'error';
+      lastStreamErrorRef.current = 'The AI connection stopped sending updates. Any partial response has been preserved. Please retry the request.';
+      finalizedRequestIdsRef.current.add(activeRequestIdRef.current);
+      activeStreamRequestIdRef.current = '';
+      abortActiveAutonomousStreams();
+      isSubmittingRef.current = false;
+      clearStepTimers();
+      setTaskStatus('error');
+      setPhase('error');
+      setResult({
+        type: currentTask?.options?.format || 'chat',
+        content: 'The AI connection stopped sending updates. Any partial response has been preserved. Please retry the request.',
+        error: true,
+        retryable: true,
+        partial: Boolean(partialText),
+      });
+      setSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'error' as const } : s));
+      window.dispatchEvent(new CustomEvent('manus_agent_generating', {
+        detail: { isGenerating: false, mode: 'work' }
+      }));
+    };
+    const armWatchdog = () => {
+      clearWatchdog();
+      watchdogTimer = setTimeout(recoverStalledTask, 55000);
+    };
+    const handleStreamActivity = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail;
+      if (detail?.requestId && activeStreamRequestIdRef.current && detail.requestId !== activeStreamRequestIdRef.current) return;
+      if (taskStatus === 'running') armWatchdog();
+    };
+
     if (taskStatus === 'running') {
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
         detail: { isGenerating: true, mode: 'work', text: 'Manus is typing...' }
       }));
-      // 40-second watchdog to guarantee no permanently stuck loading states
-      watchdogTimer = setTimeout(() => {
-        console.warn('[useAgentTask] Watchdog: Task ran past timeout, recovering to terminal state');
-        abortActiveAutonomousStreams();
-        isSubmittingRef.current = false;
-        clearStepTimers();
-        setTaskStatus('error');
-        setPhase('error');
-        setResult({
-          type: currentTask?.options?.format || 'chat',
-          content: 'This request timed out before the AI service finished. Please retry, or check the selected model and server configuration.',
-          error: true,
-          retryable: true,
-        });
-        setSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'error' as const } : s));
-        window.dispatchEvent(new CustomEvent('manus_agent_generating', {
-          detail: { isGenerating: false, mode: 'work' }
-        }));
-      }, 40000);
+      armWatchdog();
+      window.addEventListener('manus_stream_activity', handleStreamActivity);
     } else {
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
         detail: { isGenerating: false, mode: 'work' }
       }));
     }
     return () => {
-      if (watchdogTimer) clearTimeout(watchdogTimer);
+      clearWatchdog();
+      window.removeEventListener('manus_stream_activity', handleStreamActivity);
     };
-  }, [taskStatus, clearStepTimers, currentTask]);
+  }, [taskStatus, clearStepTimers, currentTask, preservePartialAssistantResponse, taskId]);
 
   // Clear stale loading indicator when switching between Chat and Work modes while idle
   useEffect(() => {
@@ -838,8 +898,12 @@ export function useAgentTask() {
       const isErrorFinish = response?.finishReason === 'error' || lastStreamFinishReasonRef.current === 'error';
 
       if (!text || isErrorFinish) {
-        const errorContent = lastStreamErrorRef.current || (isErrorFinish && text ? text : "I didn't receive an answer from the AI service. Please try again.");
+        const errorContent = lastStreamErrorRef.current || "The AI response was interrupted. Any partial response has been preserved; please retry.";
+        const partialText = text.trim();
         console.error('[Manus AI] Provider finished with error or empty text:', errorContent);
+        if (partialText) {
+          preservePartialAssistantResponse(partialText, currentTaskIdRef.current || taskId);
+        }
         finalizedRequestIdsRef.current.add(reqId);
         setActiveStreamContext(null);
         isSubmittingRef.current = false;
@@ -852,6 +916,7 @@ export function useAgentTask() {
           content: errorContent,
           error: true,
           retryable: true,
+          partial: Boolean(partialText),
           rawResponse: response ?? null,
         });
         setSteps(prev => prev.map(step => ({
@@ -871,9 +936,14 @@ export function useAgentTask() {
     },
     onError: async (err) => {
       const reqId = activeRequestIdRef.current;
+      if (finalizedRequestIdsRef.current.has(reqId)) return;
       console.error('[Manus Agent] onError triggered:', err);
       clearStepTimers();
       markExistingSdkMessagesCompleted();
+      const partialText = liveStreamTextRef.current.trim();
+      if (partialText) {
+        preservePartialAssistantResponse(partialText, currentTaskIdRef.current || taskId);
+      }
       finalizedRequestIdsRef.current.add(reqId);
       setActiveStreamContext(null);
       isSubmittingRef.current = false;
@@ -882,7 +952,7 @@ export function useAgentTask() {
       const message = err instanceof Error && err.message
         ? err.message
         : 'The selected AI provider could not complete this request.';
-      const failureText = `AI response failed: ${message}. Please retry or check the selected model and server configuration.`;
+      const failureText = `AI response failed: ${message}. ${partialText ? 'Your partial response has been preserved. ' : ''}Please retry or check the selected model and server configuration.`;
       setResult({
         type: currentTaskRef.current?.options?.format || 'chat',
         content: failureText,
