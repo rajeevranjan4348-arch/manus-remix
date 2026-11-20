@@ -197,6 +197,7 @@ interface ChatViewProps {
   isLoading: boolean;
   taskId?: string | null;
   activities?: AgentActivityEvent[];
+  onVoiceExchangeComplete?: (userText: string, aiText: string) => void;
 }
 
 const CHAT_BUBBLE_STAGGER_STEP_MS = 45;
@@ -427,6 +428,7 @@ export function ChatView({
   isLoading,
   taskId,
   activities = [],
+  onVoiceExchangeComplete,
 }: ChatViewProps) {
   const [input, setInput] = React.useState<string>(() => getChatViewDraft());
   const [perfProfile, setPerfProfile] = React.useState(() => getActivePerformanceProfile());
@@ -1953,6 +1955,9 @@ export function ChatView({
                 activePlugins={activePlugins}
                 onTogglePlugin={handleTogglePlugin}
                 onSendMessageToChat={(text) => onSubmit(text)}
+                conversationMessages={messages}
+                activeTaskId={taskId}
+                onVoiceExchangeComplete={onVoiceExchangeComplete}
                 onOpenGoogleDrivePicker={() => setIsDrivePickerOpen(true)}
                 onOpenConnectors={() => setIsConnectorsMenuOpen(true)}
               >

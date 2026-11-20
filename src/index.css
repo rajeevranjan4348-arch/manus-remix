@@ -439,8 +439,145 @@
   @apply italic text-foreground/80;
 }
 
-.manus-markdown code {
-  @apply bg-manus-cream/50 px-1.5 py-0.5 rounded border border-border/40 font-mono text-xs text-primary;
+.manus-markdown code.manus-inline-code-pill,
+.manus-filename-pill {
+  background-color: #ECEEF1;
+  color: #1F2328;
+  border: 1px solid rgba(31, 35, 40, 0.08);
+  padding: 0.18rem 0.55rem;
+  border-radius: 7px;
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.875em;
+  font-weight: 500;
+}
+
+.dark .manus-markdown code.manus-inline-code-pill,
+.dark .manus-filename-pill {
+  background-color: #1E1E1E;
+  color: #ECECEC;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* ChatGPT-Style Full-Width Code Block Container & Automatic Light/Dark Theme Tokens */
+.manus-codeblock-card {
+  background-color: #F7F7F8;
+  border-color: #E5E7EB;
+  color: #1F2328;
+}
+
+.dark .manus-codeblock-card {
+  background-color: #1E1E1E;
+  border-color: #2E2E2E;
+  color: #ECECEC;
+}
+
+.manus-codeblock-lang {
+  color: #57606A;
+}
+
+.dark .manus-codeblock-lang {
+  color: #B4B4B4;
+}
+
+.manus-codeblock-copy {
+  color: #24292F;
+}
+
+.manus-codeblock-copy:hover {
+  background-color: rgba(31, 35, 40, 0.06);
+}
+
+.dark .manus-codeblock-copy {
+  color: #ECECEC;
+}
+
+.dark .manus-codeblock-copy:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Instant Semantic Syntax Highlighter Palette — Light Theme */
+.manus-instant-code {
+  color: #1F2328;
+}
+.manus-instant-code .cb-tok-keyword {
+  color: #0550AE;
+}
+.manus-instant-code .cb-tok-entity,
+.manus-instant-code .cb-tok-function,
+.manus-instant-code .cb-tok-property {
+  color: #CF222E;
+}
+.manus-instant-code .cb-tok-selector {
+  color: #1F2328;
+}
+.manus-instant-code .cb-tok-string {
+  color: #116329;
+}
+.manus-instant-code .cb-tok-type {
+  color: #953800;
+}
+.manus-instant-code .cb-tok-number {
+  color: #8250DF;
+}
+.manus-instant-code .cb-tok-comment {
+  color: #6E7781;
+  font-style: italic;
+}
+
+/* Instant Semantic Syntax Highlighter Palette — Dark Theme (Matches Reference Screenshot) */
+.dark .manus-instant-code {
+  color: #ECECEC;
+}
+.dark .manus-instant-code .cb-tok-keyword {
+  color: #79C0FF;
+}
+.dark .manus-instant-code .cb-tok-entity,
+.dark .manus-instant-code .cb-tok-function,
+.dark .manus-instant-code .cb-tok-property {
+  color: #F48FB1;
+}
+.dark .manus-instant-code .cb-tok-selector {
+  color: #F8F8F2;
+}
+.dark .manus-instant-code .cb-tok-string {
+  color: #A5D6A7;
+}
+.dark .manus-instant-code .cb-tok-type {
+  color: #E5C07B;
+}
+.dark .manus-instant-code .cb-tok-number {
+  color: #C397D8;
+}
+.dark .manus-instant-code .cb-tok-comment {
+  color: #787C99;
+  font-style: italic;
+}
+
+/* Shiki Dual-Theme Output — Switches Light/Dark automatically via CSS variables */
+.manus-shiki-code pre.shiki {
+  background-color: transparent !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  font-family: inherit !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+}
+
+.manus-shiki-code .shiki,
+.manus-shiki-code .shiki span {
+  color: var(--shiki-light, #1F2328);
+  background-color: transparent !important;
+}
+
+.dark .manus-shiki-code .shiki,
+.dark .manus-shiki-code .shiki span {
+  color: var(--shiki-dark, #ECECEC);
+  background-color: transparent !important;
+}
+
+.manus-markdown ol {
+  @apply list-decimal pl-5 space-y-3 mb-4;
 }
 
 .manus-markdown blockquote {
@@ -2115,4 +2252,99 @@ select,
     transform: none !important;
   }
 }
+
+/* Futuristic AI Voice Call Mode — GPU-compositor-only orb & microphone animations */
+@keyframes voice-orb-float {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(0, -7px, 0) scale(1.018);
+  }
+}
+
+@keyframes voice-orb-think-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes voice-orb-think-breathe {
+  0%, 100% {
+    transform: scale(0.985);
+  }
+  50% {
+    transform: scale(1.03);
+  }
+}
+
+@keyframes voice-orb-connect-ring {
+  0% {
+    transform: scale(0.84);
+    opacity: 0.65;
+  }
+  100% {
+    transform: scale(1.24);
+    opacity: 0;
+  }
+}
+
+@keyframes voice-mic-ripple {
+  0% {
+    transform: scale(0.94);
+    opacity: 0.55;
+  }
+  70% {
+    opacity: 0.18;
+  }
+  100% {
+    transform: scale(1.42);
+    opacity: 0;
+  }
+}
+
+.voice-orb-float {
+  animation: voice-orb-float 4.8s ease-in-out infinite;
+}
+
+.voice-orb-think-spin {
+  animation: voice-orb-think-spin 4.2s linear infinite;
+}
+
+.voice-orb-idle-spin {
+  animation: voice-orb-think-spin 16s linear infinite;
+}
+
+.voice-orb-think-breathe {
+  animation: voice-orb-think-breathe 2.2s ease-in-out infinite;
+}
+
+.voice-orb-connect-ring {
+  animation: voice-orb-connect-ring 1.7s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+.voice-mic-ripple {
+  animation: voice-mic-ripple 2.1s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-orb-float,
+  .voice-orb-think-spin,
+  .voice-orb-idle-spin,
+  .voice-orb-think-breathe,
+  .voice-orb-connect-ring,
+  .voice-mic-ripple {
+    animation: none !important;
+  }
+}
+
+[data-perf-mode="ultra-lite"] .voice-orb-float,
+[data-perf-mode="ultra-lite"] .voice-orb-idle-spin,
+[data-perf-mode="ultra-lite"] .voice-mic-ripple {
+  animation: none !important;
+}
+
 

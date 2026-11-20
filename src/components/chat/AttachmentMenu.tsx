@@ -20,6 +20,9 @@ export interface AttachmentMenuProps {
   activePlugins?: string[];
   onTogglePlugin?: (pluginId: string) => void;
   onSendMessageToChat?: (text: string) => void;
+  conversationMessages?: Array<{ id?: string; role: string; content: string }>;
+  activeTaskId?: string | null;
+  onVoiceExchangeComplete?: (userText: string, aiText: string) => void;
   onOpenGoogleDrivePicker?: () => void;
   onOpenConnectors?: () => void;
   children?: React.ReactNode;
@@ -32,6 +35,9 @@ export function AttachmentMenu({
   activePlugins = ['web_search', 'code_sandbox', 'charts'],
   onTogglePlugin,
   onSendMessageToChat,
+  conversationMessages,
+  activeTaskId,
+  onVoiceExchangeComplete,
   onOpenGoogleDrivePicker,
   onOpenConnectors,
   children,
@@ -268,13 +274,16 @@ export function AttachmentMenu({
         </PopoverContent>
       </Popover>
 
-      {/* Fullscreen Voice Call Modal (Matches Reference Screenshots) */}
+      {/* Fullscreen Futuristic AI Voice Call Mode */}
       {isVoiceCallOpen && (
-        <React.Suspense fallback={<div role="status" className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 text-sm text-white">Opening voice call…</div>}>
+        <React.Suspense fallback={<div role="status" className="fixed inset-0 z-[100] flex items-center justify-center bg-black text-sm text-white">Opening voice call…</div>}>
           <VoiceCallModal
             isOpen
             onClose={() => setIsVoiceCallOpen(false)}
             onSendMessageToChat={onSendMessageToChat}
+            conversationMessages={conversationMessages}
+            activeTaskId={activeTaskId}
+            onVoiceExchangeComplete={onVoiceExchangeComplete}
           />
         </React.Suspense>
       )}

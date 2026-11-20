@@ -2268,6 +2268,69 @@ export function useAgentTask() {
     setSteps(newSteps);
   }, []);
 
+  const appendVoiceExchange = useCallback(
+    async (userText: string, aiText: string) => {
+      const cleanUser = (userText || '').trim();
+      const cleanAi = (aiText || '').trim();
+      if (!cleanUser && !cleanAi) return;
+
+      const activeId = taskId || currentTaskIdRef.current;
+      const now = Date.now();
+      const newEntries: any[] = [];
+
+      if (cleanUser) {
+        const userEntry = {
+          id: `voice_user_${now}`,
+          role: 'user',
+          content: cleanUser,
+          timestamp: new Date(now).toISOString(),
+          status: 'completed',
+        };
+        newEntries.push(userEntry);
+        if (activeId) {
+          void saveMessage({
+            id: userEntry.id,
+            conversationId: activeId,
+            role: 'user',
+            content: cleanUser,
+            timestamp: userEntry.timestamp,
+            status: 'success',
+          }).catch(() => {});
+        }
+      }
+
+      if (cleanAi) {
+        const aiEntry = {
+          id: `voice_ai_${now + 1}`,
+          role: 'assistant',
+          content: cleanAi,
+          timestamp: new Date(now + 1).toISOString(),
+          status: 'completed',
+        };
+        newEntries.push(aiEntry);
+        if (activeId) {
+          void saveMessage({
+            id: aiEntry.id,
+            conversationId: activeId,
+            role: 'assistant',
+            content: cleanAi,
+            timestamp: aiEntry.timestamp,
+            status: 'success',
+          }).catch(() => {});
+        }
+      }
+
+      if (newEntries.length > 0) {
+        setPersistentMessages((prev) => {
+          const next = [...prev, ...newEntries];
+          persistentMessagesRef.current = next;
+          return next;
+        });
+      }
+    },
+    [taskId]
+  );
+
   const activities = useTaskActivities(
     taskId || currentTaskIdRef.current,
     Boolean(isLoading || taskStatus === 'running')
@@ -2278,6 +2341,7 @@ export function useAgentTask() {
     loadTask,
     startTask,
     sendMessage,
+    appendVoiceExchange,
     resetTask,
     stopTask,
     exportToPDF,

@@ -11,6 +11,7 @@ import { auth } from '@/lib/firebase';
 import { longTermMemory, type MessageMemoryUpdate } from '@/lib/longTermMemory';
 import { ConversationActionBar } from '../agent/ConversationActionBar';
 import { MemoryUpdatedIndicator } from '../agent/MemoryUpdatedIndicator';
+import { MarkdownRenderer } from '../agent/MarkdownRenderer';
 
 interface Message {
   id?: string;
@@ -493,7 +494,13 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
                           : 'bg-transparent text-foreground rounded-bl-xs'
                       }`}
                     >
-                      {msg.content || (
+                      {msg.content ? (
+                        msg.role === 'assistant' && msg.content.includes('```') ? (
+                          <MarkdownRenderer content={msg.content} />
+                        ) : (
+                          msg.content
+                        )
+                      ) : (
                         <span className="inline-flex items-center gap-1 text-muted-foreground">
                           <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce [animation-delay:-0.3s]" />
                           <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce [animation-delay:-0.15s]" />

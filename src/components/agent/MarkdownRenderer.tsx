@@ -1,9 +1,12 @@
-import React, { useState, useEffect, useRef, useMemo, memo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, memo, createContext, useContext } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import { hasActiveTextSelection } from '@/lib/clipboard';
 import { useUltraLiteImage } from '@/hooks/useUltraLiteImage';
+import { CodeBlock } from './CodeBlock';
+
+const MarkdownStreamingContext = createContext<boolean>(false);
 
 const UltraLiteMarkdownImage = memo(function UltraLiteMarkdownImage(
   props: React.ImgHTMLAttributes<HTMLImageElement>
@@ -58,9 +61,141 @@ const UltraLiteMarkdownImage = memo(function UltraLiteMarkdownImage(
   );
 });
 
+/**
+ * Custom `<pre>` renderer for ReactMarkdown: unwraps the outer `<pre>` and renders
+ * the full-width ChatGPT-style `<CodeBlock>` with automatic theme detection.
+ */
+function MarkdownPreBlock({ children }: React.HTMLAttributes<HTMLPreElement>) {
+  const isStreaming = useContext(MarkdownStreamingContext);
+  const childArray = React.Children.toArray(children);
+  const firstChild = childArray[0] as React.ReactElement<any> | undefined;
+
+  if (firstChild && React.isValidElement(firstChild)) {
+    const childProps = (firstChild.props || {}) as Record<string, any>;
+    const className = typeof childProps.className === 'string' ? childProps.className : '';
+    const rawText = Array.isArray(childProps.children)
+      ? childProps.children.join('')
+      : String(childProps.children ?? '');
+    const meta =
+      typeof childProps['data-meta'] === 'string'
+        ? childProps['data-meta']
+        : typeof childProps.node?.data?.meta === 'string'
+          ? childProps.node.data.meta
+          : undefined;
+
+    return (
+      <CodeBlock
+        code={rawText}
+        className={className}
+        meta={meta}
+        isStreaming={isStreaming}
+      />
+    );
+  }
+
+  return (
+    <CodeBlock
+      code={typeof children === 'string' ? children : String(children ?? '')}
+      isStreaming={isStreaming}
+    />
+  );
+}
+
+/**
+ * Custom `<code>` renderer:
+ * - When called inline (e.g., `LongMessage.tsx`), renders a clean monospace pill.
+ * - When called directly as a block fence fallback, delegates to `<CodeBlock>`.
+ */
+function MarkdownCodeElement(
+  props: React.HTMLAttributes<HTMLElement> & { node?: any }
+) {
+  const { className, children, node, ...rest } = props;
+  const isStreaming = useContext(MarkdownStreamingContext);
+  const text = Array.isArray(children) ? children.join('') : String(children ?? '');
+  const isBlockCode =
+    Boolean(className && /language-/i.test(className)) || text.includes('\n');
+
+  if (isBlockCode) {
+    const meta = typeof node?.data?.meta === 'string' ? node.data.meta : undefined;
+    return (
+      <CodeBlock
+        code={text}
+        className={className}
+        meta={meta}
+        isStreaming={isStreaming}
+      />
+    );
+  }
+
+  return (
+    <code
+      className={cn('manus-inline-code-pill', className)}
+      {...rest}
+    >
+      {children}
+    </code>
+  );
+}
+
 const MARKDOWN_COMPONENTS = {
   img: UltraLiteMarkdownImage,
+  pre: MarkdownPreBlock,
+  code: MarkdownCodeElement,
 };
+
+/**
+ * Normalizes fenced code block headers that include a filename on the fence line
+ * (e.g. ```tsx LongMessage.tsx or ```tsx title="LongMessage.tsx") into `lang:filename`
+ * so ReactMarkdown passes the filename reliably via `className="language-tsx:LongMessage.tsx"`.
+ * Skips attaching the filename if the markdown line immediately above the fence already displays it.
+ */
+export function normalizeFenceFilenames(markdown: string): string {
+  if (!markdown || !markdown.includes('```')) return markdown || '';
+
+  const lines = markdown.split('\n');
+  let insideFence = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed.startsWith('```')) continue;
+
+    if (!insideFence) {
+      insideFence = true;
+      const info = trimmed.slice(3).trim();
+      if (!info || info.includes(':')) continue;
+
+      // Match e.g. `tsx LongMessage.tsx` or `tsx title="LongMessage.tsx"` or `tsx filename="LongMessage.tsx"`
+      const attrMatch = info.match(
+        /^([a-zA-Z0-9_+-]+)\s+(?:(?:title|filename|file|name)\s*=\s*["']([^"']+)["']|([a-zA-Z0-9_@.-]+(?:\/[a-zA-Z0-9_@.-]+)*\.[a-zA-Z0-9]{1,10}))/i
+      );
+      if (attrMatch) {
+        const lang = attrMatch[1];
+        const file = (attrMatch[2] || attrMatch[3] || '').trim();
+        if (file) {
+          // Check if the preceding non-empty markdown line already mentions this filename
+          let prevNonEmpty = '';
+          for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
+            if (lines[j].trim()) {
+              prevNonEmpty = lines[j].trim();
+              break;
+            }
+          }
+          if (!prevNonEmpty.includes(file)) {
+            const leadingIndent = lines[i].match(/^\s*/)?.[0] ?? '';
+            lines[i] = `${leadingIndent}\`\`\`${lang}:${file}`;
+          } else {
+            const leadingIndent = lines[i].match(/^\s*/)?.[0] ?? '';
+            lines[i] = `${leadingIndent}\`\`\`${lang}`;
+          }
+        }
+      }
+    } else {
+      insideFence = false;
+    }
+  }
+
+  return lines.join('\n');
+}
 
 export type TypingSequencePhase = 'lead-in' | 'typing' | 'settled';
 
@@ -141,21 +276,25 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   onTypewriterComplete,
   onTypewriterTick
 }: MarkdownRendererProps) {
-  // Pre-process content to remove internal chart data JSON blocks (fast-path when no json fence exists)
+  // Pre-process content to remove internal chart data JSON blocks & normalize fence filenames
   const processedContent = useMemo(() => {
-    if (!content || !content.includes('```json')) return content || '';
-    return content.replace(/```json\n([\s\S]*?)\n```/g, (match, p1) => {
-      try {
-        const parsed = JSON.parse(p1);
-        const chartData = parsed.data || parsed;
-        if (chartData.labels && chartData.datasets) {
-          return ''; // Hide chart data JSON
+    if (!content) return '';
+    let working = content;
+    if (working.includes('```json')) {
+      working = working.replace(/```json\n([\s\S]*?)\n```/g, (match, p1) => {
+        try {
+          const parsed = JSON.parse(p1);
+          const chartData = parsed.data || parsed;
+          if (chartData.labels && chartData.datasets) {
+            return ''; // Hide chart data JSON
+          }
+        } catch (e) {
+          // Not valid JSON or not chart data, keep it
         }
-      } catch (e) {
-        // Not valid JSON or not chart data, keep it
-      }
-      return match;
-    });
+        return match;
+      });
+    }
+    return normalizeFenceFilenames(working);
   }, [content]);
 
   // Statically memoize plugins so remark unified pipeline is never rebuilt across frames
@@ -326,43 +465,45 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     : processedContent;
 
   return (
-    <div 
-      data-typing-phase={sequenceState.phase}
-      className={cn(
-        "manus-markdown relative select-text",
-        isTyping ? "manus-markdown-typing cursor-pointer" : "manus-markdown-settled",
-        className
-      )}
-      onClick={handleSkip}
-      title={isTyping ? "Click to reveal complete text" : undefined}
-    >
-      {sequenceState.phase === 'lead-in' && (
-        <div
-          data-testid="typing-lead-in"
-          className="manus-typing-sequence-lead mb-2"
-          aria-live="polite"
-        >
-          <span className="manus-typing-dots-wave" aria-hidden="true">
-            <span />
-            <span />
-            <span />
+    <MarkdownStreamingContext.Provider value={isTyping}>
+      <div 
+        data-typing-phase={sequenceState.phase}
+        className={cn(
+          "manus-markdown relative select-text w-full min-w-0",
+          isTyping ? "manus-markdown-typing cursor-pointer" : "manus-markdown-settled",
+          className
+        )}
+        onClick={handleSkip}
+        title={isTyping ? "Click to reveal complete text" : undefined}
+      >
+        {sequenceState.phase === 'lead-in' && (
+          <div
+            data-testid="typing-lead-in"
+            className="manus-typing-sequence-lead mb-2"
+            aria-live="polite"
+          >
+            <span className="manus-typing-dots-wave" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+            <span>Manus is typing</span>
+          </div>
+        )}
+        <ReactMarkdown remarkPlugins={remarkPlugins} components={MARKDOWN_COMPONENTS}>
+          {visibleContent}
+        </ReactMarkdown>
+        {isTyping && (
+          <span className="inline-flex items-center gap-1.5 align-baseline ml-1" aria-hidden="true">
+            <span className="ultra-smooth-caret" />
+            <span className="manus-typing-dots-wave opacity-75">
+              <span />
+              <span />
+              <span />
+            </span>
           </span>
-          <span>Manus is typing</span>
-        </div>
-      )}
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={MARKDOWN_COMPONENTS}>
-        {visibleContent}
-      </ReactMarkdown>
-      {isTyping && (
-        <span className="inline-flex items-center gap-1.5 align-baseline ml-1" aria-hidden="true">
-          <span className="ultra-smooth-caret" />
-          <span className="manus-typing-dots-wave opacity-75">
-            <span />
-            <span />
-            <span />
-          </span>
-        </span>
-      )}
-    </div>
+        )}
+      </div>
+    </MarkdownStreamingContext.Provider>
   );
 });
