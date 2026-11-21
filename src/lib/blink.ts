@@ -1,4 +1,5 @@
 import { createClient, Agent } from '@blinkdotnew/sdk';
+import { auth } from './firebase';
 import { dispatchAgentActivity } from './agentActivity';
 
 const PROJECT_ID = (import.meta as any).env?.VITE_BLINK_PROJECT_ID || 'manus-agent-clone-tkzhogvs';
@@ -210,9 +211,12 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
           thinkHarder: Boolean(normalizedOptions.thinkHarder),
         });
 
+        const idToken = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => null) : null;
+        const requestHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (idToken) requestHeaders.Authorization = `Bearer ${idToken}`;
         let res = await activeFetch('/api/gemini/stream', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: requestHeaders,
           signal: streamAbortController.signal,
           body: payloadStr,
         });
@@ -225,7 +229,7 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
             try {
               res = await activeFetch('/.netlify/functions/agent', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: requestHeaders,
                 signal: streamAbortController.signal,
                 body: payloadStr,
               });

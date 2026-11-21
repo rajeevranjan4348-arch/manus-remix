@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { Sparkles, Bot, Hexagon, Radio, Palette, CircleDot, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getActivePerformanceProfile, getGraphicsBudget, type PerformanceProfile } from '@/lib/performanceEngine';
 
 export type GrokAvatarStyle = 'sphere' | 'geometric' | 'bot' | 'hologram';
 export type GrokColorTheme = 'electric-blue' | 'cyber-cyan' | 'neon-purple' | 'obsidian-gold';
@@ -75,7 +76,7 @@ export function Grok3DAvatar({
   const [avatarStyle, setAvatarStyle] = useState<GrokAvatarStyle>(initialStyle);
   const [colorTheme, setColorTheme] = useState<GrokColorTheme>(initialColor);
   const [showStyleMenu, setShowStyleMenu] = useState(false);
-  const [measuredFps, setMeasuredFps] = useState<number>(120);
+  const [measuredFps, setMeasuredFps] = useState<number>(0);
 
   useEffect(() => {
     if (initialStyle) setAvatarStyle(initialStyle);
@@ -141,6 +142,14 @@ export function Grok3DAvatar({
     const container = mountRef.current;
     if (!container) return;
 
+    const readPerformanceProfile = (): PerformanceProfile => {
+      const mode = document.documentElement.dataset.perfMode;
+      return mode === 'ultra-lite' || mode === 'saver' || mode === 'balanced'
+        ? mode
+        : getActivePerformanceProfile();
+    };
+    let graphicsBudget = getGraphicsBudget(readPerformanceProfile(), window.devicePixelRatio);
+
     // Dimensions
     let width = container.clientWidth || 320;
     let height = container.clientHeight || 320;
@@ -151,16 +160,13 @@ export function Grok3DAvatar({
     camera.position.z = 4.8;
 
     const renderer = new THREE.WebGLRenderer({
-      antialias: true,
+      antialias: graphicsBudget.antialias,
       alpha: true,
-      powerPreference: 'high-performance',
-      precision: 'highp'
+      powerPreference: readPerformanceProfile() === 'balanced' ? 'high-performance' : 'low-power',
+      precision: readPerformanceProfile() === 'balanced' ? 'highp' : 'mediump'
     });
     renderer.setSize(width, height);
-    const pixelRatioTarget = stateRef.current.experimentalFrameRateBoost
-      ? Math.min(window.devicePixelRatio, 2.5)
-      : Math.min(window.devicePixelRatio, 1.5);
-    renderer.setPixelRatio(pixelRatioTarget);
+    renderer.setPixelRatio(graphicsBudget.pixelRatio);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.2;
     container.innerHTML = '';
@@ -196,7 +202,7 @@ export function Grok3DAvatar({
 
     // --- SETUP: 1. GEOMETRIC / GROK POLYHEDRON ---
     // Outer Faceted Polyhedron (Icosahedron with flat shading)
-    const icosaGeometry = new THREE.IcosahedronGeometry(1.4, 2);
+    const icosaGeometry = new THREE.IcosahedronGeometry(1.4, graphicsBudget.icosahedronDetail);
     // Keep a copy of original positions for vertex wave deformation
     const origPositions = icosaGeometry.attributes.position.clone();
 
@@ -227,7 +233,7 @@ export function Grok3DAvatar({
     geometricGroup.add(wireframeLines);
 
     // Internal Pulsing Energy Core
-    const coreSphereGeo = new THREE.SphereGeometry(0.72, 32, 32);
+    const coreSphereGeo = new THREE.SphereGeometry(0.72, graphicsBudget.sphereSegments, graphicsBudget.sphereSegments);
     const coreSphereMat = new THREE.MeshBasicMaterial({
       color: COLOR_CONFIGS[colorTheme].core,
       transparent: true,
@@ -237,7 +243,7 @@ export function Grok3DAvatar({
     geometricGroup.add(coreSphere);
 
     // Outer Inner Glow Shell
-    const innerGlowGeo = new THREE.SphereGeometry(0.95, 32, 32);
+    const innerGlowGeo = new THREE.SphereGeometry(0.95, graphicsBudget.sphereSegments, graphicsBudget.sphereSegments);
     const innerGlowMat = new THREE.MeshLambertMaterial({
       color: COLOR_CONFIGS[colorTheme].secondary,
       transparent: true,
@@ -248,7 +254,7 @@ export function Grok3DAvatar({
     geometricGroup.add(innerGlow);
 
     // Gyroscopic Orbital Rings (Grok Armillary Rings)
-    const ringGeo1 = new THREE.TorusGeometry(1.85, 0.02, 16, 100);
+    const ringGeo1 = new THREE.TorusGeometry(1.85, 0.02, Math.max(8, graphicsBudget.sphereSegments / 2), graphicsBudget.ringSegments);
     const ringMat1 = new THREE.MeshStandardMaterial({
       color: COLOR_CONFIGS[colorTheme].wireframe,
       emissive: COLOR_CONFIGS[colorTheme].secondary,
@@ -260,7 +266,7 @@ export function Grok3DAvatar({
     ring1.rotation.x = Math.PI / 3;
     geometricGroup.add(ring1);
 
-    const ringGeo2 = new THREE.TorusGeometry(2.05, 0.015, 16, 100);
+    const ringGeo2 = new THREE.TorusGeometry(2.05, 0.015, Math.max(8, graphicsBudget.sphereSegments / 2), graphicsBudget.ringSegments);
     const ringMat2 = new THREE.MeshStandardMaterial({
       color: COLOR_CONFIGS[colorTheme].core,
       emissive: COLOR_CONFIGS[colorTheme].primary,
@@ -274,7 +280,7 @@ export function Grok3DAvatar({
     geometricGroup.add(ring2);
 
     // Swirling Particle Starfield
-    const particleCount = 180;
+    const particleCount = graphicsBudget.particleCount;
     const particleGeometry = new THREE.BufferGeometry();
     const particlePositions = new Float32Array(particleCount * 3);
     const particleSpeeds = new Float32Array(particleCount);
@@ -304,7 +310,7 @@ export function Grok3DAvatar({
 
     // --- SETUP: 2. GROK 3D BOT (Cute & Futuristic Cybernetic Head) ---
     // Bot Head Chassis
-    const botHeadGeo = new THREE.SphereGeometry(1.3, 32, 32);
+    const botHeadGeo = new THREE.SphereGeometry(1.3, graphicsBudget.sphereSegments, graphicsBudget.sphereSegments);
     botHeadGeo.scale(1.0, 0.92, 0.95);
     const botHeadMat = new THREE.MeshPhysicalMaterial({
       color: 0x0f172a,
@@ -317,7 +323,7 @@ export function Grok3DAvatar({
     botGroup.add(botHead);
 
     // Floating Ear Nodes / Cyber Headphone Nodes
-    const earGeo = new THREE.CylinderGeometry(0.3, 0.35, 0.25, 32);
+    const earGeo = new THREE.CylinderGeometry(0.3, 0.35, 0.25, graphicsBudget.sphereSegments);
     const earMat = new THREE.MeshStandardMaterial({
       color: COLOR_CONFIGS[colorTheme].primary,
       metalness: 0.9,
@@ -333,7 +339,7 @@ export function Grok3DAvatar({
     botGroup.add(rightEar);
 
     // Glowing Visor Face (Curved screen)
-    const visorGeo = new THREE.SphereGeometry(1.22, 32, 24, 0, Math.PI, 0, Math.PI * 0.55);
+    const visorGeo = new THREE.SphereGeometry(1.22, graphicsBudget.sphereSegments, Math.max(12, graphicsBudget.sphereSegments * 0.75), 0, Math.PI, 0, Math.PI * 0.55);
     // Dynamic canvas texture for expressive cyber eyes & mouth
     const visorCanvas = document.createElement('canvas');
     visorCanvas.width = 512;
@@ -355,7 +361,7 @@ export function Grok3DAvatar({
     botGroup.add(visorMesh);
 
     // Halo Antenna Ring
-    const haloGeo = new THREE.TorusGeometry(0.7, 0.02, 16, 64);
+    const haloGeo = new THREE.TorusGeometry(0.7, 0.02, Math.max(8, graphicsBudget.sphereSegments / 2), Math.min(64, graphicsBudget.ringSegments));
     const haloMat = new THREE.MeshBasicMaterial({
       color: COLOR_CONFIGS[colorTheme].wireframe,
       transparent: true,
@@ -368,7 +374,7 @@ export function Grok3DAvatar({
 
 
     // --- SETUP: 3. HOLOGRAPHIC MATRIX (Neural Lattice) ---
-    const holoSphereGeo = new THREE.IcosahedronGeometry(1.4, 4);
+    const holoSphereGeo = new THREE.IcosahedronGeometry(1.4, graphicsBudget.hologramDetail);
     const holoWireGeo = new THREE.WireframeGeometry(holoSphereGeo);
     const holoWireMat = new THREE.LineBasicMaterial({
       color: COLOR_CONFIGS[colorTheme].core,
@@ -378,7 +384,7 @@ export function Grok3DAvatar({
     const holoWire = new THREE.LineSegments(holoWireGeo, holoWireMat);
     hologramGroup.add(holoWire);
 
-    const holoCoreGeo = new THREE.OctahedronGeometry(0.85, 2);
+    const holoCoreGeo = new THREE.OctahedronGeometry(0.85, Math.max(1, graphicsBudget.hologramDetail - 1));
     const holoCoreMat = new THREE.MeshStandardMaterial({
       color: COLOR_CONFIGS[colorTheme].primary,
       wireframe: true,
@@ -390,6 +396,7 @@ export function Grok3DAvatar({
 
 
     // --- Helper to update colors dynamically ---
+    let lastAppliedColorTheme: GrokColorTheme | null = null;
     const updateActiveColors = (themeKey: GrokColorTheme) => {
       const cfg = COLOR_CONFIGS[themeKey];
       
@@ -421,6 +428,7 @@ export function Grok3DAvatar({
     };
 
     updateActiveColors(colorTheme);
+    lastAppliedColorTheme = colorTheme;
 
     // --- Interactive Mouse / Touch Dragging ---
     const handlePointerDown = (e: MouseEvent | TouchEvent) => {
@@ -583,31 +591,46 @@ export function Grok3DAvatar({
       visorTexture.needsUpdate = true;
     };
 
-    // --- Animation Loop ---
-    let animationFrameId: number;
-    const clock = new THREE.Clock();
+    // --- Adaptive Animation Loop ---
+    let animationFrameId: number | null = null;
+    let isInViewport = true;
+    let lastRenderTimestamp = 0;
     let frameCounter = 0;
     let lastFpsCheckTime = performance.now();
+    let scheduleAnimation: () => void = () => {};
+    const animate = (timestamp: number) => {
+      animationFrameId = null;
+      if (document.visibilityState === 'hidden' || !isInViewport) return;
 
-    const animate = () => {
-      animationFrameId = requestAnimationFrame(animate);
-
-      // Measure real-time FPS for high-refresh display feedback
-      frameCounter++;
-      const nowMs = performance.now();
-      if (nowMs - lastFpsCheckTime >= 500) {
-        const measured = Math.round((frameCounter * 1000) / (nowMs - lastFpsCheckTime));
-        setMeasuredFps(measured);
-        frameCounter = 0;
-        lastFpsCheckTime = nowMs;
+      const targetFps = stateRef.current.callStatus === 'paused'
+        ? Math.min(graphicsBudget.targetFps, 15)
+        : graphicsBudget.targetFps;
+      const minimumFrameInterval = 1000 / targetFps;
+      if (lastRenderTimestamp && timestamp - lastRenderTimestamp < minimumFrameInterval) {
+        scheduleAnimation();
+        return;
       }
-
-      const delta = clock.getDelta();
-      const time = clock.getElapsedTime();
+      const delta = lastRenderTimestamp
+        ? Math.min((timestamp - lastRenderTimestamp) / 1000, 0.1)
+        : minimumFrameInterval / 1000;
+      lastRenderTimestamp = timestamp;
+      const time = stateRef.current.time + delta;
       stateRef.current.time = time;
 
+      // Measure actual rendered FPS without triggering redundant React updates.
+      frameCounter++;
+      if (timestamp - lastFpsCheckTime >= 500) {
+        const measured = Math.round((frameCounter * 1000) / (timestamp - lastFpsCheckTime));
+        setMeasuredFps((previous) => previous === measured ? previous : measured);
+        frameCounter = 0;
+        lastFpsCheckTime = timestamp;
+      }
+
       const { callStatus, avatarStyle, colorTheme, shockwave } = stateRef.current;
-      updateActiveColors(colorTheme);
+      if (colorTheme !== lastAppliedColorTheme) {
+        updateActiveColors(colorTheme);
+        lastAppliedColorTheme = colorTheme;
+      }
 
       // Toggle group visibilities based on chosen style
       geometricGroup.visible = avatarStyle === 'geometric';
@@ -746,26 +769,83 @@ export function Grok3DAvatar({
       }
 
       renderer.render(scene, camera);
+      scheduleAnimation();
     };
-
-    animate();
 
     // Resize Handler
     const handleResize = () => {
       if (!container) return;
       const w = container.clientWidth || 320;
       const h = container.clientHeight || 320;
+      width = w;
+      height = h;
+      graphicsBudget = getGraphicsBudget(readPerformanceProfile(), window.devicePixelRatio);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
+      renderer.setPixelRatio(graphicsBudget.pixelRatio);
       renderer.setSize(w, h);
+      lastRenderTimestamp = 0;
+      scheduleAnimation();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+        lastRenderTimestamp = 0;
+        return;
+      }
+      lastRenderTimestamp = 0;
+      scheduleAnimation();
+    };
+
+    scheduleAnimation = () => {
+      if (animationFrameId !== null || document.visibilityState === 'hidden' || !isInViewport) return;
+      animationFrameId = requestAnimationFrame(animate);
+    };
+
+    const intersectionObserver = typeof IntersectionObserver !== 'undefined'
+      ? new IntersectionObserver(([entry]) => {
+          isInViewport = entry.isIntersecting || entry.intersectionRatio > 0;
+          if (!isInViewport) {
+            if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+            lastRenderTimestamp = 0;
+          } else {
+            lastRenderTimestamp = 0;
+            scheduleAnimation();
+          }
+        }, { rootMargin: '80px' })
+      : null;
+    intersectionObserver?.observe(container);
+
+    const handlePerformanceProfileChange = () => {
+      graphicsBudget = getGraphicsBudget(readPerformanceProfile(), window.devicePixelRatio);
+      renderer.setPixelRatio(graphicsBudget.pixelRatio);
+      renderer.setSize(width, height);
+      lastRenderTimestamp = 0;
+      scheduleAnimation();
     };
 
     window.addEventListener('resize', handleResize);
+    window.addEventListener('manus_performance_profile_changed', handlePerformanceProfileChange);
+    window.addEventListener('cue:recovery-performance', handlePerformanceProfileChange);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const profileObserver = typeof MutationObserver !== 'undefined'
+      ? new MutationObserver(handlePerformanceProfileChange)
+      : null;
+    profileObserver?.observe(document.documentElement, { attributes: true, attributeFilter: ['data-perf-mode'] });
+    scheduleAnimation();
 
     // Cleanup
     return () => {
-      cancelAnimationFrame(animationFrameId);
+      if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('manus_performance_profile_changed', handlePerformanceProfileChange);
+      window.removeEventListener('cue:recovery-performance', handlePerformanceProfileChange);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      profileObserver?.disconnect();
+      intersectionObserver?.disconnect();
       container.removeEventListener('mousedown', handlePointerDown);
       window.removeEventListener('mousemove', handlePointerMove);
       window.removeEventListener('mouseup', handlePointerUp);
@@ -781,6 +861,8 @@ export function Grok3DAvatar({
       wireframeMaterial.dispose();
       coreSphereGeo.dispose();
       coreSphereMat.dispose();
+      innerGlowGeo.dispose();
+      innerGlowMat.dispose();
       ringGeo1.dispose();
       ringGeo2.dispose();
       ringMat1.dispose();
@@ -789,7 +871,13 @@ export function Grok3DAvatar({
       particleMaterial.dispose();
       botHeadGeo.dispose();
       botHeadMat.dispose();
+      earGeo.dispose();
+      earMat.dispose();
+      visorGeo.dispose();
+      visorMat.dispose();
       visorTexture.dispose();
+      haloGeo.dispose();
+      haloMat.dispose();
       holoSphereGeo.dispose();
       holoWireGeo.dispose();
       holoWireMat.dispose();
@@ -808,7 +896,7 @@ export function Grok3DAvatar({
       {experimentalFrameRateBoost && (
         <div className="absolute top-1 right-2 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-md border border-amber-500/40 text-[10px] font-mono text-amber-300 font-semibold shadow-lg animate-in fade-in duration-300">
           <Zap size={11} className="text-amber-400 animate-pulse fill-amber-400/30" />
-          <span>{measuredFps > 0 ? measuredFps : 120} FPS Boosted</span>
+          <span>{measuredFps > 0 ? `${measuredFps} FPS` : 'Measuring FPS'}</span>
         </div>
       )}
 
@@ -822,7 +910,7 @@ export function Grok3DAvatar({
       {/* Cybernetic Radial Backlight / Aura */}
       <div 
         className={cn(
-          "absolute inset-0 rounded-full filter blur-[85px] pointer-events-none transition-all duration-700 -z-10",
+          "manus-avatar-aura absolute inset-0 rounded-full filter blur-[85px] pointer-events-none transition-all duration-700 -z-10",
           callStatus === 'speaking' 
             ? "scale-125 opacity-70 animate-pulse" 
             : callStatus === 'thinking'

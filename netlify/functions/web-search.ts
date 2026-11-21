@@ -5,6 +5,9 @@
  */
 import { GoogleGenAI } from '@google/genai';
 import { fetchLiveNewsAndFacts } from '../../server/realtimeDataService';
+import { checkSharedRateLimit } from '../../server/distributedRateLimiter';
+import { verifyBearerToken } from '../../src/middleware/auth';
+import { parseJsonBodyLimited } from '../../server/limitedJsonBody';
 
 type SearchResult = {
   title: string;
@@ -35,11 +38,25 @@ function safeResult(value: any, source: SearchResult['source']): SearchResult | 
 
 export default async (req: Request) => {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
-  let body: any;
-  try {
-    body = await req.json();
-  } catch {
-    return json({ error: 'Request body must be valid JSON.' }, 400);
+  const decodedToken = await verifyBearerToken(req.headers.get('authorization') || undefined);
+  if (!decodedToken?.uid) return json({ error: 'Authentication required.', code: 'UNAUTHENTICATED' }, 401);
+  const rateLimit = await checkSharedRateLimit(`web-search:${decodedToken.uid}`, 30, 60);
+  if (rateLimit.unavailable) {
+    return json({ error: 'Search is temporarily unavailable because the shared rate limiter is not configured.', code: 'RATE_LIMIT_UNAVAILABLE' }, 503);
+  }
+  if (!rateLimit.allowed) {
+    return new Response(JSON.stringify({ error: 'Too many search requests. Please wait and try again.', code: 'RATE_LIMITED' }), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Retry-After': String(rateLimit.retryAfterSeconds), 'X-Content-Type-Options': 'nosniff' },
+    });
+  }
+  const parsedBody = await parseJsonBodyLimited(req, 16 * 1024);
+  if (!parsedBody.ok) {
+    return json({ error: parsedBody.error, code: parsedBody.code }, parsedBody.status);
+  }
+  const body: any = parsedBody.value;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return json({ error: 'Expected a JSON object.', code: 'INVALID_PAYLOAD' }, 400);
   }
   const query = typeof body?.query === 'string' ? body.query.trim() : '';
   if (!query || query.length > 1000) {
@@ -166,4 +183,3 @@ export default async (req: Request) => {
     results.length ? 200 : 502
   );
 };
-

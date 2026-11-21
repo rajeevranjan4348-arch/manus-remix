@@ -97,7 +97,7 @@ describe('Features 11-20: Security, Recovery, Scheduling & Intelligence Test Sui
         accumulatedResult: 'Preliminary research draft...',
       });
 
-      expect(checkpoint.id).toBe('chk_tsk_alpha_01_step_3');
+      expect(checkpoint.id).toBe('chk_tsk_alpha_01');
       expect(checkpoint.completedToolCalls).toHaveLength(2);
 
       const loaded = taskCheckpoint.getLatestCheckpoint('tsk_alpha_01');

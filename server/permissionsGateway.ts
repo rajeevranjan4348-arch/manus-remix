@@ -46,7 +46,11 @@ export class PermissionsGatewayService {
   private challenges = new Map<string, PermissionChallenge>();
   private auditLog: AuditRecord[] = [];
   private readonly DEFAULT_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
-  private readonly SECRET = process.env.POLICY_GATEWAY_SECRET || 'manus_gateway_policy_secret_2026';
+  // Use a deployment secret where configured; never fall back to a known signing key.
+  // The random fallback keeps local tests/dev usable without making tokens forgeable.
+  private readonly SECRET = process.env.POLICY_GATEWAY_SECRET && process.env.POLICY_GATEWAY_SECRET.length >= 32
+    ? process.env.POLICY_GATEWAY_SECRET
+    : crypto.randomBytes(32).toString('hex');
 
   constructor() {
     this.registerDefaultPolicies();
@@ -116,8 +120,16 @@ export class PermissionsGatewayService {
     reason: string;
     challenge?: PermissionChallenge;
   } {
+    if (!params.userId) {
+      return {
+        allowed: false,
+        riskLevel: this.getPolicy(params.toolName).riskLevel,
+        requiresApproval: true,
+        reason: 'An authenticated user identity is required for permission checks.',
+      };
+    }
     const policy = this.getPolicy(params.toolName);
-    const userId = params.userId || 'usr_manus_default';
+    const userId = params.userId;
     const paramsHash = this.hashParameters(params.args);
 
     // 1. Read-Only tools are automatically allowed
@@ -217,6 +229,14 @@ export class PermissionsGatewayService {
       return { success: false, status: 'invalid', error: 'Challenge not found.' };
     }
 
+    // Do not allow an unauthenticated or different user to resolve someone else's challenge.
+    if (!params.userId || challenge.userId !== params.userId) {
+      return { success: false, status: 'invalid', error: 'Challenge not found.' };
+    }
+    if (challenge.status !== 'pending') {
+      return { success: false, status: 'invalid', error: 'Challenge is no longer pending.' };
+    }
+
     if (Date.now() > challenge.expiresAt) {
       challenge.status = 'expired';
       this.recordAudit({
@@ -278,6 +298,9 @@ export class PermissionsGatewayService {
     args: Record<string, any>;
     userId?: string;
   }): { valid: boolean; reason: string } {
+    if (!params.userId) {
+      return { valid: false, reason: 'An authenticated user identity is required.' };
+    }
     let matchedChallenge: PermissionChallenge | null = null;
 
     for (const [_, c] of this.challenges) {
@@ -313,7 +336,7 @@ export class PermissionsGatewayService {
       return { valid: false, reason: 'Parameter hash mismatch. Arguments were altered after approval.' };
     }
 
-    if (params.userId && matchedChallenge.userId !== params.userId) {
+    if (matchedChallenge.userId !== params.userId) {
       return { valid: false, reason: 'Approval token is bound to a different user identity.' };
     }
 
@@ -335,8 +358,9 @@ export class PermissionsGatewayService {
   /**
    * Retrieve audit logs with optional limit
    */
-  public getAuditLog(limit = 100): AuditRecord[] {
-    return this.auditLog.slice(-limit).reverse();
+  public getAuditLog(limit = 100, userId?: string): AuditRecord[] {
+    if (!userId) return [];
+    return this.auditLog.filter((record) => record.userId === userId).slice(-limit).reverse();
   }
 
   private sanitizeArgsForSummary(args: Record<string, any>): Record<string, any> {

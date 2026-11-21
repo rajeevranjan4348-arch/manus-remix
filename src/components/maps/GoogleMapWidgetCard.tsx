@@ -25,7 +25,7 @@ export function GoogleMapWidgetCard({
   autoLocate = false,
   markers = []
 }: GoogleMapWidgetCardProps) {
-  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCoOhAP8IKASkSa6jOp4AVe886-arwMzAU';
+  const apiKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '').trim();
   const [quotaExceeded, setQuotaExceeded] = useState(false);
   const [center, setCenter] = useState({ lat: latitude, lng: longitude });
 
@@ -77,29 +77,33 @@ export function GoogleMapWidgetCard({
 
       {/* Map Viewport */}
       <div className="w-full h-64 relative bg-muted/30">
-        <APIProvider apiKey={apiKey}>
-          <Map
-            mapId="DEMO_MAP_ID"
-            defaultCenter={center}
-            defaultZoom={zoom}
-            gestureHandling="greedy"
-            disableDefaultUI={false}
-            internalUsageAttributionIds={["gmp_mcp_codeassist_v1_aistudio"]}
-            className="w-full h-full rounded-b-2xl"
-          >
-            {/* Primary Location Marker */}
-            <AdvancedMarker position={center}>
-              <Pin background="#E11D48" glyphColor="#FFFFFF" borderColor="#9F1239" />
-            </AdvancedMarker>
-
-            {/* Extra Markers */}
-            {markers.map((m) => (
-              <AdvancedMarker key={m.id} position={{ lat: m.lat, lng: m.lng }} title={m.title}>
-                <Pin background="#2563EB" glyphColor="#FFFFFF" borderColor="#1E40AF" />
+        {apiKey ? (
+          <APIProvider apiKey={apiKey}>
+            <Map
+              mapId="DEMO_MAP_ID"
+              defaultCenter={center}
+              defaultZoom={zoom}
+              gestureHandling="greedy"
+              disableDefaultUI={false}
+              internalUsageAttributionIds={["gmp_mcp_codeassist_v1_aistudio"]}
+              className="w-full h-full rounded-b-2xl"
+            >
+              <AdvancedMarker position={center}>
+                <Pin background="#E11D48" glyphColor="#FFFFFF" borderColor="#9F1239" />
               </AdvancedMarker>
-            ))}
-          </Map>
-        </APIProvider>
+              {markers.map((m) => (
+                <AdvancedMarker key={m.id} position={{ lat: m.lat, lng: m.lng }} title={m.title}>
+                  <Pin background="#2563EB" glyphColor="#FFFFFF" borderColor="#1E40AF" />
+                </AdvancedMarker>
+              ))}
+            </Map>
+          </APIProvider>
+        ) : (
+          <div className="h-full flex flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
+            <AlertCircle size={20} aria-hidden="true" />
+            <p>Map unavailable: configure a domain-restricted Google Maps key in <code>VITE_GOOGLE_MAPS_API_KEY</code>.</p>
+          </div>
+        )}
       </div>
     </div>
   );

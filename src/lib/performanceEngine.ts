@@ -40,6 +40,17 @@ export interface VirtualizationBudget {
   pauseDecorativeAnimations: boolean;
 }
 
+export interface GraphicsBudget {
+  pixelRatio: number;
+  targetFps: number;
+  antialias: boolean;
+  particleCount: number;
+  sphereSegments: number;
+  ringSegments: number;
+  icosahedronDetail: number;
+  hologramDetail: number;
+}
+
 export interface PerformanceMeasurementSnapshot {
   timestamp: number;
   activeProfile: PerformanceProfile;
@@ -546,6 +557,48 @@ export function getVirtualizationBudget(profile: PerformanceProfile = getActiveP
     maxActiveObjectUrls: 40,
     disableBackdropBlur: false,
     pauseDecorativeAnimations: false,
+  };
+}
+
+/** Returns conservative GPU settings for decorative 3D scenes. */
+export function getGraphicsBudget(
+  profile: PerformanceProfile = getActivePerformanceProfile(),
+  devicePixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio : 1
+): GraphicsBudget {
+  const safePixelRatio = Number.isFinite(devicePixelRatio) && devicePixelRatio > 0 ? devicePixelRatio : 1;
+  if (profile === 'ultra-lite') {
+    return {
+      pixelRatio: Math.min(safePixelRatio, 1),
+      targetFps: 30,
+      antialias: false,
+      particleCount: 60,
+      sphereSegments: 16,
+      ringSegments: 48,
+      icosahedronDetail: 1,
+      hologramDetail: 1,
+    };
+  }
+  if (profile === 'saver') {
+    return {
+      pixelRatio: Math.min(safePixelRatio, 1.25),
+      targetFps: 40,
+      antialias: false,
+      particleCount: 100,
+      sphereSegments: 20,
+      ringSegments: 64,
+      icosahedronDetail: 1,
+      hologramDetail: 2,
+    };
+  }
+  return {
+    pixelRatio: Math.min(safePixelRatio, 1.5),
+    targetFps: 60,
+    antialias: true,
+    particleCount: 180,
+    sphereSegments: 32,
+    ringSegments: 100,
+    icosahedronDetail: 2,
+    hologramDetail: 4,
   };
 }
 

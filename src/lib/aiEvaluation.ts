@@ -16,6 +16,10 @@ import { sanitizeFilename } from './fileValidation';
 import { matchVoiceCommand } from './voiceCommands';
 import { scheduledAgents } from './scheduledAgents';
 import { longTermMemory } from './longTermMemory';
+import {
+  SUPPORT_ISSUE_RESPONSE_GUIDANCE,
+  SUPPORT_ISSUE_GUIDANCE_REQUIREMENTS,
+} from './aiSupportGuidance';
 
 export interface EvalTestCase {
   id: string;
@@ -304,6 +308,24 @@ class AIEvaluationService {
             details: passed
               ? 'Autonomously identified statistical prompt and computed mean = 35'
               : 'Failed to autonomously detect and execute data analysis skill',
+          };
+        },
+      },
+      // 16. Support and Issue Response Guidance
+      {
+        id: 'eval_support_issue_response_guidance',
+        name: 'Support Responses: Impact, Diagnosis, Verification, and Escalation',
+        category: 'reliability',
+        run: async () => {
+          const missing = SUPPORT_ISSUE_GUIDANCE_REQUIREMENTS.filter(
+            requirement => !SUPPORT_ISSUE_RESPONSE_GUIDANCE.toLowerCase().includes(requirement.toLowerCase())
+          );
+          const passed = missing.length === 0;
+          return {
+            passed,
+            details: passed
+              ? 'Support guidance covers impact, symptom restatement, uncertainty, one-question limit, safe diagnostics, platform context, verification, fallback/escalation, evidence, and secret protection'
+              : `Missing support guidance: ${missing.join('; ')}`,
           };
         },
       },

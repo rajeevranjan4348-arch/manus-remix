@@ -51,19 +51,16 @@ service cloud.firestore {
         (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
     }
 
-    // Helper for validation of Memories
     function isValidMemories(data) {
       return (!('records' in data) || data.records is list) &&
         (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
     }
 
-    // Helper for validation of Schedules
     function isValidSchedules(data) {
       return (!('schedules' in data) || data.schedules is list) &&
         (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
     }
 
-    // Helper for validation of KnowledgeCache
     function isValidKnowledgeCache(data) {
       return (!('entries' in data) || data.entries is list) &&
         (!('history' in data) || data.history is list) &&
@@ -98,9 +95,30 @@ service cloud.firestore {
         data.status in ['idle', 'running', 'completed', 'error'] &&
         (!('outputFormat' in data) || (data.outputFormat is string && data.outputFormat.size() <= 64)) &&
         (!('chartType' in data) || (data.chartType is string && data.chartType.size() <= 64)) &&
-        (!('projectId' in data) || data.projectId == null || (data.projectId is string && data.projectId.size() <= 128)) &&
+        (!('projectId' in data) || data.projectId == null || (data.projectId is string && isValidId(data.projectId))) &&
         (!('result' in data) || (data.result is string && data.result.size() <= 500000)) &&
-        (!('prompt' in data) || (data.prompt is string && data.prompt.size() <= 10000));
+        (!('prompt' in data) || (data.prompt is string && data.prompt.size() <= 10000)) &&
+        (!('steps' in data) || data.steps is list) &&
+        (!('messages' in data) || data.messages is list);
+    }
+
+    function isValidConversationUpdate() {
+      return isValidConversation(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().userId == existing().userId &&
+        incoming().createdAt == existing().createdAt &&
+        (existing().status != 'completed' || (
+          incoming().status == 'completed' &&
+          incoming().title == existing().title &&
+          incoming().mode == existing().mode &&
+          (!('outputFormat' in existing()) || ('outputFormat' in incoming() && incoming().outputFormat == existing().outputFormat)) &&
+          (!('chartType' in existing()) || ('chartType' in incoming() && incoming().chartType == existing().chartType)) &&
+          (!('projectId' in existing()) || ('projectId' in incoming() && incoming().projectId == existing().projectId)) &&
+          (!('prompt' in existing()) || ('prompt' in incoming() && incoming().prompt == existing().prompt)) &&
+          (!('result' in existing()) || ('result' in incoming() && incoming().result == existing().result)) &&
+          (!('steps' in existing()) || ('steps' in incoming() && incoming().steps == existing().steps)) &&
+          (!('messages' in existing()) || ('messages' in incoming() && incoming().messages == existing().messages))
+        ));
     }
 
     // Helper for validation of Message
@@ -116,20 +134,46 @@ service cloud.firestore {
         data.status in ['pending', 'success', 'failed', 'streaming'];
     }
 
-    // Healthcheck / test connection route (scoped to verified client or test)
+    function isValidCheckpoint(data, ownerId, checkpointId) {
+      return data.keys().hasAll(['id', 'taskId', 'conversationId', 'userId', 'stepIndex', 'stepLabel', 'completedToolCalls', 'accumulatedResult', 'checksum', 'timestamp']) &&
+        data.keys().hasOnly(['id', 'taskId', 'conversationId', 'userId', 'stepIndex', 'totalSteps', 'stepLabel', 'status', 'completedToolCalls', 'accumulatedResult', 'stateSnapshot', 'checksum', 'timestamp', 'resumedAt']) &&
+        data.id is string && isValidId(data.id) &&
+        data.taskId is string && isValidId(data.taskId) && data.taskId == checkpointId &&
+        data.conversationId is string && isValidId(data.conversationId) &&
+        data.userId is string && isValidId(data.userId) && data.userId == ownerId &&
+        data.stepIndex is int && data.stepIndex >= 0 && data.stepIndex <= 100000 &&
+        (!('totalSteps' in data) || (data.totalSteps is int && data.totalSteps >= 0 && data.totalSteps <= 100000)) &&
+        data.stepLabel is string && data.stepLabel.size() <= 256 &&
+        (!('status' in data) || data.status in ['in_progress', 'completed', 'interrupted', 'failed']) &&
+        data.completedToolCalls is list && data.completedToolCalls.size() <= 100 &&
+        data.accumulatedResult is string && data.accumulatedResult.size() <= 500000 &&
+        (!('stateSnapshot' in data) || (data.stateSnapshot is map && data.stateSnapshot.keys().size() <= 100)) &&
+        data.checksum is string && data.checksum.size() <= 128 &&
+        data.timestamp is string && data.timestamp.size() <= 64 &&
+        (!('resumedAt' in data) || (data.resumedAt is string && data.resumedAt.size() <= 64));
+    }
+
+    function isValidCheckpointTransition() {
+      return !('status' in existing()) || !('status' in incoming()) ||
+        (existing().status == 'completed' && incoming().status == 'completed') ||
+        (existing().status == 'failed' && incoming().status in ['failed', 'completed']) ||
+        (existing().status == 'interrupted' && incoming().status in ['interrupted', 'failed', 'completed']) ||
+        (existing().status == 'in_progress');
+    }
+
     match /test/connection {
       allow get: if isSignedIn() || request.time != null;
     }
 
-    // Users collection
     match /users/{userId} {
       allow get: if isOwner(userId) && isValidId(userId);
       allow list: if false;
-      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming());
-      allow update: if isOwner(userId) && isValidId(userId) && isValidUser(incoming()) && incoming().id == existing().id;
+      allow create: if isOwner(userId) && isValidId(userId) && incoming().id == userId && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidId(userId) && isValidUser(incoming()) &&
+        incoming().id == existing().id &&
+        (!('createdAt' in existing()) || ('createdAt' in incoming() && incoming().createdAt == existing().createdAt));
       allow delete: if isOwner(userId) && isValidId(userId);
 
-      // User Settings, Memories, Schedules & Knowledge Cache subcollection
       match /settings/{settingsId} {
         allow get: if isOwner(userId) && isValidId(settingsId);
         allow list: if isOwner(userId);
@@ -148,35 +192,41 @@ service cloud.firestore {
         allow delete: if isOwner(userId) && isValidId(settingsId);
       }
 
-      // Task Checkpoints subcollection for durable recovery
       match /checkpoints/{checkpointId} {
-        allow get, list, create, update, delete: if isOwner(userId) && isValidId(checkpointId);
+        allow get, list: if isOwner(userId) && isValidId(checkpointId);
+        allow create: if isOwner(userId) && isValidId(checkpointId) && isValidCheckpoint(incoming(), userId, checkpointId);
+        allow update: if isOwner(userId) && isValidId(checkpointId) &&
+          isValidCheckpoint(incoming(), userId, checkpointId) &&
+          incoming().id == existing().id && incoming().taskId == existing().taskId &&
+          incoming().conversationId == existing().conversationId && incoming().userId == existing().userId &&
+          isValidCheckpointTransition();
+        allow delete: if isOwner(userId) && isValidId(checkpointId);
       }
     }
 
-    // Projects collection
     match /projects/{projectId} {
       allow get: if isSignedIn() && isValidId(projectId) && existing().userId == request.auth.uid;
       allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && isValidId(projectId) && incoming().userId == request.auth.uid && isValidProject(incoming());
-      allow update: if isSignedIn() && isValidId(projectId) && existing().userId == request.auth.uid && incoming().userId == existing().userId && isValidProject(incoming());
+      allow create: if isSignedIn() && isValidId(projectId) && incoming().id == projectId && incoming().userId == request.auth.uid && isValidProject(incoming());
+      allow update: if isSignedIn() && isValidId(projectId) && existing().userId == request.auth.uid &&
+        incoming().id == existing().id && incoming().id == projectId && incoming().userId == existing().userId &&
+        incoming().created_at == existing().created_at && isValidProject(incoming());
       allow delete: if isSignedIn() && isValidId(projectId) && existing().userId == request.auth.uid;
     }
 
-    // Conversations collection
     match /conversations/{conversationId} {
       allow get: if isSignedIn() && isValidId(conversationId) && existing().userId == request.auth.uid;
       allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && isValidId(conversationId) && incoming().userId == request.auth.uid && isValidConversation(incoming());
-      allow update: if isSignedIn() && isValidId(conversationId) && existing().userId == request.auth.uid && incoming().userId == existing().userId && isValidConversation(incoming());
+      allow create: if isSignedIn() && isValidId(conversationId) && incoming().id == conversationId && incoming().userId == request.auth.uid && isValidConversation(incoming());
+      allow update: if isSignedIn() && isValidId(conversationId) && existing().userId == request.auth.uid &&
+        incoming().id == conversationId && isValidConversationUpdate();
       allow delete: if isSignedIn() && isValidId(conversationId) && existing().userId == request.auth.uid;
 
-      // Messages subcollection
       match /messages/{messageId} {
         allow get: if isSignedIn() && isValidId(messageId) && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid;
         allow list: if isSignedIn() && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid;
-        allow create: if isSignedIn() && isValidId(messageId) && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid && incoming().userId == request.auth.uid && isValidMessage(incoming());
-        allow update: if isSignedIn() && isValidId(messageId) && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid && existing().userId == request.auth.uid && incoming().userId == existing().userId && isValidMessage(incoming());
+        allow create: if isSignedIn() && isValidId(messageId) && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid && get(/databases/$(database)/documents/conversations/$(conversationId)).data.status != 'completed' && incoming().id == messageId && incoming().conversationId == conversationId && incoming().userId == request.auth.uid && isValidMessage(incoming());
+        allow update: if isSignedIn() && isValidId(messageId) && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid && get(/databases/$(database)/documents/conversations/$(conversationId)).data.status != 'completed' && existing().id == messageId && existing().conversationId == conversationId && incoming().id == existing().id && incoming().conversationId == existing().conversationId && existing().userId == request.auth.uid && incoming().userId == existing().userId && incoming().timestamp == existing().timestamp && isValidMessage(incoming());
         allow delete: if isSignedIn() && isValidId(messageId) && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid;
       }
     }

@@ -30,6 +30,14 @@ export async function upsertConversationInSql(params: {
 }) {
   try {
     await getOrCreateUser(params.uid, params.email, params.displayName);
+    if (params.projectId) {
+      const [ownedProject] = await db
+        .select({ id: projects.id })
+        .from(projects)
+        .where(and(eq(projects.id, params.projectId), eq(projects.userId, params.uid)))
+        .limit(1);
+      if (!ownedProject) return undefined;
+    }
     const now = new Date();
     const result = await db
       .insert(conversations)
@@ -54,6 +62,7 @@ export async function upsertConversationInSql(params: {
           ...(params.summary !== undefined ? { summary: params.summary } : {}),
           updatedAt: now,
         },
+        setWhere: eq(conversations.userId, params.uid),
       })
       .returning();
 
@@ -96,7 +105,11 @@ export async function listConversationMessagesFromSql(uid: string, conversationI
       })
       .from(messages)
       .innerJoin(conversations, eq(messages.conversationId, conversations.id))
-      .where(and(eq(conversations.id, conversationId), eq(conversations.userId, uid)));
+      .where(and(
+        eq(conversations.id, conversationId),
+        eq(conversations.userId, uid),
+        eq(messages.userId, uid),
+      ));
 
     return rows;
   } catch (error) {
@@ -117,6 +130,12 @@ export async function upsertMessageInSql(params: {
 }) {
   try {
     await getOrCreateUser(params.uid, params.email);
+    const [ownedConversation] = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(and(eq(conversations.id, params.conversationId), eq(conversations.userId, params.uid)))
+      .limit(1);
+    if (!ownedConversation) return undefined;
     const result = await db
       .insert(messages)
       .values({
@@ -135,6 +154,10 @@ export async function upsertMessageInSql(params: {
           thought: params.thought ?? null,
           status: params.status || 'success',
         },
+        setWhere: and(
+          eq(messages.userId, params.uid),
+          eq(messages.conversationId, params.conversationId),
+        ),
       })
       .returning();
 
@@ -191,6 +214,7 @@ export async function upsertProjectInSql(params: {
           color: params.color ?? null,
           updatedAt: now,
         },
+        setWhere: eq(projects.userId, params.uid),
       })
       .returning();
 

@@ -444,6 +444,59 @@
   animation-delay: 0s;
 }
 
+.chat-thinking-row {
+  animation: chat-thinking-enter 180ms ease-out both;
+}
+
+.chat-thinking-bubble {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 8px 12px;
+  border: 1px solid hsl(var(--border) / 0.55);
+  border-radius: 16px 16px 16px 5px;
+  background: hsl(var(--muted) / 0.35);
+}
+
+.chat-thinking-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-thinking-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: hsl(var(--foreground) / 0.68);
+  animation: chat-thinking-bounce 1.15s ease-in-out infinite;
+}
+
+.chat-thinking-dots span:nth-child(2) { animation-delay: 140ms; }
+.chat-thinking-dots span:nth-child(3) { animation-delay: 280ms; }
+
+@keyframes chat-thinking-bounce {
+  0%, 70%, 100% { transform: translateY(0); opacity: 0.3; }
+  35% { transform: translateY(-2px); opacity: 0.95; }
+}
+
+@keyframes chat-thinking-enter {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+[data-anim-fps="low"] .chat-thinking-dots span,
+[data-perf-mode="saver"] .chat-thinking-dots span {
+  animation-duration: 2.6s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-thinking-row,
+  .chat-thinking-dots span {
+    animation: none;
+  }
+}
+
 /* =========================================================================
    From Uiverse.io by joao-canais - 3D Sphere Loader with Orbiting Letters
    ========================================================================= */
@@ -1619,6 +1672,39 @@ html[data-perf-mode="saver"] .manus-transition-enter {
   animation-duration: 140ms;
 }
 
+html[data-perf-mode="ultra-lite"] {
+  --manus-motion-fast: 80ms;
+  --manus-motion-normal: 120ms;
+  --manus-motion-slow: 160ms;
+  scroll-behavior: auto;
+}
+
+html[data-perf-mode="ultra-lite"] *,
+html[data-perf-mode="ultra-lite"] *::before,
+html[data-perf-mode="ultra-lite"] *::after {
+  scroll-behavior: auto;
+}
+
+html[data-perf-mode="ultra-lite"] [class*="backdrop-blur"],
+html[data-perf-mode="ultra-lite"] [style*="backdrop-filter"] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html[data-perf-mode="ultra-lite"] [class*="shadow-"] {
+  box-shadow: none;
+}
+
+html[data-perf-mode="ultra-lite"] .manus-transition-enter {
+  animation-duration: 120ms;
+}
+
+html[data-perf-mode="ultra-lite"] .manus-avatar-aura {
+  filter: none !important;
+  animation: none !important;
+  transition: none !important;
+}
+
 /* Pause decorative motion only while the tab is hidden; restore it on return. */
 html[data-page-hidden="true"] *,
 html[data-page-hidden="true"] *::before,
@@ -1830,4 +1916,3 @@ select,
 [data-perf-mode="saver"] [data-virtuoso-scroller="true"] {
   scroll-behavior: auto;
 }
-

@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { formatSpokenPunctuation } from '@/components/voice/VoiceInputButton';
 import { VoiceTranscriptionIndicator } from '@/components/voice/VoiceTranscriptionIndicator';
 import { getSettings } from '@/lib/settingsStore';
+import { getFirebaseAuthorizationHeader } from '@/lib/firebaseAuthorization';
 import { speakCleanHumanVoice } from '@/lib/speechSynthesis';
 import { ConversationActionBar } from '../agent/ConversationActionBar';
 
@@ -276,9 +277,14 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
     setMessages([...updatedMessages, assistantPlaceholder]);
 
     try {
+      const authorization = await getFirebaseAuthorizationHeader();
+      if (!authorization) {
+        toast.error('Please sign in to use AI chat.');
+        throw new Error('Authentication required.');
+      }
       const res = await fetch('/api/gemini/stream', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: authorization },
         signal: controller.signal,
         body: JSON.stringify({
           requestId: `myai_${Date.now()}_${reqId}`,

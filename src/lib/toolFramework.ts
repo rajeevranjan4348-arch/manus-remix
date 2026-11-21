@@ -7,6 +7,7 @@
 
 import { observability } from './observability';
 import { securityCenter } from './securityCenter';
+import { auth } from './firebase';
 
 export type ToolRiskLevel = 'read-only' | 'destructive' | 'privileged' | 'safe' | 'moderate' | 'sensitive';
 
@@ -239,12 +240,21 @@ class ToolRegistryService {
       handler: async (args) => {
         const query = String(args.query || '').trim();
         const limit = Number(args.limit) || 5;
+        const currentUser = auth.currentUser;
+        if (!currentUser) {
+          return {
+            success: false,
+            error: 'AUTHENTICATION_REQUIRED',
+            summary: 'Sign in to use live web search.',
+          };
+        }
 
         // Query Netlify / server web-search function or public encyclopedic knowledge API
         try {
+          const idToken = await currentUser.getIdToken();
           const res = await fetch('/api/web-search', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
             body: JSON.stringify({ query, limit }),
           });
 
@@ -263,6 +273,12 @@ class ToolRegistryService {
               citations,
               summary: `Found ${results.length} verified results for "${query}"`,
             };
+          }
+          if (res.status === 401 || res.status === 403) {
+            return { success: false, error: 'AUTHENTICATION_REQUIRED', summary: 'Sign in again to use live web search.' };
+          }
+          if (res.status === 429 || res.status === 503) {
+            return { success: false, error: 'SEARCH_TEMPORARILY_UNAVAILABLE', summary: 'Live web search is temporarily unavailable. Please retry later.' };
           }
         } catch {
           // Fallback to Wikipedia REST API if local search endpoint is unavailable

@@ -42,7 +42,6 @@ import {
   FileCode,
   FileType
 } from 'lucide-react';
-import { ConnectorsStorePanel } from '../connectors/ConnectorsStorePanel';
 import { cn } from '@/lib/utils';
 import { Logo, ManusLogo } from './Logo';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -57,10 +56,6 @@ import { exportChatSession, ChatExportFormat } from '@/lib/chatExport';
 import { getBookmarkedSessionIds, setSessionBookmarked } from '@/lib/sessionBookmarks';
 import { Project } from '@/types/project';
 import { getProjects, deleteProject, addTaskToProject } from '@/lib/projectStore';
-import { ProjectModal } from '@/components/projects/ProjectModal';
-import { ProjectViewModal } from '@/components/projects/ProjectViewModal';
-import { SettingsModal } from '@/components/settings/SettingsModal';
-import { TagAnalyticsModal } from '@/components/analytics/TagAnalyticsModal';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -71,6 +66,22 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+
+const ConnectorsStorePanel = React.lazy(() =>
+  import('../connectors/ConnectorsStorePanel').then((m) => ({ default: m.ConnectorsStorePanel }))
+);
+const ProjectModal = React.lazy(() =>
+  import('@/components/projects/ProjectModal').then((m) => ({ default: m.ProjectModal }))
+);
+const ProjectViewModal = React.lazy(() =>
+  import('@/components/projects/ProjectViewModal').then((m) => ({ default: m.ProjectViewModal }))
+);
+const SettingsModal = React.lazy(() =>
+  import('@/components/settings/SettingsModal').then((m) => ({ default: m.SettingsModal }))
+);
+const TagAnalyticsModal = React.lazy(() =>
+  import('@/components/analytics/TagAnalyticsModal').then((m) => ({ default: m.TagAnalyticsModal }))
+);
 
 interface SidebarProps {
   isOpen: boolean;
@@ -1135,48 +1146,62 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
         </div>
       </aside>
 
-      {/* Project Modal (Create / Edit) */}
-      <ProjectModal
-        isOpen={isProjectModalOpen}
-        onClose={() => {
-          setIsProjectModalOpen(false);
-          setProjectToEdit(null);
-          setTaskToAddToProject(null);
-        }}
-        projectToEdit={projectToEdit}
-        onSuccess={(project) => {
-          loadProjects();
-          if (taskToAddToProject) {
-            void handleAssignTaskToProject(taskToAddToProject, project.id);
-          }
-          setTaskToAddToProject(null);
-        }}
-      />
-
-      {/* Project View Modal */}
-      <ProjectViewModal
-        isOpen={!!selectedProjectView}
-        onClose={() => setSelectedProjectView(null)}
-        project={selectedProjectView}
-        onEdit={(proj) => {
-          setSelectedProjectView(null);
-          setProjectToEdit(proj);
-          setIsProjectModalOpen(true);
-        }}
-        onNewTaskInProject={(proj) => {
-          setSelectedProjectView(null);
-          if (onNewTask) onNewTask();
-          navigate('/');
-        }}
-      />
-
-      {/* Settings & Preferences Modal (fallback when onOpenSettings prop is not used) */}
-      {isSettingsOpen && (
-        <SettingsModal
-          isOpen={isSettingsOpen}
-          onClose={() => setIsSettingsOpen(false)}
-        />
-      )}
+      <React.Suspense fallback={null}>
+        {isProjectModalOpen && (
+          <ProjectModal
+            isOpen={isProjectModalOpen}
+            onClose={() => {
+              setIsProjectModalOpen(false);
+              setProjectToEdit(null);
+              setTaskToAddToProject(null);
+            }}
+            projectToEdit={projectToEdit}
+            onSuccess={(project) => {
+              loadProjects();
+              if (taskToAddToProject) {
+                void handleAssignTaskToProject(taskToAddToProject, project.id);
+              }
+              setTaskToAddToProject(null);
+            }}
+          />
+        )}
+        {selectedProjectView && (
+          <ProjectViewModal
+            isOpen={!!selectedProjectView}
+            onClose={() => setSelectedProjectView(null)}
+            project={selectedProjectView}
+            onEdit={(proj) => {
+              setSelectedProjectView(null);
+              setProjectToEdit(proj);
+              setIsProjectModalOpen(true);
+            }}
+            onNewTaskInProject={(proj) => {
+              setSelectedProjectView(null);
+              if (onNewTask) onNewTask();
+              navigate('/');
+            }}
+          />
+        )}
+        {/* Settings & Preferences Modal (fallback when onOpenSettings prop is not used) */}
+        {isSettingsOpen && (
+          <SettingsModal
+            isOpen={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+          />
+        )}
+        {isConnectorsOpen && (
+          <ConnectorsStorePanel
+            isOpen={isConnectorsOpen}
+            onClose={() => setIsConnectorsOpen(false)}
+          />
+        )}
+        {isTagAnalyticsOpen && (
+          <TagAnalyticsModal
+            isOpen={isTagAnalyticsOpen}
+            onClose={() => setIsTagAnalyticsOpen(false)}
+          />
+        )}
+      </React.Suspense>
 
       {/* Rename Session Alert Dialog */}
       <AlertDialog
@@ -1315,16 +1340,6 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      {/* Connectors & Plugins Store Panel */}
-      <ConnectorsStorePanel
-        isOpen={isConnectorsOpen}
-        onClose={() => setIsConnectorsOpen(false)}
-      />
-      {/* D3 Tag Analytics Dashboard Modal */}
-      <TagAnalyticsModal
-        isOpen={isTagAnalyticsOpen}
-        onClose={() => setIsTagAnalyticsOpen(false)}
-      />
     </>
   );
 });

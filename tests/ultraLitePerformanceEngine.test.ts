@@ -6,6 +6,7 @@ import {
   getActivePerformanceProfile,
   setPerformanceProfileConfiguration,
   getVirtualizationBudget,
+  getGraphicsBudget,
   BoundedLRUCache,
   trimAllManagedCaches,
   clearAllManagedCaches,
@@ -158,6 +159,25 @@ describe('Ultra-Lite Performance Engine (2GB RAM Android Target)', () => {
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)',
     });
     expect(profileHighEndDesktop.detectedProfile).toBe('balanced');
+  });
+
+  it('caps 3D rendering cost according to the active device profile', () => {
+    const ultraLite = getGraphicsBudget('ultra-lite', 3);
+    expect(ultraLite.pixelRatio).toBe(1);
+    expect(ultraLite.targetFps).toBe(30);
+    expect(ultraLite.antialias).toBe(false);
+    expect(ultraLite.particleCount).toBeLessThan(100);
+
+    const saver = getGraphicsBudget('saver', 3);
+    expect(saver.pixelRatio).toBe(1.25);
+    expect(saver.targetFps).toBe(40);
+    expect(saver.particleCount).toBeLessThan(getGraphicsBudget('balanced', 3).particleCount);
+
+    const balanced = getGraphicsBudget('balanced', 3);
+    expect(balanced.pixelRatio).toBe(1.5);
+    expect(balanced.targetFps).toBe(60);
+    expect(balanced.antialias).toBe(true);
+    expect(getGraphicsBudget('ultra-lite', Number.NaN).pixelRatio).toBe(1);
   });
 
   it('supports manual Ultra-Lite mode toggle and applies data-perf-mode attribute to DOM', () => {

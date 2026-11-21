@@ -11,6 +11,7 @@ import { createAutonomousStreamResponse, setActiveStreamContext } from '../src/l
 import {
   cleanUserMessage,
   extractUserImageAttachment,
+  shouldShowChatThinkingIndicator,
   shouldShowComposingIndicator,
 } from '../src/components/agent/ChatView';
 import { deriveContextualThinkingStages } from '../src/components/agent/WorkModeThinkingAnimation';
@@ -476,6 +477,29 @@ describe('AI Response Streaming and Loading State Regression Tests', () => {
     ).toBe(false);
   });
 
+  it('shows the inline chat thinking indicator only while an active turn has no visible assistant text', () => {
+    expect(shouldShowChatThinkingIndicator({
+      isAssistantWorking: true,
+      hasCurrentUserMessage: true,
+      hasVisibleAssistantMessage: false,
+    })).toBe(true);
+    expect(shouldShowChatThinkingIndicator({
+      isAssistantWorking: true,
+      hasCurrentUserMessage: true,
+      hasVisibleAssistantMessage: true,
+    })).toBe(false);
+    expect(shouldShowChatThinkingIndicator({
+      isAssistantWorking: false,
+      hasCurrentUserMessage: true,
+      hasVisibleAssistantMessage: false,
+    })).toBe(false);
+    expect(shouldShowChatThinkingIndicator({
+      isAssistantWorking: true,
+      hasCurrentUserMessage: false,
+      hasVisibleAssistantMessage: false,
+    })).toBe(false);
+  });
+
   it('derives contextual thinking stages from live step state and sanitizes reasoning traces', () => {
     const stage1Steps = createInitialWorkflowSteps(false);
     const derivedStage1 = deriveContextualThinkingStages('Which model are you', 'chat', stage1Steps, true);
@@ -507,6 +531,8 @@ describe('AI Response Streaming and Loading State Regression Tests', () => {
 
     // ChatView must not render the duplicate top-level "Working" status banner above manus Lite
     expect(chatViewSource).not.toContain('Live tool-call progress');
+    expect(chatViewSource).toContain('data-testid="chat-thinking-indicator"');
+    expect(chatViewSource).not.toContain('Manus AI is thinking');
     // WorkModeThinkingAnimation must not use artificial setTimeout timers or duplicate LatticeLoader in header
     expect(thinkingAnimSource).not.toContain('setTimeout');
     expect(thinkingAnimSource).not.toContain('LatticeLoader');
@@ -539,5 +565,3 @@ describe('AI Response Streaming and Loading State Regression Tests', () => {
     }
   });
 });
-
-

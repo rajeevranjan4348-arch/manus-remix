@@ -3,12 +3,15 @@ import { Camera, Image, Paperclip, Brain, Check, PhoneCall, Plug } from 'lucide-
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { saveSharedFileToLibrary } from '@/lib/libraryStore';
+import { validateFile } from '@/lib/fileValidation';
+
 const VoiceCallModal = React.lazy(() =>
   import('../voice/VoiceCallModal').then((module) => ({ default: module.VoiceCallModal }))
 );
-import { LiveCameraModal } from '../camera/LiveCameraModal';
-import { saveSharedFileToLibrary } from '@/lib/libraryStore';
-import { validateFile } from '@/lib/fileValidation';
+const LiveCameraModal = React.lazy(() =>
+  import('../camera/LiveCameraModal').then((module) => ({ default: module.LiveCameraModal }))
+);
 
 export interface AttachmentMenuProps {
   onFileSelect: (file: File) => void;
@@ -280,14 +283,18 @@ export function AttachmentMenu({
       )}
 
       {/* Live Camera Modal (Real-time preview, front/rear toggle, photo capture) */}
-      <LiveCameraModal
-        isOpen={isLiveCameraOpen}
-        onClose={() => setIsLiveCameraOpen(false)}
-        onCapture={(file) => {
-          onFileSelect(file);
-          setIsOpen(false);
-        }}
-      />
+      {isLiveCameraOpen && (
+        <React.Suspense fallback={<div role="status" className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 text-sm text-white">Opening camera…</div>}>
+          <LiveCameraModal
+            isOpen
+            onClose={() => setIsLiveCameraOpen(false)}
+            onCapture={(file) => {
+              onFileSelect(file);
+              setIsOpen(false);
+            }}
+          />
+        </React.Suspense>
+      )}
     </>
   );
 }

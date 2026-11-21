@@ -1,6 +1,7 @@
 import { permissionsGateway } from '../../server/permissionsGateway';
+import { verifyBearerToken } from '../../src/middleware/auth';
 
-const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(data), {
+const jsonResponse = (data: unknown, status = 200) => new Response(JSON.stringify(data), {
   status,
   headers: {
     'Content-Type': 'application/json; charset=utf-8',
@@ -11,28 +12,26 @@ const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(da
 });
 
 export default async (req: Request) => {
+  const decodedToken = await verifyBearerToken(req.headers.get('authorization') || undefined);
+  if (!decodedToken?.uid) {
+    return jsonResponse({ error: 'Authentication required.', code: 'UNAUTHENTICATED' }, 401);
+  }
+  const authenticatedUserId = decodedToken.uid;
   const url = new URL(req.url);
   const path = url.pathname.replace(/^\/\.netlify\/functions\/permissions/, '').replace(/^\/api\/permissions/, '');
 
-  // 1. GET /policies: List all registered policies
+  // GET /policies: authenticated callers may inspect the static policy catalog.
   if (req.method === 'GET' && (path === '/policies' || path === '' || path === '/')) {
-    return jsonResponse({
-      success: true,
-      policies: permissionsGateway.getAllPolicies(),
-    });
+    return jsonResponse({ success: true, policies: permissionsGateway.getAllPolicies() });
   }
 
-  // 2. GET /audit: Retrieve audit log
+  // GET /audit: return only the authenticated user's own audit records.
   if (req.method === 'GET' && path === '/audit') {
     const limitParam = parseInt(url.searchParams.get('limit') || '50', 10);
     const limit = Math.min(100, Math.max(1, isNaN(limitParam) ? 50 : limitParam));
-    return jsonResponse({
-      success: true,
-      auditLog: permissionsGateway.getAuditLog(limit),
-    });
+    return jsonResponse({ success: true, auditLog: permissionsGateway.getAuditLog(limit, authenticatedUserId) });
   }
 
-  // 3. POST /evaluate: Check if tool action requires approval
   if (req.method === 'POST' && path === '/evaluate') {
     let body: any;
     try {
@@ -40,32 +39,20 @@ export default async (req: Request) => {
     } catch {
       return jsonResponse({ error: 'Malformed JSON payload.', code: 'BAD_REQUEST' }, 400);
     }
-
-    if (!body || typeof body !== 'object' || typeof body.toolName !== 'string' || !body.toolName.trim()) {
+    if (!body || typeof body !== 'object' || Array.isArray(body) || typeof body.toolName !== 'string' || !body.toolName.trim()) {
       return jsonResponse({ error: 'toolName string is required.', code: 'INVALID_TOOL_NAME' }, 400);
     }
-
+    if (body.userId !== undefined && body.userId !== authenticatedUserId) {
+      return jsonResponse({ error: 'Permission request owner does not match the authenticated user.', code: 'FORBIDDEN' }, 403);
+    }
     const toolName = body.toolName.slice(0, 100).trim();
     const args = (body.args && typeof body.args === 'object' && !Array.isArray(body.args)) ? body.args : {};
-    const userId = typeof body.userId === 'string' ? body.userId.slice(0, 128) : undefined;
     const target = typeof body.target === 'string' ? body.target.slice(0, 256) : undefined;
     const approvalToken = typeof body.approvalToken === 'string' ? body.approvalToken.slice(0, 128) : undefined;
-
-    const evaluation = permissionsGateway.evaluateAction({
-      toolName,
-      args,
-      userId,
-      target,
-      approvalToken,
-    });
-
-    return jsonResponse({
-      success: true,
-      ...evaluation,
-    });
+    const evaluation = permissionsGateway.evaluateAction({ toolName, args, userId: authenticatedUserId, target, approvalToken });
+    return jsonResponse({ success: true, ...evaluation });
   }
 
-  // 4. POST /approve: User explicitly confirms or denies a challenge
   if (req.method === 'POST' && path === '/approve') {
     let body: any;
     try {
@@ -73,27 +60,21 @@ export default async (req: Request) => {
     } catch {
       return jsonResponse({ error: 'Malformed JSON payload.', code: 'BAD_REQUEST' }, 400);
     }
-
     if (!body || typeof body.challengeId !== 'string' || typeof body.confirmed !== 'boolean') {
       return jsonResponse({ error: 'challengeId string and confirmed boolean are required.', code: 'INVALID_APPROVAL_REQUEST' }, 400);
     }
-
-    const challengeId = body.challengeId.slice(0, 128);
-    const confirmed = Boolean(body.confirmed);
-    const userId = typeof body.userId === 'string' ? body.userId.slice(0, 128) : undefined;
-    const reason = typeof body.reason === 'string' ? body.reason.slice(0, 300) : undefined;
-
+    if (body.userId !== undefined && body.userId !== authenticatedUserId) {
+      return jsonResponse({ error: 'Approval owner does not match the authenticated user.', code: 'FORBIDDEN' }, 403);
+    }
     const resolution = permissionsGateway.resolveChallenge({
-      challengeId,
-      confirmed,
-      userId,
-      reason,
+      challengeId: body.challengeId.slice(0, 128),
+      confirmed: body.confirmed,
+      userId: authenticatedUserId,
+      reason: typeof body.reason === 'string' ? body.reason.slice(0, 300) : undefined,
     });
-
     return jsonResponse(resolution, resolution.success ? 200 : 400);
   }
 
-  // 5. POST /verify: Pre-execution verification and token consumption
   if (req.method === 'POST' && path === '/verify') {
     let body: any;
     try {
@@ -101,23 +82,18 @@ export default async (req: Request) => {
     } catch {
       return jsonResponse({ error: 'Malformed JSON payload.', code: 'BAD_REQUEST' }, 400);
     }
-
     if (!body || typeof body.approvalToken !== 'string' || typeof body.toolName !== 'string') {
       return jsonResponse({ error: 'approvalToken and toolName are required.', code: 'INVALID_VERIFICATION_REQUEST' }, 400);
     }
-
-    const approvalToken = body.approvalToken.slice(0, 128);
-    const toolName = body.toolName.slice(0, 100);
-    const args = (body.args && typeof body.args === 'object' && !Array.isArray(body.args)) ? body.args : {};
-    const userId = typeof body.userId === 'string' ? body.userId.slice(0, 128) : undefined;
-
+    if (body.userId !== undefined && body.userId !== authenticatedUserId) {
+      return jsonResponse({ error: 'Verification owner does not match the authenticated user.', code: 'FORBIDDEN' }, 403);
+    }
     const verification = permissionsGateway.verifyApprovalToken({
-      approvalToken,
-      toolName,
-      args,
-      userId,
+      approvalToken: body.approvalToken.slice(0, 128),
+      toolName: body.toolName.slice(0, 100),
+      args: (body.args && typeof body.args === 'object' && !Array.isArray(body.args)) ? body.args : {},
+      userId: authenticatedUserId,
     });
-
     return jsonResponse(verification, verification.valid ? 200 : 403);
   }
 
