@@ -7,5 +7,6 @@ export interface HomeActionDefaults {
 export function getHomeActionDefaults(label: string): HomeActionDefaults {
   if (label === 'Build website') return { format: 'website', chartType: null };
   if (label === 'Data analysis') return { format: 'graph', chartType: 'bar' };
+  if (label === 'Write for me') return { format: 'chat', chartType: null };
   return { format: null, chartType: null };
 }

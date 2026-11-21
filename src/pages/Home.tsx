@@ -18,6 +18,7 @@ import {
   Gauge,
   Brain,
   MessageSquare,
+  Mail,
   Briefcase,
   Upload,
   AtSign,
@@ -46,6 +47,7 @@ import {
   getNextCycledRobotState,
   resolveContextualRobotState,
 } from '@/lib/robotAnimationEngine';
+import { buildWritingAssistantPrompt } from '@/lib/writingAssistant';
 const ConnectorsStorePanel = React.lazy(() =>
   import('@/components/connectors/ConnectorsStorePanel').then((m) => ({ default: m.ConnectorsStorePanel }))
 );
@@ -95,7 +97,14 @@ const CHAT_WORK_MODES = [
 const ACTION_CHIPS = [
   { label: "Build website", icon: Globe },
   { label: "Data analysis", icon: BarChart3 },
-  { label: "Research link", icon: LinkIcon }
+  { label: "Research link", icon: LinkIcon },
+  { label: "Write for me", icon: Mail }
+];
+
+const WRITING_STARTERS = [
+  { label: 'Email', prompt: 'Draft a clear, polite email about:\n' },
+  { label: 'Chat message', prompt: 'Draft a natural chat or WhatsApp message about:\n' },
+  { label: 'Improve text', prompt: 'Improve this text for clarity and grammar without changing its meaning:\n\n' },
 ];
 
 const OUTPUT_FORMATS = [
@@ -617,14 +626,17 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
       return;
     }
 
+    const isWritingAssistant = activeIntent?.label === 'Writing assistant';
+    const taskPrompt = isWritingAssistant ? buildWritingAssistantPrompt(effectivePrompt) : effectivePrompt;
+
     const options: any = { 
-      format: selectedFormat || 'report', 
+      format: isWritingAssistant ? 'chat' : selectedFormat || 'report',
       chartType: selectedChart || 'auto',
       intent: activeIntent?.label,
       thinkHarder: isThinkHarder,
       plugins: activePlugins,
       connectorTags: activeConnectorTags,
-      mode: chatWorkMode,
+      mode: isWritingAssistant ? 'chat' : chatWorkMode,
     };
 
     if (fileData) {
@@ -652,7 +664,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
-    onStartTask(effectivePrompt, options);
+    onStartTask(taskPrompt, options);
     setIsExpanded(false);
   };
 
@@ -1067,10 +1079,10 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
               </div>
             </div>
 
-            {/* Action chips displayed together in a single row line when in Work mode */}
-            {chatWorkMode === 'work' && (
+            {/* Work actions plus the writing shortcut in Chat mode */}
+            <>
               <div className="flex min-w-0 w-full box-border items-center justify-start sm:justify-center gap-2 sm:gap-2.5 overflow-x-auto overscroll-x-contain scroll-px-2 no-scrollbar px-2 sm:px-4 py-1.5 whitespace-nowrap">
-                {ACTION_CHIPS.map((chip, chipIdx) => (
+                {ACTION_CHIPS.filter((chip) => chatWorkMode === 'work' || chip.label === 'Write for me').map((chip, chipIdx) => (
                   <button
                     key={chip.label}
                     style={{ animationDelay: `${chipIdx * 45}ms` }}
@@ -1099,6 +1111,13 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                           placeholder: "Describe the data you want to analyze or upload a file"
                         });
                         setPrompt('');
+                      } else if (chip.label === "Write for me") {
+                        setActiveIntent({
+                          label: "Writing assistant",
+                          icon: chip.icon,
+                          placeholder: "What do you need to write? Share the key points, recipient, and tone..."
+                        });
+                        setPrompt('');
                       } else {
                         const shortLabel = chip.label.replace('Create ', '').replace('Build ', '').replace('Develop ', '');
                         setActiveIntent({ 
@@ -1116,12 +1135,33 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                   </button>
                 ))}
               </div>
-            )}
+              {activeIntent?.label === 'Writing assistant' && (
+                <div className="flex min-w-0 w-full items-center justify-center gap-2 overflow-x-auto overscroll-x-contain no-scrollbar px-2 py-1" role="group" aria-label="Writing starters">
+                  {WRITING_STARTERS.map((starter) => (
+                    <button
+                      key={starter.label}
+                      type="button"
+                      onClick={() => {
+                        setPrompt(starter.prompt);
+                        window.requestAnimationFrame(() => {
+                          textareaRef.current?.focus();
+                          const cursor = starter.prompt.length;
+                          textareaRef.current?.setSelectionRange(cursor, cursor);
+                        });
+                      }}
+                      className="shrink-0 rounded-full border border-border bg-white px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/30 hover:bg-slate-50 hover:text-foreground dark:bg-card dark:hover:bg-accent"
+                    >
+                      {starter.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
           </div>
         </div>
 
         {/* Building agent features (Output formats and Chart gallery) shown ONLY in Work mode */}
-        {chatWorkMode === 'work' && (
+        {chatWorkMode === 'work' && activeIntent?.label !== 'Writing assistant' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 animate-on-load animate-in fade-in slide-in-from-bottom-4 duration-300">
             <div className="space-y-4">
               <h3 className="font-sans text-xs font-bold text-slate-500 dark:text-muted-foreground uppercase tracking-widest px-1">Choose output format</h3>

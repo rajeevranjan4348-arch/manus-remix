@@ -12,6 +12,10 @@ describe('home quick action defaults', () => {
     expect(getHomeActionDefaults('Data analysis')).toEqual({ format: 'graph', chartType: 'bar' });
   });
 
+  it('uses chat output for the writing assistant', () => {
+    expect(getHomeActionDefaults('Write for me')).toEqual({ format: 'chat', chartType: null });
+  });
+
   it('clears previous output and chart settings for research and other actions', () => {
     expect(getHomeActionDefaults('Research link')).toEqual({ format: null, chartType: null });
     expect(getHomeActionDefaults('Other action')).toEqual({ format: null, chartType: null });
@@ -22,5 +26,8 @@ describe('home quick action defaults', () => {
     expect(home).toContain('const defaults = getHomeActionDefaults(chip.label)');
     expect(home).toContain('setSelectedFormat(defaults.format)');
     expect(home).toContain('setSelectedChart(defaults.chartType)');
+    expect(home).toContain("ACTION_CHIPS.filter((chip) => chatWorkMode === 'work' || chip.label === 'Write for me')");
+    expect(home).toContain('label: "Writing assistant"');
+    expect(home).toContain('buildWritingAssistantPrompt(effectivePrompt)');
   });
 });
