@@ -57,7 +57,6 @@ import { WorkspaceMentionPicker, WORKSPACE_CONNECTOR_OPTIONS, WorkspaceConnector
 import { fetchWorkspaceContextSummary } from '@/lib/workspaceContextService';
 import { Step } from '@/hooks/useAgentTask';
 import { AgentActivityEvent } from '@/lib/agentActivityTracker';
-import { AgentActivityFeed } from './AgentActivityFeed';
 import { MemoryUpdatedIndicator } from './MemoryUpdatedIndicator';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
@@ -1576,14 +1575,6 @@ export function ChatView({
 
   footerRenderRef.current = () => (
     <div className="px-4 sm:px-20 space-y-3 pb-28 pt-2">
-      {Array.isArray(activities) && activities.length > 0 && (
-        <AgentActivityFeed
-          taskId={taskId}
-          activities={activities}
-          isRunning={isAssistantWorking}
-        />
-      )}
-
       {shouldShowThinkingIndicator && (
         <div
           data-testid="chat-thinking-indicator"

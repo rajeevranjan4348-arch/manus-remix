@@ -15,7 +15,12 @@ import {
   agentActivityTracker,
 } from '../src/lib/agentActivityTracker';
 import { createAutonomousStreamResponse, setActiveStreamContext } from '../src/lib/blink';
-import { AgentActivityFeed } from '../src/components/agent/AgentActivityFeed';
+import {
+  AgentActivityFeed,
+  getActivityEntryStaggerDelaySec,
+  agentActivityListVariants,
+  agentActivityItemVariants,
+} from '../src/components/agent/AgentActivityFeed';
 
 describe('Real-Time AI Agent Activity & Verification System', () => {
   beforeEach(() => {
@@ -282,4 +287,49 @@ describe('Real-Time AI Agent Activity & Verification System', () => {
     expect(activeMarkup).toContain('Inspecting backend route wiring and SSE handlers');
     expect(activeMarkup).toContain('agent-activity-shimmer-text');
   });
+
+  it('computes bounded staggered entrance delays and renders Framer Motion timeline entries consistently during rapid updates', () => {
+    expect(getActivityEntryStaggerDelaySec(0, 3)).toBe(0);
+    expect(getActivityEntryStaggerDelaySec(1, 3)).toBe(0.045);
+    expect(getActivityEntryStaggerDelaySec(2, 3)).toBe(0.09);
+    // Capped at max stagger delay during rapid bursts of 12 entries
+    expect(getActivityEntryStaggerDelaySec(11, 12)).toBeLessThanOrEqual(0.27);
+
+    expect(agentActivityListVariants.visible).toBeDefined();
+    expect(typeof agentActivityItemVariants.visible).toBe('function');
+
+    const expandedMarkup = renderToStaticMarkup(
+      React.createElement(AgentActivityFeed, {
+        taskId: 't_stagger',
+        isRunning: true,
+        defaultExpanded: true,
+        showWidgetToggle: false,
+        activities: [
+          {
+            taskId: 't_stagger',
+            eventId: 'e1',
+            seq: 1,
+            title: 'Analyzing user request',
+            toolName: 'request_analyzer',
+            status: 'COMPLETED',
+            timestamp: new Date().toISOString(),
+          },
+          {
+            taskId: 't_stagger',
+            eventId: 'e2',
+            seq: 2,
+            title: 'Generating response with gemini-3-flash-preview',
+            toolName: 'gemini_stream',
+            status: 'RUNNING',
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      })
+    );
+    expect(expandedMarkup).not.toContain('data-testid="agent-activity-toggle"');
+    expect(expandedMarkup).toContain('data-testid="agent-activity-timeline"');
+    expect(expandedMarkup).toContain('data-stagger-delay-sec="0"');
+    expect(expandedMarkup).toContain('data-stagger-delay-sec="0.045"');
+  });
 });
+

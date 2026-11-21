@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { AnimatePresence, motion, type Variants } from 'framer-motion';
 import {
   AlertCircle,
   Check,
@@ -22,7 +23,64 @@ export interface AgentActivityFeedProps {
   activities?: AgentActivityEvent[];
   isRunning?: boolean;
   className?: string;
+  /** Whether to render the collapsible pill widget button header (defaults to true) */
+  showWidgetToggle?: boolean;
+  /** Whether timeline entries should start expanded (defaults to false) */
+  defaultExpanded?: boolean;
 }
+
+/**
+ * Computes a bounded staggered entrance delay (in seconds) for activity feed items
+ * so rapid updates animate smoothly without accumulating long delays on large feeds.
+ */
+export function getActivityEntryStaggerDelaySec(index: number, totalCount = 0): number {
+  if (!Number.isFinite(index) || index <= 0) return 0;
+  // Stagger relative to the tail window so newly appended items during rapid updates enter crisply
+  const windowStart = Math.max(0, totalCount - 8);
+  const relativeIdx = Math.max(0, index - windowStart);
+  return Math.min(relativeIdx * 0.045, 0.27);
+}
+
+export const agentActivityListVariants: Variants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.045,
+      delayChildren: 0.02,
+    },
+  },
+  exit: {
+    opacity: 0,
+    transition: { duration: 0.15 },
+  },
+};
+
+export const agentActivityItemVariants: Variants = {
+  hidden: {
+    opacity: 0,
+    y: 8,
+    scale: 0.985,
+  },
+  visible: (customDelaySec = 0) => ({
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: {
+      type: 'spring',
+      stiffness: 420,
+      damping: 30,
+      mass: 0.7,
+      delay: typeof customDelaySec === 'number' ? customDelaySec : 0,
+    },
+  }),
+  exit: {
+    opacity: 0,
+    y: -4,
+    scale: 0.985,
+    transition: { duration: 0.14 },
+  },
+};
 
 const AgentTriangleMascot: React.FC<{ active: boolean; hasError: boolean }> = ({
   active,
@@ -148,8 +206,15 @@ function renderStatusIcon(status: AgentActivityStatus, outcome?: VerificationOut
 }
 
 export const AgentActivityFeed: React.FC<AgentActivityFeedProps> = React.memo(
-  ({ taskId, activities = [], isRunning = false, className }) => {
-    const [isExpanded, setIsExpanded] = useState(false);
+  ({
+    taskId,
+    activities = [],
+    isRunning = false,
+    className,
+    showWidgetToggle = true,
+    defaultExpanded = false,
+  }) => {
+    const [isExpanded, setIsExpanded] = useState(defaultExpanded);
     const [expandedEventIds, setExpandedEventIds] = useState<Record<string, boolean>>({});
 
     const visibleActivities = useMemo(() => {
@@ -183,7 +248,7 @@ export const AgentActivityFeed: React.FC<AgentActivityFeedProps> = React.memo(
       };
     }, [visibleActivities, isRunning]);
 
-    if (!summary || !summary.activeEvent) {
+    if (!summary || !summary.activeEvent || (!showWidgetToggle && !isExpanded)) {
       return null;
     }
 
@@ -201,138 +266,170 @@ export const AgentActivityFeed: React.FC<AgentActivityFeedProps> = React.memo(
         className={cn('max-w-3xl mx-auto w-full', className)}
       >
         <div className="rounded-xl border border-[#262626] bg-[#141414] text-[#EDEDED] shadow-sm overflow-hidden transition-colors">
-          <button
-            type="button"
-            onClick={() => setIsExpanded((prev) => !prev)}
-            aria-expanded={isExpanded}
-            data-testid="agent-activity-toggle"
-            className="w-full flex items-center justify-between gap-2.5 px-3.5 py-2.5 text-left hover:bg-white/[0.03] transition-colors cursor-pointer"
-          >
-            <div className="flex items-center gap-2.5 min-w-0 flex-1">
-              <AgentTriangleMascot active={summary.isLive} hasError={summary.hasError} />
-              <span
-                data-testid="agent-activity-headline"
+          {showWidgetToggle && (
+            <button
+              type="button"
+              onClick={() => setIsExpanded((prev) => !prev)}
+              aria-expanded={isExpanded}
+              data-testid="agent-activity-toggle"
+              className="w-full flex items-center justify-between gap-2.5 px-3.5 py-2.5 text-left hover:bg-white/[0.03] transition-colors cursor-pointer"
+            >
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                <AgentTriangleMascot active={summary.isLive} hasError={summary.hasError} />
+                <AnimatePresence mode="wait" initial={false}>
+                  <motion.span
+                    key={summary.activeEvent.eventId || headline}
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.16, ease: 'easeOut' }}
+                    data-testid="agent-activity-headline"
+                    className={cn(
+                      'truncate text-[13.5px] font-normal tracking-[-0.01em] leading-snug',
+                      summary.isLive ? 'agent-activity-shimmer-text' : 'text-[#E5E5E5]'
+                    )}
+                  >
+                    {headline}
+                  </motion.span>
+                </AnimatePresence>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0 text-[11px] text-[#9A9A9A]">
+                {summary.verificationEvents.length > 0 && (
+                  <span className="hidden sm:inline-flex items-center gap-1 text-[#A3A3A3]">
+                    <ShieldCheck className="h-3 w-3 text-sky-400" />
+                    {summary.verificationEvents.filter((e) => e.verificationOutcome === 'PASSED').length}/
+                    {summary.verificationEvents.length}
+                  </span>
+                )}
+                <span className="tabular-nums">
+                  {summary.completedCount}/{summary.totalCount}
+                </span>
+                {isExpanded ? (
+                  <ChevronDown className="h-3.5 w-3.5 text-[#8E8E8E]" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5 text-[#8E8E8E]" />
+                )}
+              </div>
+            </button>
+          )}
+
+          <AnimatePresence initial={false}>
+            {isExpanded && (
+              <motion.div
+                key="agent-activity-timeline"
+                data-testid="agent-activity-timeline"
+                variants={agentActivityListVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
                 className={cn(
-                  'truncate text-[13.5px] font-normal tracking-[-0.01em] leading-snug',
-                  summary.isLive ? 'agent-activity-shimmer-text' : 'text-[#E5E5E5]'
+                  'bg-[#111111]/95 px-3.5 py-2.5 space-y-2 max-h-72 overflow-y-auto custom-scrollbar',
+                  showWidgetToggle && 'border-t border-[#242424]'
                 )}
               >
-                {headline}
-              </span>
-            </div>
+                <AnimatePresence initial={false}>
+                  {visibleActivities.map((item, idx) => {
+                    const badge = getStatusBadgeMeta(item.status, item.verificationOutcome);
+                    const durationLabel = formatDuration(item.durationMs);
+                    const detailOpen = Boolean(expandedEventIds[item.eventId]);
+                    const hasDetails = Boolean(
+                      item.description || item.resultSummary || item.error || item.toolName
+                    );
+                    const staggerDelaySec = getActivityEntryStaggerDelaySec(
+                      idx,
+                      visibleActivities.length
+                    );
 
-            <div className="flex items-center gap-2 shrink-0 text-[11px] text-[#9A9A9A]">
-              {summary.verificationEvents.length > 0 && (
-                <span className="hidden sm:inline-flex items-center gap-1 text-[#A3A3A3]">
-                  <ShieldCheck className="h-3 w-3 text-sky-400" />
-                  {summary.verificationEvents.filter((e) => e.verificationOutcome === 'PASSED').length}/
-                  {summary.verificationEvents.length}
-                </span>
-              )}
-              <span className="tabular-nums">
-                {summary.completedCount}/{summary.totalCount}
-              </span>
-              {isExpanded ? (
-                <ChevronDown className="h-3.5 w-3.5 text-[#8E8E8E]" />
-              ) : (
-                <ChevronRight className="h-3.5 w-3.5 text-[#8E8E8E]" />
-              )}
-            </div>
-          </button>
-
-          {isExpanded && (
-            <div
-              data-testid="agent-activity-timeline"
-              className="border-t border-[#242424] bg-[#111111]/95 px-3.5 py-2.5 space-y-2 max-h-72 overflow-y-auto custom-scrollbar"
-            >
-              {visibleActivities.map((item) => {
-                const badge = getStatusBadgeMeta(item.status, item.verificationOutcome);
-                const durationLabel = formatDuration(item.durationMs);
-                const detailOpen = Boolean(expandedEventIds[item.eventId]);
-                const hasDetails = Boolean(
-                  item.description || item.resultSummary || item.error || item.toolName
-                );
-
-                return (
-                  <div
-                    key={item.eventId}
-                    data-testid="agent-activity-item"
-                    data-activity-status={item.status}
-                    className="rounded-lg border border-[#222222] bg-[#161616] px-2.5 py-2 text-xs"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => hasDetails && toggleDetail(item.eventId)}
-                        className="flex items-start gap-2 min-w-0 flex-1 text-left cursor-pointer"
+                    return (
+                      <motion.div
+                        key={item.eventId}
+                        layout="position"
+                        custom={staggerDelaySec}
+                        variants={agentActivityItemVariants}
+                        initial="hidden"
+                        animate="visible"
+                        exit="exit"
+                        data-testid="agent-activity-item"
+                        data-activity-status={item.status}
+                        data-stagger-delay-sec={staggerDelaySec}
+                        className="rounded-lg border border-[#222222] bg-[#161616] px-2.5 py-2 text-xs"
                       >
-                        <span className="mt-0.5">
-                          {renderStatusIcon(item.status, item.verificationOutcome)}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="font-medium text-[#EFEFEF] truncate">
-                              {redactSensitiveActivityText(item.title, 120)}
+                        <div className="flex items-start justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => hasDetails && toggleDetail(item.eventId)}
+                            className="flex items-start gap-2 min-w-0 flex-1 text-left cursor-pointer"
+                          >
+                            <span className="mt-0.5">
+                              {renderStatusIcon(item.status, item.verificationOutcome)}
                             </span>
-                            {durationLabel && (
-                              <span className="text-[10px] text-[#8A8A8A] tabular-nums">
-                                {durationLabel}
-                              </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-medium text-[#EFEFEF] truncate">
+                                  {redactSensitiveActivityText(item.title, 120)}
+                                </span>
+                                {durationLabel && (
+                                  <span className="text-[10px] text-[#8A8A8A] tabular-nums">
+                                    {durationLabel}
+                                  </span>
+                                )}
+                              </div>
+                              {item.resultSummary && !detailOpen && (
+                                <p className="text-[11px] text-[#9A9A9A] truncate mt-0.5">
+                                  {redactSensitiveActivityText(item.resultSummary, 140)}
+                                </p>
+                              )}
+                              {item.error && !detailOpen && (
+                                <p className="text-[11px] text-red-300/90 truncate mt-0.5">
+                                  {redactSensitiveActivityText(item.error, 140)}
+                                </p>
+                              )}
+                            </div>
+                          </button>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span
+                              className={cn(
+                                'px-1.5 py-0.5 rounded text-[9.5px] font-mono tracking-wide border',
+                                badge.toneClass
+                              )}
+                            >
+                              {badge.label}
+                            </span>
+                          </div>
+                        </div>
+
+                        {detailOpen && hasDetails && (
+                          <div className="mt-2 pt-2 border-t border-[#252525] space-y-1 text-[11px] text-[#A8A8A8] font-mono">
+                            <div className="flex items-center justify-between gap-2 text-[10px] text-[#808080]">
+                              <span>tool: {redactSensitiveActivityText(item.toolName, 60)}</span>
+                              <span>{formatShortTime(item.timestamp)}</span>
+                            </div>
+                            {item.description && (
+                              <p className="text-[#BDBDBD] font-sans">
+                                {redactSensitiveActivityText(item.description, 220)}
+                              </p>
+                            )}
+                            {item.resultSummary && (
+                              <p className="text-emerald-300/90 font-sans">
+                                Result: {redactSensitiveActivityText(item.resultSummary, 240)}
+                              </p>
+                            )}
+                            {item.error && (
+                              <p className="text-red-300 font-sans">
+                                Error: {redactSensitiveActivityText(item.error, 220)}
+                              </p>
                             )}
                           </div>
-                          {item.resultSummary && !detailOpen && (
-                            <p className="text-[11px] text-[#9A9A9A] truncate mt-0.5">
-                              {redactSensitiveActivityText(item.resultSummary, 140)}
-                            </p>
-                          )}
-                          {item.error && !detailOpen && (
-                            <p className="text-[11px] text-red-300/90 truncate mt-0.5">
-                              {redactSensitiveActivityText(item.error, 140)}
-                            </p>
-                          )}
-                        </div>
-                      </button>
-
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <span
-                          className={cn(
-                            'px-1.5 py-0.5 rounded text-[9.5px] font-mono tracking-wide border',
-                            badge.toneClass
-                          )}
-                        >
-                          {badge.label}
-                        </span>
-                      </div>
-                    </div>
-
-                    {detailOpen && hasDetails && (
-                      <div className="mt-2 pt-2 border-t border-[#252525] space-y-1 text-[11px] text-[#A8A8A8] font-mono">
-                        <div className="flex items-center justify-between gap-2 text-[10px] text-[#808080]">
-                          <span>tool: {redactSensitiveActivityText(item.toolName, 60)}</span>
-                          <span>{formatShortTime(item.timestamp)}</span>
-                        </div>
-                        {item.description && (
-                          <p className="text-[#BDBDBD] font-sans">
-                            {redactSensitiveActivityText(item.description, 220)}
-                          </p>
                         )}
-                        {item.resultSummary && (
-                          <p className="text-emerald-300/90 font-sans">
-                            Result: {redactSensitiveActivityText(item.resultSummary, 240)}
-                          </p>
-                        )}
-                        {item.error && (
-                          <p className="text-red-300 font-sans">
-                            Error: {redactSensitiveActivityText(item.error, 220)}
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                      </motion.div>
+                    );
+                  })}
+                </AnimatePresence>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     );
@@ -340,3 +437,4 @@ export const AgentActivityFeed: React.FC<AgentActivityFeedProps> = React.memo(
 );
 
 AgentActivityFeed.displayName = 'AgentActivityFeed';
+
