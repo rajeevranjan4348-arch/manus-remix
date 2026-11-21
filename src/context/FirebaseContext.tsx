@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import {
   auth,
@@ -26,7 +26,7 @@ interface FirebaseContextType {
   sendPasswordReset: (email: string) => Promise<void>;
   resendVerification: () => Promise<void>;
   refreshVerification: () => Promise<boolean>;
-  signInAsGuest: () => Promise<void>;
+  signInAsGuest: () => Promise<boolean>;
   signOut: () => Promise<void>;
   getIdToken: (forceRefresh?: boolean) => Promise<string | null>;
 }
@@ -40,7 +40,7 @@ const FirebaseContext = createContext<FirebaseContextType>({
   sendPasswordReset: async () => {},
   resendVerification: async () => {},
   refreshVerification: async () => false,
-  signInAsGuest: async () => {},
+  signInAsGuest: async () => false,
   signOut: async () => {},
   getIdToken: async () => null,
 });
@@ -62,6 +62,7 @@ function syncVerifiedUser(user: FirebaseUser): void {
 export function FirebaseProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<FirebaseUser | null>(auth.currentUser);
   const [loading, setLoading] = useState(true);
+  const automaticGuestSignInAttempted = useRef(false);
 
   useEffect(() => {
     let isSubscribed = true;
@@ -71,6 +72,26 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
       (currentUser) => {
         if (!isSubscribed) return;
         hasResolvedAuth = true;
+        if (!currentUser && !automaticGuestSignInAttempted.current) {
+          automaticGuestSignInAttempted.current = true;
+          void setRememberMePersistence(true)
+            .then(() => signInAnonymouslyUser())
+            .then((guestUser) => {
+              if (!isSubscribed) return;
+              if (!guestUser) {
+                console.warn('[Firebase Auth] Automatic guest sign-in was unavailable.');
+              }
+              setUser(guestUser);
+              setLoading(false);
+            })
+            .catch((error) => {
+              if (!isSubscribed) return;
+              console.warn('[Firebase Auth] Automatic guest sign-in notice:', (error as any)?.code || 'guest-sign-in-error');
+              setUser(null);
+              setLoading(false);
+            });
+          return;
+        }
         setUser(currentUser);
         if (currentUser) syncVerifiedUser(currentUser);
         setLoading(false);
@@ -137,16 +158,18 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
     return false;
   };
 
-  const handleSignInAsGuest = async () => {
+  const handleSignInAsGuest = async (): Promise<boolean> => {
     try {
       await setRememberMePersistence(true);
       const guestUser = await signInAnonymouslyUser();
       if (!guestUser) throw new Error('Firebase anonymous sign-in is unavailable.');
       setUser(guestUser);
       toast.success('Signed in as Guest');
+      return true;
     } catch (error) {
       console.warn('[Firebase Auth] Guest sign-in notice:', (error as any)?.code || 'guest-sign-in-error');
       toast.error('Guest sign-in is unavailable. Please use an account.');
+      return false;
     }
   };
 

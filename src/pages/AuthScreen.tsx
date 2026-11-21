@@ -114,7 +114,7 @@ export default function AuthScreen() {
   }, [user?.email, email]);
 
   useEffect(() => {
-    if (user && mode !== 'reset' && (user.isAnonymous || user.emailVerified)) {
+    if (user && !user.isAnonymous && mode !== 'reset' && user.emailVerified) {
       navigate('/', { replace: true });
     }
   }, [mode, user, navigate]);
@@ -199,7 +199,8 @@ export default function AuthScreen() {
     setNotice('');
     setBusy('guest');
     try {
-      await signInAsGuest();
+      const guestSignedIn = await signInAsGuest();
+      if (guestSignedIn) navigate('/', { replace: true });
     } catch {
       setErrorMessage('Guest access is unavailable right now. Please try another sign-in option.');
     } finally {

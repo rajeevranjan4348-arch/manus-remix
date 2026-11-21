@@ -21,6 +21,7 @@ import { checkSharedRateLimit } from './server/distributedRateLimiter';
 import { verifyBearerToken } from './src/middleware/auth';
 import { GoogleGenAI } from '@google/genai';
 import { makeResearchActivities } from './src/lib/agentActivity';
+import imageGenerationHandler from './netlify/functions/image-generation';
 
 class StreamCircuitBreaker {
   private failureCount = 0;
@@ -561,59 +562,47 @@ Return a JSON object with a "tags" array property, e.g. {"tags": ["Research", "C
           return;
         }
 
-        // Server-Side AI Image Generation Endpoint
-        if (req.method === 'POST' && url === '/api/image-generation') {
-          res.setHeader('Content-Type', 'application/json');
-          let bodyStr = '';
-          req.on('data', chunk => { bodyStr += chunk; });
+        // Reuse the production handler so development keeps the same auth, validation, rate limits and provider behavior.
+        if (url === '/api/image-generation' || url === '/.netlify/functions/image-generation') {
+          const maxRequestBytes = 5_500_000;
+          const chunks: Buffer[] = [];
+          let receivedBytes = 0;
+          let oversized = false;
+          req.on('data', (chunk: Buffer | string) => {
+            const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            receivedBytes += buffer.byteLength;
+            if (receivedBytes > maxRequestBytes) {
+              oversized = true;
+              chunks.length = 0;
+              return;
+            }
+            if (!oversized) chunks.push(buffer);
+          });
           req.on('end', async () => {
+            if (oversized) {
+              res.statusCode = 413;
+              res.setHeader('Content-Type', 'application/json; charset=utf-8');
+              res.end(JSON.stringify({ error: 'Request payload exceeds the maximum allowed size.', code: 'PAYLOAD_TOO_LARGE' }));
+              return;
+            }
             try {
-              const body = bodyStr ? JSON.parse(bodyStr) : {};
-              const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
-              if (!prompt) {
-                res.statusCode = 400;
-                res.end(JSON.stringify({ error: 'An image prompt is required.' }));
-                return;
+              const headers = new Headers();
+              for (const [name, value] of Object.entries(req.headers)) {
+                if (typeof value === 'string') headers.set(name, value);
+                else if (Array.isArray(value)) headers.set(name, value.join(', '));
               }
-              const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-              if (apiKey) {
-                try {
-                  const ai = new GoogleGenAI({ apiKey });
-                  const model = process.env.IMAGE_GENERATION_MODEL || 'gemini-2.5-flash-image';
-                  const response = await ai.models.generateContent({
-                    model,
-                    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-                    config: { responseModalities: ['TEXT', 'IMAGE'] },
-                  });
-                  const parts = response.candidates?.flatMap(c => c.content?.parts || []) || [];
-                  const imagePart = parts.find(p => p.inlineData?.data && p.inlineData?.mimeType?.startsWith('image/'));
-                  if (imagePart?.inlineData?.data) {
-                    res.end(JSON.stringify({
-                      success: true,
-                      provider: 'Gemini',
-                      model,
-                      mimeType: imagePart.inlineData.mimeType || 'image/png',
-                      imageDataUrl: `data:${imagePart.inlineData.mimeType || 'image/png'};base64,${imagePart.inlineData.data}`,
-                      alt: prompt.slice(0, 180),
-                    }));
-                    return;
-                  }
-                } catch (err: any) {
-                  console.warn('[Vite Dev image-generation] Gemini call error:', err?.message);
-                }
-              }
-              const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#1e1b4b"/><stop offset="50%" stop-color="#312e81"/><stop offset="100%" stop-color="#4c1d95"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><circle cx="400" cy="250" r="100" fill="#a855f7" opacity="0.3"/><text x="50%" y="45%" dominant-baseline="middle" text-anchor="middle" fill="#ffffff" font-family="sans-serif" font-size="28" font-weight="bold">🎨 Manus AI Studio Artwork</text><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" fill="#d8b4fe" font-family="sans-serif" font-size="16">${prompt.slice(0, 60).replace(/</g, '&lt;')}</text></svg>`;
-              const base64Svg = Buffer.from(svgContent).toString('base64');
-              res.end(JSON.stringify({
-                success: true,
-                provider: 'Manus Studio Generator',
-                mimeType: 'image/svg+xml',
-                imageDataUrl: `data:image/svg+xml;base64,${base64Svg}`,
-                alt: prompt.slice(0, 180),
-              }));
-            } catch (err: any) {
+              const method = req.method || 'POST';
+              const init: RequestInit = { method, headers };
+              if (method !== 'GET' && method !== 'HEAD') init.body = Buffer.concat(chunks);
+              const request = new Request(`http://${req.headers.host || 'localhost'}${url}`, init);
+              const response = await imageGenerationHandler(request);
+              response.headers.forEach((value, name) => res.setHeader(name, value));
+              res.statusCode = response.status;
+              res.end(Buffer.from(await response.arrayBuffer()));
+            } catch {
               res.statusCode = 500;
-              res.end(JSON.stringify({ error: err?.message || 'Failed to generate image' }));
+              res.setHeader('Content-Type', 'application/json; charset=utf-8');
+              res.end(JSON.stringify({ error: 'Image generation failed unexpectedly. Please retry.', code: 'IMAGE_GENERATION_FAILED' }));
             }
           });
           return;

@@ -40,7 +40,8 @@ import {
   FolderPlus,
   FileText,
   FileCode,
-  FileType
+  FileType,
+  Image as ImageIcon
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Logo, ManusLogo } from './Logo';
@@ -49,7 +50,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { useBlinkAuth } from '@blinkdotnew/react';
 import { useFirebase } from '@/context/FirebaseContext';
 import { blink } from '@/lib/blink';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { getMessages, renameConversation } from '@/lib/chatDatabase';
 import { exportChatSession, ChatExportFormat } from '@/lib/chatExport';
@@ -220,6 +221,8 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
   const { isAuthenticated, user } = useBlinkAuth();
   const { user: fbUser, signInWithGoogle, signOut: fbSignOut } = useFirebase();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isImageStudioActive = location.pathname === '/image-studio';
 
   useEffect(() => {
     loadTasks();
@@ -436,6 +439,7 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
 
   const navItems = [
     { id: 'new', label: 'New Chat', icon: MessageSquarePlus, action: onNewTask },
+    { id: 'image-studio', label: 'Image Studio', icon: ImageIcon, action: () => navigate('/image-studio') },
     { 
       id: 'connectors', 
       label: 'Connectors & Plugins', 
@@ -507,7 +511,7 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                       "p-2.5 rounded-xl transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95",
                       item.id === 'new'
                         ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] shadow-sm"
-                        : activeTab === item.id && !item.action
+                        : (item.id === 'image-studio' ? isImageStudioActive : activeTab === item.id && !item.action)
                           ? "bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] shadow-sm" 
                           : "text-[#777777] dark:text-[#AAAAAA] hover:bg-[#F2F2F2] dark:hover:bg-[#171717] hover:text-[#000000] dark:hover:text-[#FFFFFF]"
                     )}
@@ -657,7 +661,7 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                 "manus-sidebar-item-slide group w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium text-sm cursor-pointer",
                 item.id === 'new'
                   ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] font-semibold shadow-sm"
-                  : activeTab === item.id && !item.action
+                  : (item.id === 'image-studio' ? isImageStudioActive : activeTab === item.id && !item.action)
                     ? "bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] shadow-sm" 
                     : "text-[#000000] dark:text-[#FFFFFF] hover:bg-[#F2F2F2] dark:hover:bg-[#171717]"
               )}
@@ -669,7 +673,7 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                   "manus-icon-spring",
                   item.id === 'new'
                     ? "text-[#FFFFFF] dark:text-[#000000]"
-                    : activeTab === item.id && !item.action
+                    : (item.id === 'image-studio' ? isImageStudioActive : activeTab === item.id && !item.action)
                       ? "text-[#000000] dark:text-[#FFFFFF]"
                       : "text-[#777777] dark:text-[#AAAAAA]"
                 )}

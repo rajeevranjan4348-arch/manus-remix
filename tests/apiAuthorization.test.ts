@@ -4,6 +4,7 @@ import checkpoints from '../netlify/functions/checkpoints';
 import permissions from '../netlify/functions/permissions';
 import realtime from '../netlify/functions/realtime';
 import webSearch from '../netlify/functions/web-search';
+import imageGeneration from '../netlify/functions/image-generation';
 import { encryptToken } from '../server/connectorsService';
 import { permissionsGateway } from '../server/permissionsGateway';
 
@@ -44,6 +45,12 @@ describe('API authentication boundaries', () => {
     ]);
     expect(searchResponse.status).toBe(401);
     expect(agentResponse.status).toBe(401);
+  });
+
+  it('rejects unauthenticated image-generation requests before provider work', async () => {
+    const response = await imageGeneration(post('https://app.test/api/image-generation'));
+    expect(response.status).toBe(401);
+    expect((await response.json()).code).toBe('UNAUTHENTICATED');
   });
 
   it('rejects unauthenticated realtime lookups before calling upstream services', async () => {

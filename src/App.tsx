@@ -43,6 +43,9 @@ const AndroidConnectorsSettings = lazy(() =>
 const MyAIChat = lazy(() =>
   import('./components/chat/MyAIChat').then((m) => ({ default: m.MyAIChat }))
 );
+const ImageStudio = lazy(() =>
+  import('./pages/ImageStudio').then((m) => ({ default: m.ImageStudio }))
+);
 const AuthScreen = lazy(() => import('./pages/AuthScreen'));
 function RouteLoadingFallback() {
   return (
@@ -351,6 +354,7 @@ function AppContent() {
                 <Suspense fallback={<RouteLoadingFallback />}>
                   <Routes>
                     <Route path="/" element={<Home onStartTask={handleStartTask} />} />
+                    <Route path="/image-studio" element={<ImageStudio />} />
                     <Route path="/login" element={<AuthScreen />} />
                     <Route path="/forgot-password" element={<AuthScreen />} />
                     <Route path="/signup" element={<AuthScreen />} />
