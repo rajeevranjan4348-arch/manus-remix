@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+vi.mock('../src/lib/firebaseAuthorization', () => ({
+  getFirebaseAuthorizationHeader: vi.fn().mockResolvedValue(null),
+}));
+import { getFirebaseAuthorizationHeader } from '../src/lib/firebaseAuthorization';
 import {
   classifyTaskTags,
   normalizeClientTaskTags,
@@ -40,6 +44,7 @@ describe('Automated Gemini Session Tagging & HistoryPanel Categorization', () =>
     });
     vi.stubGlobal('localStorage', mockLocalStorage);
     vi.restoreAllMocks();
+    vi.mocked(getFirebaseAuthorizationHeader).mockResolvedValue(null);
   });
 
   describe('Server-side Gemini categorization service', () => {
@@ -114,6 +119,7 @@ describe('Automated Gemini Session Tagging & HistoryPanel Categorization', () =>
     });
 
     it('calls POST /api/tag-task via analyzeTaskTagsWithGemini and persists returned Gemini categories', async () => {
+      vi.mocked(getFirebaseAuthorizationHeader).mockResolvedValue('Bearer test-id-token');
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
@@ -132,11 +138,13 @@ describe('Automated Gemini Session Tagging & HistoryPanel Categorization', () =>
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
       expect(mockFetch.mock.calls[0][0]).toBe('/api/tag-task');
+      expect(mockFetch.mock.calls[0][1].headers.Authorization).toBe('Bearer test-id-token');
       expect(tags).toEqual(['Writing', 'Research']);
       expect(getStoredSessionTags()['task-gemini-1']).toEqual(['Writing', 'Research']);
     });
 
     it('batch categorizes untagged sessions via autoTagSessionBatch and stores results', async () => {
+      vi.mocked(getFirebaseAuthorizationHeader).mockResolvedValue('Bearer test-id-token');
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
@@ -162,7 +170,21 @@ describe('Automated Gemini Session Tagging & HistoryPanel Categorization', () =>
       expect(results['sess-c']).toEqual(['Writing']);
     });
 
+    it('uses local classification without a protected backend request when signed out', async () => {
+      const mockFetch = vi.fn();
+      vi.stubGlobal('fetch', mockFetch);
+
+      const tags = await analyzeTaskTagsWithGemini({
+        id: 'task-local-1',
+        prompt: 'Debug a TypeScript compiler error in a React component',
+      });
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(tags).toContain('Coding');
+    });
+
     it('delegates taskTagger.tagTaskWithAI and processTaskTags through the unified Gemini pipeline', async () => {
+      vi.mocked(getFirebaseAuthorizationHeader).mockResolvedValue('Bearer test-id-token');
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({

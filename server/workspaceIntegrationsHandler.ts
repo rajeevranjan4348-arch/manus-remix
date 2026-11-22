@@ -74,7 +74,6 @@ export async function resolveBackendGoogleIntegrations(params: {
   const token = rawAuth.toLowerCase().startsWith('bearer ')
     ? rawAuth.slice(7).trim()
     : '';
-  const fallbackEmail = (params.userEmailHeader || '').trim() || null;
   const disabledSet = new Set(params.disabledAppIds || []);
 
   if (!token) {
@@ -98,41 +97,57 @@ export async function resolveBackendGoogleIntegrations(params: {
     };
   }
 
-  let verifiedEmail = fallbackEmail;
+  let verifiedEmail: string | null = null;
   let grantedScopeString = '';
-  let tokenValid = true;
-  let tokenExpiredOrInvalid = false;
+  let tokenVerified = false;
 
-  // Attempt lightweight tokeninfo verification against Google OAuth2 endpoint
+  // A non-empty bearer token, email header, JWT shape, or network failure is not proof
+  // that this is a valid Google OAuth access token.
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch(
-      `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`,
-      { signal: controller.signal }
-    );
-    clearTimeout(timeout);
-
-    if (res.ok) {
-      const data: any = await res.json();
-      if (data.email) {
-        verifiedEmail = data.email;
+    try {
+      const res = await fetch(
+        `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`,
+        { signal: controller.signal }
+      );
+      if (res.ok) {
+        const data: any = await res.json();
+        if (typeof data?.scope === 'string' && data.scope.trim()) {
+          tokenVerified = true;
+          grantedScopeString = data.scope.trim();
+          verifiedEmail = typeof data.email === 'string' && data.email.trim() ? data.email.trim() : null;
+        }
       }
-      if (typeof data.scope === 'string') {
-        grantedScopeString = data.scope;
-      }
-    } else if (res.status === 400 || res.status === 401) {
-      // Note: Firebase ID tokens or mock tokens may return 400 on access_token tokeninfo;
-      // check if it looks like a JWT (3 dot-separated parts) before marking expired.
-      const isJwt = token.split('.').length === 3;
-      if (!isJwt && token !== 'mock-oauth-token') {
-        tokenExpiredOrInvalid = true;
-        tokenValid = false;
-      }
+    } finally {
+      clearTimeout(timeout);
     }
   } catch {
-    // Network unreachable in offline/test environment: trust non-empty Bearer token
-    tokenValid = Boolean(token);
+    // Fail closed if Google tokeninfo cannot verify the token.
+  }
+
+  if (!tokenVerified) {
+    return {
+      authenticated: false,
+      accountEmail: null,
+      checkedAt,
+      source: 'backend',
+      integrations: GOOGLE_INTEGRATION_CATALOG.map((item) => {
+        const isManuallyUnlinked = disabledSet.has(item.id);
+        return {
+          id: item.id,
+          name: item.name,
+          category: item.category,
+          description: item.description,
+          status: isManuallyUnlinked || !token ? 'disconnected' : 'needs_reconnect',
+          isLinked: false,
+          accountEmail: null,
+          primaryScope: item.primaryScope,
+          scopeGranted: false,
+          lastVerifiedAt: checkedAt,
+        };
+      }),
+    };
   }
 
   const integrations: BackendGoogleIntegrationItem[] = GOOGLE_INTEGRATION_CATALOG.map((item) => {
@@ -152,32 +167,15 @@ export async function resolveBackendGoogleIntegrations(params: {
       };
     }
 
-    if (tokenExpiredOrInvalid) {
-      return {
-        id: item.id,
-        name: item.name,
-        category: item.category,
-        description: item.description,
-        status: 'needs_reconnect',
-        isLinked: true,
-        accountEmail: verifiedEmail,
-        primaryScope: item.primaryScope,
-        scopeGranted: false,
-        lastVerifiedAt: checkedAt,
-      };
-    }
-
-    const scopeGranted =
-      !grantedScopeString ||
-      item.scopeKeywords.some((kw) => grantedScopeString.includes(kw));
+    const scopeGranted = item.scopeKeywords.some((kw) => grantedScopeString.includes(kw));
 
     return {
       id: item.id,
       name: item.name,
       category: item.category,
       description: item.description,
-      status: tokenValid && scopeGranted ? 'connected' : 'needs_reconnect',
-      isLinked: tokenValid,
+      status: scopeGranted ? 'connected' : 'needs_reconnect',
+      isLinked: true,
       accountEmail: verifiedEmail,
       primaryScope: item.primaryScope,
       scopeGranted,
@@ -186,7 +184,7 @@ export async function resolveBackendGoogleIntegrations(params: {
   });
 
   return {
-    authenticated: tokenValid,
+    authenticated: true,
     accountEmail: verifiedEmail,
     checkedAt,
     source: 'backend',

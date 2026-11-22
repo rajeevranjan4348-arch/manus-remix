@@ -4,6 +4,26 @@
   functions = "netlify/functions"
 
 [[redirects]]
+  from = "/api/tag-task"
+  to = "/.netlify/functions/tag-task"
+  status = 200
+
+[[redirects]]
+  from = "/api/gemini/tag-task"
+  to = "/.netlify/functions/tag-task"
+  status = 200
+
+[[redirects]]
+  from = "/api/summarize-session"
+  to = "/.netlify/functions/summarize-session"
+  status = 200
+
+[[redirects]]
+  from = "/api/gemini/summarize-session"
+  to = "/.netlify/functions/summarize-session"
+  status = 200
+
+[[redirects]]
   from = "/api/gemini/*"
   to = "/.netlify/functions/agent"
   status = 200

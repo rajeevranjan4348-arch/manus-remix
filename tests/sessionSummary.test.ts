@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+vi.mock('../src/lib/firebaseAuthorization', () => ({
+  getFirebaseAuthorizationHeader: vi.fn().mockResolvedValue(null),
+}));
+import { getFirebaseAuthorizationHeader } from '../src/lib/firebaseAuthorization';
 import {
   normalizeOneSentenceSummary,
   getStoredSessionSummaries,
@@ -29,6 +33,7 @@ describe('Session Summary Feature (HistoryPanel & Gemini API)', () => {
       dispatchEvent: vi.fn(),
     });
     vi.restoreAllMocks();
+    vi.mocked(getFirebaseAuthorizationHeader).mockResolvedValue(null);
   });
 
   it('normalizes generated summaries into a clean one-sentence descriptive summary', () => {
@@ -69,6 +74,7 @@ describe('Session Summary Feature (HistoryPanel & Gemini API)', () => {
   });
 
   it('calls POST /api/summarize-session and stores the returned summary', async () => {
+    vi.mocked(getFirebaseAuthorizationHeader).mockResolvedValue('Bearer test-id-token');
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -88,8 +94,23 @@ describe('Session Summary Feature (HistoryPanel & Gemini API)', () => {
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(mockFetch.mock.calls[0][0]).toBe('/api/summarize-session');
+    expect(mockFetch.mock.calls[0][1].headers.Authorization).toBe('Bearer test-id-token');
     expect(summary).toBe('The conversation covered setting up a Vite dev server and fixing TypeScript build errors.');
     expect(getStoredSessionSummaries()['task-42']).toBe(summary);
+  });
+
+  it('uses a local summary without a protected backend request when signed out', async () => {
+    const mockFetch = vi.fn();
+    vi.stubGlobal('fetch', mockFetch);
+
+    const summary = await generateSessionSummary({
+      id: 'task-local-42',
+      title: 'Summarize a TypeScript debugging session',
+    });
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(summary).toContain('TypeScript debugging session');
+    expect(getStoredSessionSummaries()['task-local-42']).toBe(summary);
   });
 
   it('formats server-side single sentence summaries and provides fallback when API key is missing', async () => {

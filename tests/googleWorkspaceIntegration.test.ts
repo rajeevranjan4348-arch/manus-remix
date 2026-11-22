@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -33,6 +33,10 @@ import {
   refreshUserConnectorToken,
 } from '../server/connectorsService';
 import { resolveBackendGoogleIntegrations } from '../server/workspaceIntegrationsHandler';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('Google Workspace Integration: Sheets, Gmail, and Drive', () => {
   describe('Gmail Sender Parsing & Compact Email Card', () => {
@@ -136,18 +140,61 @@ describe('Google Workspace Integration: Sheets, Gmail, and Drive', () => {
         true
       );
 
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        email: 'verified-google@example.com',
+        scope: [
+          'https://www.googleapis.com/auth/drive',
+          'https://www.googleapis.com/auth/spreadsheets',
+          'https://www.googleapis.com/auth/calendar',
+          'https://www.googleapis.com/auth/gmail.readonly',
+        ].join(' '),
+      }), { status: 200 })));
       const authResult = await resolveBackendGoogleIntegrations({
         authorizationHeader: 'Bearer mock-oauth-token',
-        userEmailHeader: 'rajeev@example.com',
+        userEmailHeader: 'unverified-header@example.com',
         disabledAppIds: ['calendar'],
       });
       expect(authResult.authenticated).toBe(true);
+      expect(authResult.accountEmail).toBe('verified-google@example.com');
       const driveApp = authResult.integrations.find((i) => i.id === 'drive');
       const calendarApp = authResult.integrations.find((i) => i.id === 'calendar');
       expect(driveApp?.isLinked).toBe(true);
       expect(driveApp?.status).toBe('connected');
       expect(calendarApp?.isLinked).toBe(false);
       expect(calendarApp?.status).toBe('disconnected');
+    });
+
+    it('fails closed when Google tokeninfo rejects a token, even if it resembles a JWT or has a caller email', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 401 })));
+      const result = await resolveBackendGoogleIntegrations({
+        authorizationHeader: 'Bearer header.payload.signature',
+        userEmailHeader: 'spoofed@example.com',
+        disabledAppIds: ['calendar'],
+      });
+
+      expect(result.authenticated).toBe(false);
+      expect(result.accountEmail).toBeNull();
+      expect(result.integrations.filter((item) => item.id !== 'calendar').every((item) => !item.isLinked && item.status === 'needs_reconnect')).toBe(true);
+      expect(result.integrations.every((item) => item.accountEmail === null && !item.scopeGranted)).toBe(true);
+      expect(result.integrations.find((item) => item.id === 'calendar')?.status).toBe('disconnected');
+    });
+
+    it('fails closed on tokeninfo network errors and does not treat missing scopes as granted', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+      const offlineResult = await resolveBackendGoogleIntegrations({
+        authorizationHeader: 'Bearer mock-oauth-token',
+        userEmailHeader: 'spoofed@example.com',
+      });
+      expect(offlineResult.authenticated).toBe(false);
+      expect(offlineResult.integrations.every((item) => !item.isLinked)).toBe(true);
+
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ email: 'claimed@example.com' }), { status: 200 })));
+      const missingScopeResult = await resolveBackendGoogleIntegrations({
+        authorizationHeader: 'Bearer mock-oauth-token',
+      });
+      expect(missingScopeResult.authenticated).toBe(false);
+      expect(missingScopeResult.accountEmail).toBeNull();
+      expect(missingScopeResult.integrations.every((item) => !item.scopeGranted && !item.isLinked)).toBe(true);
     });
 
     it('tracks connection status for all 4 core Google Workspace services', async () => {

@@ -15,7 +15,6 @@ import {
   getLiveTemporalContext,
 } from './server/realtimeDataService';
 import {
-  knowledgeCacheService,
   orchestrateRealtimeResearch,
   routeQueryIntent,
 } from './server/rtie';
@@ -252,11 +251,22 @@ function geminiApiPlugin(): Plugin {
         if (url === '/api/realtime' || url === '/api/realtime-data' || url === '/api/rtie/research' || url === '/.netlify/functions/realtime') {
           res.setHeader('Content-Type', 'application/json; charset=utf-8');
           res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-          const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'local';
-          const rateCheck = knowledgeCacheService.checkRateLimit(clientIp, 60);
-          if (!rateCheck.allowed) {
+          const decodedToken = await verifyBearerToken(req.headers.authorization as string | undefined);
+          if (!decodedToken?.uid) {
+            res.statusCode = 401;
+            res.end(JSON.stringify({ ok: false, error: 'Authentication required.', code: 'UNAUTHENTICATED' }));
+            return;
+          }
+          const rateLimit = await checkSharedRateLimit(`realtime:${decodedToken.uid}`, 30, 60);
+          if (rateLimit.unavailable) {
+            res.statusCode = 503;
+            res.end(JSON.stringify({ ok: false, error: 'Real-time data is temporarily unavailable because the shared rate limiter is not configured.', code: 'RATE_LIMIT_UNAVAILABLE' }));
+            return;
+          }
+          if (!rateLimit.allowed) {
             res.statusCode = 429;
-            res.end(JSON.stringify({ ok: false, error: 'Rate limit exceeded. Please wait before sending more research requests.' }));
+            res.setHeader('Retry-After', String(rateLimit.retryAfterSeconds));
+            res.end(JSON.stringify({ ok: false, error: 'Rate limit exceeded. Please wait before sending more research requests.', code: 'RATE_LIMITED' }));
             return;
           }
 
@@ -490,9 +500,36 @@ function geminiApiPlugin(): Plugin {
           req.method === 'POST'
         ) {
           res.setHeader('Content-Type', 'application/json');
+          const decodedToken = await verifyBearerToken(req.headers.authorization as string | undefined);
+          if (!decodedToken?.uid) {
+            res.statusCode = 401;
+            res.end(JSON.stringify({ error: 'Authentication required.', code: 'UNAUTHENTICATED' }));
+            return;
+          }
+          const rateLimit = await checkSharedRateLimit(`tag-task:${decodedToken.uid}`, 20, 60);
+          if (rateLimit.unavailable || !rateLimit.allowed) {
+            res.statusCode = rateLimit.unavailable ? 503 : 429;
+            if (!rateLimit.unavailable) res.setHeader('Retry-After', String(rateLimit.retryAfterSeconds));
+            res.end(JSON.stringify({
+              error: rateLimit.unavailable ? 'Task tagging is temporarily unavailable because the shared rate limiter is not configured.' : 'Too many task-tagging requests. Please wait and try again.',
+              code: rateLimit.unavailable ? 'RATE_LIMIT_UNAVAILABLE' : 'RATE_LIMITED',
+            }));
+            return;
+          }
           let bodyStr = '';
-          req.on('data', chunk => { bodyStr += chunk; });
+          let bodyBytes = 0;
+          let bodyTooLarge = false;
+          req.on('data', chunk => {
+            bodyBytes += Buffer.byteLength(chunk);
+            if (bodyBytes > 16 * 1024) bodyTooLarge = true;
+            else if (!bodyTooLarge) bodyStr += chunk;
+          });
           req.on('end', async () => {
+            if (bodyTooLarge) {
+              res.statusCode = 413;
+              res.end(JSON.stringify({ error: 'Request payload exceeds the maximum allowed size.', code: 'PAYLOAD_TOO_LARGE' }));
+              return;
+            }
             try {
               const body = bodyStr ? JSON.parse(bodyStr) : {};
 
@@ -555,9 +592,36 @@ function geminiApiPlugin(): Plugin {
         // Server-Side Session Conversation History Summary Endpoint (Gemini API)
         if ((url === '/api/summarize-session' || url === '/api/gemini/summarize-session') && req.method === 'POST') {
           res.setHeader('Content-Type', 'application/json');
+          const decodedToken = await verifyBearerToken(req.headers.authorization as string | undefined);
+          if (!decodedToken?.uid) {
+            res.statusCode = 401;
+            res.end(JSON.stringify({ error: 'Authentication required.', code: 'UNAUTHENTICATED' }));
+            return;
+          }
+          const rateLimit = await checkSharedRateLimit(`summarize-session:${decodedToken.uid}`, 20, 60);
+          if (rateLimit.unavailable || !rateLimit.allowed) {
+            res.statusCode = rateLimit.unavailable ? 503 : 429;
+            if (!rateLimit.unavailable) res.setHeader('Retry-After', String(rateLimit.retryAfterSeconds));
+            res.end(JSON.stringify({
+              error: rateLimit.unavailable ? 'Session summaries are temporarily unavailable because the shared rate limiter is not configured.' : 'Too many summary requests. Please wait and try again.',
+              code: rateLimit.unavailable ? 'RATE_LIMIT_UNAVAILABLE' : 'RATE_LIMITED',
+            }));
+            return;
+          }
           let bodyStr = '';
-          req.on('data', chunk => { bodyStr += chunk; });
+          let bodyBytes = 0;
+          let bodyTooLarge = false;
+          req.on('data', chunk => {
+            bodyBytes += Buffer.byteLength(chunk);
+            if (bodyBytes > 16 * 1024) bodyTooLarge = true;
+            else if (!bodyTooLarge) bodyStr += chunk;
+          });
           req.on('end', async () => {
+            if (bodyTooLarge) {
+              res.statusCode = 413;
+              res.end(JSON.stringify({ error: 'Request payload exceeds the maximum allowed size.', code: 'PAYLOAD_TOO_LARGE' }));
+              return;
+            }
             try {
               const body = bodyStr ? JSON.parse(bodyStr) : {};
               const summary = await summarizeSessionHistory({

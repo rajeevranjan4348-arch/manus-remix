@@ -1,3 +1,5 @@
+import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
+
 const SESSION_SUMMARIES_STORAGE_KEY = 'manus_session_summaries';
 
 export interface SessionSummaryRequest {
@@ -108,27 +110,31 @@ export async function generateSessionSummary(request: SessionSummaryRequest): Pr
   const fallbackTopic = request.title || request.prompt || request.content || 'the conversation';
 
   try {
-    const response = await fetch('/api/summarize-session', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify({
-        sessionId: request.id,
-        title: request.title,
-        prompt: request.prompt,
-        content: request.content,
-        messages: request.messages,
-      }),
-    });
+    const authorization = await getFirebaseAuthorizationHeader();
+    if (authorization) {
+      const response = await fetch('/api/summarize-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: authorization,
+        },
+        body: JSON.stringify({
+          sessionId: request.id,
+          title: request.title,
+          prompt: request.prompt,
+          content: request.content,
+          messages: request.messages,
+        }),
+      });
 
-    if (response.ok) {
-      const data = await response.json();
-      if (typeof data?.summary === 'string' && data.summary.trim()) {
-        const normalized = normalizeOneSentenceSummary(data.summary, fallbackTopic);
-        saveSessionSummary(request.id, normalized);
-        return normalized;
+      if (response.ok) {
+        const data = await response.json();
+        if (typeof data?.summary === 'string' && data.summary.trim()) {
+          const normalized = normalizeOneSentenceSummary(data.summary, fallbackTopic);
+          saveSessionSummary(request.id, normalized);
+          return normalized;
+        }
       }
     }
   } catch (err) {

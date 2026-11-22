@@ -3,6 +3,8 @@ import agent from '../netlify/functions/agent';
 import checkpoints from '../netlify/functions/checkpoints';
 import permissions from '../netlify/functions/permissions';
 import realtime from '../netlify/functions/realtime';
+import summarizeSession from '../netlify/functions/summarize-session';
+import tagTask from '../netlify/functions/tag-task';
 import webSearch from '../netlify/functions/web-search';
 import { encryptToken } from '../server/connectorsService';
 import { permissionsGateway } from '../server/permissionsGateway';
@@ -44,6 +46,17 @@ describe('API authentication boundaries', () => {
     ]);
     expect(searchResponse.status).toBe(401);
     expect(agentResponse.status).toBe(401);
+  });
+
+  it('rejects unauthenticated task-tagging and session-summary requests', async () => {
+    const [tagResponse, summaryResponse] = await Promise.all([
+      tagTask(post('https://app.test/api/tag-task')),
+      summarizeSession(post('https://app.test/api/summarize-session')),
+    ]);
+    expect(tagResponse.status).toBe(401);
+    expect((await tagResponse.json()).code).toBe('UNAUTHENTICATED');
+    expect(summaryResponse.status).toBe(401);
+    expect((await summaryResponse.json()).code).toBe('UNAUTHENTICATED');
   });
 
   it('rejects unauthenticated realtime lookups before calling upstream services', async () => {

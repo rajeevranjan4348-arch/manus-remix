@@ -8,6 +8,7 @@
 
 import { updateConversation } from './chatDatabase';
 import { blink } from './blink';
+import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
 
 export type TaskTag = 'Research' | 'Coding' | 'Analysis' | 'Design' | 'Writing' | 'Automation' | 'General';
 
@@ -499,28 +500,32 @@ export async function analyzeTaskTagsWithGemini(
 
     if (typeof fetch === 'function') {
       try {
-        const response = await fetch('/api/tag-task', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          },
-          body: JSON.stringify({
-            sessionId: request.id,
-            title: request.title,
-            prompt: promptText,
-            content: contentText.slice(0, 4000),
-            messages: Array.isArray(request.messages) ? request.messages.slice(-12) : undefined,
-          }),
-        });
+        const authorization = await getFirebaseAuthorizationHeader();
+        if (authorization) {
+          const response = await fetch('/api/tag-task', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+              Authorization: authorization,
+            },
+            body: JSON.stringify({
+              sessionId: request.id,
+              title: request.title,
+              prompt: promptText,
+              content: contentText.slice(0, 4000),
+              messages: Array.isArray(request.messages) ? request.messages.slice(-12) : undefined,
+            }),
+          });
 
-        if (response.ok) {
-          const data = await response.json();
-          if (Array.isArray(data?.tags) && data.tags.length > 0) {
-            resolvedTags = normalizeClientTaskTags(data.tags, promptText, {
-              content: contentText,
-              ...(typeof request.resultContext === 'object' ? request.resultContext : {}),
-            });
+          if (response.ok) {
+            const data = await response.json();
+            if (Array.isArray(data?.tags) && data.tags.length > 0) {
+              resolvedTags = normalizeClientTaskTags(data.tags, promptText, {
+                content: contentText,
+                ...(typeof request.resultContext === 'object' ? request.resultContext : {}),
+              });
+            }
           }
         }
       } catch {
@@ -590,36 +595,40 @@ export async function autoTagSessionBatch(
 
   if (typeof fetch === 'function') {
     try {
-      const response = await fetch('/api/tag-task', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify({
-          sessions: batchSlice.map((s) => ({
-            id: s.id,
-            title: s.title,
-            prompt: s.prompt,
-            content: (s.content || '').slice(0, 3000),
-            messages: s.messages,
-          })),
-        }),
-      });
+      const authorization = await getFirebaseAuthorizationHeader();
+      if (authorization) {
+        const response = await fetch('/api/tag-task', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            Authorization: authorization,
+          },
+          body: JSON.stringify({
+            sessions: batchSlice.map((s) => ({
+              id: s.id,
+              title: s.title,
+              prompt: s.prompt,
+              content: (s.content || '').slice(0, 3000),
+              messages: s.messages,
+            })),
+          }),
+        });
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data?.results && typeof data.results === 'object') {
-          await Promise.allSettled(
-            batchSlice.map(async (session) => {
-              const raw = data.results[session.id];
-              const normalized = normalizeClientTaskTags(raw, session.prompt || session.title || '', {
-                content: session.content,
-              });
-              await persistTagsForSession(session.id, normalized);
-            })
-          );
-          return getStoredSessionTags();
+        if (response.ok) {
+          const data = await response.json();
+          if (data?.results && typeof data.results === 'object') {
+            await Promise.allSettled(
+              batchSlice.map(async (session) => {
+                const raw = data.results[session.id];
+                const normalized = normalizeClientTaskTags(raw, session.prompt || session.title || '', {
+                  content: session.content,
+                });
+                await persistTagsForSession(session.id, normalized);
+              })
+            );
+            return getStoredSessionTags();
+          }
         }
       }
     } catch {
