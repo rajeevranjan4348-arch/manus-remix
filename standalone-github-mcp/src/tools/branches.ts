@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { RuntimeConfig } from '../config.js';
 import { assertAllowedRepo, githubRequest, GitHubToolError } from '../github.js';
-import { approvalPhraseSchema, requireApproval, withToolErrors } from './common.js';
+import { registerWriteTool, requireApproval, withToolErrors } from './common.js';
 
 const readAnnotations = { readOnlyHint: true, openWorldHint: true };
 const writeAnnotations = { readOnlyHint: false, destructiveHint: false, openWorldHint: true };
@@ -29,16 +29,16 @@ export function registerBranchTools(server: any, octokit: any, config: RuntimeCo
     return data.map((branch: any) => ({ name: branch.name, protected: branch.protected, commitSha: branch.commit?.sha, commitUrl: branch.commit?.url }));
   }));
 
-  server.registerTool('github_create_branch', {
+  registerWriteTool(server, config, 'github_create_branch', {
     title: 'Create GitHub branch (approval required)',
     description: 'Create a branch from a branch, tag, or commit SHA in an allowed repository. Show the new branch name and source ref before explicit approval.',
-    inputSchema: { ...repoShape, branchName: z.string().min(1).max(240), sourceRef: z.string().min(1).max(255), approvalPhrase: approvalPhraseSchema },
+    inputSchema: { ...repoShape, branchName: z.string().min(1).max(240), sourceRef: z.string().min(1).max(255) },
     annotations: writeAnnotations,
-  }, withToolErrors(async ({ owner, repo, branchName, sourceRef, approvalPhrase }) => {
+  }, withToolErrors(async ({ owner, repo, branchName, sourceRef }) => {
     assertAllowedRepo(owner, repo, config);
     const validBranch = validateBranchName(branchName);
     const args = { owner, repo, branchName: validBranch, sourceRef };
-    requireApproval('github_create_branch', `${owner}/${repo}:${validBranch} <- ${sourceRef}`, args, approvalPhrase);
+    await requireApproval(server, 'github_create_branch', `${owner}/${repo}:${validBranch} <- ${sourceRef}`, args);
     const { data: source } = await githubRequest(() => octokit.rest.git.getRef({ owner, repo, ref: sourceRef.startsWith('refs/') ? sourceRef.replace(/^refs\//, '') : `heads/${sourceRef}` }), { retries: config.githubReadRetries });
     const { data } = await githubRequest(() => octokit.rest.git.createRef({ owner, repo, ref: `refs/heads/${validBranch}`, sha: source.object.sha }), { retryable: false });
     return { branch: data.ref.replace(/^refs\/heads\//, ''), commitSha: data.object.sha, url: data.url };

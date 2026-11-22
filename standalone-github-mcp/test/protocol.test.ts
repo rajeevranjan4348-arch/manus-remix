@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { approvalPhraseFor } from '../src/tools/common.js';
 import { testConfig, createTestClient, parseToolText } from './fixtures.js';
 
 const repositoryData = {
@@ -20,7 +19,7 @@ const repositoryData = {
 };
 
 test('MCP initialization and tool discovery expose all documented GitHub capabilities', async () => {
-  const harness = await createTestClient(testConfig(), { rest: {} });
+  const harness = await createTestClient(testConfig({ MCP_ENABLE_WRITE_TOOLS: 'true' }), { rest: {} });
   try {
     const { tools } = await harness.client.listTools();
     const names = tools.map((tool) => tool.name);
@@ -35,6 +34,17 @@ test('MCP initialization and tool discovery expose all documented GitHub capabil
     assert.equal(names.length, required.length);
     for (const name of required) assert.ok(names.includes(name), `Missing tool ${name}`);
     assert.ok(tools.every((tool) => tool.inputSchema && tool.description));
+  } finally {
+    await harness.close();
+  }
+});
+
+test('MCP hides every state-changing tool by default', async () => {
+  const harness = await createTestClient(testConfig(), { rest: {} });
+  try {
+    const { tools } = await harness.client.listTools();
+    assert.ok(tools.length > 0);
+    assert.ok(tools.every((tool) => tool.annotations?.readOnlyHint === true), 'default tool catalog must be read-only');
   } finally {
     await harness.close();
   }
@@ -88,15 +98,31 @@ test('MCP rejects path traversal before any GitHub content request', async () =>
   }
 });
 
-test('MCP write tool refuses missing approval and performs no GitHub write', async () => {
+test('MCP write tool fails closed when the client cannot provide human approval', async () => {
   let writes = 0;
-  const harness = await createTestClient(testConfig({ GITHUB_ALLOWED_REPOS: 'owner/repo' }), {
+  const harness = await createTestClient(testConfig({ MCP_ENABLE_WRITE_TOOLS: 'true', GITHUB_ALLOWED_REPOS: 'owner/repo' }), {
     rest: { issues: { create: async () => { writes += 1; return { data: {} }; } } },
   });
   try {
     const result = await harness.client.callTool({ name: 'github_create_issue', arguments: { owner: 'owner', repo: 'repo', title: 'Bug report' } });
     assert.equal(result.isError, true);
-    assert.equal(parseToolText(result).code, 'USER_APPROVAL_REQUIRED');
+    assert.equal(parseToolText(result).code, 'APPROVAL_UNAVAILABLE');
+    assert.equal(writes, 0);
+  } finally {
+    await harness.close();
+  }
+});
+
+test('MCP write tool performs no GitHub write after a declined approval form', async () => {
+  let writes = 0;
+  const harness = await createTestClient(testConfig({ MCP_ENABLE_WRITE_TOOLS: 'true', GITHUB_ALLOWED_REPOS: 'owner/repo' }), {
+    rest: { issues: { create: async () => { writes += 1; return { data: {} }; } } },
+  }, { elicitationAction: 'decline' });
+  try {
+    const result = await harness.client.callTool({ name: 'github_create_issue', arguments: { owner: 'owner', repo: 'repo', title: 'Bug report' } });
+    assert.equal(result.isError, true);
+    assert.equal(parseToolText(result).code, 'APPROVAL_DENIED');
+    assert.match(harness.elicitationRequests[0]?.message || '', /Bug report/);
     assert.equal(writes, 0);
   } finally {
     await harness.close();
@@ -149,13 +175,13 @@ test('MCP file creation uses a Git ref compare-and-swap instead of the overwrite
       },
     },
   };
-  const harness = await createTestClient(testConfig({ GITHUB_ALLOWED_REPOS: 'owner/repo' }), api);
+  const harness = await createTestClient(testConfig({ MCP_ENABLE_WRITE_TOOLS: 'true', GITHUB_ALLOWED_REPOS: 'owner/repo' }), api, { elicitationAction: 'accept' });
   const input = { owner: 'owner', repo: 'repo', path: 'new.txt', content: 'hello', message: 'Add new file', branch: 'main' };
-  const phrase = approvalPhraseFor('github_create_file', 'owner/repo:new.txt@main', input);
   try {
-    const result = await harness.client.callTool({ name: 'github_create_file', arguments: { ...input, approvalPhrase: phrase } });
+    const result = await harness.client.callTool({ name: 'github_create_file', arguments: input });
     assert.notEqual(result.isError, true);
     assert.equal(parseToolText(result).operation, 'created');
+    assert.match(harness.elicitationRequests[0]?.message || '', /"content": "hello"/);
     const update = calls.find((call) => call.name === 'updateRef');
     assert.ok(update);
     assert.equal(update.arguments_.force, false);
@@ -179,11 +205,10 @@ test('MCP file creation refuses an existing path before creating Git objects', a
       },
     },
   };
-  const harness = await createTestClient(testConfig({ GITHUB_ALLOWED_REPOS: 'owner/repo' }), api);
+  const harness = await createTestClient(testConfig({ MCP_ENABLE_WRITE_TOOLS: 'true', GITHUB_ALLOWED_REPOS: 'owner/repo' }), api, { elicitationAction: 'accept' });
   const input = { owner: 'owner', repo: 'repo', path: 'new.txt', content: 'hello', message: 'Add new file', branch: 'main' };
-  const phrase = approvalPhraseFor('github_create_file', 'owner/repo:new.txt@main', input);
   try {
-    const result = await harness.client.callTool({ name: 'github_create_file', arguments: { ...input, approvalPhrase: phrase } });
+    const result = await harness.client.callTool({ name: 'github_create_file', arguments: input });
     assert.equal(result.isError, true);
     assert.equal(parseToolText(result).code, 'FILE_ALREADY_EXISTS');
     assert.equal(objectWrites, 0);

@@ -2,7 +2,7 @@ import { createTwoFilesPatch } from 'diff';
 import { z } from 'zod';
 import type { RuntimeConfig } from '../config.js';
 import { assertAllowedRepo, githubRequest, GitHubToolError, readTextFileContent, validateRepoPath } from '../github.js';
-import { approvalPhraseSchema, requireApproval, withToolErrors } from './common.js';
+import { registerWriteTool, requireApproval, withToolErrors } from './common.js';
 import { assertPositiveInteger } from './repo-utils.js';
 
 const readAnnotations = { readOnlyHint: true, openWorldHint: true };
@@ -145,33 +145,33 @@ export function registerFileTools(server: any, octokit: any, config: RuntimeConf
     return { ...(config.allowedRepos.size === 0 ? { totalCount: data.total_count, incompleteResults: data.incomplete_results } : {}), items: items.map((item: any) => ({ name: item.name, path: item.path, repository: item.repository.full_name, htmlUrl: item.html_url, sha: item.sha })) };
   }));
 
-  server.registerTool('github_create_file', {
+  registerWriteTool(server, config, 'github_create_file', {
     title: 'Create GitHub file (approval required)',
     description: 'Create a new UTF-8 file on a branch. It refuses to overwrite an existing file. Show the repository, path, branch, commit message, and complete file contents before explicit approval.',
-    inputSchema: { ...repoShape, path: z.string().min(1).max(500), content: z.string().max(100000), message: z.string().min(1).max(256), branch: z.string().min(1).max(255), approvalPhrase: approvalPhraseSchema },
+    inputSchema: { ...repoShape, path: z.string().min(1).max(500), content: z.string().max(100000), message: z.string().min(1).max(256), branch: z.string().min(1).max(255) },
     annotations: writeAnnotations,
-  }, withToolErrors(async ({ owner, repo, path, content, message, branch, approvalPhrase }) => {
+  }, withToolErrors(async ({ owner, repo, path, content, message, branch }) => {
     assertAllowedRepo(owner, repo, config);
     validateRepoPath(path);
     const args = { owner, repo, path, content, message, branch };
     const target = `${owner}/${repo}:${path}@${branch}`;
-    requireApproval('github_create_file', target, args, approvalPhrase);
+    await requireApproval(server, 'github_create_file', target, args);
     await assertCanPush(octokit, owner, repo, config.githubReadRetries);
     const created = await createFileWithRefGuard(octokit, owner, repo, path, content, message, branch, config.githubReadRetries);
     return { operation: 'created', path, ...created };
   }));
 
-  server.registerTool('github_update_file', {
+  registerWriteTool(server, config, 'github_update_file', {
     title: 'Update GitHub file (approval required)',
     description: 'Update an existing UTF-8 file on a branch using its current blob SHA. The server rejects stale SHA values. Show the complete proposed content and commit message before explicit approval.',
-    inputSchema: { ...repoShape, path: z.string().min(1).max(500), content: z.string().max(100000), message: z.string().min(1).max(256), branch: z.string().min(1).max(255), existingSha: z.string().min(1).max(100), approvalPhrase: approvalPhraseSchema },
+    inputSchema: { ...repoShape, path: z.string().min(1).max(500), content: z.string().max(100000), message: z.string().min(1).max(256), branch: z.string().min(1).max(255), existingSha: z.string().min(1).max(100) },
     annotations: writeAnnotations,
-  }, withToolErrors(async ({ owner, repo, path, content, message, branch, existingSha, approvalPhrase }) => {
+  }, withToolErrors(async ({ owner, repo, path, content, message, branch, existingSha }) => {
     assertAllowedRepo(owner, repo, config);
     validateRepoPath(path);
     const args = { owner, repo, path, content, message, branch, existingSha };
     const target = `${owner}/${repo}:${path}@${branch}`;
-    requireApproval('github_update_file', target, args, approvalPhrase);
+    await requireApproval(server, 'github_update_file', target, args);
     await assertCanPush(octokit, owner, repo, config.githubReadRetries);
     const current = await getContent(octokit, owner, repo, path, branch, config.githubReadRetries);
     if (Array.isArray(current.data) || current.data.type !== 'file' || current.data.sha !== existingSha) {
@@ -181,17 +181,17 @@ export function registerFileTools(server: any, octokit: any, config: RuntimeConf
     return { operation: 'updated', path, branch, commitUrl: data.commit.html_url, contentUrl: data.content?.html_url, sha: data.content?.sha };
   }));
 
-  server.registerTool('github_delete_file', {
+  registerWriteTool(server, config, 'github_delete_file', {
     title: 'Delete GitHub file (approval required)',
     description: 'Delete a file from a branch. This action is destructive. Show the repository, path, branch, current contents/SHA, and commit message before explicit approval.',
-    inputSchema: { ...repoShape, path: z.string().min(1).max(500), message: z.string().min(1).max(256), branch: z.string().min(1).max(255), existingSha: z.string().min(1).max(100), approvalPhrase: approvalPhraseSchema },
+    inputSchema: { ...repoShape, path: z.string().min(1).max(500), message: z.string().min(1).max(256), branch: z.string().min(1).max(255), existingSha: z.string().min(1).max(100) },
     annotations: destructiveAnnotations,
-  }, withToolErrors(async ({ owner, repo, path, message, branch, existingSha, approvalPhrase }) => {
+  }, withToolErrors(async ({ owner, repo, path, message, branch, existingSha }) => {
     assertAllowedRepo(owner, repo, config);
     validateRepoPath(path);
     const args = { owner, repo, path, message, branch, existingSha };
     const target = `${owner}/${repo}:${path}@${branch}`;
-    requireApproval('github_delete_file', target, args, approvalPhrase);
+    await requireApproval(server, 'github_delete_file', target, args);
     await assertCanPush(octokit, owner, repo, config.githubReadRetries);
     const current = await getContent(octokit, owner, repo, path, branch, config.githubReadRetries);
     if (Array.isArray(current.data) || current.data.type !== 'file' || current.data.sha !== existingSha) {

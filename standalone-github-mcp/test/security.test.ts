@@ -5,7 +5,7 @@ import { isFirebaseUidAllowed } from '../src/auth.js';
 import { readConfig } from '../src/config.js';
 import { assertAllowedFullName, assertAllowedRepo, githubRequest, GitHubToolError, validateRepoPath } from '../src/github.js';
 import { resetRateLimitsForTests, consumeRateLimit } from '../src/rateLimit.js';
-import { approvalPhraseFor, requireApproval, sanitizeError } from '../src/tools/common.js';
+import { sanitizeError } from '../src/tools/common.js';
 import { extractBoundedWorkflowLogs } from '../src/tools/actions.js';
 import { testConfig } from './fixtures.js';
 
@@ -19,6 +19,28 @@ test('HTTP configuration fails closed without Firebase UID, repo, host, and prod
   assert.throws(() => readConfig({ ...tokenEnv, FIREBASE_PROJECT_ID: 'cue-app-project-123', MCP_ALLOWED_FIREBASE_UIDS: 'uid-1', GITHUB_ALLOWED_REPOS: 'team/repo' }), /MCP_ALLOWED_HOSTS/);
   assert.throws(() => readConfig({ ...tokenEnv, NODE_ENV: 'production', FIREBASE_PROJECT_ID: 'cue-app-project-123', MCP_ALLOWED_FIREBASE_UIDS: 'uid-1', GITHUB_ALLOWED_REPOS: 'team/repo', MCP_ALLOWED_HOSTS: 'mcp.example.com' }), /UPSTASH_REDIS/);
   assert.throws(() => readConfig({ ...tokenEnv, MCP_TRANSPORT: 'http', FIREBASE_PROJECT_ID: 'cue-app-project-123', MCP_ALLOWED_FIREBASE_UIDS: 'uid-1', GITHUB_ALLOWED_REPOS: 'team/repo', MCP_ALLOWED_HOSTS: '*.example.com' }), /wildcards/);
+});
+
+test('write tools are disabled by default and their environment switch is strict', () => {
+  assert.equal(testConfig().enableWriteTools, false);
+  assert.equal(testConfig({ MCP_ENABLE_WRITE_TOOLS: 'true' }).enableWriteTools, true);
+  assert.equal(testConfig({ MCP_ENABLE_WRITE_TOOLS: 'false' }).enableWriteTools, false);
+  assert.throws(() => testConfig({ MCP_ENABLE_WRITE_TOOLS: 'yes' }), /MCP_ENABLE_WRITE_TOOLS/);
+});
+
+test('Render assigned hostname is accepted as an exact host when no manual list is provided', () => {
+  const config = readConfig({
+    NODE_ENV: 'production',
+    MCP_TRANSPORT: 'http',
+    GITHUB_TOKEN: 'test-token',
+    FIREBASE_PROJECT_ID: 'eternal-envoy-cnzsc',
+    MCP_ALLOWED_FIREBASE_UIDS: 'uid-one',
+    GITHUB_ALLOWED_REPOS: 'team/repo',
+    RENDER_EXTERNAL_HOSTNAME: 'cue-github-mcp.onrender.com',
+    UPSTASH_REDIS_REST_URL: 'https://redis.example',
+    UPSTASH_REDIS_REST_TOKEN: 'test-token',
+  });
+  assert.deepEqual([...config.allowedHosts], ['cue-github-mcp.onrender.com']);
 });
 
 test('Firebase UID and repository allowlists are exact and case-normalized only for repositories', () => {
@@ -37,14 +59,6 @@ test('repository paths reject traversal, absolute paths, backslashes, and contro
     assert.throws(() => validateRepoPath(path), (error: any) => error instanceof GitHubToolError && error.code === 'INVALID_PATH');
   }
   assert.equal(validateRepoPath('src/index.ts'), 'src/index.ts');
-});
-
-test('approval phrase binds the action arguments independent of object key order', () => {
-  const phrase = approvalPhraseFor('github_create_issue', 'team/project:Bug', { owner: 'team', repo: 'project', title: 'Bug' });
-  assert.equal(phrase, approvalPhraseFor('github_create_issue', 'team/project:Bug', { title: 'Bug', repo: 'project', owner: 'team' }));
-  assert.doesNotThrow(() => requireApproval('github_create_issue', 'team/project:Bug', { owner: 'team', repo: 'project', title: 'Bug' }, phrase));
-  assert.throws(() => requireApproval('github_create_issue', 'team/project:Bug', { owner: 'team', repo: 'project', title: 'Changed' }, phrase), (error: any) => error instanceof GitHubToolError && error.code === 'USER_APPROVAL_REQUIRED');
-  assert.throws(() => requireApproval('github_create_issue', 'team/project:Bug', { owner: 'team', repo: 'project', title: 'Bug' }), (error: any) => error instanceof GitHubToolError && error.code === 'USER_APPROVAL_REQUIRED');
 });
 
 test('GitHub API retries transient rate limits with bounded backoff and sanitizes failures', async () => {

@@ -1,5 +1,6 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import type { RuntimeConfig } from '../config.js';
 import { GitHubToolError } from '../github.js';
 
 export const repoShape = {
@@ -37,35 +38,46 @@ export function withToolErrors(handler: (args: any, extra: any) => Promise<unkno
   };
 }
 
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
-  if (!value || typeof value !== 'object') return JSON.stringify(value);
-  const entries = Object.entries(value as Record<string, unknown>)
-    .filter(([key]) => key !== 'approvalPhrase')
-    .sort(([a], [b]) => a.localeCompare(b));
-  return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`).join(',')}}`;
+export function registerWriteTool(server: any, config: RuntimeConfig, name: string, definition: any, handler: any): void {
+  if (!config.enableWriteTools) return;
+  server.registerTool(name, definition, handler);
 }
 
-export function approvalPhraseFor(toolName: string, target: string, args: Record<string, unknown>): string {
-  const digest = createHash('sha256').update(stableJson(args)).digest('hex').slice(0, 16);
-  return `APPROVE ${toolName} ${target} ${digest}`;
-}
+const MAX_APPROVAL_DETAILS_CHARS = 120_000;
 
-export function requireApproval(
+export async function requireApproval(
+  server: any,
   toolName: string,
   target: string,
   args: Record<string, unknown>,
-  provided?: string,
-): void {
-  const expected = approvalPhraseFor(toolName, target, args);
-  if (provided !== expected) {
-    throw new GitHubToolError(
-      `Explicit user approval is required before this write. Show the exact operation and target (including file content or full change) to the user, then retry with approvalPhrase exactly equal to: "${expected}". The phrase binds the approval to this exact argument set. The MCP host must never invent or silently add it.`,
-      'USER_APPROVAL_REQUIRED',
-    );
+): Promise<void> {
+  const details = JSON.stringify({ tool: toolName, target, arguments: args }, null, 2);
+  if (details.length > MAX_APPROVAL_DETAILS_CHARS) {
+    throw new GitHubToolError('The exact operation is too large to review in an MCP approval form. No changes were made.', 'APPROVAL_DETAILS_TOO_LARGE');
+  }
+
+  let result: { action: string; content?: Record<string, unknown> };
+  try {
+    result = await server.server.elicitInput({
+      mode: 'form',
+      message: `Review the exact GitHub operation below. The server proceeds only if this client returns an explicit approval.\n\n${details}`,
+      requestedSchema: {
+        type: 'object',
+        properties: {
+          approved: {
+            type: 'boolean',
+            title: 'Approve this exact operation',
+            description: 'Select true only after reviewing the complete target and proposed arguments above.',
+          },
+        },
+        required: ['approved'],
+      },
+    }, { timeout: 120_000 });
+  } catch {
+    throw new GitHubToolError('This MCP client did not complete a supported form-based approval request. No changes were made.', 'APPROVAL_UNAVAILABLE');
+  }
+
+  if (result.action !== 'accept' || result.content?.approved !== true) {
+    throw new GitHubToolError('The operation was not explicitly approved. No changes were made.', 'APPROVAL_DENIED');
   }
 }
-
-export const approvalPhraseSchema = z.string().min(1).max(200).optional().describe(
-  'Required for state-changing operations. Only provide after the MCP host has shown the exact action and complete proposed change to the user and the user explicitly approved it. Do not infer or fabricate approval.',
-);

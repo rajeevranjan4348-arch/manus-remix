@@ -1,6 +1,6 @@
 # Cue GitHub MCP server
 
-A TypeScript MCP server for GitHub built with the official Model Context Protocol SDK and Octokit. It supports local stdio and authenticated Streamable HTTP, with server-side GitHub PAT or GitHub App credentials, an exact repository allowlist for hosted use, Firebase user authentication, bounded request/pagination sizes, rate limits, approval-gated writes, health checks, and structured request logs.
+A TypeScript MCP server for GitHub built with the official Model Context Protocol SDK and Octokit. It supports local stdio and authenticated Streamable HTTP, with server-side GitHub PAT or GitHub App credentials, an exact repository allowlist for hosted use, Firebase user authentication, bounded request/pagination sizes, rate limits, optional client-mediated write approvals, health checks, and structured request logs. State-changing tools are disabled by default.
 
 The server uses GitHub's REST API directly. It does not execute repository code, workflows, or shell commands. Workflow dispatch is an explicit approved tool call; merely reading workflow logs never executes a workflow.
 
@@ -15,7 +15,7 @@ npm test
 npm run build
 ```
 
-Set `MCP_TRANSPORT=stdio`, then configure either a fine-grained PAT (`GITHUB_TOKEN`) or a GitHub App installation (`GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_INSTALLATION_ID`). Use a dedicated test account/repository when exercising write tools. Do not put GitHub credentials in a Cue client config; the local MCP process reads them from its environment.
+Set `MCP_TRANSPORT=stdio`, then configure either a fine-grained PAT (`GITHUB_TOKEN`) or a GitHub App installation (`GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_INSTALLATION_ID`). Writes are off unless `MCP_ENABLE_WRITE_TOOLS=true`; only turn them on with an MCP client that presents and handles human form elicitation. Use a dedicated test account/repository when exercising writes. Do not put GitHub credentials in a Cue client config; the local MCP process reads them from its environment.
 
 Example MCP client configuration (replace paths and pass the PAT through the client's secret manager rather than inline JSON):
 
@@ -39,10 +39,10 @@ Example MCP client configuration (replace paths and pass the PAT through the cli
 Use a persistent Node host (Docker, Railway, Render, Fly.io, or equivalent) with a stable single instance / sticky routing for MCP sessions. Ordinary Netlify Functions are not used for this server: Streamable HTTP sessions are stateful, and a standard short-lived function is not a suitable process/session store. The repository's static Netlify app remains unchanged.
 
 1. Build and run the supplied Docker image or `npm run build && npm start` with `MCP_TRANSPORT=http`.
-2. Configure `FIREBASE_PROJECT_ID`, workload identity or `FIREBASE_SERVICE_ACCOUNT_JSON`, `MCP_ALLOWED_FIREBASE_UIDS`, exact `MCP_ALLOWED_HOSTS`, and exact GitHub repository names in `GITHUB_ALLOWED_REPOS`.
+2. Configure `FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT_JSON`, `MCP_ALLOWED_FIREBASE_UIDS`, exact `MCP_ALLOWED_HOSTS`, and exact GitHub repository names in `GITHUB_ALLOWED_REPOS`. The service-account credential is needed because the server checks Firebase ID-token revocation.
 3. Configure either a PAT or GitHub App secret on the hosting platform. For PATs, select only the allowed repositories and grant only the minimum permissions needed. For GitHub Apps, install only into the required repositories and grant only required permissions.
 4. Configure Upstash Redis REST credentials for distributed per-user rate limiting in production. Startup fails closed if production HTTP mode lacks them.
-5. Publish `/mcp` for MCP Streamable HTTP and `/health` for liveness. Configure the Cue MCP client with the HTTPS `/mcp` endpoint and a Firebase ID-token bearer credential. The server allows only Firebase UIDs configured in `MCP_ALLOWED_FIREBASE_UIDS`.
+5. Publish `/mcp` for MCP Streamable HTTP and `/health` for liveness. Configure a supported MCP client with the HTTPS `/mcp` endpoint and a Firebase ID-token bearer credential. The server allows only Firebase UIDs configured in `MCP_ALLOWED_FIREBASE_UIDS`.
 6. Configure `MCP_ALLOWED_ORIGINS` only for trusted browser-based MCP clients. Wildcard origins are rejected. Native clients without an `Origin` header are accepted; if an Origin is present, it must exactly match the list.
 
 ### GitHub identity and tenant boundary
@@ -53,7 +53,13 @@ In hosted mode, all approved requests use the configured GitHub PAT or GitHub Ap
 
 ## Approval model
 
-All state-changing tools are marked non-read-only and require an operation-specific `approvalPhrase`. The phrase is bound to the exact tool arguments, including the repository, branch/path, content/body, and action inputs. The MCP host must show the user the exact target and proposed effect and only send the phrase after explicit approval. This argument is a protocol safeguard, not proof that a human clicked; because the expected phrase is deterministic, an MCP client can derive it from the returned error and retry. Therefore this server does **not** enforce human approval by itself. Cue must add a trusted confirmation gate before this endpoint is exposed to an agent; the existing MCP settings UI is not a verified approval bridge for this server. Do not enable write tools in production until that gate is implemented and tested. Destructive and execution-triggering operations are further flagged with MCP annotations. GitHub permissions remain the final enforcement boundary.
+State-changing tools are omitted from the MCP catalog unless `MCP_ENABLE_WRITE_TOOLS=true`. When enabled, each write handler asks the connected MCP client to show a form elicitation containing the exact tool, target, and complete arguments; the server proceeds only when the client returns `action: accept` and `approved: true`. Missing elicitation support, timeout, decline, invalid responses, or oversized approval details all fail closed. The old deterministic `approvalPhrase` has been removed because a client could derive it from an error response.
+
+Form elicitation is a protocol request, not proof that a particular client displayed a trustworthy prompt. Cue's active agent path and MCP settings screen have not been verified to connect to this server or display an approval UI. Keep writes disabled in hosted deployments until the intended Cue client is wired to this endpoint and its approval experience is tested end to end. Destructive and execution-triggering operations are marked with MCP annotations, and GitHub permissions remain the final enforcement boundary.
+
+## Render Blueprint
+
+The repository-root `render.yaml` defines one Docker web service in Singapore, pinned to the feature branch with automatic deploys disabled. It uses the `0.5c-512mb` plan and expects deployment secrets to be entered in Render. The Blueprint is only a plan until explicitly applied; do not provision it without reviewing the plan and monthly cost. Writes remain disabled in the Blueprint configuration.
 
 ## GitHub permissions
 
@@ -78,7 +84,7 @@ Tools are grouped with stable `github_` names: repository search/list/get/create
 
 ## Limitations to verify before production traffic
 
-- The local `npm test` suite uses mocks; live GitHub, Firebase, Redis, hosting health, OAuth/App installation scopes, and Cue's approval gate must be independently configured and staged. The app currently has a separate GitHub connector and settings-only MCP server list; this standalone endpoint is not yet connected to Cue's agent tool registry.
+- The local `npm test` suite uses mocks; live GitHub, Firebase, Redis, hosting health, OAuth/App installation scopes, and Cue's approval gate must be independently configured and staged. The app currently has a separate GitHub connector with mock fallbacks and a settings-only MCP server list; this standalone endpoint is not connected to Cue's active agent tool registry.
 - Session state is process-local to the MCP server. Deploy one instance with sticky routing for a session, or implement a shared MCP session store before horizontal scaling. Restarts invalidate existing sessions; clients should reinitialize.
 - GitHub code search is subject to GitHub's indexing/access rules, and workflow-log access depends on Actions permissions. Raw log output is size-limited and common credential patterns are redacted, but this cannot guarantee removal of arbitrary, encoded, or project-specific secrets; always treat logs as sensitive.
 - Actions log downloads use a temporary GitHub redirect; cross-origin credential handling has not been live-validated and must be verified in staging before production log access is enabled.

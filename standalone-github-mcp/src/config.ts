@@ -19,6 +19,7 @@ export interface RuntimeConfig {
   maxSessions: number;
   sessionTtlMs: number;
   rateLimitPerMinute: number;
+  enableWriteTools: boolean;
   redisRestUrl?: string;
   redisRestToken?: string;
   githubRequestTimeoutMs: number;
@@ -28,6 +29,12 @@ export interface RuntimeConfig {
 
 function csvSet(value: string | undefined): Set<string> {
   return new Set((value || '').split(',').map((part) => part.trim()).filter(Boolean));
+}
+function boolEnv(value: string | undefined, fallback: boolean, name: string): boolean {
+  if (value === undefined || value.trim() === '') return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (normalized !== 'true' && normalized !== 'false') throw new Error(`${name} must be either "true" or "false".`);
+  return normalized === 'true';
 }
 function intEnv(value: string | undefined, fallback: number, min: number, max: number, name: string): number {
   const parsed = value === undefined || value.trim() === '' ? fallback : Number(value);
@@ -46,6 +53,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
   if (transport !== 'stdio' && transport !== 'http') {
     throw new Error('MCP_TRANSPORT must be either "stdio" or "http".');
   }
+  const enableWriteTools = boolEnv(env.MCP_ENABLE_WRITE_TOOLS, false, 'MCP_ENABLE_WRITE_TOOLS');
   const pat = env.GITHUB_TOKEN?.trim() || undefined;
   const appIdRaw = env.GITHUB_APP_ID?.trim();
   const appKeyRaw = env.GITHUB_APP_PRIVATE_KEY?.trim();
@@ -67,6 +75,8 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
   const firebaseProjectId = env.FIREBASE_PROJECT_ID?.trim() || undefined;
   const isProduction = env.NODE_ENV === 'production';
   const allowedHosts = new Set([...csvSet(env.MCP_ALLOWED_HOSTS)].map((host) => host.toLowerCase()));
+  const renderExternalHost = env.RENDER_EXTERNAL_HOSTNAME?.trim();
+  if (renderExternalHost) allowedHosts.add(renderExternalHost.toLowerCase());
   const allowedOrigins = csvSet(env.MCP_ALLOWED_ORIGINS);
   const redisRestUrl = env.UPSTASH_REDIS_REST_URL?.trim() || undefined;
   const redisRestToken = env.UPSTASH_REDIS_REST_TOKEN?.trim() || undefined;
@@ -120,6 +130,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     maxSessions: intEnv(env.MCP_MAX_SESSIONS, 250, 1, 10000, 'MCP_MAX_SESSIONS'),
     sessionTtlMs: intEnv(env.MCP_SESSION_TTL_MS, 30 * 60 * 1000, 60_000, 24 * 60 * 60 * 1000, 'MCP_SESSION_TTL_MS'),
     rateLimitPerMinute: intEnv(env.MCP_RATE_LIMIT_PER_MINUTE, 120, 10, 10000, 'MCP_RATE_LIMIT_PER_MINUTE'),
+    enableWriteTools,
     redisRestUrl,
     redisRestToken,
     githubRequestTimeoutMs: intEnv(env.GITHUB_REQUEST_TIMEOUT_MS, 12_000, 1000, 120_000, 'GITHUB_REQUEST_TIMEOUT_MS'),

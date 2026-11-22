@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { Unzip, UnzipInflate, UnzipPassThrough } from 'fflate';
 import type { RuntimeConfig } from '../config.js';
 import { assertAllowedRepo, githubRequest, GitHubToolError } from '../github.js';
-import { approvalPhraseSchema, requireApproval, withToolErrors } from './common.js';
+import { registerWriteTool, requireApproval, withToolErrors } from './common.js';
 
 const readAnnotations = { readOnlyHint: true, openWorldHint: true };
 const writeAnnotations = { readOnlyHint: false, destructiveHint: false, openWorldHint: true };
@@ -145,15 +145,15 @@ export function registerActionTools(server: any, octokit: any, config: RuntimeCo
     return { totalRunsChecked: data.total_count, failedRuns: result };
   }));
 
-  server.registerTool('github_trigger_workflow', {
+  registerWriteTool(server, config, 'github_trigger_workflow', {
     title: 'Trigger GitHub Actions workflow (approval required)',
     description: 'Dispatch a workflow. This executes repository-controlled code and may consume resources or change external state. Show repository, workflow, ref, inputs, and likely effects before explicit approval; never invoke based solely on an inferred intent.',
-    inputSchema: { ...repoShape, workflowId: z.union([z.number().int().positive(), z.string().min(1).max(255)]), ref: z.string().min(1).max(255), inputs: z.record(z.string(), z.string().max(5000)).refine((value) => Object.keys(value).length <= 20, 'Workflow inputs may contain at most 20 entries.').default({}), approvalPhrase: approvalPhraseSchema },
+    inputSchema: { ...repoShape, workflowId: z.union([z.number().int().positive(), z.string().min(1).max(255)]), ref: z.string().min(1).max(255), inputs: z.record(z.string(), z.string().max(5000)).refine((value) => Object.keys(value).length <= 20, 'Workflow inputs may contain at most 20 entries.').default({}) },
     annotations: writeAnnotations,
-  }, withToolErrors(async ({ owner, repo, workflowId, ref, inputs, approvalPhrase }) => {
+  }, withToolErrors(async ({ owner, repo, workflowId, ref, inputs }) => {
     assertAllowedRepo(owner, repo, config);
     const args = { owner, repo, workflowId, ref, inputs };
-    requireApproval('github_trigger_workflow', `${owner}/${repo}:${workflowId}@${ref}`, args, approvalPhrase);
+    await requireApproval(server, 'github_trigger_workflow', `${owner}/${repo}:${workflowId}@${ref}`, args);
     await githubRequest(() => octokit.rest.actions.createWorkflowDispatch({ owner, repo, workflow_id: workflowId, ref, inputs }), { retryable: false });
     return { dispatched: true, repository: `${owner}/${repo}`, workflowId, ref, message: 'Workflow dispatch accepted by GitHub.' };
   }));
