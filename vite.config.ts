@@ -1,4 +1,5 @@
-import { defineConfig, Plugin } from 'vite';
+import { configDefaults, defineConfig } from 'vitest/config';
+import type { Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import {
@@ -1270,5 +1271,8 @@ export default defineConfig({
     port: 3000,
     host: true,
     allowedHosts: true,
+  },
+  test: {
+    exclude: [...configDefaults.exclude, 'standalone-github-mcp/test/**'],
   },
 });

@@ -1,0 +1,32 @@
+name: GitHub MCP checks
+
+on:
+  pull_request:
+    paths:
+      - "standalone-github-mcp/**"
+      - "docs/GITHUB_MCP_TOOLS.md"
+      - ".github/workflows/github-mcp.yml"
+  push:
+    branches: [main]
+    paths:
+      - "standalone-github-mcp/**"
+      - "docs/GITHUB_MCP_TOOLS.md"
+      - ".github/workflows/github-mcp.yml"
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: standalone-github-mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: standalone-github-mcp/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
