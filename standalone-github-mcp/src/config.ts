@@ -73,16 +73,30 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
   const allowedRepos = new Set([...csvSet(env.GITHUB_ALLOWED_REPOS)].map((repo) => repo.toLowerCase()));
   const allowedFirebaseUids = csvSet(env.MCP_ALLOWED_FIREBASE_UIDS);
   const firebaseProjectId = env.FIREBASE_PROJECT_ID?.trim() || undefined;
+  const firebaseServiceAccountJson = env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim() || undefined;
   const isProduction = env.NODE_ENV === 'production';
   const allowedHosts = new Set([...csvSet(env.MCP_ALLOWED_HOSTS)].map((host) => host.toLowerCase()));
   const renderExternalHost = env.RENDER_EXTERNAL_HOSTNAME?.trim();
   if (renderExternalHost) allowedHosts.add(renderExternalHost.toLowerCase());
+  for (const vercelHost of [env.VERCEL_URL?.trim(), env.VERCEL_PROJECT_PRODUCTION_URL?.trim()]) {
+    if (vercelHost) allowedHosts.add(vercelHost.toLowerCase());
+  }
   const allowedOrigins = csvSet(env.MCP_ALLOWED_ORIGINS);
   const redisRestUrl = env.UPSTASH_REDIS_REST_URL?.trim() || undefined;
   const redisRestToken = env.UPSTASH_REDIS_REST_TOKEN?.trim() || undefined;
 
   if (transport === 'http') {
     required(firebaseProjectId, 'FIREBASE_PROJECT_ID');
+    const serviceAccountJson = required(firebaseServiceAccountJson, 'FIREBASE_SERVICE_ACCOUNT_JSON');
+    let serviceAccount: Record<string, unknown>;
+    try {
+      serviceAccount = JSON.parse(serviceAccountJson) as Record<string, unknown>;
+    } catch {
+      throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON must contain valid Firebase service-account JSON.');
+    }
+    if (serviceAccount.project_id !== firebaseProjectId || typeof serviceAccount.client_email !== 'string' || typeof serviceAccount.private_key !== 'string') {
+      throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON must be a service account for FIREBASE_PROJECT_ID.');
+    }
     if (!allowedFirebaseUids.size) required(undefined, 'MCP_ALLOWED_FIREBASE_UIDS (one or more Firebase UIDs)');
     if (!allowedRepos.size) required(undefined, 'GITHUB_ALLOWED_REPOS (one or more owner/repo entries)');
     if (!allowedHosts.size) required(undefined, 'MCP_ALLOWED_HOSTS');
@@ -123,7 +137,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     allowedRepos,
     allowedFirebaseUids,
     firebaseProjectId,
-    firebaseServiceAccountJson: env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim() || undefined,
+    firebaseServiceAccountJson,
     allowedHosts,
     allowedOrigins,
     maxBodyBytes: intEnv(env.MCP_MAX_BODY_BYTES, 1024 * 1024, 1024, 10 * 1024 * 1024, 'MCP_MAX_BODY_BYTES'),

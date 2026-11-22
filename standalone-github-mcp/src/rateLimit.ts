@@ -40,7 +40,7 @@ export async function consumeRateLimit(
       };
     } catch {
       if (config.nodeEnv === 'production') {
-        return { allowed: false, retryAfterSeconds: 60, remaining: 0, distributed: true };
+        return { allowed: false, retryAfterSeconds: 60, remaining: 0, distributed: false };
       }
     }
   } else if (config.nodeEnv === 'production' && config.transport === 'http') {

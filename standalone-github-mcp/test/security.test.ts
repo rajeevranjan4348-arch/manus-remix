@@ -14,11 +14,13 @@ const allowedRepoConfig = () => testConfig({ GITHUB_ALLOWED_REPOS: 'Team/Project
 test('HTTP configuration fails closed without Firebase UID, repo, host, and production Redis allowlists', () => {
   const tokenEnv = { NODE_ENV: 'test', MCP_TRANSPORT: 'http', GITHUB_TOKEN: 'test-token' };
   assert.throws(() => readConfig(tokenEnv), /FIREBASE_PROJECT_ID/);
-  assert.throws(() => readConfig({ ...tokenEnv, FIREBASE_PROJECT_ID: 'cue-app-project-123' }), /MCP_ALLOWED_FIREBASE_UIDS/);
-  assert.throws(() => readConfig({ ...tokenEnv, FIREBASE_PROJECT_ID: 'cue-app-project-123', MCP_ALLOWED_FIREBASE_UIDS: 'uid-1' }), /GITHUB_ALLOWED_REPOS/);
-  assert.throws(() => readConfig({ ...tokenEnv, FIREBASE_PROJECT_ID: 'cue-app-project-123', MCP_ALLOWED_FIREBASE_UIDS: 'uid-1', GITHUB_ALLOWED_REPOS: 'team/repo' }), /MCP_ALLOWED_HOSTS/);
-  assert.throws(() => readConfig({ ...tokenEnv, NODE_ENV: 'production', FIREBASE_PROJECT_ID: 'cue-app-project-123', MCP_ALLOWED_FIREBASE_UIDS: 'uid-1', GITHUB_ALLOWED_REPOS: 'team/repo', MCP_ALLOWED_HOSTS: 'mcp.example.com' }), /UPSTASH_REDIS/);
-  assert.throws(() => readConfig({ ...tokenEnv, MCP_TRANSPORT: 'http', FIREBASE_PROJECT_ID: 'cue-app-project-123', MCP_ALLOWED_FIREBASE_UIDS: 'uid-1', GITHUB_ALLOWED_REPOS: 'team/repo', MCP_ALLOWED_HOSTS: '*.example.com' }), /wildcards/);
+  const serviceAccount = JSON.stringify({ project_id: 'cue-app-project-123', client_email: 'mcp@example.iam.gserviceaccount.com', private_key: 'placeholder' });
+  assert.throws(() => readConfig({ ...tokenEnv, FIREBASE_PROJECT_ID: 'cue-app-project-123' }), /FIREBASE_SERVICE_ACCOUNT_JSON/);
+  assert.throws(() => readConfig({ ...tokenEnv, FIREBASE_PROJECT_ID: 'cue-app-project-123', FIREBASE_SERVICE_ACCOUNT_JSON: serviceAccount }), /MCP_ALLOWED_FIREBASE_UIDS/);
+  assert.throws(() => readConfig({ ...tokenEnv, FIREBASE_PROJECT_ID: 'cue-app-project-123', FIREBASE_SERVICE_ACCOUNT_JSON: serviceAccount, MCP_ALLOWED_FIREBASE_UIDS: 'uid-1' }), /GITHUB_ALLOWED_REPOS/);
+  assert.throws(() => readConfig({ ...tokenEnv, FIREBASE_PROJECT_ID: 'cue-app-project-123', FIREBASE_SERVICE_ACCOUNT_JSON: serviceAccount, MCP_ALLOWED_FIREBASE_UIDS: 'uid-1', GITHUB_ALLOWED_REPOS: 'team/repo' }), /MCP_ALLOWED_HOSTS/);
+  assert.throws(() => readConfig({ ...tokenEnv, NODE_ENV: 'production', FIREBASE_PROJECT_ID: 'cue-app-project-123', FIREBASE_SERVICE_ACCOUNT_JSON: serviceAccount, MCP_ALLOWED_FIREBASE_UIDS: 'uid-1', GITHUB_ALLOWED_REPOS: 'team/repo', MCP_ALLOWED_HOSTS: 'mcp.example.com' }), /UPSTASH_REDIS/);
+  assert.throws(() => readConfig({ ...tokenEnv, FIREBASE_PROJECT_ID: 'cue-app-project-123', FIREBASE_SERVICE_ACCOUNT_JSON: serviceAccount, MCP_ALLOWED_FIREBASE_UIDS: 'uid-1', GITHUB_ALLOWED_REPOS: 'team/repo', MCP_ALLOWED_HOSTS: '*.example.com' }), /wildcards/);
 });
 
 test('write tools are disabled by default and their environment switch is strict', () => {
@@ -34,6 +36,7 @@ test('Render assigned hostname is accepted as an exact host when no manual list 
     MCP_TRANSPORT: 'http',
     GITHUB_TOKEN: 'test-token',
     FIREBASE_PROJECT_ID: 'eternal-envoy-cnzsc',
+    FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({ project_id: 'eternal-envoy-cnzsc', client_email: 'mcp@example.iam.gserviceaccount.com', private_key: 'placeholder' }),
     MCP_ALLOWED_FIREBASE_UIDS: 'uid-one',
     GITHUB_ALLOWED_REPOS: 'team/repo',
     RENDER_EXTERNAL_HOSTNAME: 'cue-github-mcp.onrender.com',
@@ -41,6 +44,29 @@ test('Render assigned hostname is accepted as an exact host when no manual list 
     UPSTASH_REDIS_REST_TOKEN: 'test-token',
   });
   assert.deepEqual([...config.allowedHosts], ['cue-github-mcp.onrender.com']);
+});
+
+test('Vercel deployment and production hostnames are accepted as exact runtime hosts', () => {
+  const config = readConfig({
+    NODE_ENV: 'production',
+    MCP_TRANSPORT: 'http',
+    GITHUB_TOKEN: 'test-token',
+    FIREBASE_PROJECT_ID: 'eternal-envoy-cnzsc',
+    FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({ project_id: 'eternal-envoy-cnzsc', client_email: 'mcp@example.iam.gserviceaccount.com', private_key: 'placeholder' }),
+    MCP_ALLOWED_FIREBASE_UIDS: 'uid-one',
+    GITHUB_ALLOWED_REPOS: 'team/repo',
+    VERCEL_URL: 'mcp-preview.vercel.app',
+    VERCEL_PROJECT_PRODUCTION_URL: 'cue-github-mcp.vercel.app',
+    UPSTASH_REDIS_REST_URL: 'https://redis.example',
+    UPSTASH_REDIS_REST_TOKEN: 'test-token',
+  });
+  assert.deepEqual([...config.allowedHosts], ['mcp-preview.vercel.app', 'cue-github-mcp.vercel.app']);
+});
+
+test('HTTP config rejects malformed or mismatched Firebase service-account JSON without echoing the credential', () => {
+  const base = { NODE_ENV: 'test', MCP_TRANSPORT: 'http', GITHUB_TOKEN: 'test-token', FIREBASE_PROJECT_ID: 'cue-app-project-123' };
+  assert.throws(() => readConfig({ ...base, FIREBASE_SERVICE_ACCOUNT_JSON: '{' }), /valid Firebase service-account JSON/);
+  assert.throws(() => readConfig({ ...base, FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({ project_id: 'other-project', client_email: 'mcp@example.iam.gserviceaccount.com', private_key: 'secret' }) }), /service account for FIREBASE_PROJECT_ID/);
 });
 
 test('Firebase UID and repository allowlists are exact and case-normalized only for repositories', () => {

@@ -12,6 +12,7 @@ function hostedTestConfig() {
     MCP_TRANSPORT: 'http',
     GITHUB_TOKEN: 'test-token-not-a-secret',
     FIREBASE_PROJECT_ID: 'cue-app-project-123',
+    FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({ project_id: 'cue-app-project-123', client_email: 'mcp@example.iam.gserviceaccount.com', private_key: 'placeholder' }),
     MCP_ALLOWED_FIREBASE_UIDS: 'cue-user-1',
     GITHUB_ALLOWED_REPOS: 'owner/repo',
     MCP_ALLOWED_HOSTS: 'mcp.test',
