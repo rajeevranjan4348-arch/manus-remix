@@ -23,6 +23,7 @@ import {
   clearWorkspaceAccessTokenOnly,
   setCachedAccessToken,
 } from '@/lib/workspaceAuth';
+import { clearInMemoryGuestSessionToken } from '@/lib/firebaseAuthorization';
 import { syncUserProfile } from '@/lib/firestoreService';
 import { syncUserToCloudSql } from '@/lib/cloudSqlClient';
 import { toast } from 'sonner';
@@ -119,6 +120,7 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
           markSingletonAuthResolved(currentUser);
           setUser(currentUser);
           if (currentUser) {
+            clearInMemoryGuestSessionToken();
             syncVerifiedUser(currentUser);
           } else {
             // Only clear in-memory Workspace OAuth cache when Firebase confirms signed-out state.
@@ -225,6 +227,7 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
   const handleSignOut = async () => {
     try {
       clearWorkspaceAccessTokenOnly();
+      clearInMemoryGuestSessionToken();
       await signOutUser();
       markSingletonAuthResolved(null);
       setUser(null);

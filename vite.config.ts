@@ -7,6 +7,15 @@ import {
   summarizeSessionHistory,
 } from './server/geminiService';
 import {
+  generateImageWithGemini,
+  formatGeneratedImageMarkdown,
+  extractReferenceImagesFromContent,
+  parseAspectRatioFromPrompt,
+  parseImageSizeFromPrompt,
+  SupportedAspectRatio,
+  SupportedImageSize,
+} from './server/imageGenerationService';
+import {
   enrichQueryWithRealtimeData,
   fetchLiveCryptoPrices,
   fetchLiveExchangeRates,
@@ -30,6 +39,7 @@ import { searchVerifiedEntityImages } from './server/visualSearchService';
 import { resolveBackendGoogleIntegrations } from './server/workspaceIntegrationsHandler';
 import { checkSharedRateLimit } from './server/distributedRateLimiter';
 import { verifyBearerToken } from './src/middleware/auth';
+import { issueGuestSessionToken, isSameOriginOrLocalRequest } from './server/guestSessionAuth';
 import { GoogleGenAI } from '@google/genai';
 import { agentActivityHub } from './server/agentActivityService';
 import { runTechnicalVerification } from './server/agentVerificationService';
@@ -93,6 +103,58 @@ function geminiApiPlugin(): Plugin {
           }
           res.statusCode = 200;
           res.end(JSON.stringify({ ok: true, service: 'ai-app-function', generatedAt: new Date().toISOString() }));
+          return;
+        }
+
+        if (url === '/api/auth/session' || url === '/.netlify/functions/auth-session') {
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+          res.setHeader('X-Content-Type-Options', 'nosniff');
+          res.setHeader('Referrer-Policy', 'no-referrer');
+          if (req.method !== 'POST') {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: 'Method not allowed. Use POST.', code: 'METHOD_NOT_ALLOWED' }));
+            return;
+          }
+          const originHeader = (req.headers.origin as string | undefined) || null;
+          const hostHeader =
+            (req.headers['x-forwarded-host'] as string | undefined) ||
+            (req.headers.host as string | undefined) ||
+            null;
+          if (!isSameOriginOrLocalRequest(originHeader, hostHeader)) {
+            res.statusCode = 403;
+            res.end(JSON.stringify({ error: 'Cross-origin session request rejected.', code: 'FORBIDDEN_ORIGIN' }));
+            return;
+          }
+          const rawIp =
+            (req.headers['x-forwarded-for'] as string | undefined) ||
+            req.socket?.remoteAddress ||
+            'local';
+          const clientIp = rawIp.split(',')[0].trim().slice(0, 64) || 'local';
+          const rateCheck = await checkSharedRateLimit(`auth-session:${clientIp}`, 30, 60);
+          if (rateCheck.unavailable || !rateCheck.allowed) {
+            res.statusCode = rateCheck.unavailable ? 503 : 429;
+            res.setHeader('Retry-After', String(rateCheck.retryAfterSeconds));
+            res.end(
+              JSON.stringify({
+                error: rateCheck.unavailable
+                  ? 'Session service temporarily unavailable.'
+                  : 'Too many session requests. Please wait a moment.',
+                code: rateCheck.unavailable ? 'RATE_LIMIT_UNAVAILABLE' : 'RATE_LIMITED',
+              })
+            );
+            return;
+          }
+          const session = issueGuestSessionToken();
+          res.statusCode = 200;
+          res.end(
+            JSON.stringify({
+              ok: true,
+              token: session.token,
+              uid: session.uid,
+              expiresAt: session.expiresAt,
+            })
+          );
           return;
         }
 
@@ -946,56 +1008,77 @@ function geminiApiPlugin(): Plugin {
           return;
         }
 
-        // Server-Side AI Image Generation Endpoint
-        if (req.method === 'POST' && (url === '/api/image-generation' || url === '/.netlify/functions/image-generation')) {
-          res.setHeader('Content-Type', 'application/json');
+        // Server-Side AI Image Generation & Editing Endpoint
+        if (
+          req.method === 'POST' &&
+          (url === '/api/image-generation' ||
+            url === '/api/gemini/image' ||
+            url === '/.netlify/functions/image-generation')
+        ) {
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
           let bodyStr = '';
           req.on('data', chunk => { bodyStr += chunk; });
           req.on('end', async () => {
             try {
               const body = bodyStr ? JSON.parse(bodyStr) : {};
-              const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
-              if (!prompt) {
+              const rawPrompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
+              if (!rawPrompt) {
                 res.statusCode = 400;
                 res.end(JSON.stringify({ error: 'An image prompt is required.' }));
                 return;
               }
-              const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-              if (apiKey) {
-                try {
-                  const ai = new GoogleGenAI({ apiKey });
-                  const model = process.env.IMAGE_GENERATION_MODEL || 'gemini-2.5-flash-image';
-                  const response = await ai.models.generateContent({
-                    model,
-                    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-                    config: { responseModalities: ['TEXT', 'IMAGE'] },
-                  });
-                  const parts = response.candidates?.flatMap(c => c.content?.parts || []) || [];
-                  const imagePart = parts.find(p => p.inlineData?.data && p.inlineData?.mimeType?.startsWith('image/'));
-                  if (imagePart?.inlineData?.data) {
-                    res.end(JSON.stringify({
-                      success: true,
-                      provider: 'Gemini',
-                      model,
-                      mimeType: imagePart.inlineData.mimeType || 'image/png',
-                      imageDataUrl: `data:${imagePart.inlineData.mimeType || 'image/png'};base64,${imagePart.inlineData.data}`,
-                      alt: prompt.slice(0, 180),
-                    }));
-                    return;
-                  }
-                } catch (err: any) {
-                  console.warn('[Vite Dev image-generation] Gemini call error:', err?.message);
-                }
-              }
-              const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#1e1b4b"/><stop offset="50%" stop-color="#312e81"/><stop offset="100%" stop-color="#4c1d95"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><circle cx="400" cy="250" r="100" fill="#a855f7" opacity="0.3"/><text x="50%" y="45%" dominant-baseline="middle" text-anchor="middle" fill="#ffffff" font-family="sans-serif" font-size="28" font-weight="bold">🎨 Manus AI Studio Artwork</text><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" fill="#d8b4fe" font-family="sans-serif" font-size="16">${prompt.slice(0, 60).replace(/</g, '&lt;')}</text></svg>`;
-              const base64Svg = Buffer.from(svgContent).toString('base64');
-              res.end(JSON.stringify({
-                success: true,
-                provider: 'Manus Studio Generator',
-                mimeType: 'image/svg+xml',
-                imageDataUrl: `data:image/svg+xml;base64,${base64Svg}`,
-                alt: prompt.slice(0, 180),
-              }));
+
+              const { images: inlineRefImages, strippedText } = extractReferenceImagesFromContent(rawPrompt);
+              const explicitRefImages = Array.isArray(body.referenceImages)
+                ? body.referenceImages.filter(
+                    (img: any) =>
+                      img &&
+                      typeof img.data === 'string' &&
+                      img.data.trim() &&
+                      typeof img.mimeType === 'string' &&
+                      img.mimeType.startsWith('image/')
+                  )
+                : [];
+              const referenceImages = [...explicitRefImages, ...inlineRefImages];
+
+              const aspectRatio: SupportedAspectRatio =
+                typeof body.aspectRatio === 'string' && body.aspectRatio.trim()
+                  ? (body.aspectRatio.trim() as SupportedAspectRatio)
+                  : parseAspectRatioFromPrompt(strippedText || rawPrompt);
+
+              const parsedSize = parseImageSizeFromPrompt(strippedText || rawPrompt);
+              const imageSize: SupportedImageSize =
+                typeof body.imageSize === 'string' && ['1K', '2K', '4K'].includes(body.imageSize.trim().toUpperCase())
+                  ? (body.imageSize.trim().toUpperCase() as SupportedImageSize)
+                  : parsedSize.imageSize;
+
+              const result = await generateImageWithGemini({
+                prompt: strippedText || rawPrompt,
+                aspectRatio,
+                imageSize,
+                model: typeof body.model === 'string' ? body.model : undefined,
+                highQuality: Boolean(body.highQuality || parsedSize.explicitResolution),
+                useGoogleSearch: Boolean(body.useGoogleSearch),
+                useImageSearch: Boolean(body.useImageSearch),
+                referenceImages,
+                taskId: typeof body.taskId === 'string' ? body.taskId : undefined,
+              });
+
+              res.end(
+                JSON.stringify({
+                  success: true,
+                  provider: result.provider,
+                  model: result.model,
+                  mimeType: result.mimeType,
+                  imageDataUrl: result.imageDataUrl,
+                  aspectRatio: result.aspectRatio,
+                  imageSize: result.imageSize,
+                  caption: result.caption,
+                  alt: result.prompt.slice(0, 180),
+                  isEdited: result.isEdited,
+                  markdown: formatGeneratedImageMarkdown(result),
+                })
+              );
             } catch (err: any) {
               res.statusCode = 500;
               res.end(JSON.stringify({ error: err?.message || 'Failed to generate image' }));

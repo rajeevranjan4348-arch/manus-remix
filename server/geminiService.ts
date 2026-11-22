@@ -27,6 +27,25 @@ import {
   createScopedAbortController,
   iterateStreamWithTimeouts,
 } from './streamReliability';
+import {
+  detectImageGenerationIntent,
+  generateImageWithGemini,
+  formatGeneratedImageMarkdown,
+} from './imageGenerationService';
+import {
+  detectThreeDSceneIntent,
+  formatProcedural3DSceneMarkdown,
+} from '../src/lib/threeSceneSpec';
+
+export {
+  detectImageGenerationIntent,
+  generateImageWithGemini,
+  formatGeneratedImageMarkdown,
+} from './imageGenerationService';
+export {
+  detectThreeDSceneIntent,
+  formatProcedural3DSceneMarkdown,
+} from '../src/lib/threeSceneSpec';
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -216,6 +235,12 @@ export function generateResilientResponse(
     return `I am **${verified.applicationName}**, an AI workspace agent powered by the **${verified.modelId}** model (${verified.provider}).\n\nHere is what I can do for you:\n- **Direct Q&A & Knowledge**: Answer questions clearly and concisely across science, technology, culture, and everyday topics.\n- **Real-Time Data & Search**: Retrieve live weather, air quality, currency exchange rates, crypto prices, world clocks, and current news headlines.\n- **Full-Stack Engineering**: Build, modify, debug, and preview web applications and interactive systems.\n- **Data Analysis & Processing**: Compute metrics, summarize complex records, and generate actionable reports.\n\nTell me what you'd like to know or work on!`;
   }
 
+  // Check if interactive 3D scene or Three.js PBR model was requested
+  const threeIntentFallback = detectThreeDSceneIntent(raw);
+  if (threeIntentFallback.is3DRequest) {
+    return formatProcedural3DSceneMarkdown(threeIntentFallback.spec);
+  }
+
   // Check if code or technical architecture was requested
   if (/\b(write code|implement|function|react|typescript|python|component|css|html|sql)\b/i.test(clean)) {
     return `Here is a clean TypeScript implementation for **${raw || 'your request'}**:\n\n\`\`\`typescript\nexport interface TaskResult {\n  status: 'success' | 'pending';\n  timestamp: string;\n  query: string;\n}\n\nexport function executeTask(query = ${JSON.stringify(raw || 'task')}): TaskResult {\n  return {\n    status: 'success',\n    timestamp: new Date().toISOString(),\n    query,\n  };\n}\n\`\`\`\n\nLet me know if you'd like this adapted to a specific framework or signature.`;
@@ -231,8 +256,9 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
   const preferredModel = normalizeModel(options.model);
   const activityTaskId = options.taskId || `srv_task_${Date.now()}`;
   const emitActivity = options.onActivity;
-  const latestUserText = ([...options.messages].reverse()
-    .find(m => m.role === 'user')?.content || '')
+  const rawLatestUserContent =
+    [...options.messages].reverse().find(m => m.role === 'user')?.content || '';
+  const latestUserText = rawLatestUserContent
     .replace(/\[IMAGE_DATA_URL:[^\]]+\]\s*/gi, '')
     .trim();
 
@@ -249,6 +275,53 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     },
     emitActivity
   );
+
+  // Check if the user is requesting AI image generation or image editing
+  const priorMessages = options.messages.length > 1 ? options.messages.slice(0, -1) : [];
+  const imageIntent = detectImageGenerationIntent(rawLatestUserContent, priorMessages);
+  if (imageIntent.isImageRequest) {
+    analyzeHandle.complete(
+      imageIntent.isEditRequest
+        ? `Intent: image_editing (${imageIntent.aspectRatio})`
+        : `Intent: image_generation (${imageIntent.aspectRatio}, ${imageIntent.imageSize})`
+    );
+    const imgResult = await generateImageWithGemini({
+      prompt: imageIntent.cleanPrompt,
+      aspectRatio: imageIntent.aspectRatio,
+      imageSize: imageIntent.imageSize,
+      highQuality: imageIntent.highQuality,
+      useGoogleSearch: imageIntent.useGoogleSearch,
+      useImageSearch: imageIntent.useImageSearch,
+      referenceImages: imageIntent.referenceImages,
+      taskId: activityTaskId,
+      signal: options.signal,
+      onActivity: emitActivity,
+    });
+    const markdown = formatGeneratedImageMarkdown(imgResult);
+    yield markdown;
+    return;
+  }
+
+  // Check if the user is requesting an interactive 3D model or Three.js Studio PBR scene
+  const threeIntent = detectThreeDSceneIntent(latestUserText);
+  if (threeIntent.is3DRequest) {
+    analyzeHandle.complete(`Intent: threejs_3d_scene (${threeIntent.spec.preset}, ${threeIntent.spec.finish})`);
+    const renderHandle = agentActivityHub.startActivity(
+      activityTaskId,
+      {
+        title: `Synthesizing 3D Studio PBR scene (${threeIntent.spec.title})`,
+        description: `Building ${threeIntent.spec.preset} procedural multi-part geometry & RoomEnvironment PBR materials`,
+        toolName: 'render_3d_scene',
+        category: 'model',
+      },
+      emitActivity
+    );
+    const sceneMarkdown = formatProcedural3DSceneMarkdown(threeIntent.spec);
+    renderHandle.complete(`Prepared interactive Three.js PBR scene (${threeIntent.spec.preset})`);
+    yield sceneMarkdown;
+    return;
+  }
+
   const preRoute = routeQueryIntent(latestUserText);
   analyzeHandle.complete(
     `Intent: ${preRoute.category}${preRoute.requiresLiveResearch ? ' (live web search required)' : ' (direct reasoning)'}`
@@ -408,7 +481,9 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
       '2. For fictional characters (e.g., Jethalal Champaklal Gada), clearly distinguish the fictional character from the real-world actor portraying them (e.g., Dilip Joshi).\n' +
       '3. Start with a concise, Google AI Overview-style lead paragraph that bolds the full canonical name/title of the subject and key associated figures (such as the portraying actor, creator, or show title in italics).\n' +
       '4. Follow with a clean **Quick Information** section containing 4–6 key factual bullet points matching that exact entity (e.g., Character/Full Name, Actor/Creator, Show/Organization, Role/Known For, Nationality/Origin).\n' +
-      '5. Never fabricate image URLs or markdown `![img](...)` links in the text—the Visual Answer Engine automatically renders verified photographs above your response.';
+      '5. Never fabricate image URLs or markdown `![img](...)` links in the text—the Visual Answer Engine automatically renders verified photographs above your response.\n\n' +
+      '[INTERACTIVE 3D STUDIO PBR RENDERER]\n' +
+      'When the user asks to render, preview, or interact with a 3D model, 3D asset, or Three.js scene, emit a ```threejs-scene JSON code block with keys `{"preset":"chronograph_watch"|"cyber_rover"|"robot_mech"|"architectural_pavilion"|"quantum_gyroscope"|"alpine_sanctuary","finish":"brushed_gold"|"anodized_titanium"|"blued_steel"|"obsidian_chrome"|"ceramic_ivory","environment":"studio_warm"|"cyber_twilight"|"alpine_daylight"|"obsidian_void","explodedFactor":0}` so the live WebGL Studio PBR viewer mounts directly in the response.';
 
     const contents = options.messages
       .filter(m => m.role === 'user' || m.role === 'assistant')

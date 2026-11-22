@@ -5,6 +5,8 @@ import { cn } from '@/lib/utils';
 import { hasActiveTextSelection } from '@/lib/clipboard';
 import { useUltraLiteImage } from '@/hooks/useUltraLiteImage';
 import { CodeBlock } from './CodeBlock';
+import { ThreeSceneViewer } from '@/components/three/ThreeSceneViewer';
+import { parseProcedural3DSceneCodeFence } from '@/lib/threeSceneSpec';
 
 const MarkdownStreamingContext = createContext<boolean>(false);
 
@@ -31,6 +33,7 @@ const UltraLiteMarkdownImage = memo(function UltraLiteMarkdownImage(
         {...imgProps}
         src={resolvedSrc}
         alt={alt || 'Image'}
+        referrerPolicy="no-referrer"
         onClick={(e) => {
           if (isOptimized) {
             e.stopPropagation();
@@ -83,6 +86,14 @@ function MarkdownPreBlock({ children }: React.HTMLAttributes<HTMLPreElement>) {
           ? childProps.node.data.meta
           : undefined;
 
+    const isThreeSceneFence = /(?:^|\s)language-(?:threejs-scene|3d-scene|three-pbr)\b/i.test(
+      className
+    );
+    if (isThreeSceneFence) {
+      const sceneSpec = parseProcedural3DSceneCodeFence(rawText);
+      return <ThreeSceneViewer initialSpec={sceneSpec} />;
+    }
+
     return (
       <CodeBlock
         code={rawText}
@@ -116,6 +127,13 @@ function MarkdownCodeElement(
     Boolean(className && /language-/i.test(className)) || text.includes('\n');
 
   if (isBlockCode) {
+    const isThreeSceneFence = /(?:^|\s)language-(?:threejs-scene|3d-scene|three-pbr)\b/i.test(
+      className || ''
+    );
+    if (isThreeSceneFence) {
+      const sceneSpec = parseProcedural3DSceneCodeFence(text);
+      return <ThreeSceneViewer initialSpec={sceneSpec} />;
+    }
     const meta = typeof node?.data?.meta === 'string' ? node.data.meta : undefined;
     return (
       <CodeBlock
@@ -142,6 +160,59 @@ const MARKDOWN_COMPONENTS = {
   pre: MarkdownPreBlock,
   code: MarkdownCodeElement,
 };
+
+/**
+ * Safe URL transform for ReactMarkdown that preserves `data:image/*` URLs for AI-generated images
+ * alongside standard web protocols (`http:`, `https:`, `mailto:`, `tel:`, and relative paths),
+ * while blocking unsafe schemes (`javascript:`, `vbscript:`, `data:text/html`).
+ */
+export function safeMarkdownUrlTransform(url: string): string {
+  const raw = String(url || '').trim();
+  if (!raw) return '';
+  if (/^data:image\/(?:png|jpe?g|webp|gif|bmp|avif|svg\+xml);(?:base64|utf8),/i.test(raw)) {
+    return raw;
+  }
+  const colonIdx = raw.indexOf(':');
+  const slashIdx = raw.indexOf('/');
+  const questionIdx = raw.indexOf('?');
+  const hashIdx = raw.indexOf('#');
+
+  if (
+    colonIdx === -1 ||
+    (slashIdx !== -1 && colonIdx > slashIdx) ||
+    (questionIdx !== -1 && colonIdx > questionIdx) ||
+    (hashIdx !== -1 && colonIdx > hashIdx)
+  ) {
+    return raw;
+  }
+
+  const protocol = raw.slice(0, colonIdx).toLowerCase();
+  if (protocol === 'http' || protocol === 'https' || protocol === 'mailto' || protocol === 'tel') {
+    return raw;
+  }
+  return '';
+}
+
+/**
+ * Ensures typewriter slicing never cuts through the middle of a multi-kilobyte
+ * `![alt](data:image/...)` token (which would briefly display raw base64 text).
+ */
+export function snapVisibleLengthPastDataImages(text: string, targetLength: number): number {
+  if (!text || targetLength <= 0 || !text.includes('data:image/')) {
+    return targetLength;
+  }
+  const imgPattern = /!\[[^\]]*\]\(data:image\/[^)]+\)/g;
+  let match: RegExpExecArray | null;
+  let adjusted = targetLength;
+  while ((match = imgPattern.exec(text)) !== null) {
+    const start = match.index;
+    const end = start + match[0].length;
+    if (adjusted > start && adjusted < end) {
+      adjusted = end;
+    }
+  }
+  return Math.min(text.length, adjusted);
+}
 
 /**
  * Normalizes fenced code block headers that include a filename on the fence line
@@ -460,8 +531,12 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     inLeadIn,
   });
 
+  const snappedVisibleLength = animateTypewriter
+    ? snapVisibleLengthPastDataImages(processedContent, sequenceState.visibleLength)
+    : processedContent.length;
+
   const visibleContent = animateTypewriter
-    ? processedContent.slice(0, sequenceState.visibleLength)
+    ? processedContent.slice(0, snappedVisibleLength)
     : processedContent;
 
   return (
@@ -490,7 +565,11 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
             <span>Manus is typing</span>
           </div>
         )}
-        <ReactMarkdown remarkPlugins={remarkPlugins} components={MARKDOWN_COMPONENTS}>
+        <ReactMarkdown
+          remarkPlugins={remarkPlugins}
+          components={MARKDOWN_COMPONENTS}
+          urlTransform={safeMarkdownUrlTransform}
+        >
           {visibleContent}
         </ReactMarkdown>
         {isTyping && (

@@ -17,9 +17,7 @@ import {
 import { startRecoveryMonitoring } from './lib/recoveryController';
 
 import { ErrorBoundary } from './components/common/ErrorBoundary';
-import { AuthLoadingScreen, ProtectedRoute, PublicOnlyRoute } from './components/auth/AuthGuard';
 
-const AuthScreen = lazy(() => import('./pages/AuthScreen'));
 const Home = lazy(() =>
   import('./pages/Home').then((m) => ({ default: m.Home }))
 );
@@ -434,37 +432,7 @@ export default function App() {
           >
             <BlinkAuthProvider>
               <BrowserRouter>
-                <Routes>
-                  <Route
-                    path="/login"
-                    element={
-                      <PublicOnlyRoute>
-                        <Suspense fallback={<AuthLoadingScreen />}>
-                          <AuthScreen />
-                        </Suspense>
-                      </PublicOnlyRoute>
-                    }
-                  />
-                  <Route
-                    path="/forgot-password"
-                    element={
-                      <PublicOnlyRoute>
-                        <Suspense fallback={<AuthLoadingScreen />}>
-                          <AuthScreen />
-                        </Suspense>
-                      </PublicOnlyRoute>
-                    }
-                  />
-                  <Route path="/signup" element={<Navigate to="/login" replace />} />
-                  <Route
-                    path="/*"
-                    element={
-                      <ProtectedRoute>
-                        <AppContent />
-                      </ProtectedRoute>
-                    }
-                  />
-                </Routes>
+                <AppContent />
                 <Toaster />
               </BrowserRouter>
             </BlinkAuthProvider>

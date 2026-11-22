@@ -24,6 +24,15 @@ import {
   createScopedAbortController,
   iterateStreamWithTimeouts,
 } from '../../server/streamReliability';
+import {
+  detectImageGenerationIntent,
+  generateImageWithGemini,
+  formatGeneratedImageMarkdown,
+} from '../../server/imageGenerationService';
+import {
+  detectThreeDSceneIntent,
+  formatProcedural3DSceneMarkdown,
+} from '../../src/lib/threeSceneSpec';
 
 const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -246,6 +255,51 @@ export default async (req: Request) => {
       },
       pushBufferedActivity
     );
+
+    const priorMessages = messages.length > 1 ? messages.slice(0, -1) : [];
+    const imageIntent = detectImageGenerationIntent(rawLatestUserText, priorMessages);
+    if (imageIntent.isImageRequest) {
+      analyzeHandle.complete(
+        imageIntent.isEditRequest
+          ? `Intent: image_editing (${imageIntent.aspectRatio})`
+          : `Intent: image_generation (${imageIntent.aspectRatio}, ${imageIntent.imageSize})`
+      );
+      const imgResult = await generateImageWithGemini({
+        prompt: imageIntent.cleanPrompt,
+        aspectRatio: imageIntent.aspectRatio,
+        imageSize: imageIntent.imageSize,
+        highQuality: imageIntent.highQuality,
+        useGoogleSearch: imageIntent.useGoogleSearch,
+        useImageSearch: imageIntent.useImageSearch,
+        referenceImages: imageIntent.referenceImages,
+        taskId,
+        signal: req.signal,
+        onActivity: pushBufferedActivity,
+      });
+      return createFallbackSseResponse(
+        formatGeneratedImageMarkdown(imgResult),
+        'stop',
+        collectedStages
+      );
+    }
+
+    const threeIntent = detectThreeDSceneIntent(latestUserText);
+    if (threeIntent.is3DRequest) {
+      analyzeHandle.complete(`Intent: threejs_3d_scene (${threeIntent.spec.preset}, ${threeIntent.spec.finish})`);
+      const renderHandle = agentActivityHub.startActivity(
+        taskId,
+        {
+          title: `Synthesizing 3D Studio PBR scene (${threeIntent.spec.title})`,
+          description: `Building ${threeIntent.spec.preset} procedural multi-part geometry & RoomEnvironment PBR materials`,
+          toolName: 'render_3d_scene',
+          category: 'model',
+        },
+        pushBufferedActivity
+      );
+      const markdown = formatProcedural3DSceneMarkdown(threeIntent.spec);
+      renderHandle.complete(`Prepared interactive Three.js PBR scene (${threeIntent.spec.preset})`);
+      return createFallbackSseResponse(markdown, 'stop', collectedStages);
+    }
 
     const researchScope = createScopedAbortController(
       DEFAULT_TIMEOUT_BUDGETS.rtieResearchMaxMs,

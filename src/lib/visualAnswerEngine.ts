@@ -1,3 +1,5 @@
+import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
+
 export type VisualSubjectCategory =
   | 'person'
   | 'character'
@@ -1165,9 +1167,13 @@ export async function fetchVisualAnswerImages(
 
   // 1. Try server-side /api/visual-search endpoint first (fast & cached on server)
   try {
+    const authHeader = await getFirebaseAuthorizationHeader().catch(() => null);
     const serverRes = await fetch('/api/visual-search', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authHeader ? { Authorization: authHeader } : {}),
+      },
       body: JSON.stringify({
         primarySubject: entityProfile.canonicalName,
         subjects: detection.subjects,

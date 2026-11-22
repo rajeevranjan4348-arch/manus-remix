@@ -47,6 +47,8 @@ import { generateSessionSummary, getStoredSessionSummaries, removeSessionSummary
 import { TaskQuickPreviewCard } from './TaskQuickPreviewCard';
 import { SwipeableHistoryItem } from './SwipeableHistoryItem';
 import { useUltraLiteImage } from '@/hooks/useUltraLiteImage';
+import { motion, type PanInfo } from 'framer-motion';
+import { shouldDismissRightDrawerOnSwipe } from '@/lib/swipeToDismiss';
 
 const TagAnalyticsModal = React.lazy(() =>
   import('@/components/analytics/TagAnalyticsModal').then((m) => ({ default: m.TagAnalyticsModal }))
@@ -1103,6 +1105,12 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
   const videosCount = libraryItems.filter(i => i.type === 'video' || i.type === 'audio').length;
   const filesCount = libraryItems.filter(i => i.type === 'doc' || i.type === 'graph').length;
 
+  const handleHistorySwipeEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+    if (shouldDismissRightDrawerOnSwipe(info)) {
+      onClose();
+    }
+  };
+
   return (
     <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <SheetContent 
@@ -1110,6 +1118,16 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
         hideCloseButton
         className="w-full max-w-[100vw] sm:max-w-xl p-0 flex flex-col h-full h-[100dvh] max-h-[100dvh] bg-[#FFFFFF] dark:bg-[#000000] text-[#000000] dark:text-[#FFFFFF] border-l border-[#E0E0E0] dark:border-[#262626] shadow-2xl z-50 overflow-hidden"
       >
+        <motion.div
+          data-testid="history-panel-swipe-container"
+          className="flex flex-col flex-1 min-h-0 w-full h-full overflow-hidden"
+          drag="x"
+          dragDirectionLock
+          dragConstraints={{ left: 0, right: 0 }}
+          dragElastic={{ left: 0, right: 0.45 }}
+          dragMomentum={false}
+          onDragEnd={handleHistorySwipeEnd}
+        >
         {/* Minimal Fixed Header */}
         <div className="px-4 py-3 border-b border-[#E0E0E0] dark:border-[#262626] bg-[#FFFFFF] dark:bg-[#000000] shrink-0">
           <SheetHeader className="text-left space-y-0">
@@ -2387,6 +2405,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
             />
           </React.Suspense>
         )}
+        </motion.div>
       </SheetContent>
     </Sheet>
   );

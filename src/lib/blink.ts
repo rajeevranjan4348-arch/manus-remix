@@ -1,5 +1,6 @@
 import { createClient, Agent } from '@blinkdotnew/sdk';
 import { auth } from './firebase';
+import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
 import { agentActivityTracker } from './agentActivityTracker';
 
 const PROJECT_ID = (import.meta as any).env?.VITE_BLINK_PROJECT_ID || 'manus-agent-clone-tkzhogvs';
@@ -243,9 +244,9 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
           thinkHarder: Boolean(normalizedOptions.thinkHarder),
         });
 
-        const idToken = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => null) : null;
+        const authHeader = await getFirebaseAuthorizationHeader().catch(() => null);
         const requestHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (idToken) requestHeaders.Authorization = `Bearer ${idToken}`;
+        if (authHeader) requestHeaders.Authorization = authHeader;
 
         const fetchWithSafePreTokenRetry = async (url: string): Promise<Response> => {
           const firstRes = await activeFetch(url, {
@@ -254,6 +255,32 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
             signal: streamAbortController.signal,
             body: payloadStr,
           });
+          if (
+            firstRes &&
+            firstRes.status === 401 &&
+            typeof window !== 'undefined' &&
+            !streamAbortController.signal.aborted
+          ) {
+            const refreshedHeader = await getFirebaseAuthorizationHeader(true).catch(() => null);
+            if (refreshedHeader && refreshedHeader !== requestHeaders.Authorization) {
+              requestHeaders.Authorization = refreshedHeader;
+              resetInactivityWatchdog();
+              try {
+                const retryRes = await activeFetch(url, {
+                  method: 'POST',
+                  headers: requestHeaders,
+                  signal: streamAbortController.signal,
+                  body: payloadStr,
+                });
+                if (retryRes && typeof retryRes.status === 'number') {
+                  try { await firstRes.body?.cancel(); } catch {}
+                  return retryRes;
+                }
+              } catch {
+                // Keep original firstRes if retry failed
+              }
+            }
+          }
           if (
             firstRes &&
             (firstRes.status === 502 || firstRes.status === 503 || firstRes.status === 504) &&

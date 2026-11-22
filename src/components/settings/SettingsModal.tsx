@@ -53,6 +53,8 @@ import {
 import { requestMicrophonePermission, requestCameraAccess, getPermissionsStatus, PermissionState } from '@/lib/permissionsManager';
 import { MicrophonePermissionModal } from '@/components/voice/MicrophonePermissionModal';
 import { useTheme } from '@/context/ThemeContext';
+import { motion, useDragControls, type PanInfo } from 'framer-motion';
+import { shouldDismissModalOnSwipe } from '@/lib/swipeToDismiss';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Slider } from '@/components/ui/slider';
@@ -120,6 +122,7 @@ type SettingsTab = 'general' | 'robot' | 'ai' | 'diagnostics' | 'personalization
 
 export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskInfo }: SettingsModalProps) {
   const { theme, setTheme } = useTheme();
+  const dragControls = useDragControls();
   const { user: fbUser, signInWithGoogle, signInAsGuest, signOut: fbSignOut } = useFirebase();
   const [settings, setSettings] = useState<UserSettings>(getSettings());
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab || 'general');
@@ -281,6 +284,12 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
 
   if (!isOpen) return null;
 
+  const handleSettingsSwipeEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+    if (shouldDismissModalOnSwipe(info)) {
+      onClose();
+    }
+  };
+
   const tabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
     { id: 'general', label: 'General', icon: Sun },
     { id: 'connectors', label: 'GitHub & Repos', icon: Github },
@@ -311,14 +320,31 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
           if (e.target === e.currentTarget) onClose();
         }}
       >
-        <div 
+        <motion.div 
+          data-testid="settings-modal-swipe-container"
           className="w-full max-w-2xl h-[min(560px,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] bg-background border border-border/70 rounded-2xl shadow-xl flex flex-col overflow-hidden text-foreground animate-in zoom-in-98 duration-150 gpu-accelerated"
           role="dialog"
           aria-modal="true"
           aria-labelledby="settings-dialog-title"
+          drag="y"
+          dragControls={dragControls}
+          dragListener={false}
+          dragDirectionLock
+          dragConstraints={{ top: 0, bottom: 0 }}
+          dragElastic={{ top: 0.04, bottom: 0.45 }}
+          dragMomentum={false}
+          onDragEnd={handleSettingsSwipeEnd}
         >
           {/* Minimal Header */}
-          <div className="px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border/50 flex items-center justify-between gap-2 shrink-0 min-w-0">
+          <div
+            data-testid="settings-modal-drag-header"
+            onPointerDown={(e) => {
+              const target = e.target as HTMLElement | null;
+              if (target?.closest('button, a, input, select, textarea, [data-no-swipe]')) return;
+              dragControls.start(e);
+            }}
+            className="px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border/50 flex items-center justify-between gap-2 shrink-0 min-w-0 touch-none"
+          >
             <div className="flex items-center gap-2 min-w-0">
               <h2 id="settings-dialog-title" className="text-sm font-semibold tracking-tight text-foreground truncate">
                 Settings
@@ -1741,7 +1767,14 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
         </div>
 
         {/* Minimal Footer */}
-        <div className="px-5 py-2.5 border-t border-border/50 flex items-center justify-between shrink-0 bg-muted/10">
+        <div
+          onPointerDown={(e) => {
+            const target = e.target as HTMLElement | null;
+            if (target?.closest('button, a, input, select, textarea, [data-no-swipe]')) return;
+            dragControls.start(e);
+          }}
+          className="px-5 py-2.5 border-t border-border/50 flex items-center justify-between shrink-0 bg-muted/10 touch-none"
+        >
           <span className="text-[11px] text-muted-foreground">
             Saved automatically
           </span>
@@ -1752,7 +1785,7 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
             Done
           </button>
         </div>
-      </div>
+      </motion.div>
     </div>
   </>
 );

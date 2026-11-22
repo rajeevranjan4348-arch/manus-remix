@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { adminAuth } from '../lib/firebase-admin.ts';
 import type { DecodedIdToken } from 'firebase-admin/auth';
+import { verifyGuestSessionToken } from '../../server/guestSessionAuth';
 
 export interface AuthRequest extends IncomingMessage {
   user?: DecodedIdToken;
@@ -14,6 +15,12 @@ export async function verifyBearerToken(authHeader?: string): Promise<DecodedIdT
   if (!token) {
     return null;
   }
+
+  // First check server-issued HMAC-signed guest session tokens (for no-login workspace sessions)
+  if (token.startsWith('guest_v1.')) {
+    return verifyGuestSessionToken(token);
+  }
+
   try {
     return await adminAuth.verifyIdToken(token);
   } catch (error) {

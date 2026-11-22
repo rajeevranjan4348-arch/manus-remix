@@ -1,8 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import React from 'react';
-import { renderToString } from 'react-dom/server';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   app,
   auth,
@@ -19,11 +17,6 @@ import {
   clearWorkspaceAccessTokenOnly,
   logoutWorkspace,
 } from '../src/lib/workspaceAuth';
-import {
-  isUserSessionAuthorized,
-  resolvePostAuthDestination,
-  AuthLoadingScreen,
-} from '../src/components/auth/AuthGuard';
 
 function createMemoryStorage(): Storage {
   const store = new Map<string, string>();
@@ -134,123 +127,16 @@ describe('Permanent Google Authentication & Session Restoration Test Suite', () 
     markSingletonAuthResolved(null);
   });
 
-  it('4. Protected Routes & Route Preservation: shows loading screen during hydration, preserves deep routes, and redirects only when confirmed signed out', async () => {
-    // Verify authorization helper handles Google verified users, anonymous guest users, unverified email users, and signed-out users
-    expect(isUserSessionAuthorized(null)).toBe(false);
-    expect(isUserSessionAuthorized({ uid: 'g1', emailVerified: true, isAnonymous: false } as any)).toBe(true);
-    expect(isUserSessionAuthorized({ uid: 'anon1', emailVerified: false, isAnonymous: true } as any)).toBe(true);
-    expect(isUserSessionAuthorized({ uid: 'unv1', emailVerified: false, isAnonymous: false } as any)).toBe(false);
-
-    // Verify preserved route destination resolution
-    expect(resolvePostAuthDestination(null)).toBe('/');
-    expect(resolvePostAuthDestination({ from: { pathname: '/task/abc-123', search: '?tab=data', hash: '#top' } })).toBe(
-      '/task/abc-123?tab=data#top',
-    );
-    // Never redirect back into /login or /forgot-password after signing in
-    expect(resolvePostAuthDestination({ from: { pathname: '/login' } })).toBe('/');
-    expect(resolvePostAuthDestination({ from: { pathname: '/forgot-password' } })).toBe('/');
-
-    // Verify AuthLoadingScreen renders cleanly during startup/refresh restoration
-    const loadingHtml = renderToString(React.createElement(AuthLoadingScreen));
-    expect(loadingHtml).toContain('auth-loading-screen');
-    expect(loadingHtml).toContain('Restoring your session');
-
-    // Verify App.tsx wires ProtectedRoute and PublicOnlyRoute properly
+  it('4. Direct App Access: login page and blocking auth routes are removed so users enter the app directly', () => {
     const appSrc = fs.readFileSync(path.resolve(__dirname, '../src/App.tsx'), 'utf-8');
-    expect(appSrc).toContain('<ProtectedRoute>');
-    expect(appSrc).toContain('<PublicOnlyRoute>');
-    expect(appSrc).toContain('path="/login"');
-    expect(appSrc).toContain('AuthScreen');
-  });
-
-  it('5. Guard State Transitions: renders loading while initializing, renders preserved route when authenticated, and redirects to /login after explicit sign-out', async () => {
-    vi.resetModules();
-    const state = { user: null as any, loading: true };
-
-    vi.doMock('../src/context/FirebaseContext', () => ({
-      useFirebase: () => state,
-    }));
-
-    vi.doMock('react-router-dom', async () => {
-      const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
-      return {
-        ...actual,
-        Navigate: ({ to, state: navState, replace }: { to: string; state?: any; replace?: boolean }) =>
-          React.createElement('div', {
-            'data-testid': 'navigate-redirect',
-            'data-to': to,
-            'data-from': navState?.from?.pathname || '',
-            'data-replace': String(Boolean(replace)),
-          }),
-      };
-    });
-
-    const { MemoryRouter: MockedMemoryRouter, Route: MockedRoute, Routes: MockedRoutes } = await import('react-router-dom');
-    const { ProtectedRoute, PublicOnlyRoute } = await import('../src/components/auth/AuthGuard');
-
-    function LoginProbe() {
-      return React.createElement('div', null, 'LOGIN_SCREEN');
-    }
-
-    function TaskProbe() {
-      return React.createElement('div', null, 'PROTECTED_TASK_VIEW:/task/42');
-    }
-
-    const renderAt = (initialEntry: any) =>
-      renderToString(
-        React.createElement(
-          MockedMemoryRouter,
-          { initialEntries: [initialEntry] },
-          React.createElement(
-            MockedRoutes,
-            null,
-            React.createElement(MockedRoute, {
-              path: '/login',
-              element: React.createElement(PublicOnlyRoute, null, React.createElement(LoginProbe)),
-            }),
-            React.createElement(MockedRoute, {
-              path: '/task/:id',
-              element: React.createElement(ProtectedRoute, null, React.createElement(TaskProbe)),
-            }),
-          ),
-        ),
-      );
-
-    // Scenario A (Refresh / App Startup): loading = true -> MUST show loading screen and NOT redirect to /login
-    state.loading = true;
-    state.user = null;
-    const loadingResult = renderAt('/task/42');
-    expect(loadingResult).toContain('auth-loading-screen');
-    expect(loadingResult).not.toContain('navigate-redirect');
-
-    // Scenario B (Session Restored): loading = false, authenticated Google user -> preserves /task/42
-    state.loading = false;
-    state.user = { uid: 'google_u1', email: 'user@gmail.com', emailVerified: true, isAnonymous: false };
-    const restoredResult = renderAt('/task/42');
-    expect(restoredResult).toContain('PROTECTED_TASK_VIEW:/task/42');
-    expect(restoredResult).not.toContain('navigate-redirect');
-
-    // Scenario C (Signed-in user hitting /login with preserved state): redirects straight back to /task/42
-    const redirectBackResult = renderAt({ pathname: '/login', state: { from: { pathname: '/task/42' } } });
-    expect(redirectBackResult).toContain('data-to="/task/42"');
-    expect(redirectBackResult).toContain('data-replace="true"');
-
-    // Scenario D (Explicit Sign-Out): loading = false, user = null -> redirects to /login preserving original route
-    state.loading = false;
-    state.user = null;
-    const signedOutResult = renderAt('/task/42');
-    expect(signedOutResult).toContain('data-to="/login"');
-    expect(signedOutResult).toContain('data-from="/task/42"');
-    expect(signedOutResult).toContain('data-replace="true"');
-    expect(signedOutResult).not.toContain('PROTECTED_TASK_VIEW');
-
-    // Scenario E (Unauthenticated user visiting /login): renders login screen directly
-    const loginPageResult = renderAt('/login');
-    expect(loginPageResult).toContain('LOGIN_SCREEN');
-    expect(loginPageResult).not.toContain('navigate-redirect');
-
-    vi.doUnmock('../src/context/FirebaseContext');
-    vi.doUnmock('react-router-dom');
+    expect(appSrc).not.toContain('AuthScreen');
+    expect(appSrc).not.toContain('ProtectedRoute');
+    expect(appSrc).not.toContain('PublicOnlyRoute');
+    expect(appSrc).not.toContain('path="/login"');
+    expect(appSrc).toContain('<AppContent />');
+    expect(appSrc).toContain('<Route path="*" element={<Navigate to="/" replace />} />');
+    expect(fs.existsSync(path.resolve(__dirname, '../src/pages/AuthScreen.tsx'))).toBe(false);
+    expect(fs.existsSync(path.resolve(__dirname, '../src/components/auth/AuthGuard.tsx'))).toBe(false);
   });
 
   it('6. Explicit Sign-Out & Connector Disconnect Separation: clears token cache cleanly', async () => {

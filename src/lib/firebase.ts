@@ -196,7 +196,7 @@ let nativeGoogleInitialization: Promise<void> | null = null;
 
 function getAuthContinueUrl(): string | undefined {
   if (typeof window === 'undefined') return undefined;
-  return `${window.location.origin}/login`;
+  return `${window.location.origin}/`;
 }
 
 /**

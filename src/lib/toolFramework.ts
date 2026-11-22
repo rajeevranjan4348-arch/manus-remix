@@ -7,7 +7,17 @@
 
 import { observability } from './observability';
 import { securityCenter } from './securityCenter';
-import { auth } from './firebase';
+import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
+import {
+  buildProcedural3DSceneSpecFromPrompt,
+  formatProcedural3DSceneMarkdown,
+  PROCEDURAL_3D_PRESET_CATALOG,
+  PROCEDURAL_3D_FINISHES,
+  PROCEDURAL_3D_ENVIRONMENTS,
+  Procedural3DPresetId,
+  StudioFinishId,
+  StudioEnvironmentPresetId,
+} from './threeSceneSpec';
 
 export type ToolRiskLevel = 'read-only' | 'destructive' | 'privileged' | 'safe' | 'moderate' | 'sensitive';
 
@@ -240,21 +250,16 @@ class ToolRegistryService {
       handler: async (args) => {
         const query = String(args.query || '').trim();
         const limit = Number(args.limit) || 5;
-        const currentUser = auth.currentUser;
-        if (!currentUser) {
-          return {
-            success: false,
-            error: 'AUTHENTICATION_REQUIRED',
-            summary: 'Sign in to use live web search.',
-          };
-        }
+        const authHeader = await getFirebaseAuthorizationHeader().catch(() => null);
 
         // Query Netlify / server web-search function or public encyclopedic knowledge API
         try {
-          const idToken = await currentUser.getIdToken();
           const res = await fetch('/api/web-search', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+            headers: {
+              'Content-Type': 'application/json',
+              ...(authHeader ? { Authorization: authHeader } : {}),
+            },
             body: JSON.stringify({ query, limit }),
           });
 
@@ -472,6 +477,123 @@ class ToolRegistryService {
           success: true,
           data: { command: cmd, exitCode: 0 },
           summary: `Command "${cmd}" executed successfully after authorization.`,
+        };
+      },
+    });
+
+    // 8. AI Image Generation & Editing (Gemini Nano Banana series)
+    this.register({
+      name: 'generate_image',
+      displayName: 'AI Image Generator',
+      description: 'Generate or edit images from a text prompt using Gemini image generation models (gemini-3.1-flash-lite-image / gemini-nano-banana-2.1).',
+      category: 'web',
+      riskLevel: 'safe',
+      parameters: {
+        prompt: {
+          type: 'string',
+          description: 'Detailed visual description of the image to generate or edit',
+          required: true,
+        },
+        aspectRatio: {
+          type: 'string',
+          description: 'Aspect ratio of the generated image',
+          enum: ['1:1', '3:4', '4:3', '9:16', '16:9', '1:4', '1:8', '4:1', '8:1'],
+          default: '1:1',
+        },
+        imageSize: {
+          type: 'string',
+          description: 'Target resolution size for high-quality generation',
+          enum: ['1K', '2K', '4K'],
+          default: '1K',
+        },
+      },
+      handler: async (args, context) => {
+        const prompt = String(args.prompt || '').trim();
+        const aspectRatio = String(args.aspectRatio || '1:1').trim();
+        const imageSize = String(args.imageSize || '1K').trim();
+
+        const res = await fetch('/api/image-generation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: context.signal,
+          body: JSON.stringify({
+            prompt,
+            aspectRatio,
+            imageSize,
+            taskId: context.taskId,
+          }),
+        });
+
+        if (!res.ok) {
+          const errPayload = await res.json().catch(() => ({}));
+          return {
+            success: false,
+            error: errPayload?.error || `HTTP ${res.status}`,
+            summary: `Image generation failed for "${prompt.slice(0, 60)}"`,
+          };
+        }
+
+        const data = await res.json();
+        return {
+          success: true,
+          data,
+          summary: data.caption || `Generated image for "${prompt.slice(0, 60)}" (${aspectRatio})`,
+        };
+      },
+    });
+
+    // 9. Interactive Three.js 3D Studio PBR Scene & Procedural Asset Renderer
+    this.register({
+      name: 'render_3d_scene',
+      displayName: '3D Studio PBR Renderer',
+      description:
+        'Render an interactive 3D model and scene using Three.js with studio PBR materials, RoomEnvironment PMREM reflections, 3-point lighting, softboxes, and multi-part procedural assets.',
+      category: 'coding',
+      riskLevel: 'safe',
+      parameters: {
+        prompt: {
+          type: 'string',
+          description: 'Description of the 3D subject or scene to render',
+          required: true,
+        },
+        preset: {
+          type: 'string',
+          description: 'Procedural 3D composite assembly preset',
+          enum: Object.keys(PROCEDURAL_3D_PRESET_CATALOG),
+        },
+        finish: {
+          type: 'string',
+          description: 'Studio PBR surface material finish',
+          enum: Object.keys(PROCEDURAL_3D_FINISHES),
+        },
+        environment: {
+          type: 'string',
+          description: 'Studio lighting and environment preset',
+          enum: Object.keys(PROCEDURAL_3D_ENVIRONMENTS),
+        },
+        explodedFactor: {
+          type: 'number',
+          description: 'Initial exploded-view separation factor from 0.0 to 1.0',
+          default: 0,
+        },
+      },
+      handler: async (args) => {
+        const prompt = String(args.prompt || '').trim();
+        const spec = buildProcedural3DSceneSpecFromPrompt(prompt, {
+          preset: args.preset as Procedural3DPresetId | undefined,
+          finish: args.finish as StudioFinishId | undefined,
+          environment: args.environment as StudioEnvironmentPresetId | undefined,
+          explodedFactor:
+            typeof args.explodedFactor === 'number' ? args.explodedFactor : undefined,
+        });
+        const markdown = formatProcedural3DSceneMarkdown(spec);
+        return {
+          success: true,
+          data: {
+            spec,
+            markdown,
+          },
+          summary: `Rendered interactive 3D Studio PBR scene: ${spec.title} (${spec.finish})`,
         };
       },
     });
