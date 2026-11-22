@@ -1,18 +1,14 @@
 import React, { useState, useEffect, useRef, memo } from 'react';
 import { 
-  Copy, 
   Check, 
-  ThumbsUp, 
-  ThumbsDown, 
   Heart,
   Volume2, 
   VolumeX, 
-  Share2, 
-  MoreVertical, 
   RotateCcw, 
   Download, 
   FileText 
 } from 'lucide-react';
+import { Copy, ThumbsUp, ThumbsDown, Share2, MoreVertical } from 'pulsoicon-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';

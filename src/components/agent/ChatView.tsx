@@ -1,17 +1,12 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { 
-  ArrowUp,
   ArrowDown,
   Square, 
-  Plus, 
   Mic, 
-  Search, 
   Globe, 
   MousePointer2, 
   FileCode, 
   Check, 
-  ChevronUp,
-  ChevronDown,
   RotateCcw,
   Workflow,
   Gauge,
@@ -27,6 +22,7 @@ import {
   RotateCw,
   Pencil
 } from 'lucide-react';
+import { ArrowUp, Plus, Search, ChevronUp, ChevronDown } from 'pulsoicon-react';
 import { ConnectorsPopupMenu } from '../chat/ConnectorsPopupMenu';
 import { CONNECTOR_CATALOG } from '../connectors/ConnectorsStorePanel';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
@@ -1958,7 +1954,7 @@ export function ChatView({
                   title="Add attachments or options"
                   aria-label="Add attachments or options"
                 >
-                  <Plus size={18} strokeWidth={2.4} className="manus-plus-rotate text-[#000000] dark:text-[#FFFFFF] shrink-0" />
+                  <Plus animated={false} size={18} strokeWidth={2.4} className="manus-plus-rotate text-[#000000] dark:text-[#FFFFFF] shrink-0" />
                 </button>
               </AttachmentMenu>
 

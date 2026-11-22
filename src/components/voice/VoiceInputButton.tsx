@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, ExternalLink, Phone, Camera, Smartphone } from 'lucide-react';
+import { MicOff, ExternalLink, Phone, Camera, Smartphone } from 'lucide-react';
+import { Mic } from 'pulsoicon-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { matchVoiceCommand, executeOpenUrl, executeDeviceCommand, VoiceCommandResult } from '@/lib/voiceCommands';

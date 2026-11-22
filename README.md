@@ -15,7 +15,7 @@ A powerful autonomous AI agent workspace built with React, Vite, TypeScript, and
 ## Tech Stack
 
 - **Runtime & Build**: Node.js, Vite, TypeScript
-- **UI Framework**: React 18, Tailwind CSS, Lucide Icons, Radix UI, Framer Motion
+- **UI Framework**: React 18, Tailwind CSS, Lucide and PulsoIcon icons, Radix UI, Framer Motion
 - **3D Graphics & Audio**: Three.js, React Three Fiber, Web Speech API, Web Audio API
 - **Persistence & Cloud**: Firebase (Firestore, Auth), IndexedDB
 - **Data Visualization**: Recharts
@@ -51,3 +51,7 @@ npm test
 ### Production security configuration
 
 Configure `TOKEN_ENCRYPTION_SECRET` and `POLICY_GATEWAY_SECRET` as independent server-only random secrets of at least 32 characters. Do not expose them through `VITE_*` variables. Production AI and web-search endpoints also require `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` for atomic per-user rate limits across serverless instances; without the shared limiter, those endpoints fail closed. Configure `VITE_GOOGLE_MAPS_API_KEY` only with a Google Maps key restricted to the app's allowed domains and required APIs.
+
+### Third-party icon notice
+
+Animated interface icons use `pulsoicon-react` (PulsoIcon 6.2.0). The full upstream license and third-party notices are included in [`THIRD_PARTY_NOTICES/PulsoIcon-LICENSE.txt`](THIRD_PARTY_NOTICES/PulsoIcon-LICENSE.txt).

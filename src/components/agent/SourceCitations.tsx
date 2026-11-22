@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { ExternalLink, Globe, CheckCircle2, Search, ChevronDown, Copy, Check, Link2 } from 'lucide-react';
+import { ExternalLink, Globe, CheckCircle2, Check, Link2 } from 'lucide-react';
+import { Search, ChevronDown, Copy } from 'pulsoicon-react';
 import { cn } from '@/lib/utils';
 
 export interface SourceCitationItem {

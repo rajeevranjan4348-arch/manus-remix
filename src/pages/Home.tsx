@@ -1,8 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { RobotHead } from 'robot-heads';
 import { 
-  Plus, 
-  ArrowUp,
   Mic, 
   Layout, 
   FileText, 
@@ -27,6 +25,7 @@ import {
   Maximize2,
   Minimize2
 } from 'lucide-react';
+import { Plus, ArrowUp } from 'pulsoicon-react';
 import { cn } from '@/lib/utils';
 import { gsap } from 'gsap';
 import { toast } from 'sonner';
@@ -896,7 +895,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                     title="Add attachments or connectors"
                     aria-label="Add attachments or options"
                   >
-                    <Plus size={18} strokeWidth={2.4} className="manus-plus-rotate text-[#000000] dark:text-[#FFFFFF] shrink-0"/>
+                    <Plus animated={false} size={18} strokeWidth={2.4} className="manus-plus-rotate text-[#000000] dark:text-[#FFFFFF] shrink-0"/>
                   </button>
                 </AttachmentMenu>
 

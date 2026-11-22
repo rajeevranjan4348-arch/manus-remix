@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
-import { Camera, Image, Paperclip, Brain, Check, PhoneCall, Plug } from 'lucide-react';
+import { Camera, Image, Brain, Check, PhoneCall, Plug } from 'lucide-react';
+import { Paperclip } from 'pulsoicon-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';

@@ -1,19 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { 
-  MessageSquarePlus, 
-  Search, 
   Library, 
-  Settings2,
-  PanelLeft,
-  MessageSquare,
   Clock,
-  History as HistoryIcon,
-  MoreHorizontal,
-  Plus,
   Folder,
   Filter,
-  Trash2,
-  Copy,
   ExternalLink,
   X,
   Sparkles,
@@ -25,23 +15,35 @@ import {
   Box,
   Zap,
   Layers,
-  Edit3,
   FolderKanban,
   Check,
-  ChevronRight,
   Plug,
   Cloud,
   LogIn,
   LogOut,
   User as UserIcon,
   Bookmark,
-  Share2,
   Shield,
   FolderPlus,
   FileText,
   FileCode,
   FileType
 } from 'lucide-react';
+import {
+  MessageSquarePlus,
+  Search,
+  Settings as Settings2,
+  PanelLeft,
+  MessageSquare,
+  History as HistoryIcon,
+  MoreHorizontal,
+  Plus,
+  Trash2,
+  Copy,
+  Edit3,
+  ChevronRight,
+  Share2,
+} from 'pulsoicon-react';
 import { cn } from '@/lib/utils';
 import { Logo, ManusLogo } from './Logo';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';

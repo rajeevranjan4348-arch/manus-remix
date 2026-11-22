@@ -2,11 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Library, 
   Clock, 
-  Search, 
-  Trash2, 
   ExternalLink, 
-  Copy, 
-  MessageSquare, 
   Mic, 
   Sparkles, 
   X, 
@@ -22,16 +18,14 @@ import {
   Play,
   FileCode,
   Check,
-  Plus,
   LayoutList,
   LayoutGrid,
   Calendar,
   Filter,
   CheckSquare,
-  Tag,
-  ChevronDown,
-  ChevronUp
+  Tag
 } from 'lucide-react';
+import { Search, Trash2, Copy, MessageSquare, Plus, ChevronDown, ChevronUp } from 'pulsoicon-react';
 import { useNavigate } from 'react-router-dom';
 import { blink } from '@/lib/blink';
 import { toast } from 'sonner';
@@ -1204,7 +1198,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
           <div className="space-y-2">
             <div className="flex items-center gap-2">
               <div className="relative flex-1 min-w-0">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#777777] pointer-events-none" />
+                <Search animated={false} size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#777777] pointer-events-none" />
                 <input
                   ref={searchInputRef}
                   type="text"
@@ -1977,7 +1971,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                 {groupedTasks.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-14 text-center px-4 space-y-3">
                     <div className="w-11 h-11 rounded-2xl bg-[#F2F2F2] dark:bg-[#111111] border border-[#E0E0E0] dark:border-[#262626] text-[#777777] flex items-center justify-center">
-                      {searchQuery ? <Search size={18} /> : <MessageSquare size={18} />}
+                      {searchQuery ? <Search animated={false} size={18} /> : <MessageSquare animated={false} size={18} />}
                     </div>
                     <div>
                       <p className="text-sm font-semibold text-[#000000] dark:text-[#FFFFFF]">
@@ -2067,7 +2061,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                                 <div className="flex-1 min-w-0 space-y-1">
                                   <div className="flex items-center gap-1.5 flex-wrap">
                                     <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-[#F2F2F2] dark:bg-[#1A1A1A] text-[#000000] dark:text-[#FFFFFF] font-medium">
-                                      <MessageSquare size={10} /> {((task as any).mode === 'work' || task.outputFormat === 'website' || Boolean(task.websiteName)) ? 'Work' : 'Chat'}
+                                      <MessageSquare animated={false} size={10} /> {((task as any).mode === 'work' || task.outputFormat === 'website' || Boolean(task.websiteName)) ? 'Work' : 'Chat'}
                                     </span>
                                     {((Array.isArray(task.tags) && task.tags.length > 0)
                                       ? task.tags

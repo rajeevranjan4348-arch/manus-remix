@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { ChevronDown, PanelLeft, Check, Sparkles, Zap, Brain, Cpu, MessageSquare, Briefcase, Settings2, SquarePen, MoreVertical, FileText, FileCode, Braces, History } from 'lucide-react';
+import { Check, Sparkles, Zap, Brain, Cpu, MessageSquare, Briefcase, FileText, FileCode, Braces } from 'lucide-react';
+import { ChevronDown, PanelLeft, Settings as Settings2, SquarePen, MoreVertical, History } from 'pulsoicon-react';
 import { RobotHead } from 'robot-heads';
 import { toast } from 'sonner';
 import { getSettings } from '@/lib/settingsStore';
