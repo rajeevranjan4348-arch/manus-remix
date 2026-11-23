@@ -66,7 +66,7 @@ const VOICE_PERSONAS: VoiceModelOption[] = [
     cadence: 'Lyrical & Gentle',
     desc: 'Warm, lyrical and soothing narrator',
     personaKey: 'shimmer',
-    previewText: 'Welcome to Manus. I am Lyra, ready to guide your workflows with gentle clarity.'
+    previewText: 'Welcome to Deku AI. I am Lyra, ready to guide your workflows with gentle clarity.'
   }
 ];
 
@@ -196,7 +196,7 @@ export function AndroidVoiceSettings({ onBack }: AndroidVoiceSettingsProps) {
   const handleToggleWakeWord = () => {
     setWakeWord(prev => {
       const next = !prev;
-      toast.success(next ? 'Wake Word "Hey Manus" active' : 'Wake Word disabled');
+      toast.success(next ? 'Wake Word "Hey Deku" active' : 'Wake Word disabled');
       return next;
     });
   };
@@ -523,7 +523,7 @@ export function AndroidVoiceSettings({ onBack }: AndroidVoiceSettingsProps) {
                         {wakeWord ? 'Active' : 'Disabled'}
                       </span>
                     </div>
-                    <span className="text-[13px] text-[#92959C]">Listen for "Hey Manus"</span>
+                    <span className="text-[13px] text-[#92959C]">Listen for "Hey Deku"</span>
                   </div>
                 </div>
                 <button 

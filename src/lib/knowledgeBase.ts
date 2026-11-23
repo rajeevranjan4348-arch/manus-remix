@@ -1,5 +1,5 @@
 /**
- * Knowledge Base and Semantic Retrieval (RAG) Engine for Manus AI
+ * Knowledge Base and Semantic Retrieval (RAG) Engine for Deku AI
  * 
  * Provides document chunking, metadata indexing, BM25-style relevance scoring,
  * user-isolated queries, and citation attribution.

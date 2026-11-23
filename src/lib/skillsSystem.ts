@@ -1,5 +1,5 @@
 /**
- * Modular Skills System for Manus AI
+ * Modular Skills System for Deku AI
  * 
  * Provides dynamic registration, enabling/disabling, validation,
  * execution handlers, and permission isolation for agent skills.
@@ -140,7 +140,7 @@ class SkillsRegistryService {
       name: 'Statistical Data Analyzer',
       description: 'Calculates mean, median, standard deviation, min/max, and frequency distributions from numbers.',
       version: '1.0.0',
-      author: 'Manus Core',
+      author: 'Deku Core',
       category: 'analysis',
       permissions: ['read_input'],
       enabled: true,
@@ -188,7 +188,7 @@ class SkillsRegistryService {
       name: 'Regex Evaluator & Pattern Matcher',
       description: 'Tests regular expressions against sample inputs and returns match positions.',
       version: '1.0.0',
-      author: 'Manus Core',
+      author: 'Deku Core',
       category: 'utilities',
       permissions: ['read_input'],
       enabled: true,
@@ -228,7 +228,7 @@ class SkillsRegistryService {
       name: 'Markdown Table Builder',
       description: 'Converts key-value records or 2D arrays into clean GitHub-flavored markdown tables.',
       version: '1.0.0',
-      author: 'Manus Core',
+      author: 'Deku Core',
       category: 'productivity',
       permissions: ['read_input'],
       enabled: true,
@@ -265,7 +265,7 @@ class SkillsRegistryService {
       name: 'Unit & Metric Converter',
       description: 'Converts distances, weights, temperatures, and storage units with high precision.',
       version: '1.0.0',
-      author: 'Manus Core',
+      author: 'Deku Core',
       category: 'utilities',
       permissions: ['read_input'],
       enabled: true,
@@ -336,7 +336,7 @@ class SkillsRegistryService {
       name: 'JSON Validator & Formatter',
       description: 'Validates JSON strings, identifies syntax discrepancies, and formats clean indentation.',
       version: '1.0.0',
-      author: 'Manus Core',
+      author: 'Deku Core',
       category: 'productivity',
       permissions: ['read_input'],
       enabled: true,
@@ -372,7 +372,7 @@ class SkillsRegistryService {
       name: 'Real-Time Data & Live Feed Engine',
       description: 'Provides live world clocks, current date/time, and real-time weather, currency FX, crypto prices, and news snapshots.',
       version: '1.0.0',
-      author: 'Manus Core',
+      author: 'Deku Core',
       category: 'utilities',
       permissions: ['read_input', 'network_fetch'],
       enabled: true,

@@ -1,5 +1,5 @@
 /**
- * Reliable Response Engine for Manus AI
+ * Reliable Response Engine for Deku AI
  * 
  * Prevents duplicate submissions, duplicate stream finalization events,
  * guarantees message ordering, manages request fencing, and validates structured outputs.

@@ -180,7 +180,7 @@ export function AgentView({ prompt, steps, onReorderSteps, result, status, onRes
                   <div className="space-y-2 max-w-sm">
                     <h2 className="text-xl font-serif font-bold text-foreground/70">Working on it...</h2>
                     <p className="text-sm text-muted-foreground">
-                      Manus is analyzing your data, computing statistics, and generating the optimal visualization.
+                      Deku AI is analyzing your data, computing statistics, and generating the optimal visualization.
                     </p>
                   </div>
                 </div>

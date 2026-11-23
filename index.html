@@ -7,10 +7,22 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=IBM+Plex+Mono:ital,wght@0,100..700;1,100..700&display=swap" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Manus AI Agent Clone</title>
+    <title>Deku AI</title>
     <meta name="description" content="Autonomous AI agent workspace with multi-step reasoning, research, data analysis, and live preview." />
-    <meta property="og:title" content="Manus AI Agent Clone" />
+    <meta name="application-name" content="Deku AI" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Deku AI" />
+    <meta name="theme-color" content="#141413" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Deku AI" />
+    <meta property="og:title" content="Deku AI" />
     <meta property="og:description" content="Autonomous AI agent workspace with multi-step reasoning, research, data analysis, and live preview." />
+    <meta property="og:image" content="/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Deku AI" />
+    <meta name="twitter:description" content="Autonomous AI agent workspace with multi-step reasoning, research, data analysis, and live preview." />
+    <link rel="manifest" href="/manifest.json" />
     <script>
       // Defensive fallback for localStorage & sessionStorage in restricted cross-origin iframes
       (function () {
@@ -39,7 +51,7 @@
           };
         }
         try {
-          var testKey = '__manus_storage_test__';
+          var testKey = '__deku_storage_test__';
           window.localStorage.setItem(testKey, '1');
           window.localStorage.removeItem(testKey);
         } catch (e) {
@@ -53,7 +65,7 @@
           } catch (_) {}
         }
         try {
-          var testSessionKey = '__manus_session_test__';
+          var testSessionKey = '__deku_session_test__';
           window.sessionStorage.setItem(testSessionKey, '1');
           window.sessionStorage.removeItem(testSessionKey);
         } catch (e) {

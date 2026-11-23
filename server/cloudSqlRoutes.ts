@@ -52,7 +52,7 @@ export async function handleCloudSqlApiRequest(
   }
 
   const uid = decodedUser.uid;
-  const email = decodedUser.email || `${uid}@manus.user`;
+  const email = decodedUser.email || `${uid}@deku.user`;
   const displayName = decodedUser.name || null;
 
   try {

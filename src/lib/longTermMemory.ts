@@ -1,5 +1,5 @@
 /**
- * Long-Term Memory System for Manus AI
+ * Long-Term Memory System for Deku AI
  *
  * Provides durable, user-isolated preferences and facts with full
  * CRUD capability, verified Firestore synchronization, explicit memory
@@ -27,6 +27,8 @@ export interface MessageMemoryUpdate {
   status: 'saved' | 'failed';
   action: 'save' | 'clear';
   recordId?: string;
+  memoryKey?: string;
+  memoryValue?: string;
   summary?: string;
   error?: string;
   updatedAt: string;
@@ -115,9 +117,9 @@ function stripInternalMessageWrappers(raw: string): string {
 const CLEAR_MEMORY_REGEX =
   /\b(forget|clear|delete|erase|reset|wipe)\b[\w\s]{0,20}\b(my\s+)?(saved\s+|long[- ]term\s+)?(memories|memory|preferences)\b/i;
 
-// Exclude ordinary recall/question prompts like "Do you remember who won..." or "Remind me what..."
+// Exclude ordinary recall/question prompts like "Do you remember who won...", "What do you remember about me?", or "Remind me what..."
 const QUESTION_RECALL_GUARD_REGEX =
-  /^(?:do you|did you|can you|could you|will you)\s+(?:remember|recall)\s+(?:who|what|when|where|why|how|if|whether)\b|^(?:remind me|can you remind me|could you remind me)\s+(?:to|about|what|when|where|how)\b/i;
+  /^(?:do you|did you|can you|could you|will you)\s+(?:remember|recall)\b|^(?:what|which|who)\s+(?:do\s+you|did\s+you|have\s+you)\s+(?:remember|recall|know|saved|stored)\b|^(?:remind me|can you remind me|could you remind me)\s+(?:to|about|what|when|where|how)\b/i;
 
 // Explicit remember / save / reminder / preference patterns
 const EXPLICIT_MEMORY_PATTERNS: Array<{
@@ -196,7 +198,7 @@ export function detectExplicitMemoryIntent(rawMessage: string): ExplicitMemoryIn
     return { matched: true, action: 'clear' };
   }
 
-  if (QUESTION_RECALL_GUARD_REGEX.test(text)) {
+  if (QUESTION_RECALL_GUARD_REGEX.test(text) || EXPLICIT_MEMORY_RECALL_REGEX.test(text)) {
     return { matched: false };
   }
 
@@ -222,6 +224,217 @@ export function detectExplicitMemoryIntent(rawMessage: string): ExplicitMemoryIn
 }
 
 const LOCAL_STORAGE_PREFIX = 'manus_long_term_memory_';
+
+const GREETING_OR_SMALL_TALK_REGEX =
+  /^(?:(?:hi|hello|hey|yo|hola|namaste|howdy|sup|greetings|gm|gn|good\s+(?:morning|afternoon|evening|night))(?:\s+(?:there|deku|deku\s+ai|ai|assistant|bot|buddy|friend|everyone|all))?|(?:how\s+(?:are\s+you|is\s+it\s+going|are\s+things|do\s+you\s+do|are\s+you\s+doing))|(?:what'?s\s+up|whats\s+up)|(?:thanks|thank\s+you(?:\s+so\s+much)?|thx|ty)|(?:ok|okay|cool|nice|great|awesome|got\s+it|alright|sure|bye|goodbye|see\s+you|take\s+care))[!?. ,]*$/i;
+
+const EXPLICIT_MEMORY_RECALL_REGEX =
+  /\b(?:what\s+do\s+you\s+(?:remember|know)\s+about\s+me|what\s+have\s+you\s+(?:remembered|saved|stored)(?:\s+about\s+me)?|do\s+you\s+remember\s+anything\s+about\s+me|what\s+are\s+my\s+(?:saved\s+)?(?:memories|preferences)|(?:list|show|view|tell\s+me)\s+(?:all\s+)?(?:my\s+)?(?:saved\s+)?(?:memories|memory)|tell\s+me\s+(?:what\s+you\s+know\s+)?about\s+myself|what\s+preferences\s+do\s+you\s+have\s+for\s+me)\b/i;
+
+const IMPERATIVE_ME_IDIOM_REGEX =
+  /\b(?:tell|show|give|help|teach|send|explain\s+to|write|summarize\s+for|find|fetch|get|remind)\s+me\b/gi;
+
+const PERSONAL_SELF_REFERENCE_REGEX =
+  /\b(?:my|mine|myself|about\s+me|for\s+me|call\s+me|address\s+me|do\s+i|am\s+i|should\s+i|i\s+(?:like|love|prefer|use|work|live|have|am|enjoy|want|need)|i'm|i've)\b/i;
+
+const SPELLING_NORMALIZATION_MAP: Record<string, string> = {
+  favourite: 'favorite',
+  favourites: 'favorite',
+  favorites: 'favorite',
+  fav: 'favorite',
+  colour: 'color',
+  colours: 'color',
+  colors: 'color',
+  humour: 'humor',
+  flavour: 'flavor',
+  flavours: 'flavor',
+  programme: 'program',
+  programmes: 'program',
+  behaviour: 'behavior',
+  organisation: 'organization',
+  centre: 'center',
+  travelling: 'traveling',
+  catalogue: 'catalog',
+};
+
+const STOP_WORDS = new Set([
+  'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'who', 'what', 'where', 'when', 'why', 'how', 'which', 'whom', 'whose',
+  'i', 'me', 'my', 'mine', 'myself', 'you', 'your', 'yours', 'we', 'our', 'they', 'their',
+  'do', 'does', 'did', 'can', 'could', 'would', 'should', 'will', 'shall', 'may', 'might',
+  'about', 'tell', 'show', 'give', 'explain', 'please', 'just', 'really', 'very', 'also',
+  'of', 'in', 'on', 'at', 'for', 'to', 'from', 'with', 'by', 'as', 'into', 'onto',
+  'and', 'or', 'but', 'if', 'then', 'than', 'so', 'that', 'this', 'these', 'those',
+  'it', 'its', 'one', 'thing', 'some', 'any', 'all', 'now', 'here', 'there',
+  'remember', 'reminder', 'saved', 'memory', 'memories', 'know', 'have', 'has', 'had',
+]);
+
+// Generic preference qualifiers (contribute lower weight so specific subject tokens decide relevance)
+const GENERIC_QUALIFIER_TOKENS = new Set([
+  'favorite', 'prefer', 'preference', 'like', 'love', 'best', 'top', 'user', 'personal',
+]);
+
+const SEMANTIC_SYNONYM_GROUPS: string[][] = [
+  ['favorite', 'prefer', 'preference', 'like', 'love', 'best', 'top'],
+  ['character', 'hero', 'protagonist', 'fighter', 'villain', 'anime'],
+  ['name', 'call', 'called', 'nickname', 'address'],
+  ['job', 'work', 'role', 'profession', 'occupation', 'career', 'developer', 'engineer'],
+  ['location', 'city', 'country', 'live', 'timezone', 'home', 'from'],
+  ['code', 'coding', 'programming', 'language', 'framework', 'stack', 'tech', 'typescript', 'javascript', 'python', 'react'],
+  ['style', 'format', 'tone', 'concise', 'brief', 'detailed', 'bullet', 'respond', 'reply'],
+  ['pet', 'dog', 'cat', 'animal'],
+  ['movie', 'film', 'show', 'series', 'anime', 'tv'],
+  ['game', 'gaming', 'videogame', 'play'],
+  ['food', 'dish', 'meal', 'drink', 'eat', 'cuisine'],
+  ['music', 'song', 'band', 'artist', 'singer'],
+];
+
+const TOKEN_TO_SYNONYM_GROUP = new Map<string, number>();
+SEMANTIC_SYNONYM_GROUPS.forEach((group, groupIdx) => {
+  for (const word of group) {
+    TOKEN_TO_SYNONYM_GROUP.set(word, groupIdx);
+  }
+});
+
+export function normalizeMemoryToken(rawToken: string): string {
+  let token = rawToken.toLowerCase().replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '');
+  if (!token) return '';
+  if (SPELLING_NORMALIZATION_MAP[token]) {
+    return SPELLING_NORMALIZATION_MAP[token];
+  }
+  // Lightweight inflection normalization
+  if (token.length > 4 && token.endsWith('ies')) {
+    token = `${token.slice(0, -3)}y`;
+  } else if (token.length > 4 && token.endsWith('ing')) {
+    token = token.slice(0, -3);
+  } else if (token.length > 4 && token.endsWith('es') && /(ch|sh|x|s|z)es$/.test(token)) {
+    token = token.slice(0, -2);
+  } else if (token.length > 3 && token.endsWith('s') && !token.endsWith('ss')) {
+    token = token.slice(0, -1);
+  }
+  return SPELLING_NORMALIZATION_MAP[token] || token;
+}
+
+export function extractSemanticTokens(text: string): string[] {
+  const rawTokens = text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s'-]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of rawTokens) {
+    const clean = normalizeMemoryToken(raw);
+    if (!clean || clean.length < 2 || STOP_WORDS.has(clean)) continue;
+    if (!seen.has(clean)) {
+      seen.add(clean);
+      normalized.push(clean);
+    }
+  }
+  return normalized;
+}
+
+export function isGreetingOrSmallTalk(rawQuery: string): boolean {
+  const cleaned = stripInternalMessageWrappers(String(rawQuery || ''))
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return true;
+  return GREETING_OR_SMALL_TALK_REGEX.test(cleaned);
+}
+
+export function isExplicitMemoryRecallQuery(rawQuery: string): boolean {
+  const cleaned = stripInternalMessageWrappers(String(rawQuery || ''))
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return false;
+  return EXPLICIT_MEMORY_RECALL_REGEX.test(cleaned);
+}
+
+export function isPersonalSelfReferenceQuery(rawQuery: string): boolean {
+  const cleaned = stripInternalMessageWrappers(String(rawQuery || ''))
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return false;
+  const withoutImperativeIdioms = cleaned.replace(IMPERATIVE_ME_IDIOM_REGEX, ' ').trim();
+  return PERSONAL_SELF_REFERENCE_REGEX.test(withoutImperativeIdioms);
+}
+
+export const MEMORY_BEHAVIOR_POLICY =
+  '[MEMORY USAGE POLICY]\n' +
+  '- Treat any saved user memory strictly as silent background context.\n' +
+  '- NEVER bring up, mention, or allude to saved memories or personal preferences during greetings (such as "Hello", "Hi", "Hey", "Good morning") or unrelated conversations.\n' +
+  '- NEVER announce that a memory was saved, updated, or retrieved unless the user explicitly asks about memory or asks what you remember about them.\n' +
+  '- Use relevant memory silently only when it directly answers the user\'s question or genuinely improves personalization.\n' +
+  '- Avoid repetitive references to saved memories across turns.';
+
+export function formatRelevantMemoryBlock(memoryContext: string, isExplicitRecall = false): string {
+  const trimmed = memoryContext.trim();
+  if (!trimmed) return '';
+  if (isExplicitRecall) {
+    return (
+      `[USER SAVED MEMORIES — EXPLICIT RECALL REQUEST]\n` +
+      `${trimmed}\n` +
+      `[INSTRUCTION: The user explicitly asked what you remember about them. Share only the relevant saved items clearly and naturally without inventing extra facts.]`
+    );
+  }
+  return (
+    `[SILENT USER MEMORY CONTEXT — USE ONLY IF DIRECTLY RELEVANT]\n` +
+    `${trimmed}\n` +
+    `[INSTRUCTION: Use this background context silently only if it directly answers the user's question or genuinely improves the reply. Do not volunteer unrelated preferences, do not announce that a memory was saved or retrieved, and do not repeat memory facts unnecessarily.]`
+  );
+}
+
+export function scoreMemoryRelevance(
+  record: MemoryRecord,
+  queryTokens: string[],
+  isPersonalQuery: boolean
+): number {
+  if (queryTokens.length === 0) return 0;
+
+  const keyTokens = new Set(extractSemanticTokens(record.key));
+  const valueTokens = new Set(extractSemanticTokens(record.value));
+  const recordGroups = new Set<number>();
+  for (const t of [...keyTokens, ...valueTokens]) {
+    const g = TOKEN_TO_SYNONYM_GROUP.get(t);
+    if (g !== undefined) recordGroups.add(g);
+  }
+
+  // Personal preferences & personal facts should NOT be injected into non-personal
+  // general-knowledge questions (e.g., "Tell me about Leon.").
+  const isPersonalPreferenceOrFact =
+    record.category === 'preference' || record.category === 'fact';
+  if (!isPersonalQuery && isPersonalPreferenceOrFact) {
+    return 0;
+  }
+
+  let score = 0;
+  let specificMatchCount = 0;
+
+  for (const qt of queryTokens) {
+    const isGeneric = GENERIC_QUALIFIER_TOKENS.has(qt);
+    if (keyTokens.has(qt)) {
+      score += isGeneric ? 1.0 : 3.5;
+      if (!isGeneric) specificMatchCount += 1;
+    } else if (valueTokens.has(qt)) {
+      score += isGeneric ? 0.6 : 2.2;
+      if (!isGeneric) specificMatchCount += 1;
+    } else {
+      const qGroup = TOKEN_TO_SYNONYM_GROUP.get(qt);
+      if (qGroup !== undefined && recordGroups.has(qGroup)) {
+        score += isGeneric ? 0.5 : 1.5;
+        if (!isGeneric) specificMatchCount += 1;
+      }
+    }
+  }
+
+  // Prevent generic words like "favorite" alone from pulling in unrelated favorites
+  // (e.g., "Who is my favourite character?" should not pull "Favourite color: Blue").
+  if (specificMatchCount === 0) {
+    return 0;
+  }
+
+  return score;
+}
 
 class LongTermMemoryService {
   private memoryCache = new Map<string, MemoryRecord[]>();
@@ -457,37 +670,53 @@ class LongTermMemoryService {
   }
 
   /**
-   * Retrieve relevant active memories formatted for prompt injection
+   * Retrieve semantically relevant active memories formatted for prompt injection.
+   * Never dumps unrelated memories into greetings, small talk, or unrelated questions.
    */
   public async getRelevantContext(userId: string, queryText = ''): Promise<string> {
     const records = (await this.getMemories(userId)).filter((r) => r.isEnabled);
     if (records.length === 0) return '';
 
-    let relevant: MemoryRecord[] = [];
-    if (queryText.trim()) {
-      const qTokens = queryText.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
-      relevant = records.filter((r) => {
-        const text = `${r.key} ${r.value} ${r.category}`.toLowerCase();
-        return qTokens.some((token) => text.includes(token));
-      });
+    const cleanedQuery = stripInternalMessageWrappers(queryText).trim();
+    if (!cleanedQuery) return '';
+
+    // 1. Never inject memories for simple greetings or casual small talk
+    if (isGreetingOrSmallTalk(cleanedQuery)) {
+      return '';
     }
 
-    // Always include recent enabled facts, preferences, and instructions so saved personal facts
-    // remain accessible even when phrasing/spelling differs (e.g. "favourite" vs "favorite").
-    const seen = new Set(relevant.map((r) => r.id));
-    for (const r of records) {
-      if (relevant.length >= 10) break;
-      if (!seen.has(r.id)) {
-        seen.add(r.id);
-        relevant.push(r);
-      }
+    // 2. Explicit memory recall ("What do you remember about me?", "List my saved memories")
+    if (isExplicitMemoryRecallQuery(cleanedQuery)) {
+      return records
+        .slice(0, 10)
+        .map((r) => `- [${r.category.toUpperCase()}] ${r.key}: ${r.value}`)
+        .join('\n');
     }
 
-    if (relevant.length === 0) return '';
+    // 3. When the user is explicitly saving/clearing a memory in this turn,
+    // do not dump unrelated older memories back into the prompt.
+    if (detectExplicitMemoryIntent(cleanedQuery).matched) {
+      return '';
+    }
 
-    return relevant
-      .slice(0, 10)
-      .map((r) => `- [${r.category.toUpperCase()}] ${r.key}: ${r.value}`)
+    // 4. Semantic relevance filtering based on normalized tokens & query intent
+    const queryTokens = extractSemanticTokens(cleanedQuery);
+    if (queryTokens.length === 0) return '';
+
+    const isPersonalQuery = isPersonalSelfReferenceQuery(cleanedQuery);
+    const scored = records
+      .map((record) => ({
+        record,
+        score: scoreMemoryRelevance(record, queryTokens, isPersonalQuery),
+      }))
+      .filter((entry) => entry.score >= 2.0)
+      .sort((a, b) => b.score - a.score);
+
+    if (scored.length === 0) return '';
+
+    return scored
+      .slice(0, 5)
+      .map(({ record }) => `- [${record.category.toUpperCase()}] ${record.key}: ${record.value}`)
       .join('\n');
   }
 

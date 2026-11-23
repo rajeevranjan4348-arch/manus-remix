@@ -1,12 +1,12 @@
-# Android app (Capacitor)
+# Deku AI — Android App (Capacitor)
 
-This repository now has a Capacitor Android wrapper configuration and an automated debug-APK build workflow. The web UI remains the same; Android is a native WebView shell around the built app.
+This repository has a Capacitor Android wrapper configuration and an automated debug-APK build workflow for **Deku AI**. The web UI remains the same; Android is a native WebView shell around the built app.
 
 ## Build an APK in GitHub Actions
 
 1. Open the repository's **Actions** tab.
 2. Run **Build Android APK**, or push a change to `main`.
-3. Download the `manus-remix-debug-apk` artifact from a successful run.
+3. Download the debug APK artifact from a successful run.
 4. Install the debug APK on your Android phone. Android may ask you to allow installation from the browser/file manager you used.
 
 The APK is a debug build for testing, not a Play Store release. A signed release needs a private signing key stored as GitHub Actions secrets; never commit signing keys.

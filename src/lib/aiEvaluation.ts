@@ -1,5 +1,5 @@
 /**
- * Automated AI Evaluation and Regression Test Engine for Manus AI
+ * Automated AI Evaluation and Regression Test Engine for Deku AI
  * 
  * Verifies answer relevance, source grounding, tool correctness,
  * conversation isolation, prompt injection safety, and error handling.
@@ -282,7 +282,7 @@ class AIEvaluationService {
         name: 'Skills System: JSON Formatter & Schema Validator',
         category: 'tool',
         run: async () => {
-          const validJson = JSON.stringify({ name: 'Manus', status: 'ready', tier: 1 });
+          const validJson = JSON.stringify({ name: 'Deku AI', status: 'ready', tier: 1 });
           const res = await skillsRegistry.executeSkill('skill_json_validator', {
             rawJson: validJson,
           });

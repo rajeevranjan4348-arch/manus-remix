@@ -1,4 +1,4 @@
-# scrcpy integration for Manus Remix
+# scrcpy integration for Deku AI
 
 This change prepares a safe integration boundary for the official **scrcpy** project; it does not bundle or relicense scrcpy binaries.
 
@@ -9,7 +9,7 @@ This change prepares a safe integration boundary for the official **scrcpy** pro
 
 ## Intended architecture
 
-`Manus Remix UI (unchanged) → authenticated Netlify/server API → private, user-operated scrcpy host bridge → ADB/scrcpy → explicitly paired Android device`
+`Deku AI UI (unchanged) → authenticated Netlify/server API → private, user-operated scrcpy host bridge → ADB/scrcpy → explicitly paired Android device`
 
 The host bridge must be installed and operated separately on a trusted computer or local network. Netlify functions cannot launch a native scrcpy process on the user's phone or access a user's USB device directly.
 
@@ -22,7 +22,7 @@ The server-side client in `server/android/scrcpy-bridge.ts` expects a separately
 - `DELETE /v1/sessions/:sessionId` to stop one
 - `POST /v1/sessions/:sessionId/input` for an explicitly approved input action
 
-These are Manus Remix adapter endpoints, **not** built-in scrcpy HTTP endpoints. Do not expose the bridge directly to the public internet. Put it behind TLS, authentication, device pairing, rate limits, and an allowlist. Keep its bearer token in server-side environment variables only.
+These are Deku AI adapter endpoints, **not** built-in scrcpy HTTP endpoints. Do not expose the bridge directly to the public internet. Put it behind TLS, authentication, device pairing, rate limits, and an allowlist. Keep its bearer token in server-side environment variables only.
 
 ## Safety and product requirements
 

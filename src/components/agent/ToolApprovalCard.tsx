@@ -70,7 +70,7 @@ export function ToolApprovalCard({
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Manus is requesting permission to execute:
+            Deku AI is requesting permission to execute:
           </p>
 
           <div className="p-2.5 rounded-xl bg-muted/40 text-foreground font-mono text-xs border border-border/40">

@@ -1,5 +1,5 @@
 /**
- * Android Companion & Capacitor Integration for Manus AI
+ * Android Companion & Capacitor Integration for Deku AI
  * 
  * Provides native Android permission requests, Intent dispatching
  * (App open, Share sheet, System settings), Scrcpy bridge integration,

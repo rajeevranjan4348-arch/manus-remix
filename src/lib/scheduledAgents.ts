@@ -1,5 +1,5 @@
 /**
- * Scheduled Agents Manager for Manus AI
+ * Scheduled Agents Manager for Deku AI
  * 
  * Provides persistent background agent schedules, intervals,
  * timezones, next-run calculations, pause/resume, and execution logging.

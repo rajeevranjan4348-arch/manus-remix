@@ -1,5 +1,5 @@
 /**
- * Read-only readiness endpoint for the Manus agent.
+ * Read-only readiness endpoint for the Deku AI agent.
  *
  * This reports configuration presence, not proof that a third-party service is healthy
  * or that a capability is fully implemented. It deliberately never returns secret values.

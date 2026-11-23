@@ -24,7 +24,7 @@ export function ManusLogo({ showBadge = false, onClick }: { showBadge?: boolean;
         <Logo size={16} />
       </div>
       <div className="flex items-center gap-2">
-        <span className="font-serif font-bold text-[#000000] dark:text-[#FFFFFF]">manus</span>
+        <span className="font-serif font-bold text-[#000000] dark:text-[#FFFFFF]">deku</span>
         {showBadge && (
           <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-[#F3F4F6] dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 border border-[#E5E5E5] dark:border-neutral-700">
             Lite
@@ -34,6 +34,8 @@ export function ManusLogo({ showBadge = false, onClick }: { showBadge?: boolean;
     </div>
   );
 }
+
+export const DekuLogo = ManusLogo;
 
 export function Logo({ className, size = 28, onClick }: { className?: string; size?: number; onClick?: (e: React.MouseEvent) => void }) {
   const id = React.useId().replace(/:/g, "");

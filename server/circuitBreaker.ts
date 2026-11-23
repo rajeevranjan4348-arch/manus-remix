@@ -261,7 +261,7 @@ The upstream AI provider is currently experiencing service disruptions or elevat
 
 **Actionable Steps:**
 1. ⏳ **Auto-Recovery**: The circuit breaker will automatically probe service recovery in **${remainingSec}s**.
-2. 🔄 **Retry Request**: Click **Retry Request** below. Manus will automatically route your request through secondary fallback synthesizers.
+2. 🔄 **Retry Request**: Click **Retry Request** below. Deku AI will automatically route your request through secondary fallback synthesizers.
 3. ⚡ **Switch Model**: Open **Settings** (⚙️) to select an alternative model (e.g. Gemini 3.1 Flash Lite) or configure a personal OpenRouter API key.
 4. 🛠️ **Reset Circuit**: Click the **Reset** button below to clear the active error state immediately.`;
     }

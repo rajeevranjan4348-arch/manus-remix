@@ -64,7 +64,7 @@ describe('Topbar Chat Session Export (PDF, Markdown, JSON)', () => {
     expect(md).toContain('## Execution Steps');
     expect(md).toContain('- [x] **Search global solar & wind capacity reports** _(completed)_');
     expect(md).toContain('### 1. User');
-    expect(md).toContain('### 2. Manus AI');
+    expect(md).toContain('### 2. Deku AI');
     expect(md).toContain('> **Thought Process:**');
     expect(md).toContain('> Analyzing IEA 2025 and 2026 solar and wind additions.');
     expect(md).toContain('Global renewable capacity additions increased by 18% in 2026');
@@ -93,7 +93,7 @@ describe('Topbar Chat Session Export (PDF, Markdown, JSON)', () => {
 
     const pdfText = new TextDecoder().decode(pdfBytes);
     expect(pdfText.startsWith('%PDF-1.4\n')).toBe(true);
-    expect(pdfText).toContain('MANUS AI - CHAT SESSION EXPORT');
+    expect(pdfText).toContain('DEKU AI - CHAT SESSION EXPORT');
     expect(pdfText).toContain('Compare renewable energy growth in 2025 vs 2026');
     expect(pdfText).toContain('Global renewable capacity additions increased by 18%');
     expect(pdfText).toContain('xref');

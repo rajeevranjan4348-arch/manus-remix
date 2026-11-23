@@ -1,0 +1,93 @@
+import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import {
+  resolveVerifiedModelConfig,
+  buildModelIdentityInstruction,
+  generateResilientResponse,
+  normalizeModel,
+} from '../server/geminiService';
+import { formatChatAsMarkdown } from '../src/lib/chatExport';
+
+const rootDir = process.cwd();
+const readText = (relPath: string) =>
+  fs.readFileSync(path.join(rootDir, relPath), 'utf8');
+
+describe('Global Rebranding Verification — Manus AI → Deku AI', () => {
+  it('updates HTML title, SEO metadata, PWA manifest, metadata.json, and Capacitor appName to Deku AI', () => {
+    const indexHtml = readText('index.html');
+    expect(indexHtml).toContain('<title>Deku AI</title>');
+    expect(indexHtml).toContain('content="Deku AI"');
+    expect(indexHtml).toContain('<link rel="manifest" href="/manifest.json" />');
+    expect(indexHtml).not.toContain('Manus AI');
+
+    const manifest = JSON.parse(readText('public/manifest.json'));
+    expect(manifest.name).toBe('Deku AI');
+    expect(manifest.short_name).toBe('Deku');
+    expect(manifest.display).toBe('standalone');
+    expect(manifest.start_url).toBe('/');
+
+    const metadata = JSON.parse(readText('metadata.json'));
+    expect(metadata.name).toBe('Deku AI');
+
+    const capacitorConfig = readText('capacitor.config.ts');
+    expect(capacitorConfig).toContain("appName: 'Deku AI'");
+    // Preserves Android package identifier for existing installations
+    expect(capacitorConfig).toContain("appId: 'com.rajeevranjan.manusremix'");
+  });
+
+  it('configures backend model identity and resilient responses as Deku AI while preserving legacy model aliases', async () => {
+    const verifiedLite = resolveVerifiedModelConfig('deku-1.6-lite');
+    expect(verifiedLite.applicationName).toBe('Deku AI');
+    expect(verifiedLite.modelId).toBe('gemini-3.1-flash-lite-preview');
+
+    const legacyLite = resolveVerifiedModelConfig('manus-1.6-lite');
+    expect(legacyLite.applicationName).toBe('Deku AI');
+    expect(legacyLite.modelId).toBe('gemini-3.1-flash-lite-preview');
+
+    expect(normalizeModel('deku-1.6-max')).toBe('gemini-3.1-pro-preview');
+    expect(normalizeModel('manus-1.6-max')).toBe('gemini-3.1-pro-preview');
+
+    const instruction = buildModelIdentityInstruction('deku-1.6-lite');
+    expect(instruction).toContain('Application / Workspace Agent Name: Deku AI');
+    expect(instruction).not.toContain('Application / Workspace Agent Name: Manus AI');
+
+    const identityReply = generateResilientResponse('Who are you?', [], 'deku-1.6-lite');
+    expect(identityReply).toContain('Deku AI');
+    expect(identityReply).not.toContain('Manus AI');
+  });
+
+  it('updates visible brand UI components (Logo, Topbar, WorkModeThinkingAnimation, SettingsModal) to Deku AI', () => {
+    const logoSrc = readText('src/components/layout/Logo.tsx');
+    expect(logoSrc).toContain('>deku</span>');
+    expect(logoSrc).toContain('export const DekuLogo = ManusLogo;');
+
+    const topbarSrc = readText('src/components/layout/Topbar.tsx');
+    expect(topbarSrc).toContain("name: 'Deku 1.6 Lite'");
+    expect(topbarSrc).toContain("name: 'Deku 1.6 Max'");
+    expect(topbarSrc).toContain('Deku is typing...');
+
+    const workThinkingSrc = readText('src/components/agent/WorkModeThinkingAnimation.tsx');
+    expect(workThinkingSrc).toContain("'Deku Deep Reasoning'");
+    expect(workThinkingSrc).toContain("'Deku AI is thinking'");
+
+    const settingsSrc = readText('src/components/settings/SettingsModal.tsx');
+    expect(settingsSrc).toContain('Deku AI Workspace');
+    expect(settingsSrc).toContain('Deku 1.6 Lite');
+    expect(settingsSrc).toContain('Deku 1.6 Max (2M)');
+  });
+
+  it('exports chat sessions with Deku AI branding', () => {
+    const markdown = formatChatAsMarkdown({
+      taskId: 'task_deku_1',
+      prompt: 'Architecture Review',
+      status: 'completed',
+      messages: [
+        { id: '1', role: 'user', content: 'Hello Deku' },
+        { id: '2', role: 'assistant', content: 'Hello! I am Deku AI.' },
+      ],
+    });
+    expect(markdown).toContain('### 2. Deku AI');
+    expect(markdown).not.toContain('Manus AI');
+  });
+});

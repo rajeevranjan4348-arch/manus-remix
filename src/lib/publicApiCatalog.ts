@@ -1,8 +1,8 @@
 /**
- * Curated public API directory for Manus Remix.
+ * Curated public API directory for Deku AI.
  *
  * The upstream public-apis/public-apis repository is a directory, not a single
- * API SDK. These entries are selected for Manus' existing research, Q&A,
+ * API SDK. These entries are selected for Deku AI's existing research, Q&A,
  * reports, and data-analysis workflows. Prefer keyless, HTTPS endpoints.
  *
  * Use these endpoints through the agent's existing fetch_url/web_search tools.

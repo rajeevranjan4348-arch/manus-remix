@@ -1,5 +1,5 @@
 /**
- * Durable Background Task Queue for Manus AI
+ * Durable Background Task Queue for Deku AI
  * 
  * Provides job queueing, state persistence, idempotency checking,
  * exponential backoff retries, cancellation, and execution recovery.

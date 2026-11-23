@@ -1,5 +1,5 @@
 /**
- * Persistent Knowledge Database & Research Cache for Manus Remix (RTIE)
+ * Persistent Knowledge Database & Research Cache for Deku AI (RTIE)
  *
  * Integrates with Firebase Firestore (`/users/{userId}/settings/knowledge_cache`)
  * and bounded localStorage to store:

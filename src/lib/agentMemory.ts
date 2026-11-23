@@ -1,9 +1,9 @@
 /**
- * Small, privacy-conscious preference memory for Manus.
+ * Small, privacy-conscious preference memory for Deku AI.
  *
- * Stores only messages that explicitly ask Manus to remember something.
+ * Stores only messages that explicitly ask Deku AI to remember something.
  * Data stays in this browser's localStorage and is scoped by the signed-in user ID.
- * It is not uploaded to a third-party service and can be cleared by asking Manus
+ * It is not uploaded to a third-party service and can be cleared by asking Deku AI
  * to "forget my saved memories".
  */
 export interface AgentMemoryEntry {

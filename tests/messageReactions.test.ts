@@ -108,4 +108,24 @@ describe('AI Message Hover Reactions (Thumbs Up/Down)', () => {
     expect(myAiChatSource).not.toContain('<MessageHoverReactions');
     expect(myAiChatSource).toContain('group/ai-message');
   });
+
+  it('adds BubbleReactionButtons (thumbs up/down) triggering animate-reaction-spring-pop on chat message bubbles', () => {
+    const bubbleCompPath = path.resolve(__dirname, '../src/components/agent/BubbleReactionButtons.tsx');
+    const chatViewPath = path.resolve(__dirname, '../src/components/agent/ChatView.tsx');
+    const myAiChatPath = path.resolve(__dirname, '../src/components/chat/MyAIChat.tsx');
+
+    const bubbleSource = fs.readFileSync(bubbleCompPath, 'utf-8');
+    const chatViewSource = fs.readFileSync(chatViewPath, 'utf-8');
+    const myAiChatSource = fs.readFileSync(myAiChatPath, 'utf-8');
+
+    expect(bubbleSource).toContain('data-testid="bubble-reaction-buttons"');
+    expect(bubbleSource).toContain('data-testid="bubble-reaction-thumbs-up"');
+    expect(bubbleSource).toContain('data-testid="bubble-reaction-thumbs-down"');
+    expect(bubbleSource).toContain('animate-reaction-spring-pop');
+    expect(bubbleSource).toContain('animate-reaction-icon-pop');
+    expect(bubbleSource).toContain('toggleMessageReaction');
+
+    expect(chatViewSource).toContain('<BubbleReactionButtons');
+    expect(myAiChatSource).toContain('<BubbleReactionButtons');
+  });
 });

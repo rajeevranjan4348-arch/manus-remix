@@ -52,27 +52,31 @@ describe('Response UI & Functionality Fixes (Global Audit)', () => {
   });
 
   describe('2. Verified Model Identification', () => {
-    it('resolves verified backend model configuration and distinguishes Manus application from underlying LLM', () => {
+    it('resolves verified backend model configuration and distinguishes Deku AI application from underlying LLM', () => {
       const defaultConfig = resolveVerifiedModelConfig('gemini-3.8-flash');
-      expect(defaultConfig.applicationName).toBe('Manus');
+      expect(defaultConfig.applicationName).toBe('Deku AI');
       expect(defaultConfig.modelId).toBe('gemini-3-flash-preview');
       expect(defaultConfig.provider).toBe('Google Gemini');
 
       const liteConfig = resolveVerifiedModelConfig('manus-1.6-lite');
-      expect(liteConfig.applicationName).toBe('Manus');
+      expect(liteConfig.applicationName).toBe('Deku AI');
       expect(liteConfig.modelId).toBe('gemini-3.1-flash-lite-preview');
       expect(liteConfig.provider).toBe('Google Gemini');
 
+      const dekuLiteConfig = resolveVerifiedModelConfig('deku-1.6-lite');
+      expect(dekuLiteConfig.applicationName).toBe('Deku AI');
+      expect(dekuLiteConfig.modelId).toBe('gemini-3.1-flash-lite-preview');
+
       const instruction = buildModelIdentityInstruction('gemini-3-flash-preview', 'Google Gemini');
-      expect(instruction).toContain('Application / Workspace Agent Name: Manus');
+      expect(instruction).toContain('Application / Workspace Agent Name: Deku AI');
       expect(instruction).toContain('Active Underlying LLM Model ID: gemini-3-flash-preview');
       expect(instruction).toContain('Model Provider: Google Gemini');
       expect(instruction).toContain('Never invent model names');
     });
 
-    it('identifies the actual underlying model and distinguishes Manus vs LLM when asked "Which model are you"', () => {
+    it('identifies the actual underlying model and distinguishes Deku AI vs LLM when asked "Which model are you"', () => {
       const reply = generateResilientResponse('Which model are you', [], 'gemini-3-flash-preview');
-      expect(reply).toContain('Manus');
+      expect(reply).toContain('Deku AI');
       expect(reply).toContain('gemini-3-flash-preview');
       expect(reply).toContain('Google Gemini');
       expect(reply).toContain('Application / Agent:');

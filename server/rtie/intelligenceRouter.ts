@@ -144,7 +144,7 @@ function isSimpleGreetingOrSelfIdentity(clean: string): boolean {
     return true;
   }
   if (
-    /\b(which\s+model\s+are\s+you|what\s+model\s+are\s+you|what\s+llm\s+are\s+you|which\s+llm\s+are\s+you|your\s+underlying\s+model|who\s+built\s+you|who\s+are\s+you|what\s+is\s+manus)\b/i.test(
+    /\b(which\s+model\s+are\s+you|what\s+model\s+are\s+you|what\s+llm\s+are\s+you|which\s+llm\s+are\s+you|your\s+underlying\s+model|who\s+built\s+you|who\s+are\s+you|what\s+is\s+(deku|manus))\b/i.test(
       clean
     ) &&
     !/\b(latest\s+gemini|newest\s+gemini|gemini\s+release|latest\s+openai|latest\s+claude|latest\s+ai\s+model)\b/i.test(

@@ -1,5 +1,5 @@
 /**
- * Observability, Tracing, and Diagnostics Engine for Manus AI
+ * Observability, Tracing, and Diagnostics Engine for Deku AI
  * 
  * Provides structured diagnostics, request IDs, latency metrics,
  * error taxonomy, secret redaction, and provider health checks.

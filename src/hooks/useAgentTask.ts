@@ -13,6 +13,9 @@ import { toast } from 'sonner';
 import {
   longTermMemory,
   detectExplicitMemoryIntent,
+  isExplicitMemoryRecallQuery,
+  formatRelevantMemoryBlock,
+  MEMORY_BEHAVIOR_POLICY,
   type MessageMemoryUpdate,
 } from '@/lib/longTermMemory';
 import { auth } from '@/lib/firebase';
@@ -467,7 +470,7 @@ export function useAgentTask() {
 
     if (taskStatus === 'running') {
       window.dispatchEvent(new CustomEvent('manus_agent_generating', {
-        detail: { isGenerating: true, mode: 'work', text: 'Manus is typing...' }
+        detail: { isGenerating: true, mode: 'work', text: 'Deku is typing...' }
       }));
       resetWatchdog();
       window.addEventListener('manus_stream_heartbeat', resetWatchdog);
@@ -511,6 +514,8 @@ export function useAgentTask() {
       }
     } catch {}
     const modelMap: Record<string, string> = {
+      'deku-1.6-lite': 'google/gemini-3.1-flash-lite',
+      'deku-1.6-max': 'google/gemini-3.1-pro-preview',
       'manus-1.6-lite': 'google/gemini-3.1-flash-lite',
       'manus-1.6-max': 'google/gemini-3.1-pro-preview',
       'gemini-3.1-pro-preview': 'google/gemini-3.1-pro-preview',
@@ -525,12 +530,12 @@ export function useAgentTask() {
 
     return new Agent({
       model: activeModel,
-      system: `You are Manus, a premium AI workspace agent. Your goal is to turn prompts, file uploads (CSV, Excel, PDF), or URLs into actionable data analyses, charts, and reports.
+      system: `You are Deku AI, a premium AI workspace agent. Your goal is to turn prompts, file uploads (CSV, Excel, PDF), or URLs into actionable data analyses, charts, and reports.
 
     VERIFIED MODEL & APPLICATION IDENTITY:
-    - Application / Workspace Agent Name: Manus
+    - Application / Workspace Agent Name: Deku AI
     - Active Underlying LLM Model: ${activeModel.replace(/^google\//, '')} (Provider: ${activeModel.startsWith('anthropic/') ? 'Anthropic' : 'Google Gemini'})
-    - When asked which model you are, what LLM you use, or about your architecture, always identify your actual underlying model (${activeModel.replace(/^google\//, '')}) and clearly distinguish between the application/agent name (Manus) and the underlying LLM model. Never invent model names, providers, or architectures.
+    - When asked which model you are, what LLM you use, or about your architecture, always identify your actual underlying model (${activeModel.replace(/^google\//, '')}) and clearly distinguish between the application/agent name (Deku AI) and the underlying LLM model. Never invent model names, providers, or architectures.
     
     Guidelines:
     1. When given file content or CSV data, ALWAYS parse it, analyze the context, compute statistics if numeric, and identify insights.
@@ -570,6 +575,8 @@ export function useAgentTask() {
     12. When the request is ambiguous but still answerable, choose the most likely interpretation and briefly state it. When interpretations would lead to materially different actions, ask a concise clarifying question.
 
     ${SUPPORT_ISSUE_RESPONSE_GUIDANCE}
+
+    ${MEMORY_BEHAVIOR_POLICY}
 
     Output Format Guide:
     - graph: Generate structured JSON with chart data (labels, datasets with values) AND include a "type" field (bar, line, pie, scatter, area, bubble) if 'auto' was requested.
@@ -834,14 +841,14 @@ export function useAgentTask() {
 
     if (typeof document !== 'undefined' && document.hidden && curSettings.enableBackgroundNotifications) {
       sendBackgroundNotification(
-        'Manus AI Agent',
+        'Deku AI Agent',
         `Task completed: ${cleanChatTitle(cleanedText)}`
       );
     }
 
     notificationDispatcher.dispatch({
       channel: 'task_completed',
-      title: 'Manus AI Agent',
+      title: 'Deku AI Agent',
       body: `Task completed: ${cleanChatTitle(cleanedText)}`,
       taskId: activeId || undefined,
       sound: curSettings.soundEffects,
@@ -856,7 +863,7 @@ export function useAgentTask() {
     sandbox: sandbox || undefined,
     onFinish: async (response) => {
       const reqId = activeRequestIdRef.current;
-      console.log('[Manus Agent] onFinish triggered for reqId:', reqId, response);
+      console.log('[Deku Agent] onFinish triggered for reqId:', reqId, response);
       clearStepTimers();
       markExistingSdkMessagesCompleted();
 
@@ -871,7 +878,7 @@ export function useAgentTask() {
 
       if (!text || isErrorFinish) {
         const errorContent = lastStreamErrorRef.current || (isErrorFinish && text ? text : "I didn't receive an answer from the AI service. Please try again.");
-        console.error('[Manus AI] Provider finished with error or empty text:', errorContent);
+        console.error('[Deku AI] Provider finished with error or empty text:', errorContent);
         finalizedRequestIdsRef.current.add(reqId);
         setActiveStreamContext(null);
         isSubmittingRef.current = false;
@@ -903,7 +910,7 @@ export function useAgentTask() {
     },
     onError: async (err) => {
       const reqId = activeRequestIdRef.current;
-      console.error('[Manus Agent] onError triggered:', err);
+      console.error('[Deku Agent] onError triggered:', err);
       clearStepTimers();
       markExistingSdkMessagesCompleted();
 
@@ -963,7 +970,7 @@ export function useAgentTask() {
     try {
       await agentSendMessageRef.current(promptText);
     } catch (sdkErr) {
-      console.warn('[Manus Agent] SDK sendMessage threw, checking direct stream fallback:', sdkErr);
+      console.warn('[Deku Agent] SDK sendMessage threw, checking direct stream fallback:', sdkErr);
     }
 
     if (activeRequestIdRef.current !== reqId || finalizedRequestIdsRef.current.has(reqId)) {
@@ -1159,6 +1166,8 @@ export function useAgentTask() {
       status: captureRes.persisted ? 'saved' : 'failed',
       action: captureRes.action || 'save',
       recordId: captureRes.record?.id,
+      memoryKey: captureRes.record?.key,
+      memoryValue: captureRes.record?.value,
       summary: captureRes.summary,
       error: captureRes.error,
       updatedAt: new Date().toISOString(),
@@ -1217,18 +1226,22 @@ export function useAgentTask() {
       try {
         const memoryContext = await longTermMemory.getRelevantContext(activeUserId, prompt);
         if (memoryContext) {
+          const isExplicitRecall = isExplicitMemoryRecallQuery(prompt);
           if (activeActivityTaskId) {
             agentActivityTracker.ingestEvent({
               taskId: activeActivityTaskId,
-              title: 'Loaded saved user context from memory',
-              description: 'Retrieved matching preferences and factual memory entries',
+              title: 'Loaded relevant user context from memory',
+              description: 'Retrieved semantically matching preferences and factual memory entries',
               toolName: 'long_term_memory',
               status: 'COMPLETED',
               category: 'database',
               resultSummary: 'Injected relevant user memory context',
             }, false);
           }
-          enriched += `\n\n[USER SAVED PREFERENCES & FACTUAL MEMORY]:\n${memoryContext}`;
+          const formattedMemory = formatRelevantMemoryBlock(memoryContext, isExplicitRecall);
+          if (formattedMemory) {
+            enriched += `\n\n${formattedMemory}`;
+          }
         }
       } catch {}
 
@@ -1483,12 +1496,12 @@ export function useAgentTask() {
   const sendMessage = useCallback((content: string) => {
     if (!content || !content.trim()) return;
     if (isSubmittingRef.current) {
-      console.warn('[Manus Agent] Ignored submission while a request is still active.');
+      console.warn('[Deku Agent] Ignored submission while a request is still active.');
       return;
     }
     const now = Date.now();
     if (taskStatus !== 'error' && lastSubmitRef.current.prompt === content.trim() && now - lastSubmitRef.current.timestamp < 1200) {
-      console.warn('[Manus Agent] Suppressed duplicate rapid submission:', content);
+      console.warn('[Deku Agent] Suppressed duplicate rapid submission:', content);
       return;
     }
     lastSubmitRef.current = { prompt: content.trim(), timestamp: now };
@@ -1640,7 +1653,7 @@ export function useAgentTask() {
         await executeReliableAgentTurn(preparedPrompt, reqId);
       } catch (error) {
         if (activeRequestIdRef.current !== reqId) return;
-        console.error('[Manus AI] Failed to send chat message:', error);
+        console.error('[Deku AI] Failed to send chat message:', error);
         finalizedRequestIdsRef.current.add(reqId);
         setActiveStreamContext(null);
         setTaskStatus('error');
@@ -1707,12 +1720,12 @@ export function useAgentTask() {
   const startTask = useCallback(async (prompt: string, options: any = {}) => {
     if (!prompt || !prompt.trim()) return null;
     if (isSubmittingRef.current) {
-      console.warn('[Manus Agent] Ignored startTask while a request is still active.');
+      console.warn('[Deku Agent] Ignored startTask while a request is still active.');
       return currentTaskIdRef.current;
     }
     const now = Date.now();
     if (taskStatus !== 'error' && lastSubmitRef.current.prompt === prompt.trim() && now - lastSubmitRef.current.timestamp < 1200) {
-      console.warn('[Manus Agent] Suppressed duplicate rapid startTask:', prompt);
+      console.warn('[Deku Agent] Suppressed duplicate rapid startTask:', prompt);
       return currentTaskIdRef.current;
     }
     lastSubmitRef.current = { prompt: prompt.trim(), timestamp: now };
@@ -1986,7 +1999,7 @@ export function useAgentTask() {
       }
     } catch (error) {
       if (activeRequestIdRef.current === reqId) {
-        console.error('[Manus AI] Failed to start generation:', error);
+        console.error('[Deku AI] Failed to start generation:', error);
         finalizedRequestIdsRef.current.add(reqId);
         setActiveStreamContext(null);
         setTaskStatus('error');

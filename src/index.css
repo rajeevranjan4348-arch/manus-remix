@@ -1303,7 +1303,7 @@
 }
 
 
-/* Manus Remix: Ultra-Smooth 120fps Spring Physics & GPU Motion System */
+/* Deku AI: Ultra-Smooth 120fps Spring Physics & GPU Motion System */
 :root {
   --manus-motion-fast: 160ms;
   --manus-motion-normal: 240ms;
@@ -2299,7 +2299,7 @@ select,
   background-image: none !important;
 }
 
-/* Minimal ChatGPT-style "Memory updated" confirmation animation */
+/* Deku AI minimal "Memory updated" confirmation & profile highlight animation */
 @keyframes memory-updated-fade-slide {
   from {
     opacity: 0;
@@ -2322,6 +2322,62 @@ select,
   }
 }
 
+@keyframes memory-highlight-reveal {
+  0% {
+    opacity: 0;
+    transform: translate3d(-6px, 4px, 0) scale(0.97);
+  }
+  65% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1.012);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes memory-highlight-sheen {
+  0% {
+    opacity: 0;
+    transform: translate3d(-130%, 0, 0) skewX(-18deg);
+  }
+  20% {
+    opacity: 0.7;
+  }
+  80% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(240%, 0, 0) skewX(-18deg);
+  }
+}
+
+@keyframes memory-highlight-border-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(0, 0, 0, 0);
+  }
+  40% {
+    box-shadow: 0 0 0 2px rgba(23, 23, 23, 0.14);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 0, 0, 0);
+  }
+}
+
+@keyframes memory-highlight-border-glow-dark {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+  40% {
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.18);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+}
+
 .memory-updated-enter {
   animation: memory-updated-fade-slide 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
@@ -2330,12 +2386,59 @@ select,
   animation: memory-book-scale-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+.memory-highlight-enter {
+  animation:
+    memory-highlight-reveal 440ms cubic-bezier(0.22, 1, 0.36, 1) 90ms both,
+    memory-highlight-border-glow 1400ms cubic-bezier(0.22, 1, 0.36, 1) 180ms 1 both;
+}
+
+.dark .memory-highlight-enter {
+  animation:
+    memory-highlight-reveal 440ms cubic-bezier(0.22, 1, 0.36, 1) 90ms both,
+    memory-highlight-border-glow-dark 1400ms cubic-bezier(0.22, 1, 0.36, 1) 180ms 1 both;
+}
+
+.memory-highlight-sheen {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(0, 0, 0, 0.065) 45%,
+    rgba(0, 0, 0, 0.11) 50%,
+    rgba(0, 0, 0, 0.065) 55%,
+    transparent 100%
+  );
+  animation: memory-highlight-sheen 1100ms cubic-bezier(0.22, 1, 0.36, 1) 240ms 1 both;
+}
+
+.dark .memory-highlight-sheen {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.09) 45%,
+    rgba(255, 255, 255, 0.18) 50%,
+    rgba(255, 255, 255, 0.09) 55%,
+    transparent 100%
+  );
+}
+
 @media (prefers-reduced-motion: reduce) {
   .memory-updated-enter,
-  .memory-book-icon-enter {
+  .memory-book-icon-enter,
+  .memory-highlight-enter,
+  .memory-highlight-sheen {
     animation: none !important;
     transform: none !important;
+    box-shadow: none !important;
   }
+}
+
+[data-perf-mode="ultra-lite"] .memory-updated-enter,
+[data-perf-mode="ultra-lite"] .memory-book-icon-enter,
+[data-perf-mode="ultra-lite"] .memory-highlight-enter,
+[data-perf-mode="ultra-lite"] .memory-highlight-sheen {
+  animation: none !important;
+  transform: none !important;
+  box-shadow: none !important;
 }
 
 /* Futuristic AI Voice Call Mode — GPU-compositor-only orb & microphone animations */

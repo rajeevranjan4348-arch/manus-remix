@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 
 export async function getOrCreateUser(uid: string, email: string, displayName?: string | null) {
   try {
-    const safeEmail = email || `${uid}@manus.user`;
+    const safeEmail = email || `${uid}@deku.user`;
     const result = await db
       .insert(users)
       .values({

@@ -35,6 +35,7 @@ import { MarkdownRenderer } from './MarkdownRenderer';
 import { FileAttachments } from './FileAttachments';
 import { AttachmentMenu } from '../chat/AttachmentMenu';
 import { ConversationActionBar } from './ConversationActionBar';
+import { BubbleReactionButtons } from './BubbleReactionButtons';
 import { VoiceInputButton, formatSpeechAutoFill } from '../voice/VoiceInputButton';
 import { VoiceTranscriptionIndicator } from '../voice/VoiceTranscriptionIndicator';
 import { SourceCitations, parseSourcesFromMarkdown, resolveMessageSourcesAndQueries } from './SourceCitations';
@@ -1125,18 +1126,24 @@ export function ChatView({
                 </div>
               </div>
             ) : (
-              <div className="relative flex items-center gap-2 max-w-[85%] sm:max-w-[75%]">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingMessageId(msgId);
-                    setEditInputContent(cleanedText);
-                  }}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-full bg-card/80 hover:bg-card border border-border shadow-xs text-muted-foreground hover:text-foreground shrink-0"
-                  title="Edit prompt"
-                >
-                  <Pencil size={13} />
-                </button>
+              <div className="relative flex items-center gap-1.5 max-w-[85%] sm:max-w-[75%]">
+                <div className="flex items-center gap-1 shrink-0">
+                  <BubbleReactionButtons
+                    messageId={`user-${msgId}`}
+                    groupScope="user"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingMessageId(msgId);
+                      setEditInputContent(cleanedText);
+                    }}
+                    className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity p-1.5 rounded-full bg-card/80 hover:bg-card border border-border shadow-xs text-muted-foreground hover:text-foreground shrink-0"
+                    title="Edit prompt"
+                  >
+                    <Pencil size={13} />
+                  </button>
+                </div>
                 <div
                   data-testid="user-message-bubble"
                   className={cn(
@@ -1255,7 +1262,7 @@ export function ChatView({
                 type="calendar_event"
                 data={{
                   summary: 'Team Sync & Project Discussion',
-                  description: 'Scheduled via Manus Workspace AI Assistant',
+                  description: 'Scheduled via Deku Workspace AI Assistant',
                   startDateTime: new Date(Date.now() + 86400000).toISOString(),
                   endDateTime: new Date(Date.now() + 90000000).toISOString(),
                 }}
@@ -1268,7 +1275,7 @@ export function ChatView({
                 type="gmail_draft"
                 data={{
                   subject: 'Project Status & Follow-up',
-                  body: 'Hi Team,\n\nHere is the updated summary and action items discussed in our current session.\n\nBest regards,\nManus AI',
+                  body: 'Hi Team,\n\nHere is the updated summary and action items discussed in our current session.\n\nBest regards,\nDeku AI',
                 }}
               />
             )}
@@ -1310,7 +1317,7 @@ export function ChatView({
               <WorkspaceToolCard
                 type="google_meet"
                 data={{
-                  summary: 'Manus Video Meeting',
+                  summary: 'Deku Video Meeting',
                   startDateTime: new Date().toISOString(),
                   endDateTime: new Date(Date.now() + 3600000).toISOString(),
                 }}
@@ -1323,7 +1330,7 @@ export function ChatView({
                 type="google_task"
                 data={{
                   title: 'Follow-up Task',
-                  notes: 'Created via Manus Assistant',
+                  notes: 'Created via Deku Assistant',
                 }}
               />
             )}

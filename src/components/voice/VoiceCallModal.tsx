@@ -28,7 +28,12 @@ import { speakCleanHumanVoice, stopCleanSpeech } from '@/lib/speechSynthesis';
 import { createConversation, saveMessage } from '@/lib/chatDatabase';
 import { getFirebaseAuthorizationHeader } from '@/lib/firebaseAuthorization';
 import { auth } from '@/lib/firebase';
-import { longTermMemory } from '@/lib/longTermMemory';
+import {
+  longTermMemory,
+  isExplicitMemoryRecallQuery,
+  formatRelevantMemoryBlock,
+  MEMORY_BEHAVIOR_POLICY,
+} from '@/lib/longTermMemory';
 import { requestMicrophonePermission } from '@/lib/permissionsManager';
 import { getActivePerformanceProfile } from '@/lib/performanceEngine';
 import { MicrophonePermissionModal } from './MicrophonePermissionModal';
@@ -581,9 +586,12 @@ export function VoiceCallModal({
         const historyPayload = buildBackendHistory(query);
 
         const baseSystemInstruction =
-          'You are a warm, intelligent AI voice assistant in a live full-screen voice call. Give concise, natural, clear spoken responses in 2 to 4 sentences without markdown tables, code fences, or bullet symbols. Respond directly to the user.';
-        const systemInstruction = memoryContext
-          ? `${baseSystemInstruction}\n\n${memoryContext}`
+          `You are Deku AI, a warm, intelligent AI voice assistant in a live full-screen voice call. Give concise, natural, clear spoken responses in 2 to 4 sentences without markdown tables, code fences, or bullet symbols. Respond directly to the user.\n\n${MEMORY_BEHAVIOR_POLICY}`;
+        const formattedMemory = memoryContext
+          ? formatRelevantMemoryBlock(memoryContext, isExplicitMemoryRecallQuery(query))
+          : '';
+        const systemInstruction = formattedMemory
+          ? `${baseSystemInstruction}\n\n${formattedMemory}`
           : baseSystemInstruction;
 
         const response = await fetch('/api/gemini/stream', {

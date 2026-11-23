@@ -1,5 +1,5 @@
 /**
- * Scheduled task intent parsing and time validation for Manus.
+ * Scheduled task intent parsing and time validation for Deku AI.
  *
  * This module deliberately does not create timers in a serverless process:
  * callers must persist accepted tasks and deliver them through a durable

@@ -46,7 +46,7 @@ async function queryWikipediaAndCommonsForVerifiedEntity(
       query
     )}&gsrlimit=5&prop=pageimages|info|description&inprop=url&pithumbsize=720`;
     const res = await fetch(wikiUrl, {
-      headers: { 'User-Agent': 'ManusAI/2.0 (VisualAnswerEngine)' },
+      headers: { 'User-Agent': 'DekuAI/2.0 (VisualAnswerEngine)' },
       signal: AbortSignal.timeout(4500),
     });
     if (res.ok) {
@@ -99,7 +99,7 @@ async function queryWikipediaAndCommonsForVerifiedEntity(
         const mediaRes = await fetch(
           `https://en.wikipedia.org/api/rest_v1/page/media-list/${encodedTitle}`,
           {
-            headers: { 'User-Agent': 'ManusAI/2.0 (VisualAnswerEngine)' },
+            headers: { 'User-Agent': 'DekuAI/2.0 (VisualAnswerEngine)' },
             signal: AbortSignal.timeout(4000),
           }
         );
@@ -147,7 +147,7 @@ async function queryWikipediaAndCommonsForVerifiedEntity(
         `filetype:bitmap "${query}"`
       )}&gsrnamespace=6&gsrlimit=8&prop=imageinfo&iiprop=url|dimensions|extmetadata&iiurlwidth=720`;
       const commonsRes = await fetch(commonsUrl, {
-        headers: { 'User-Agent': 'ManusAI/2.0 (VisualAnswerEngine)' },
+        headers: { 'User-Agent': 'DekuAI/2.0 (VisualAnswerEngine)' },
         signal: AbortSignal.timeout(4500),
       });
       if (commonsRes.ok) {

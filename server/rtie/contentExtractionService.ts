@@ -186,7 +186,7 @@ export async function fetchAndExtractWebPage(
     const res = await fetch(targetUrl, {
       method: 'GET',
       headers: {
-        'User-Agent': 'Manus-RTIE-ResearchBot/1.0 (+https://manus.im)',
+        'User-Agent': 'Deku-RTIE-ResearchBot/1.0 (+https://deku.ai)',
         Accept: 'text/html,application/xhtml+xml,application/json,text/plain;q=0.9',
       },
       redirect: 'follow',

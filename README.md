@@ -1,4 +1,4 @@
-# Manus AI Agent Clone (Manus Remix)
+# Deku AI
 
 A powerful autonomous AI agent workspace built with React, Vite, TypeScript, and Tailwind CSS. Features multi-step reasoning, real-time research, data analysis, interactive previews, multimodal capabilities, and an integrated tool execution framework.
 

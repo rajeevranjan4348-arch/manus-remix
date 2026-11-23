@@ -1,5 +1,5 @@
 /**
- * User Approval and Permissions Manager for Manus AI
+ * User Approval and Permissions Manager for Deku AI
  * 
  * Provides unified confirmation mechanisms for sensitive/destructive operations
  * (file deletions, git pushes, code execution, external webhooks, device actions).

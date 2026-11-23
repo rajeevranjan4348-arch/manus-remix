@@ -684,13 +684,13 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   return (
     <div ref={containerRef} className="w-full h-full overflow-y-auto overscroll-y-contain flex flex-col items-center px-4 py-6 sm:px-6 md:py-10 bg-manus-cream dark:bg-background">
       <div className="w-full max-w-4xl space-y-5 sm:space-y-7 my-auto">
-        <div className="flex flex-col items-center animate-on-load" aria-label="Manus AI robot assistant">
+        <div className="flex flex-col items-center animate-on-load" aria-label="Deku AI robot assistant">
           <div
             className="relative shrink-0 cursor-pointer select-none manus-hero-float"
             onClick={handleRobotTap}
             role="button"
             tabIndex={0}
-            aria-label="Manus robot. Tap three times to toggle India time."
+            aria-label="Deku robot. Tap three times to toggle India time."
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
@@ -711,7 +711,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
               antenna={robotAntenna}
               floorShadow={robotFloorShadow}
               seed={robotSeed}
-              aria-label={`Manus AI robot assistant, ${effectiveRobotState}`}
+              aria-label={`Deku AI robot assistant, ${effectiveRobotState}`}
               data-hero-robot-shape={robotShape}
               data-robot-state={effectiveRobotState}
               className={`shrink-0 transform transition-transform manus-hero-robot-gloss ${robotPaused ? '' : 'manus-hero-robot-breathe'} ${showIndiaClock ? 'opacity-20' : ''}`}

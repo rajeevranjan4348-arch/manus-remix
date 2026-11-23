@@ -8,8 +8,15 @@ import { getFirebaseAuthorizationHeader } from '@/lib/firebaseAuthorization';
 import { speakCleanHumanVoice } from '@/lib/speechSynthesis';
 import { hasActiveTextSelection } from '@/lib/clipboard';
 import { auth } from '@/lib/firebase';
-import { longTermMemory, type MessageMemoryUpdate } from '@/lib/longTermMemory';
+import {
+  longTermMemory,
+  isExplicitMemoryRecallQuery,
+  formatRelevantMemoryBlock,
+  MEMORY_BEHAVIOR_POLICY,
+  type MessageMemoryUpdate,
+} from '@/lib/longTermMemory';
 import { ConversationActionBar } from '../agent/ConversationActionBar';
+import { BubbleReactionButtons } from '../agent/BubbleReactionButtons';
 import { MemoryUpdatedIndicator } from '../agent/MemoryUpdatedIndicator';
 import { MarkdownRenderer } from '../agent/MarkdownRenderer';
 
@@ -303,6 +310,8 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
           status: captureRes.persisted ? 'saved' : 'failed',
           action: captureRes.action || 'save',
           recordId: captureRes.record?.id,
+          memoryKey: captureRes.record?.key,
+          memoryValue: captureRes.record?.value,
           summary: captureRes.summary,
           error: captureRes.error,
           updatedAt: new Date().toISOString(),
@@ -314,13 +323,21 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
       }
 
       const memoryContext = await longTermMemory.getRelevantContext(activeUserId, query).catch(() => '');
-      const payloadMessages = updatedMessages.map((m, i) => ({
+      const payloadMessages = updatedMessages.map((m) => ({
         role: m.role,
-        content:
-          i === updatedMessages.length - 1 && memoryContext
-            ? `${m.content}\n\n[USER SAVED PREFERENCES & FACTUAL MEMORY]:\n${memoryContext}`
-            : m.content,
+        content: m.content,
       }));
+
+      const formattedMemory = memoryContext
+        ? formatRelevantMemoryBlock(memoryContext, isExplicitMemoryRecallQuery(query))
+        : '';
+      const systemInstruction = [
+        'You are Deku AI, an intelligent, natural, and helpful conversational assistant. Respond directly and warmly to the user.',
+        MEMORY_BEHAVIOR_POLICY,
+        formattedMemory,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
 
       const authorization = await getFirebaseAuthorizationHeader();
       if (!authorization) {
@@ -331,6 +348,7 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
       const requestBody = JSON.stringify({
         requestId: requestIdStr,
         messages: payloadMessages,
+        systemInstruction,
         model: 'gemini-3-flash-preview',
       });
       const endpoints = ['/api/gemini/stream', '/.netlify/functions/agent'];
@@ -512,30 +530,38 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
               <React.Fragment key={msg.id || `myai-${msg.role}-${index}`}>
                 <div
                   className={`flex w-full animate-in fade-in duration-200 ${
-                    msg.role === 'user' ? 'justify-end' : 'justify-start group/ai-message relative'
+                    msg.role === 'user' ? 'justify-end group relative' : 'justify-start group/ai-message relative'
                   }`}
                 >
-                  <div className="flex flex-col items-start max-w-[88%] sm:max-w-[82%] gap-1">
-                    <div
-                      className={`w-full px-4 py-3 rounded-[18px] text-[15px] leading-relaxed break-words whitespace-pre-wrap select-text ${
-                        msg.role === 'user'
-                          ? 'bg-muted/80 dark:bg-card border border-border text-foreground rounded-br-xs'
-                          : 'bg-transparent text-foreground rounded-bl-xs'
-                      }`}
-                    >
-                      {msg.content ? (
-                        msg.role === 'assistant' && msg.content.includes('```') ? (
-                          <MarkdownRenderer content={msg.content} />
-                        ) : (
-                          msg.content
-                        )
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-muted-foreground">
-                          <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce [animation-delay:-0.3s]" />
-                          <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce [animation-delay:-0.15s]" />
-                          <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce" />
-                        </span>
+                  <div className={`flex flex-col max-w-[88%] sm:max-w-[82%] gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                    <div className={msg.role === 'user' ? 'flex items-center gap-1.5 max-w-full' : 'w-full'}>
+                      {msg.role === 'user' && msg.content && (
+                        <BubbleReactionButtons
+                          messageId={msg.id ? `myai-user-${msg.id}` : `myai-user-msg-${index}`}
+                          groupScope="user"
+                        />
                       )}
+                      <div
+                        className={`w-full px-4 py-3 rounded-[18px] text-[15px] leading-relaxed break-words whitespace-pre-wrap select-text ${
+                          msg.role === 'user'
+                            ? 'bg-muted/80 dark:bg-card border border-border text-foreground rounded-br-xs'
+                            : 'bg-transparent text-foreground rounded-bl-xs'
+                        }`}
+                      >
+                        {msg.content ? (
+                          msg.role === 'assistant' && msg.content.includes('```') ? (
+                            <MarkdownRenderer content={msg.content} />
+                          ) : (
+                            msg.content
+                          )
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-muted-foreground">
+                            <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce [animation-delay:-0.3s]" />
+                            <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce [animation-delay:-0.15s]" />
+                            <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce" />
+                          </span>
+                        )}
+                      </div>
                     </div>
                     {msg.role === 'assistant' && msg.content && (
                       <div className="pl-3">

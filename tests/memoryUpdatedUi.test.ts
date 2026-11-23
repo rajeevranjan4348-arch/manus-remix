@@ -5,6 +5,7 @@ import {
   detectExplicitMemoryIntent,
   longTermMemory,
 } from '../src/lib/longTermMemory';
+import { formatMemoryHighlight } from '../src/components/agent/MemoryUpdatedIndicator';
 
 const rootDir = path.resolve(__dirname, '..');
 const readFile = (relPath: string) => fs.readFileSync(path.join(rootDir, relPath), 'utf8');
@@ -198,6 +199,69 @@ describe('ChatGPT-style Memory Updated UI & Long-Term Memory Persistence', () =>
       const callCount = (hook.match(/await captureAndAttachUserMemory\(/g) || []).length;
       expect(callCount).toBe(2); // Both sendMessage and startTask
       expect(hook).toContain('...(m.metadata ? { metadata: m.metadata } : {})');
+      expect(hook).toContain('memoryKey: captureRes.record?.key');
+      expect(hook).toContain('memoryValue: captureRes.record?.value');
+    });
+
+    it('highlights the specific memory added to the Deku AI profile with entrance & sheen animation and clean formatting', () => {
+      const cleaned = formatMemoryHighlight({
+        status: 'saved',
+        action: 'save',
+        memoryKey: 'Favourite character',
+        memoryValue: 'my favourite character is leon',
+        summary: 'Favourite character: my favourite character is leon',
+        updatedAt: new Date().toISOString(),
+        isFresh: true,
+      });
+      expect(cleaned).toEqual({
+        key: 'Favourite character',
+        value: 'leon',
+      });
+
+      const fromSummaryOnly = formatMemoryHighlight({
+        status: 'saved',
+        action: 'save',
+        summary: 'Timezone: IST (Asia/Kolkata)',
+        updatedAt: new Date().toISOString(),
+        isFresh: false,
+      });
+      expect(fromSummaryOnly).toEqual({
+        key: 'Timezone',
+        value: 'IST (Asia/Kolkata)',
+      });
+
+      const cleared = formatMemoryHighlight({
+        status: 'saved',
+        action: 'clear',
+        summary: 'Cleared saved memories',
+        updatedAt: new Date().toISOString(),
+        isFresh: true,
+      });
+      expect(cleared).toEqual({ value: 'Profile memories cleared' });
+
+      const failed = formatMemoryHighlight({
+        status: 'failed',
+        action: 'save',
+        error: 'Storage full',
+        updatedAt: new Date().toISOString(),
+        isFresh: true,
+      });
+      expect(failed).toBeNull();
+
+      const source = readFile('src/components/agent/MemoryUpdatedIndicator.tsx');
+      expect(source).toContain('data-testid="memory-updated-highlight"');
+      expect(source).toContain('data-testid="memory-updated-sheen"');
+      expect(source).toContain('memory-highlight-enter');
+      expect(source).toContain('memory-highlight-sheen');
+      expect(source).toContain('Deku AI');
+      expect(source).not.toMatch(/Manus/i);
+
+      const css = readFile('src/index.css');
+      expect(css).toContain('@keyframes memory-highlight-reveal');
+      expect(css).toContain('@keyframes memory-highlight-sheen');
+      expect(css).toContain('@keyframes memory-highlight-border-glow');
+      expect(css).toContain('.memory-highlight-enter');
+      expect(css).toContain('.memory-highlight-sheen');
     });
   });
 });

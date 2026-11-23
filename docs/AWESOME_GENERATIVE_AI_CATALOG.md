@@ -1,4 +1,4 @@
-# Awesome Generative AI catalog imported into Manus Remix
+# Awesome Generative AI catalog imported into Deku AI
 
 This directory vendors the source files from [steven2358/awesome-generative-ai](https://github.com/steven2358/awesome-generative-ai) as a reference catalog.
 
@@ -6,7 +6,7 @@ This directory vendors the source files from [steven2358/awesome-generative-ai](
 
 - A curated index of generative-AI tools and resources across text, coding, agents, image, video, audio, and learning.
 - The upstream discoveries and archive lists.
-- Upstream contribution, citation, license, and link-check workflow files, kept under the vendor directory so they do not replace Manus Remix's own GitHub workflows.
+- Upstream contribution, citation, license, and link-check workflow files, kept under the vendor directory so they do not replace Deku AI's own GitHub workflows.
 
 ## Integration boundary
 

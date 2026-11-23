@@ -20,7 +20,6 @@ import {
   Plug,
   Cloud,
   LogIn,
-  LogOut,
   User as UserIcon,
   Bookmark,
   Shield,
@@ -51,7 +50,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { useBlinkAuth } from '@blinkdotnew/react';
 import { useFirebase } from '@/context/FirebaseContext';
 import { blink } from '@/lib/blink';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { getMessages, renameConversation } from '@/lib/chatDatabase';
 import { exportChatSession, ChatExportFormat } from '@/lib/chatExport';
@@ -92,6 +91,7 @@ interface SidebarProps {
   activeTaskId?: string;
   onOpenHistory?: () => void;
   onOpenSettings?: () => void;
+  isSettingsActive?: boolean;
 }
 
 interface TaskHistory {
@@ -194,7 +194,7 @@ function groupTasksByTime(tasks: TaskHistory[]): { group: string; items: TaskHis
     .map(([group, items]) => ({ group, items }));
 }
 
-export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHistory, onOpenSettings }: SidebarProps) {
+export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHistory, onOpenSettings, isSettingsActive }: SidebarProps) {
   const [activeTab, setActiveTab] = React.useState('new');
   const [tasks, setTasks] = useState<TaskHistory[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -220,8 +220,12 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
   const [showAllProjects, setShowAllProjects] = useState(false);
 
   const { isAuthenticated, user } = useBlinkAuth();
-  const { user: fbUser, signInWithGoogle, signOut: fbSignOut } = useFirebase();
+  const { user: fbUser, signInWithGoogle } = useFirebase();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isSettingsRouteActive = Boolean(
+    isSettingsActive || isSettingsOpen || location.pathname.startsWith('/settings')
+  );
 
   useEffect(() => {
     loadTasks();
@@ -436,6 +440,15 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
     return groupTasksByTime(filteredTasks);
   }, [filteredTasks]);
 
+  const handleOpenSettingsNavigation = () => {
+    setActiveTab('settings');
+    if (onOpenSettings) {
+      onOpenSettings();
+    } else {
+      setIsSettingsOpen(true);
+    }
+  };
+
   const navItems = [
     { id: 'new', label: 'New Chat', icon: MessageSquarePlus, action: onNewTask },
     { 
@@ -450,15 +463,6 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
       label: 'Tag Analytics',
       icon: BarChart3,
       action: () => setIsTagAnalyticsOpen(true)
-    },
-    { 
-      id: 'settings', 
-      label: 'Settings', 
-      icon: Settings2,
-      action: () => {
-        if (onOpenSettings) onOpenSettings();
-        else setIsSettingsOpen(true);
-      }
     },
   ];
 
@@ -591,33 +595,48 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
           })}
         </div>
 
-        {/* Firebase Cloud Sync Icon in Collapsed View */}
-        <div className="mt-auto mb-2 flex flex-col items-center">
+        {/* Settings & Account Footer in Collapsed View */}
+        <div className="mt-auto mb-2 flex flex-col items-center gap-2">
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={fbUser ? () => fbSignOut() : () => signInWithGoogle()}
-                  className="manus-touch-target w-11 h-11 sm:w-9 sm:h-9 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 rounded-xl flex items-center justify-center transition-all cursor-pointer bg-white/80 dark:bg-card border border-border/80 hover:border-foreground/30 shadow-xs"
-                >
-                  {fbUser ? (
-                    fbUser.photoURL ? (
-                      <img src={fbUser.photoURL} alt="" className="w-7 h-7 rounded-full object-cover" />
-                    ) : (
-                      <div className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-xs">
-                        {(fbUser.displayName || fbUser.email || 'U')[0].toUpperCase()}
-                      </div>
-                    )
-                  ) : (
-                    <Cloud size={18} className="text-muted-foreground hover:text-foreground" />
+                  type="button"
+                  data-testid="sidebar-collapsed-settings-button"
+                  onClick={handleOpenSettingsNavigation}
+                  aria-label="Settings"
+                  aria-current={isSettingsRouteActive ? 'page' : undefined}
+                  className={cn(
+                    "manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-2.5 rounded-xl transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 flex items-center justify-center",
+                    isSettingsRouteActive
+                      ? "bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] shadow-sm"
+                      : "text-[#777777] dark:text-[#AAAAAA] hover:bg-[#F2F2F2] dark:hover:bg-[#171717] hover:text-[#000000] dark:hover:text-[#FFFFFF]"
                   )}
+                >
+                  <Settings2 size={23} strokeWidth={2.5} />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="right">
-                {fbUser ? `${fbUser.displayName || fbUser.email} (Click to sign out)` : 'Sign in with Google (Firebase)'}
-              </TooltipContent>
+              <TooltipContent side="right">Settings</TooltipContent>
             </Tooltip>
           </TooltipProvider>
+
+          {!fbUser && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => signInWithGoogle()}
+                    aria-label="Sign in with Google"
+                    className="manus-touch-target w-11 h-11 sm:w-9 sm:h-9 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 rounded-xl flex items-center justify-center transition-all cursor-pointer bg-white/80 dark:bg-card border border-border/80 hover:border-foreground/30 shadow-xs"
+                  >
+                    <Cloud size={18} className="text-muted-foreground hover:text-foreground" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">Sign in with Google (Firebase)</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
         </div>
         <TagAnalyticsModal
           isOpen={isTagAnalyticsOpen}
@@ -1120,11 +1139,37 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
           </div>
         </div>
 
-        {/* Firebase Cloud Sync & User Profile Footer */}
-        <div className="p-3 border-t border-border/40 bg-card/30 mt-auto">
+        {/* Settings Navigation & User Profile Footer */}
+        <div className="p-3 border-t border-border/40 bg-card/30 mt-auto space-y-2">
+          <button
+            type="button"
+            data-testid="sidebar-settings-button"
+            onClick={() => handleMobileSelect(handleOpenSettingsNavigation)}
+            aria-current={isSettingsRouteActive ? 'page' : undefined}
+            title="Settings"
+            className={cn(
+              "manus-sidebar-item-slide manus-touch-target min-h-[44px] sm:min-h-0 group w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium text-sm cursor-pointer transition-colors",
+              isSettingsRouteActive
+                ? "bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] shadow-sm"
+                : "text-[#000000] dark:text-[#FFFFFF] hover:bg-[#F2F2F2] dark:hover:bg-[#171717]"
+            )}
+          >
+            <Settings2
+              size={21}
+              strokeWidth={2.4}
+              className={cn(
+                "manus-icon-spring shrink-0",
+                isSettingsRouteActive
+                  ? "text-[#000000] dark:text-[#FFFFFF]"
+                  : "text-[#777777] dark:text-[#AAAAAA]"
+              )}
+            />
+            <span>Settings</span>
+          </button>
+
           {fbUser ? (
-            <div className="flex items-center justify-between gap-2 p-1.5 rounded-xl bg-card border border-border/60 shadow-2xs">
-              <div className="flex items-center gap-2 min-w-0">
+            <div className="flex items-center gap-2 p-1.5 rounded-xl bg-card border border-border/60 shadow-2xs">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
                 {fbUser.photoURL ? (
                   <img src={fbUser.photoURL} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 border border-border" />
                 ) : (
@@ -1140,15 +1185,6 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                   </div>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => fbSignOut()}
-                className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors cursor-pointer shrink-0 inline-flex items-center justify-center"
-                title="Sign out of Firebase"
-                aria-label="Sign out of Firebase"
-              >
-                <LogOut size={15} />
-              </button>
             </div>
           ) : (
             <button

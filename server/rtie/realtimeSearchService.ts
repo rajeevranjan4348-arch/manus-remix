@@ -46,7 +46,7 @@ export async function fetchGitHubReleaseAdapter(
   const retrievedAt = new Date().toISOString();
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
-    'User-Agent': 'Manus-RTIE-Engine/1.0',
+    'User-Agent': 'Deku-RTIE-Engine/1.0',
   };
   if (process.env.GITHUB_TOKEN) {
     headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;

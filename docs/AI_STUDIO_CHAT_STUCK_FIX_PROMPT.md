@@ -1,10 +1,10 @@
-# Manus Remix: AI Studio Bug-Fix Prompt
+# Deku AI: AI Studio Bug-Fix Prompt
 
-Paste this prompt into Google AI Studio Build mode with the existing Manus Remix project open.
+Paste this prompt into Google AI Studio Build mode with the existing Deku AI project open.
 
 ---
 
-Act as a senior React/TypeScript, AI streaming, Netlify Functions, and QA engineer. Fix the real runtime bug shown in the supplied screen recording in the existing Manus Remix app. The user sends a simple factual question (example: “Who is Prime Minister of India and who is Anuradha Paudwal?”), but no answer appears while “Manus is typing…” remains stuck and the Manus header/status text overlaps.
+Act as a senior React/TypeScript, AI streaming, Netlify Functions, and QA engineer. Fix the real runtime bug shown in the supplied screen recording in the existing Deku AI app. The user sends a simple factual question (example: “Who is Prime Minister of India and who is Anuradha Paudwal?”), but no answer appears while “Deku is typing…” remains stuck and the Deku header/status text overlaps.
 
 ## Non-negotiable constraints
 - Diagnose the actual root cause before editing; trace the send handler → task/agent hook → AI provider/request → response parsing → message state/rendering.
@@ -21,7 +21,7 @@ Act as a senior React/TypeScript, AI streaming, Netlify Functions, and QA engine
 5. Ensure the assistant response is appended to the *same active conversation* and is rendered in the normal message list. Avoid relying only on a task result panel if chat messages are the visible UI.
 6. Guarantee every request terminates its loading/typing state on success, provider error, malformed payload, network failure, timeout, and user cancellation. Use `try/catch/finally`, request IDs or cancellation guards where appropriate, and prevent stale requests from overwriting a newer conversation.
 7. Prevent duplicate sends and duplicate assistant messages, but do not deduplicate legitimate identical answers from separate user turns.
-8. Fix the header/status layout so “Manus” and “Manus is typing…” cannot overlap at narrow mobile widths. Preserve the existing design and make status text wrap/truncate safely.
+8. Fix the header/status layout so “Deku” and “Deku is typing…” cannot overlap at narrow mobile widths. Preserve the existing design and make status text wrap/truncate safely.
 9. Keep stop/cancel functional. A stopped request must not later overwrite the current result or leave the UI loading.
 10. Do not report success when the provider returns empty content. Show a clear retryable error and log a sanitized diagnostic identifier.
 

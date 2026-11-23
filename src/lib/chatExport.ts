@@ -122,7 +122,7 @@ export function deriveSessionTitle(data: ChatExportSessionData): string {
     const cleaned = cleanExportMessageText(firstUserMsg.content);
     if (cleaned) return cleaned.slice(0, 80);
   }
-  return 'Manus Chat Session';
+  return 'Deku Chat Session';
 }
 
 export function slugifyFilename(title: string): string {
@@ -131,7 +131,7 @@ export function slugifyFilename(title: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 48);
-  return slug || 'manus-chat-session';
+  return slug || 'deku-chat-session';
 }
 
 /**
@@ -247,7 +247,7 @@ export function formatChatAsMarkdown(data: ChatExportSessionData): string {
     lines.push('');
   } else {
     messages.forEach((msg, index) => {
-      const speaker = msg.role === 'user' ? 'User' : 'Manus AI';
+      const speaker = msg.role === 'user' ? 'User' : 'Deku AI';
       const timeSuffix = msg.timestamp ? ` (${msg.timestamp})` : '';
       lines.push(`### ${index + 1}. ${speaker}${timeSuffix}`);
       lines.push('');
@@ -266,7 +266,7 @@ export function formatChatAsMarkdown(data: ChatExportSessionData): string {
   }
 
   lines.push('---');
-  lines.push('_Exported from Manus AI Workspace_');
+  lines.push('_Exported from Deku AI Workspace_');
 
   return lines.join('\n');
 }
@@ -392,7 +392,7 @@ export function generateChatPdfBytes(data: ChatExportSessionData): Uint8Array {
   const pdfLines: PdfLineItem[] = [];
 
   // Header
-  pdfLines.push({ text: 'MANUS AI - CHAT SESSION EXPORT', bold: true, fontSize: 15, leading: 22 });
+  pdfLines.push({ text: 'DEKU AI - CHAT SESSION EXPORT', bold: true, fontSize: 15, leading: 22 });
   pdfLines.push({ text: `Title: ${title}`, bold: true, fontSize: 11, leading: 16 });
   pdfLines.push({ text: `Exported: ${exportedAt}`, fontSize: 9, leading: 14 });
   if (data.taskId) {
@@ -417,7 +417,7 @@ export function generateChatPdfBytes(data: ChatExportSessionData): Uint8Array {
     pdfLines.push({ text: 'No messages recorded in this session.', fontSize: 10, leading: 14 });
   } else {
     messages.forEach((msg, index) => {
-      const speaker = msg.role === 'user' ? 'User' : 'Manus AI';
+      const speaker = msg.role === 'user' ? 'User' : 'Deku AI';
       const header = `${index + 1}. ${speaker}${msg.timestamp ? ` (${msg.timestamp})` : ''}`;
       pdfLines.push({ text: header, bold: true, fontSize: 11, leading: 17 });
 
@@ -495,7 +495,7 @@ export function generateChatPdfBytes(data: ChatExportSessionData): Uint8Array {
     // Footer with page number
     streamOps.push('/F1 8 Tf');
     streamOps.push(`1 0 0 1 50 32 Tm`);
-    streamOps.push(`(Page ${pageIndex + 1} of ${pages.length} - Manus AI Workspace) Tj`);
+    streamOps.push(`(Page ${pageIndex + 1} of ${pages.length} - Deku AI Workspace) Tj`);
     streamOps.push('ET');
 
     const streamBody = streamOps.join('\n');
@@ -574,7 +574,7 @@ export function generateChatDocxBytes(data: ChatExportSessionData): Uint8Array {
     paragraphs.push(docxParagraph('No messages recorded in this session.'));
   } else {
     messages.forEach((message, index) => {
-      const speaker = message.role === 'user' ? 'User' : 'Cue';
+      const speaker = message.role === 'user' ? 'User' : 'Deku AI';
       const timestamp = message.timestamp ? ` (${message.timestamp})` : '';
       paragraphs.push(docxParagraph(`${index + 1}. ${speaker}${timestamp}`, { bold: true }));
       if (message.thought) paragraphs.push(docxParagraph(`Thought Process: ${message.thought}`));
@@ -582,7 +582,7 @@ export function generateChatDocxBytes(data: ChatExportSessionData): Uint8Array {
     });
   }
 
-  paragraphs.push(docxParagraph('Exported from Cue'));
+  paragraphs.push(docxParagraph('Exported from Deku AI Workspace'));
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
     `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
     `<w:body>${paragraphs.join('')}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/>` +

@@ -1,6 +1,6 @@
 # World Monitor global news integration
 
-This integration uses the official World Monitor service instead of copying its full application into Manus Remix.
+This integration uses the official World Monitor service instead of copying its full application into Deku AI.
 
 - Upstream project: https://github.com/koala73/worldmonitor
 - Live dashboard: https://www.worldmonitor.app
@@ -10,7 +10,7 @@ This integration uses the official World Monitor service instead of copying its 
 
 ## Why this approach
 
-World Monitor is a large, separate dashboard with its own map-heavy UI, desktop app, build system and data-source requirements. Copying the whole repository into Manus Remix would risk replacing the existing UI, expanding the deployment footprint, and introducing a separate build architecture. This change adds a server-side integration scaffold while keeping the current UI untouched.
+World Monitor is a large, separate dashboard with its own map-heavy UI, desktop app, build system and data-source requirements. Copying the whole repository into Deku AI would risk replacing the existing UI, expanding the deployment footprint, and introducing a separate build architecture. This change adds a server-side integration scaffold while keeping the current UI untouched.
 
 ## Environment
 

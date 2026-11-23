@@ -228,7 +228,7 @@ export function AndroidConnectorsSettings({ onBack }: AndroidConnectorsSettingsP
                   </span>
                 </div>
                 <p className="text-xs text-[#C4C7C8] leading-relaxed">
-                  Connect external tools, databases, and Model Context Protocol (MCP) servers to expand Manus's real-time reasoning and execution scope.
+                  Connect external tools, databases, and Model Context Protocol (MCP) servers to expand Deku AI's real-time reasoning and execution scope.
                 </p>
               </div>
             </div>

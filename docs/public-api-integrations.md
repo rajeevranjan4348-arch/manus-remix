@@ -1,4 +1,4 @@
-# Manus Remix: curated public API integrations
+# Deku AI: curated public API integrations
 
 This integration is based on an analysis of [public-apis/public-apis](https://github.com/public-apis/public-apis), which is a community-maintained directory of APIs—not a single SDK and not a guarantee that every listed service is free, safe, available, or keyless.
 
@@ -42,7 +42,7 @@ This integration is based on an analysis of [public-apis/public-apis](https://gi
 
 ## Upstream directory
 
-The upstream source is [public-apis/public-apis](https://github.com/public-apis/public-apis). Manus Remix now includes a category index in `src/lib/publicApiDirectory.ts` matching the categories shown in the screenshots, while `src/lib/publicApiCatalog.ts` contains 9 selected API endpoint integrations. The full upstream directory is not copied wholesale into the runtime because it contains hundreds of unrelated providers with different authentication, pricing, terms, CORS behavior, and reliability. Each additional provider needs its own verified endpoint and implemented call path. API keys are issued by the individual providers; they cannot be imported from the directory and must be configured securely when required.
+The upstream source is [public-apis/public-apis](https://github.com/public-apis/public-apis). Deku AI now includes a category index in `src/lib/publicApiDirectory.ts` matching the categories shown in the screenshots, while `src/lib/publicApiCatalog.ts` contains 9 selected API endpoint integrations. The full upstream directory is not copied wholesale into the runtime because it contains hundreds of unrelated providers with different authentication, pricing, terms, CORS behavior, and reliability. Each additional provider needs its own verified endpoint and implemented call path. API keys are issued by the individual providers; they cannot be imported from the directory and must be configured securely when required.
 
 
 ## Environment template for all 51 categories

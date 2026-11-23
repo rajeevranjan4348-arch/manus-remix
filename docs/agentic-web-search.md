@@ -1,6 +1,6 @@
 # Agentic web search integration
 
-Manus Remix can combine two complementary projects without replacing its existing chat UI:
+Deku AI can combine two complementary projects without replacing its existing chat UI:
 
 - **Firecrawl** (`firecrawl/firecrawl`): hosted Search API for web results. Configure `FIRECRAWL_API_KEY` in Netlify.
 - **Agent Reach** (`Panniantong/Agent-Reach`): a Python/CLI toolkit for connecting agents to multiple sources. It is not automatically a hosted HTTP endpoint. Deploy it separately with an HTTP bridge and set `AGENT_REACH_BRIDGE_URL`; optionally protect the bridge with `AGENT_REACH_BRIDGE_TOKEN`.

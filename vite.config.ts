@@ -1165,13 +1165,13 @@ function geminiApiPlugin(): Plugin {
                       headers: {
                         'Authorization': `Bearer ${openRouterKey}`,
                         'Content-Type': 'application/json',
-                        'HTTP-Referer': 'https://manus.im',
-                        'X-Title': 'Manus AI Agent',
+                        'HTTP-Referer': 'https://deku.ai',
+                        'X-Title': 'Deku AI Agent',
                       },
                       body: JSON.stringify({
                         model: model,
                         messages: [
-                          { role: 'system', content: body.systemInstruction || 'You are Manus, an intelligent AI workspace agent. Provide clear, accurate, and comprehensive responses.' },
+                          { role: 'system', content: body.systemInstruction || 'You are Deku AI, an intelligent AI workspace agent. Provide clear, accurate, and comprehensive responses.' },
                           ...messages
                         ],
                         max_tokens: 4096,

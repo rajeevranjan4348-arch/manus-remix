@@ -52,6 +52,8 @@ const MODEL_ALIAS_MAP: Record<string, string> = {
   'gemini-3.1-flash-lite': 'gemini-3.1-flash-lite-preview',
   'gemini-flash-latest': 'gemini-2.5-flash',
   'gemini-flash-lite-latest': 'gemini-3.1-flash-lite-preview',
+  'deku-1.6-lite': 'gemini-3-flash-preview',
+  'deku-1.6-max': 'gemini-3.1-pro-preview',
   'manus-1.6-lite': 'gemini-3-flash-preview',
   'manus-1.6-max': 'gemini-3.1-pro-preview',
 };

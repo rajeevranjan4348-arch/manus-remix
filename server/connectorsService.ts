@@ -394,7 +394,7 @@ export function generateOAuthUrl(connectorId: string, redirectUri: string, userI
     createdAt: Date.now()
   });
 
-  const appUrl = process.env.APP_URL || 'https://manus.im';
+  const appUrl = process.env.APP_URL || 'https://deku.ai';
   const finalRedirect = redirectUri || `${appUrl}/api/connectors/oauth/callback`;
 
   let authUrl = '';
@@ -477,7 +477,7 @@ export async function handleOAuthCallback(
           const userRes = await fetch('https://api.github.com/user', {
             headers: {
               'Authorization': `Bearer ${realAccessToken}`,
-              'User-Agent': 'Manus-App-Connector',
+              'User-Agent': 'Deku-App-Connector',
               'Accept': 'application/vnd.github.v3+json'
             }
           });
@@ -504,8 +504,8 @@ export async function handleOAuthCallback(
     if (connectorId === 'github') {
       userInfo = {
         name: 'GitHub Developer Account',
-        login: 'manus-developer',
-        email: 'developer@manus.ai'
+        login: 'deku-developer',
+        email: 'developer@deku.ai'
       };
     }
   }
@@ -569,7 +569,7 @@ async function executeGitHubApiTool(
   token: string | null
 ): Promise<{ success: boolean; data?: any; error?: string; message?: string }> {
   const headers: Record<string, string> = {
-    'User-Agent': 'Manus-App-Connector',
+    'User-Agent': 'Deku-App-Connector',
     'Accept': 'application/vnd.github.v3+json'
   };
   if (token) {
@@ -628,9 +628,9 @@ async function executeGitHubApiTool(
     if (toolName === 'github_create_issue') {
       const repoInput = args.repo || 'rajeevranjan4348-arch/manus-remix';
       const [owner, repoName] = repoInput.includes('/') ? repoInput.split('/') : ['rajeevranjan4348-arch', repoInput];
-      const title = args.title || 'New issue created by Manus AI';
+      const title = args.title || 'New issue created by Deku AI';
       const body = args.body || 'Issue details logged from agent conversation.';
-      const labels = args.labels ? args.labels.split(',').map((l: string) => l.trim()) : ['manus-agent'];
+      const labels = args.labels ? args.labels.split(',').map((l: string) => l.trim()) : ['deku-agent'];
 
       if (token || process.env.GITHUB_TOKEN) {
         const url = `https://api.github.com/repos/${owner}/${repoName}/issues`;
@@ -667,7 +667,7 @@ async function executeGitHubApiTool(
           url: `https://github.com/${owner}/${repoName}/issues/${mockIssueNumber}`,
           createdAt: new Date().toISOString(),
           labels,
-          author: 'manus-agent'
+          author: 'deku-agent'
         },
         message: `Successfully created GitHub Issue #${mockIssueNumber} "${title}" in ${owner}/${repoName}`
       };

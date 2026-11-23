@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.rajeevranjan.manusremix',
-  appName: 'Manus Remix',
+  appName: 'Deku AI',
   webDir: 'dist',
   bundledWebRuntime: false,
   android: {

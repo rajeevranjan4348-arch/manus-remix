@@ -320,7 +320,7 @@ export async function orchestrateRealtimeResearch(
       key: cacheKey,
       query: rawQuery,
       category: route.category,
-      sourceUrl: verification.verifiedSources[0]?.url || 'https://manus.im/rtie',
+      sourceUrl: verification.verifiedSources[0]?.url || 'https://deku.ai/rtie',
       publishedAt: verification.verifiedSources[0]?.publishedAt,
       sourceConfidence: verification.overallConfidence || 0.85,
       payload: orchestrationResult,

@@ -870,7 +870,7 @@ export async function createGoogleKeepNote(title: string, content: string) {
     body: JSON.stringify({
       name: `📌 ${title}.txt`,
       mimeType: 'text/plain',
-      description: 'Saved via Manus Keep Plugin',
+      description: 'Saved via Deku Keep Plugin',
     }),
   });
 
@@ -1808,7 +1808,7 @@ export async function createInstantGoogleMeetSpace() {
 
   if (!res.ok) {
     // Fallback to Calendar conferenceData version
-    return createGoogleMeetCall('Instant Manus Meeting', new Date().toISOString(), new Date(Date.now() + 3600000).toISOString());
+    return createGoogleMeetCall('Instant Deku Meeting', new Date().toISOString(), new Date(Date.now() + 3600000).toISOString());
   }
 
   const data = await res.json();

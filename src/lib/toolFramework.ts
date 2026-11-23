@@ -1,5 +1,5 @@
 /**
- * Unified Tool Execution Framework for Manus AI
+ * Unified Tool Execution Framework for Deku AI
  * 
  * Defines standardized tool schemas, parameter validation,
  * risk classification, approval gates, and execution dispatching.
@@ -345,7 +345,7 @@ class ToolRegistryService {
           }
 
           const response = await fetch(rawUrl, {
-            headers: { 'User-Agent': 'ManusAI-Research/2.0' },
+            headers: { 'User-Agent': 'DekuAI-Research/2.0' },
             signal: AbortSignal.timeout(10000),
           });
 

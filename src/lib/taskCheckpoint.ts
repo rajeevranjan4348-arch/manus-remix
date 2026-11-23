@@ -1,5 +1,5 @@
 /**
- * Task Checkpoints and Recovery Manager for Manus AI
+ * Task Checkpoints and Recovery Manager for Deku AI
  * 
  * Persists intermediate execution states, completed tool calls,
  * and allows resuming interrupted agent tasks from the last verified checkpoint

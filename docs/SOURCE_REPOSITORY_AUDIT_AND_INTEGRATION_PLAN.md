@@ -3,7 +3,7 @@
 Target: `rajeevranjan4348-arch/manus-remix` (`main`)
 
 ## Integration rules
-- Preserve the existing Manus Remix UI. Do not import or replace source-project UI.
+- Preserve the existing Deku AI UI. Do not import or replace source-project UI.
 - Integrate capabilities as server-side services, agents, tools, APIs, or connectors.
 - Keep secrets server-side; validate inputs and provider output; use timeouts and bounded payloads.
 - A source repository's README or file presence is not proof of production readiness. Test each integration before describing it as working.

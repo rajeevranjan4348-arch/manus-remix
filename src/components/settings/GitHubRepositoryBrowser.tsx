@@ -182,7 +182,7 @@ export function GitHubRepositoryBrowser({ className, onSelectRepo }: GitHubRepos
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
               {isConnected 
-                ? `Authorized as ${connectorState.account?.name || 'GitHub User'} (${connectorState.account?.email || 'developer@manus.ai'})`
+                ? `Authorized as ${connectorState.account?.name || 'GitHub User'} (${connectorState.account?.email || 'developer@deku.ai'})`
                 : 'Connect your account to query repositories, issues, and pull requests.'}
             </p>
           </div>

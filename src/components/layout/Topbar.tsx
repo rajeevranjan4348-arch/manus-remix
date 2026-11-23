@@ -21,8 +21,8 @@ interface TopbarProps {
 }
 
 const MODELS = [
-  { id: 'manus-1.6-lite', name: 'Manus 1.6 Lite', badge: 'Fast', desc: 'Optimized for speed and quick tasks', icon: Zap },
-  { id: 'manus-1.6-max', name: 'Manus 1.6 Max', badge: 'Pro', desc: 'Complex reasoning & autonomous workflows', icon: Brain },
+  { id: 'manus-1.6-lite', name: 'Deku 1.6 Lite', badge: 'Fast', desc: 'Optimized for speed and quick tasks', icon: Zap },
+  { id: 'manus-1.6-max', name: 'Deku 1.6 Max', badge: 'Pro', desc: 'Complex reasoning & autonomous workflows', icon: Brain },
   { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', badge: 'Multimodal', desc: 'Ultra-fast vision & text processing', icon: Sparkles },
   { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', badge: 'Code', desc: 'Advanced coding & data synthesis', icon: Cpu },
 ];
@@ -56,7 +56,7 @@ export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistor
   const [liveRobotState, setLiveRobotState] = useState<string | null>(null);
   const [ambientRobotState, setAmbientRobotState] = useState<RobotHeadState>('idle');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generationText, setGenerationText] = useState('Manus is typing...');
+  const [generationText, setGenerationText] = useState('Deku is typing...');
   const [generationMode, setGenerationMode] = useState<'chat' | 'website' | 'work'>('chat');
   const dropdownRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -108,7 +108,7 @@ export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistor
           setIsGenerating(true);
           if (state === 'searching') setGenerationText('Searching...');
           else if (state === 'working') setGenerationText('Building...');
-          else setGenerationText('Manus is typing...');
+          else setGenerationText('Deku is typing...');
         } else if (['idle', 'happy', 'error'].includes(state)) {
           setIsGenerating(false);
         }

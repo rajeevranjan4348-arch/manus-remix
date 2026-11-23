@@ -1,5 +1,5 @@
 /**
- * Coding Agent & GitHub Integration for Manus AI
+ * Coding Agent & GitHub Integration for Deku AI
  * 
  * Provides repository inspection, file reading/writing, diff generation,
  * branch verification, commit creation, and real SHA reporting via GitHub API.
@@ -49,7 +49,7 @@ class CodingAgentService {
   private async request(path: string, token?: string, options: RequestInit = {}): Promise<Response> {
     const headers: Record<string, string> = {
       Accept: 'application/vnd.github.v3+json',
-      'User-Agent': 'ManusAI-CodingAgent/2.0',
+      'User-Agent': 'DekuAI-CodingAgent/2.0',
       ...(options.headers as Record<string, string>),
     };
 

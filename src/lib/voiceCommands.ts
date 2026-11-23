@@ -405,7 +405,7 @@ export async function executeDeviceCommand(cmd: VoiceCommandResult): Promise<{ s
         const ms = cmd.parameters.minutes * 60 * 1000;
         setTimeout(() => {
           if ('Notification' in window && Notification.permission === 'granted') {
-            new Notification('Manus Timer Completed', {
+            new Notification('Deku Timer Completed', {
               body: `Your ${cmd.parameters?.minutes} minute timer is done!`,
             });
           }

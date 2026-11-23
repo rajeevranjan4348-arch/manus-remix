@@ -860,7 +860,7 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
                       <p className="text-[11px] text-muted-foreground">Choose the robot's shell and screen colors</p>
                     </div>
                     <select aria-label="Robot color theme" value={settings.robotTheme} onChange={(e) => updateSetting('robotTheme', Number(e.target.value))} className="text-xs bg-muted/40 border border-border/60 rounded-lg px-2.5 py-1.5 text-foreground">
-                      <option value={0}>Manus blue</option><option value={1}>Graphite</option><option value={2}>Mint</option><option value={3}>Violet</option>
+                      <option value={0}>Deku blue</option><option value={1}>Graphite</option><option value={2}>Mint</option><option value={3}>Violet</option>
                     </select>
                   </div>
 
@@ -910,8 +910,8 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
                   
                   <div className="space-y-1.5">
                     {[
-                      { id: 'manus-1.6-lite', name: 'Manus 1.6 Lite', desc: 'Fast execution for quick chats and requests (1M context)', tag: 'Fast' },
-                      { id: 'manus-1.6-max', name: 'Manus 1.6 Max (2M)', desc: 'Deep reasoning with massive 2 Million token context window', tag: '2M Pro' },
+                      { id: 'manus-1.6-lite', name: 'Deku 1.6 Lite', desc: 'Fast execution for quick chats and requests (1M context)', tag: 'Fast' },
+                      { id: 'manus-1.6-max', name: 'Deku 1.6 Max (2M)', desc: 'Deep reasoning with massive 2 Million token context window', tag: '2M Pro' },
                       { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (2M Context)', desc: '2,000,000 token context window for huge codebases, books, and documents', tag: '2M Context' },
                       { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', desc: 'Multimodal vision and rapid document analysis (1M context)', tag: 'Vision' },
                       { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', desc: 'High precision code and structured engineering', tag: 'Code' },
@@ -1787,10 +1787,10 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
                 <div>
                   <div className="flex items-center gap-2.5 mb-1.5">
                     <div className="w-6 h-6 rounded-md bg-foreground text-background flex items-center justify-center font-bold text-xs">
-                      M
+                      D
                     </div>
                     <div>
-                      <p className="text-xs font-semibold text-foreground">Manus AI Workspace</p>
+                      <p className="text-xs font-semibold text-foreground">Deku AI Workspace</p>
                       <p className="text-[11px] text-muted-foreground">Version 2.4.0</p>
                     </div>
                   </div>

@@ -1,5 +1,5 @@
 /**
- * Browser Automation Framework for Manus AI
+ * Browser Automation Framework for Deku AI
  * 
  * Provides automated web inspection, structured DOM snapshot extraction,
  * safe interaction simulation, form analysis, and safety approval checks.
@@ -69,7 +69,7 @@ class BrowserAutomationService {
     try {
       const response = await fetch(targetUrl, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ManusBrowserAutomation/2.0',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) DekuBrowserAutomation/2.0',
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
         signal: AbortSignal.timeout(12000),

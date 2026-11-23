@@ -1,5 +1,5 @@
 /**
- * Agent Configuration and Policy Manager for Manus AI
+ * Agent Configuration and Policy Manager for Deku AI
  * 
  * Manages runtime policies, model providers, tool permissions,
  * and security constraints with safe defaults.

@@ -1,5 +1,5 @@
 /**
- * Agentic web search adapter for Manus Remix.
+ * Agentic web search adapter for Deku AI.
  * Supports Firecrawl, Agent Reach HTTP bridge, Gemini Google Search Grounding,
  * and public real-time news/fact feeds (Spaceflight News, Hacker News, USGS, Wikipedia, DuckDuckGo).
  */
@@ -61,7 +61,7 @@ export default async (req: Request) => {
   }
 
   // Handle Visual Answer Engine image lookup requests (/api/visual-search)
-  const reqUrl = new URL(req.url, 'https://manus.local');
+  const reqUrl = new URL(req.url, 'https://deku.local');
   if (
     reqUrl.pathname.endsWith('/visual-search') ||
     body?.mode === 'images' ||

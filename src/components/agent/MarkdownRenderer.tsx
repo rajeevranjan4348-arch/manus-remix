@@ -562,7 +562,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
               <span />
               <span />
             </span>
-            <span>Manus is typing</span>
+            <span>Deku is typing</span>
           </div>
         )}
         <ReactMarkdown

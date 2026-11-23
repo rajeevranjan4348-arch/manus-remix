@@ -47,7 +47,7 @@ import { generateSessionSummary, getStoredSessionSummaries, removeSessionSummary
 import { TaskQuickPreviewCard } from './TaskQuickPreviewCard';
 import { SwipeableHistoryItem } from './SwipeableHistoryItem';
 import { useUltraLiteImage } from '@/hooks/useUltraLiteImage';
-import { motion, type PanInfo } from 'framer-motion';
+import { motion, useReducedMotion, type PanInfo, type Variants } from 'framer-motion';
 import { shouldDismissRightDrawerOnSwipe } from '@/lib/swipeToDismiss';
 
 const TagAnalyticsModal = React.lazy(() =>
@@ -147,6 +147,80 @@ interface HistoryPanelProps {
   onSelectTask?: (taskId: string) => void;
   initialTab?: 'sessions' | 'all' | 'photos' | 'videos' | 'docs';
 }
+
+export const HISTORY_PANEL_SLIDE_VARIANTS: Variants = {
+  hidden: {
+    x: '100%',
+    opacity: 0.92,
+  },
+  visible: {
+    x: 0,
+    opacity: 1,
+    transition: {
+      type: 'spring',
+      stiffness: 340,
+      damping: 34,
+      mass: 0.85,
+    },
+  },
+};
+
+export function getHistoryItemStaggerDelay(
+  index: number,
+  baseDelaySec = 0.06,
+  stepSec = 0.045,
+  maxSteps = 10
+): number {
+  const clamped = Math.min(Math.max(0, index), maxSteps);
+  return Number((baseDelaySec + clamped * stepSec).toFixed(4));
+}
+
+export const HISTORY_TASK_LIST_CONTAINER_VARIANTS: Variants = {
+  hidden: {
+    opacity: 0,
+  },
+  visible: {
+    opacity: 1,
+    transition: {
+      delayChildren: 0.1,
+      staggerChildren: 0.045,
+    },
+  },
+};
+
+export const HISTORY_LIST_ITEM_VARIANTS: Variants = {
+  hidden: {
+    opacity: 0,
+    y: 14,
+    scale: 0.98,
+  },
+  visible: (index: number = 0) => ({
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: {
+      duration: 0.32,
+      delay: getHistoryItemStaggerDelay(index),
+      ease: [0.16, 1, 0.3, 1],
+    },
+  }),
+};
+
+export const HISTORY_GROUP_HEADER_VARIANTS: Variants = {
+  hidden: {
+    opacity: 0,
+    y: 8,
+  },
+  visible: (index: number = 0) => ({
+    opacity: 1,
+    y: 0,
+    transition: {
+      duration: 0.24,
+      delay: getHistoryItemStaggerDelay(index, 0.04, 0.03, 8),
+      ease: [0.16, 1, 0.3, 1],
+    },
+  }),
+};
 
 // Initial sample media & shared items for rich Library experience
 const DEFAULT_LIBRARY_ITEMS: LibraryFileItem[] = [
@@ -403,6 +477,15 @@ export function groupTasksByDate(tasks: TaskHistoryItem[]): { label: string; tas
 }
 
 export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: HistoryPanelProps) {
+  const prefersReducedMotion = useReducedMotion();
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+  const [openAnimationCycle, setOpenAnimationCycle] = useState(isOpen ? 1 : 0);
+  if (isOpen !== prevIsOpen) {
+    setPrevIsOpen(isOpen);
+    if (isOpen) {
+      setOpenAnimationCycle((prev) => prev + 1);
+    }
+  }
   const [tasks, setTasks] = useState<TaskHistoryItem[]>([]);
   const [voiceHistory, setVoiceHistory] = useState<VoiceHistoryRecord[]>([]);
   const [libraryItems, setLibraryItems] = useState<LibraryFileItem[]>([]);
@@ -652,7 +735,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
       let downloadUrl = item.url;
 
       if (!downloadUrl || downloadUrl === '#') {
-        let content = `Manus AI Library - ${item.name}\nType: ${item.type}\nCreated: ${item.createdAt}\nSource: ${item.source || 'AI Library'}\nDescription: ${item.description || ''}`;
+        let content = `Deku AI Library - ${item.name}\nType: ${item.type}\nCreated: ${item.createdAt}\nSource: ${item.source || 'AI Library'}\nDescription: ${item.description || ''}`;
         if (item.name.endsWith('.json')) {
           content = JSON.stringify({
             title: item.name,
@@ -957,7 +1040,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `manus-conversation-backup-${Date.now()}.json`;
+      a.download = `deku-conversation-backup-${Date.now()}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1116,11 +1199,16 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
       <SheetContent 
         side="right" 
         hideCloseButton
-        className="w-full max-w-[100vw] sm:max-w-xl p-0 flex flex-col h-full h-[100dvh] max-h-[100dvh] bg-[#FFFFFF] dark:bg-[#000000] text-[#000000] dark:text-[#FFFFFF] border-l border-[#E0E0E0] dark:border-[#262626] shadow-2xl z-50 overflow-hidden"
+        className="w-full max-w-[100vw] sm:max-w-xl p-0 flex flex-col h-full h-[100dvh] max-h-[100dvh] bg-transparent border-0 shadow-none data-[state=open]:animate-none data-[state=closed]:animate-none z-50 overflow-visible"
       >
         <motion.div
+          key={isOpen ? 'history-panel-open' : 'history-panel-closed'}
           data-testid="history-panel-swipe-container"
-          className="flex flex-col flex-1 min-h-0 w-full h-full overflow-hidden"
+          data-animation="slide-in"
+          variants={prefersReducedMotion ? undefined : HISTORY_PANEL_SLIDE_VARIANTS}
+          initial={prefersReducedMotion ? false : 'hidden'}
+          animate="visible"
+          className="flex flex-col flex-1 min-h-0 w-full h-full overflow-hidden bg-[#FFFFFF] dark:bg-[#000000] text-[#000000] dark:text-[#FFFFFF] border-l border-[#E0E0E0] dark:border-[#262626] shadow-2xl will-change-transform"
           drag="x"
           dragDirectionLock
           dragConstraints={{ left: 0, right: 0 }}
@@ -1616,12 +1704,20 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                 ) : viewMode === 'list' ? (
                   /* Clean List Format Layout */
                   <div className="space-y-2">
-                    {filteredItems.map((item) => {
+                    {filteredItems.map((item, itemIndex) => {
                       const typeBadge = getTypeLabel(item);
                       const TypeIcon = typeBadge.icon;
                       return (
+                        <motion.div
+                          key={`${activeTab}-list-${item.id}`}
+                          data-testid="history-library-list-item"
+                          data-stagger-index={itemIndex}
+                          custom={itemIndex}
+                          variants={prefersReducedMotion ? undefined : HISTORY_LIST_ITEM_VARIANTS}
+                          initial={prefersReducedMotion ? false : 'hidden'}
+                          animate="visible"
+                        >
                         <SwipeableHistoryItem
-                          key={item.id}
                           id={item.id}
                           deleteLabel="Remove"
                           onDelete={() => handleDeleteLibraryItem(item.id, undefined, item.name)}
@@ -1696,18 +1792,28 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                             </div>
                           </div>
                         </SwipeableHistoryItem>
+                        </motion.div>
                       );
                     })}
                   </div>
                 ) : (
                   /* Grid Layout */
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {filteredItems.map((item) => {
+                    {filteredItems.map((item, itemIndex) => {
                       const typeBadge = getTypeLabel(item);
                       const TypeIcon = typeBadge.icon;
                       return (
+                        <motion.div
+                          key={`${activeTab}-grid-${item.id}`}
+                          data-testid="history-library-grid-item"
+                          data-stagger-index={itemIndex}
+                          custom={itemIndex}
+                          variants={prefersReducedMotion ? undefined : HISTORY_LIST_ITEM_VARIANTS}
+                          initial={prefersReducedMotion ? false : 'hidden'}
+                          animate="visible"
+                          className="h-full"
+                        >
                         <SwipeableHistoryItem
-                          key={item.id}
                           id={item.id}
                           deleteLabel="Remove"
                           onDelete={() => handleDeleteLibraryItem(item.id, undefined, item.name)}
@@ -1818,6 +1924,7 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                             </div>
                           </div>
                         </SwipeableHistoryItem>
+                        </motion.div>
                       );
                     })}
                   </div>
@@ -2014,10 +2121,29 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                     )}
                   </div>
                 ) : (
-                  groupedTasks.map((group) => (
+                  <motion.div
+                    key={`history-task-list-${openAnimationCycle}`}
+                    data-testid="history-task-list-container"
+                    data-stagger-open-cycle={openAnimationCycle}
+                    variants={prefersReducedMotion ? undefined : HISTORY_TASK_LIST_CONTAINER_VARIANTS}
+                    initial={prefersReducedMotion ? false : 'hidden'}
+                    animate="visible"
+                    className="space-y-2.5"
+                  >
+                  {(() => {
+                    let cumulativeSessionIndex = 0;
+                    return groupedTasks.map((group) => {
+                      const groupHeaderIndex = cumulativeSessionIndex;
+                      return (
                     <div key={group.label} className="space-y-2 pt-1">
                       {/* Date Group Header */}
-                      <div className="flex items-center gap-2 px-1 py-1">
+                      <motion.div
+                        custom={groupHeaderIndex}
+                        variants={prefersReducedMotion ? undefined : HISTORY_GROUP_HEADER_VARIANTS}
+                        initial={prefersReducedMotion ? false : 'hidden'}
+                        animate="visible"
+                        className="flex items-center gap-2 px-1 py-1"
+                      >
                         <span className="text-[11px] font-bold tracking-wider text-[#777777] dark:text-[#888888] uppercase">
                           {group.label}
                         </span>
@@ -2035,11 +2161,12 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                             {group.tasks.every(t => selectedTaskIds.has(t.id)) ? 'Deselect group' : 'Select group'}
                           </button>
                         )}
-                      </div>
+                      </motion.div>
 
                       {/* Grouped session cards */}
                       <div className="space-y-2">
                         {group.tasks.map((task) => {
+                          const staggerIndex = cumulativeSessionIndex++;
                           const isSelected = selectedTaskIds.has(task.id);
                           const isSummarizing = Boolean(summarizingIds[task.id]);
                           const activeSummary = sessionSummaries[task.id] || task.summary;
@@ -2225,21 +2352,36 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                             </TaskQuickPreviewCard>
                           );
 
+                          const staggerDelayMs = Math.round(getHistoryItemStaggerDelay(staggerIndex) * 1000);
                           return (
-                            <SwipeableHistoryItem
-                              key={task.id}
-                              id={task.id}
-                              disabled={isSelectionMode}
-                              deleteLabel="Delete"
-                              onDelete={() => handleDeleteTask(task.id, undefined, formatTitle(task))}
+                            <motion.div
+                              key={`session-${openAnimationCycle}-${task.id}`}
+                              data-testid="history-session-list-item"
+                              data-stagger-index={staggerIndex}
+                              data-stagger-delay-ms={staggerDelayMs}
+                              custom={staggerIndex}
+                              variants={prefersReducedMotion ? undefined : HISTORY_LIST_ITEM_VARIANTS}
+                              initial={prefersReducedMotion ? false : 'hidden'}
+                              animate="visible"
+                              className="will-change-transform"
                             >
-                              {wrappedCard}
-                            </SwipeableHistoryItem>
+                              <SwipeableHistoryItem
+                                id={task.id}
+                                disabled={isSelectionMode}
+                                deleteLabel="Delete"
+                                onDelete={() => handleDeleteTask(task.id, undefined, formatTitle(task))}
+                              >
+                                {wrappedCard}
+                              </SwipeableHistoryItem>
+                            </motion.div>
                           );
                         })}
                       </div>
                     </div>
-                  ))
+                      );
+                    });
+                  })()}
+                  </motion.div>
                 )}
               </TabsContent>
             )}

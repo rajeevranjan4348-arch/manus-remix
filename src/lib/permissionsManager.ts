@@ -1,5 +1,5 @@
 /**
- * Permissions & Background Behavior Manager for Manus
+ * Permissions & Background Behavior Manager for Deku AI
  * Handles browser permissions (Microphone, Camera, Geolocation, Notifications),
  * background task execution, and system-level alerts.
  */

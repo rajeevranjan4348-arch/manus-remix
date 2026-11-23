@@ -1,5 +1,5 @@
 /**
- * Parallel Multi-Agent Orchestrator for Manus AI
+ * Parallel Multi-Agent Orchestrator for Deku AI
  * 
  * Coordinates specialized sub-agents running concurrently,
  * assigns explicit sub-goals, resource budgets, and synthesizes findings.

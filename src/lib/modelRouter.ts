@@ -1,5 +1,5 @@
 /**
- * Intelligent Model Router for Manus AI
+ * Intelligent Model Router for Deku AI
  * 
  * Dynamically routes queries to optimal AI models based on task type,
  * capability affinity, latency targets, and verified provider availability.
@@ -30,7 +30,7 @@ export interface ModelProfile {
 export const SUPPORTED_MODELS: ModelProfile[] = [
   {
     id: 'gemini-3.8-flash',
-    name: 'Gemini 3.8 Flash (Manus Default)',
+    name: 'Gemini 3.8 Flash (Deku Default)',
     provider: 'google',
     contextWindow: 1048576,
     strengths: ['web_research', 'fast_chat', 'reasoning'],

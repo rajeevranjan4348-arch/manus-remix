@@ -1,5 +1,5 @@
 /**
- * Security Center for Manus AI
+ * Security Center for Deku AI
  * 
  * Enforces input sanitization, prompt injection detection, rate limiting,
  * safe path traversal mitigation, and security audit event logging.

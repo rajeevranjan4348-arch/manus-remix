@@ -1,7 +1,7 @@
-# Manus Remix — Google Workspace Agent
+# Deku AI — Google Workspace Agent
 
 ## Goal
-Let Manus plan and execute user-authorized workflows across Google Workspace while preserving the existing UI. This is a capability integration, not a claim that software can perform every human action: APIs, Google account permissions, admin policies, quotas, and consent still apply.
+Let Deku AI plan and execute user-authorized workflows across Google Workspace while preserving the existing UI. This is a capability integration, not a claim that software can perform every human action: APIs, Google account permissions, admin policies, quotas, and consent still apply.
 
 ## Supported Workspace surface
 Use official Google APIs and only enable actions for which the user granted the required OAuth scopes.
@@ -40,9 +40,9 @@ Use official Google APIs and only enable actions for which the user granted the 
 The repository already contains Workspace OAuth/UI and client-side adapters in src/lib/workspaceAuth.ts, src/lib/workspaceTools.ts, and src/lib/workspaceContextService.ts. These are a starting point, not complete coverage of every Workspace product. In particular, the current auth helper keeps an access token in memory and its listener does not restore that token after an app restart. Production-grade unattended access requires a secure server-side OAuth flow and explicit Google consent.
 
 ## Acceptance tests
-- Unconnected account: no action runs; Manus offers a connect flow.
+- Unconnected account: no action runs; Deku AI offers a connect flow.
 - Missing scope / revoked consent / expired token: action stops safely and explains how to reconnect.
-- Ambiguous recipient or event: Manus asks before writing.
+- Ambiguous recipient or event: Deku AI asks before writing.
 - Send/share/delete: preview appears and no mutation occurs until the user confirms.
 - API error, quota error, or partial failure: truthful status and retry guidance are shown.
 - Prompt injection in an email or document: content is treated as data, not as tool instructions.

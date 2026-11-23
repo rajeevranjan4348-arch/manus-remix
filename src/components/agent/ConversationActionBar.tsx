@@ -80,6 +80,8 @@ export const ConversationActionBar = memo(function ConversationActionBar({
 
   const [poppingReaction, setPoppingReaction] = useState<MessageReactionType | 'copy' | null>(null);
   const popTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const popRaf1Ref = useRef<number | null>(null);
+  const popRaf2Ref = useRef<number | null>(null);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -87,6 +89,14 @@ export const ConversationActionBar = memo(function ConversationActionBar({
       if (popTimerRef.current) {
         clearTimeout(popTimerRef.current);
         popTimerRef.current = null;
+      }
+      if (popRaf1Ref.current !== null) {
+        cancelAnimationFrame(popRaf1Ref.current);
+        popRaf1Ref.current = null;
+      }
+      if (popRaf2Ref.current !== null) {
+        cancelAnimationFrame(popRaf2Ref.current);
+        popRaf2Ref.current = null;
       }
       if (copyTimerRef.current) {
         clearTimeout(copyTimerRef.current);
@@ -98,13 +108,20 @@ export const ConversationActionBar = memo(function ConversationActionBar({
   const triggerSpringPop = (type: MessageReactionType | 'copy') => {
     if (popTimerRef.current) {
       clearTimeout(popTimerRef.current);
+      popTimerRef.current = null;
     }
+    if (popRaf1Ref.current !== null) cancelAnimationFrame(popRaf1Ref.current);
+    if (popRaf2Ref.current !== null) cancelAnimationFrame(popRaf2Ref.current);
+
     setPoppingReaction(null);
-    requestAnimationFrame(() => {
-      setPoppingReaction(type);
-      popTimerRef.current = setTimeout(() => {
-        setPoppingReaction((prev) => (prev === type ? null : prev));
-      }, 430);
+    popRaf1Ref.current = requestAnimationFrame(() => {
+      popRaf2Ref.current = requestAnimationFrame(() => {
+        setPoppingReaction(type);
+        popTimerRef.current = setTimeout(() => {
+          setPoppingReaction((prev) => (prev === type ? null : prev));
+          popTimerRef.current = null;
+        }, 430);
+      });
     });
   };
 
@@ -127,8 +144,17 @@ export const ConversationActionBar = memo(function ConversationActionBar({
     }
   };
 
+  const triggerHapticTap = () => {
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      try {
+        navigator.vibrate(12);
+      } catch {}
+    }
+  };
+
   const handleThumbsUp = () => {
     triggerSpringPop('up');
+    triggerHapticTap();
     const { nextReaction } = toggleMessageReaction(resolvedId, 'up');
     setFeedback(nextReaction);
     if (nextReaction === 'up') {
@@ -140,6 +166,7 @@ export const ConversationActionBar = memo(function ConversationActionBar({
 
   const handleHeart = () => {
     triggerSpringPop('heart');
+    triggerHapticTap();
     const { nextReaction } = toggleMessageReaction(resolvedId, 'heart');
     setFeedback(nextReaction);
     if (nextReaction === 'heart') {
@@ -151,6 +178,7 @@ export const ConversationActionBar = memo(function ConversationActionBar({
 
   const handleThumbsDown = () => {
     triggerSpringPop('down');
+    triggerHapticTap();
     const { nextReaction } = toggleMessageReaction(resolvedId, 'down');
     setFeedback(nextReaction);
     if (nextReaction === 'down') {
@@ -196,7 +224,7 @@ export const ConversationActionBar = memo(function ConversationActionBar({
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
         await navigator.share({
-          title: 'Manus AI Response',
+          title: 'Deku AI Response',
           text: content.slice(0, 300) + (content.length > 300 ? '...' : ''),
           url: window.location.href,
         });
@@ -208,7 +236,7 @@ export const ConversationActionBar = memo(function ConversationActionBar({
     }
 
     // Fallback: Copy formatted text to clipboard without disturbing selection or scroll
-    const ok = await copyTextToClipboard(`${content}\n\n— Shared from Manus AI`);
+    const ok = await copyTextToClipboard(`${content}\n\n— Shared from Deku AI`);
     if (ok) {
       toast.success('Response copied to clipboard for sharing');
     } else {
@@ -222,7 +250,7 @@ export const ConversationActionBar = memo(function ConversationActionBar({
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `manus-response-${Date.now()}.txt`;
+      a.download = `deku-response-${Date.now()}.txt`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -262,7 +290,7 @@ export const ConversationActionBar = memo(function ConversationActionBar({
         {copied ? (
           <Check size={18} className={cn("text-[#000000] dark:text-[#FFFFFF] animate-in zoom-in-75 duration-150", poppingReaction === 'copy' && "animate-reaction-icon-pop")} strokeWidth={2} />
         ) : (
-          <Copy size={18} strokeWidth={1.75} className={cn(poppingReaction === 'copy' && "animate-reaction-icon-pop")} />
+          <Copy animated={false} size={18} strokeWidth={1.75} className={cn(poppingReaction === 'copy' && "animate-reaction-icon-pop")} />
         )}
       </button>
 
@@ -287,7 +315,8 @@ export const ConversationActionBar = memo(function ConversationActionBar({
             : "text-[#000000] dark:text-[#FFFFFF]"
         )}
       >
-        <ThumbsUp 
+        <ThumbsUp
+          animated={false}
           size={18} 
           strokeWidth={feedback === 'up' ? 2.25 : 1.75} 
           className={cn(
@@ -355,7 +384,8 @@ export const ConversationActionBar = memo(function ConversationActionBar({
             : "text-[#000000] dark:text-[#FFFFFF]"
         )}
       >
-        <ThumbsDown 
+        <ThumbsDown
+          animated={false}
           size={18} 
           strokeWidth={feedback === 'down' ? 2.25 : 1.75} 
           className={cn(
@@ -398,7 +428,7 @@ export const ConversationActionBar = memo(function ConversationActionBar({
         aria-label="Share response"
         className="p-1.5 rounded-lg hover:bg-[#F2F2F2] dark:hover:bg-[#171717] active:scale-95 transition-all text-[#000000] dark:text-[#FFFFFF] cursor-pointer"
       >
-        <Share2 size={18} strokeWidth={1.75} />
+        <Share2 animated={false} size={18} strokeWidth={1.75} />
       </button>
 
       {/* 6. More options button */}
@@ -414,7 +444,7 @@ export const ConversationActionBar = memo(function ConversationActionBar({
             showMenu && "bg-[#F2F2F2] dark:bg-[#171717]"
           )}
         >
-          <MoreVertical size={18} strokeWidth={1.75} />
+          <MoreVertical animated={false} size={18} strokeWidth={1.75} />
         </button>
 
         {/* Dropdown Menu */}

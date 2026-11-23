@@ -183,8 +183,8 @@ export const WorkModeThinkingAnimation = React.memo(function WorkModeThinkingAni
     : allCompleted || !isLive
     ? 'Response completed'
     : deepMode
-    ? 'Manus Deep Reasoning'
-    : 'Manus AI is thinking';
+    ? 'Deku Deep Reasoning'
+    : 'Deku AI is thinking';
 
   const getStageIcon = () => {
     if (hasError) {

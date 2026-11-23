@@ -1,5 +1,5 @@
 /**
- * Notifications and Task Updates Dispatcher for Manus AI
+ * Notifications and Task Updates Dispatcher for Deku AI
  * 
  * Handles browser and Android push/local notifications, task completion alerts,
  * approval triggers, sound effects, quiet hours, and duplicate throttling.

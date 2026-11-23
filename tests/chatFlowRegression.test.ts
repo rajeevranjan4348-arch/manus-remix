@@ -118,7 +118,7 @@ describe('Chat Flow & Stream Processing Regression Tests', () => {
     const htmlPath = path.resolve(__dirname, '../public/chat.html');
     expect(fs.existsSync(htmlPath)).toBe(true);
     const content = fs.readFileSync(htmlPath, 'utf-8');
-    expect(content).toContain('My AI Chat');
+    expect(content).toContain('Deku AI Chat');
     expect(content).toContain('How can I help you?');
     expect(content).toContain('Ask me anything to get started.');
     expect(content).toContain('/api/gemini/stream');
@@ -138,7 +138,7 @@ describe('Chat Flow & Stream Processing Regression Tests', () => {
     const content = fs.readFileSync(compPath, 'utf-8');
     expect(content).toContain('export function MyAIChat');
     expect(content).toContain('/api/gemini/stream');
-    expect(content).toContain('gemini-3.8-flash');
+    expect(content).toContain('gemini-3-flash-preview');
     expect(content).toContain('How can I help you?');
     // Web Speech API Voice-to-Text Integration
     expect(content).toContain('toggleListening');

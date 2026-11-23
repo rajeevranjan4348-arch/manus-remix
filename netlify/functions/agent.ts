@@ -109,10 +109,10 @@ export default async (req: Request) => {
     if (clean === 'gemini-3.8-flash' || clean === 'gemini-2.5-flash' || clean === 'gemini-3-flash' || clean === 'gemini-3.0-flash') {
       return 'gemini-3-flash-preview';
     }
-    if (clean === 'gemini-3.1-flash-lite' || clean === 'manus-1.6-lite') {
+    if (clean === 'gemini-3.1-flash-lite' || clean === 'deku-1.6-lite' || clean === 'manus-1.6-lite') {
       return 'gemini-3.1-flash-lite-preview';
     }
-    if (clean === 'manus-1.6-max') {
+    if (clean === 'deku-1.6-max' || clean === 'manus-1.6-max') {
       return 'gemini-3.1-pro-preview';
     }
     return clean || 'gemini-3-flash-preview';
@@ -128,12 +128,15 @@ export default async (req: Request) => {
     if (realtimeSnapshot?.directFallbackMarkdown) {
       return realtimeSnapshot.directFallbackMarkdown;
     }
-    const clean = promptText.trim().toLowerCase();
-    if (/^(hi|hello|hey|hiya|howdy|good\s+(morning|afternoon|evening|day))[!?.\s]*$/i.test(clean)) {
+    const strippedPrompt = promptText
+      .replace(/\n*\[(?:SILENT USER MEMORY CONTEXT|USER SAVED MEMORIES|USER SAVED PREFERENCES & FACTUAL MEMORY|WORKSPACE KNOWLEDGE BASE PASSAGES|VERIFIED RESEARCH CACHE|CONNECTED WORKSPACE CONTEXT)[^\]]*\][\s\S]*$/i, '')
+      .trim();
+    const clean = strippedPrompt.toLowerCase();
+    if (/^(hi|hello|hey|hiya|howdy|yo|namaste|greetings|good\s+(morning|afternoon|evening|day|night))(?:\s+(?:deku|deku\s+ai|there|ai|assistant))?[!?.,\s]*$/i.test(clean)) {
       return 'Hello! How can I help you today?';
     }
     if (/which model|what model|what llm|which llm|underlying model|what ai model|model are you|who built you|your architecture/i.test(clean)) {
-      return `I am operating inside **Manus** (the AI workspace agent and application), powered by the **${modelId}** large language model from **Google Gemini**.\n\n- **Application / Agent:** Manus\n- **Underlying LLM Model:** \`${modelId}\`\n- **Model Provider:** Google Gemini`;
+      return `I am operating inside **Deku AI** (the AI workspace agent and application), powered by the **${modelId}** large language model from **Google Gemini**.\n\n- **Application / Agent:** Deku AI\n- **Underlying LLM Model:** \`${modelId}\`\n- **Model Provider:** Google Gemini`;
     }
     if (/\b(what time is it|current time|time right now|what is the date|today'?s date|what day is today|current date|time in india|time in utc|world clock)\b/i.test(clean)) {
       const temporal = getLiveTemporalContext();
@@ -176,8 +179,8 @@ export default async (req: Request) => {
         `- **Nationality:** Indian`
       );
     }
-    if (/who are you|what can you do|what is manus/i.test(clean)) {
-      return `I am **Manus**, your AI workspace agent powered by the **${modelId}** model (Google Gemini). I can answer questions, research topics, write and debug code, analyze data, and help with everyday tasks.`;
+    if (/who are you|what can you do|what is (deku|manus)/i.test(clean)) {
+      return `I am **Deku AI**, your AI workspace agent powered by the **${modelId}** model (Google Gemini). I can answer questions, research topics, write and debug code, analyze data, and help with everyday tasks.`;
     }
     return `Here is a direct response regarding **${promptText.trim() || 'your request'}**:\n\nI have processed your question. Let me know if you would like more specific details, examples, or a deeper breakdown.`;
   }
@@ -237,6 +240,7 @@ export default async (req: Request) => {
       [...messages].reverse().find((m: any) => m?.role === 'user' && typeof m?.content === 'string')?.content
       || (typeof body.prompt === 'string' ? body.prompt : '');
     const latestUserText = rawLatestUserText
+      .replace(/\n*\[(?:SILENT USER MEMORY CONTEXT|USER SAVED MEMORIES|USER SAVED PREFERENCES & FACTUAL MEMORY|WORKSPACE KNOWLEDGE BASE PASSAGES|VERIFIED RESEARCH CACHE|CONNECTED WORKSPACE CONTEXT)[^\]]*\][\s\S]*$/i, '')
       .replace(/\[IMAGE_DATA_URL:[^\]]+\]\s*/gi, '')
       .replace(/\[Attached Image:[^\]]*\]\s*/gi, '')
       .trim();
@@ -367,14 +371,24 @@ export default async (req: Request) => {
     const candidateModels = resolveCandidateModels(configuredModelId);
 
     let systemInstruction = body.systemInstruction ||
-      'You are Manus, an intelligent AI workspace agent. Provide direct, helpful, and high-quality responses. Answer factual questions directly. Do not generate fake reports or fake charts unless specifically asked for them. Never expose private internal chain-of-thought.';
+      'You are Deku AI, an intelligent AI workspace agent. Provide direct, helpful, and high-quality responses. Answer factual questions directly. Do not generate fake reports or fake charts unless specifically asked for them. Never expose private internal chain-of-thought.';
+
+    if (!systemInstruction.includes('[MEMORY USAGE POLICY]')) {
+      systemInstruction +=
+        '\n\n[MEMORY USAGE POLICY]\n' +
+        '- Treat any saved user memory strictly as silent background context.\n' +
+        '- NEVER bring up, mention, or allude to saved memories or personal preferences during greetings (such as "Hello", "Hi", "Hey", "Good morning") or unrelated conversations.\n' +
+        '- NEVER announce that a memory was saved, updated, or retrieved unless the user explicitly asks about memory or asks what you remember about them.\n' +
+        '- Use relevant memory silently only when it directly answers the user\'s question or genuinely improves personalization.\n' +
+        '- Avoid repetitive references to saved memories across turns.';
+    }
 
     systemInstruction +=
       `\n\n[VERIFIED MODEL & APPLICATION IDENTITY]\n` +
-      `- Application / Workspace Agent Name: Manus\n` +
+      `- Application / Workspace Agent Name: Deku AI\n` +
       `- Active Underlying LLM Model ID: ${configuredModelId}\n` +
       `- Model Provider: Google Gemini\n` +
-      `- Strict Rule: When asked "which model are you", "what LLM are you running on", "who built you", or about your model/architecture, clearly distinguish between the application/agent name (Manus) and the actual underlying LLM model (${configuredModelId} by Google Gemini). Never invent model names, providers, or architectures.`;
+      `- Strict Rule: When asked "which model are you", "what LLM are you running on", "who built you", or about your model/architecture, clearly distinguish between the application/agent name (Deku AI) and the actual underlying LLM model (${configuredModelId} by Google Gemini). Never invent model names, providers, or architectures.`;
 
     if (realtimeSnapshot) {
       systemInstruction += realtimeSnapshot.systemContextBlock;
@@ -706,8 +720,8 @@ export default async (req: Request) => {
             headers: {
               'Authorization': `Bearer ${orKey}`,
               'Content-Type': 'application/json',
-              'HTTP-Referer': 'https://manus.im',
-              'X-Title': 'Manus AI Agent',
+              'HTTP-Referer': 'https://deku.ai',
+              'X-Title': 'Deku AI Agent',
             },
             body: JSON.stringify({
               model: orModel,

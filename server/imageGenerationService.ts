@@ -38,7 +38,7 @@ export interface ImageGenerationResult {
   imageDataUrl: string;
   mimeType: string;
   model: string;
-  provider: 'Google Gemini' | 'Google Gemini SVG' | 'Manus Visual Synthesizer';
+  provider: 'Google Gemini' | 'Google Gemini SVG' | 'Deku Visual Synthesizer' | 'Manus Visual Synthesizer';
   prompt: string;
   aspectRatio: SupportedAspectRatio;
   imageSize?: SupportedImageSize;
@@ -706,7 +706,7 @@ export async function generateImageWithGemini(
     imageDataUrl: procedural.imageDataUrl,
     mimeType: procedural.mimeType,
     model: candidateModels[0] || 'gemini-3.1-flash-lite-image',
-    provider: 'Manus Visual Synthesizer',
+    provider: 'Deku Visual Synthesizer',
     prompt: cleanPrompt,
     aspectRatio,
     imageSize,

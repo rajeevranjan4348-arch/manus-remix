@@ -1,4 +1,4 @@
-# AndroidEnv integration for Manus Remix
+# AndroidEnv integration for Deku AI
 
 ## UI preservation
 
@@ -6,7 +6,7 @@ This integration is isolated from `src/` and the React/Vite UI. It does not chan
 
 ## Full upstream source
 
-The complete upstream AndroidEnv repository is included as a Git submodule at `vendor/android_env`, pinned to an upstream commit. This preserves the upstream code and history without duplicating its large Python/RL codebase in the Manus Remix repository.
+The complete upstream AndroidEnv repository is included as a Git submodule at `vendor/android_env`, pinned to an upstream commit. This preserves the upstream code and history without duplicating its large Python/RL codebase in the Deku AI repository.
 
 Upstream: https://github.com/google-deepmind/android_env  
 License: Apache-2.0
@@ -27,7 +27,7 @@ The upstream library includes the Android reinforcement-learning environment, AD
 
 AndroidEnv itself does not provide a ready-to-run general-purpose trained assistant policy. A task definition and a suitable agent/policy must be configured for autonomous RL execution.
 
-## Manus Remix device bridge
+## Deku AI device bridge
 
 The optional FastAPI sidecar in `server/androidenv/service.py` provides a small authenticated adapter for controlled Android interaction:
 
@@ -62,7 +62,7 @@ The sidecar API is ready to be called by a server-side connector, but this commi
 
 ## Validation checklist
 
-Before production use, run the Manus Remix Vite build/lint and the Python service tests, then test against a disposable emulator and a non-sensitive app. Do not test device-control actions on a personal device until the action flow and permissions have been reviewed.
+Before production use, run the Deku AI Vite build/lint and the Python service tests, then test against a disposable emulator and a non-sensitive app. Do not test device-control actions on a personal device until the action flow and permissions have been reviewed.
 
 
 ## Voice commands: launch installed Android apps and search
