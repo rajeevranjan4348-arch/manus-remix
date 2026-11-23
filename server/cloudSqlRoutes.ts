@@ -3,6 +3,7 @@ import { verifyBearerToken } from '../src/middleware/auth.ts';
 import { getOrCreateUser } from '../src/db/users.ts';
 import {
   deleteConversationInSql,
+  deleteMessagesInSql,
   deleteProjectInSql,
   getUserProfileWithCountsFromSql,
   listConversationMessagesFromSql,
@@ -121,6 +122,22 @@ export async function handleCloudSqlApiRequest(
         return true;
       }
       const deleted = await deleteConversationInSql(uid, conversationId);
+      sendJson(res, 200, { ok: true, deleted });
+      return true;
+    }
+
+    // DELETE /api/sql/messages — Remove selected messages from an owned conversation
+    if (urlPath === '/api/sql/messages' && req.method === 'DELETE') {
+      const body = await readJsonBody(req);
+      const conversationId = String(body.conversationId || '').trim();
+      const messageIds = Array.isArray(body.messageIds)
+        ? body.messageIds.filter((id: unknown): id is string => typeof id === 'string' && id.length > 0).slice(0, 500)
+        : [];
+      if (!conversationId || messageIds.length === 0) {
+        sendJson(res, 400, { error: 'conversationId and messageIds are required' });
+        return true;
+      }
+      const deleted = await deleteMessagesInSql(uid, conversationId, messageIds);
       sendJson(res, 200, { ok: true, deleted });
       return true;
     }

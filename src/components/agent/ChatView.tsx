@@ -20,7 +20,8 @@ import {
   Zap,
   AlertCircle,
   RotateCw,
-  Pencil
+  Pencil,
+  MoreVertical,
 } from 'lucide-react';
 import { ArrowUp, Plus, Search, ChevronUp, ChevronDown } from 'pulsoicon-react';
 import { ConnectorsPopupMenu } from '../chat/ConnectorsPopupMenu';
@@ -36,6 +37,8 @@ import { FileAttachments } from './FileAttachments';
 import { AttachmentMenu } from '../chat/AttachmentMenu';
 import { ConversationActionBar } from './ConversationActionBar';
 import { BubbleReactionButtons } from './BubbleReactionButtons';
+import { MessageContextMenu } from './MessageContextMenu';
+import { WritingBlock } from './WritingBlock';
 import { VoiceInputButton, formatSpeechAutoFill } from '../voice/VoiceInputButton';
 import { VoiceTranscriptionIndicator } from '../voice/VoiceTranscriptionIndicator';
 import { SourceCitations, parseSourcesFromMarkdown, resolveMessageSourcesAndQueries } from './SourceCitations';
@@ -74,6 +77,7 @@ import {
   groupConsecutiveMessages,
 } from '@/lib/messageGrouping';
 import { SseDiagnosticConsole } from './SseDiagnosticConsole';
+import { isStandaloneWritingArtifact } from '@/lib/writingBlockClassifier';
 
 // Lazy-load heavy chart, map, Drive picker, and connector store modals
 const ChartResult = React.lazy(() =>
@@ -202,6 +206,8 @@ interface ChatViewProps {
   onReset: () => void;
   onExport?: (format?: ChatExportFormat) => void;
   onSubmit: (prompt: string) => void;
+  onEditMessage?: (messageId: string, content: string) => void | Promise<void>;
+  onRegenerateMessage?: (messageId: string) => void | Promise<void>;
   onStop?: () => void;
   onReorderSteps?: (steps: Step[]) => void;
   isLoading: boolean;
@@ -328,6 +334,23 @@ export function cleanUserMessage(raw: any): string {
   return text.trim() || (typeof raw === 'string' && !raw.includes('[IMAGE_DATA_URL:') ? raw : '');
 }
 
+export function replaceVisibleUserMessageContent(raw: any, editedText: string): string {
+  const nextText = String(editedText || '').trim();
+  const source = typeof raw === 'string' ? raw : String(raw?.content || raw?.text || '');
+  if (!source) return nextText;
+
+  const visibleText = cleanUserMessage(source);
+  if (visibleText) {
+    const visibleIndex = source.lastIndexOf(visibleText);
+    if (visibleIndex >= 0) {
+      return `${source.slice(0, visibleIndex)}${nextText}${source.slice(visibleIndex + visibleText.length)}`.trim();
+    }
+  }
+
+  const attachmentPrefix = source.match(/^(?:(?:\[Attached Image:[^\n]*\]\s*)?\[IMAGE_DATA_URL:[^\]]+\]\s*|\[Attached File:[^\n]*\]\s*)/i)?.[0] || '';
+  return `${attachmentPrefix}${nextText}`.trim();
+}
+
 export function centerElementInContainer(
   container: HTMLElement,
   target: HTMLElement,
@@ -431,9 +454,11 @@ export function ChatView({
   chartData,
   status, 
   phase,
-  onReset, 
-  onExport, 
+  onReset,
+  onExport,
   onSubmit,
+  onEditMessage,
+  onRegenerateMessage,
   onStop,
   isLoading,
   taskId,
@@ -1088,86 +1113,129 @@ export function ChatView({
 
       return (
         <React.Fragment key={msgId}>
-          <div
-            data-message="user"
-            data-grouped-with-prev={isGroupedWithPrev ? 'true' : 'false'}
-            data-grouped-with-next={isGroupedWithNext ? 'true' : 'false'}
-            data-group-position={groupMeta?.groupPosition ?? 0}
-            data-group-size={groupMeta?.groupSize ?? 1}
-            data-stagger-index={index}
-            data-stagger-delay-ms={staggerDelayMs}
-            style={staggerStyle}
-            className={cn(
-              "flex justify-end chat-message-enter chat-message-user-enter group relative px-4 sm:px-20",
-              isGroupedWithPrev ? "mt-0.5" : "mt-2",
-              isGroupedWithNext ? "mb-0.5" : "mb-2"
-            )}
+          <MessageContextMenu
+            content={cleanedText}
+            onEdit={() => {
+              setEditingMessageId(msgId);
+              setEditInputContent(cleanedText);
+            }}
+            onSelectText={() => {
+              const messageElement = document.getElementById(`message-text-${msgId}`);
+              if (!messageElement) return;
+              messageElement.focus({ preventScroll: true });
+              const selection = window.getSelection();
+              if (!selection) return;
+              const range = document.createRange();
+              range.selectNodeContents(messageElement);
+              selection.removeAllRanges();
+              selection.addRange(range);
+            }}
           >
-            {isEditing ? (
-              <div className="bg-card border border-border p-3 rounded-2xl max-w-[90%] sm:max-w-[80%] shadow-md w-full space-y-2">
-                <textarea
-                  value={editInputContent}
-                  onChange={(e) => setEditInputContent(e.target.value)}
-                  className="w-full bg-transparent border border-border rounded-lg p-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
-                  rows={2}
-                />
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditingMessageId(null)}
-                    className="px-3 py-1 rounded-lg text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (editInputContent.trim()) {
-                        onSubmit(editInputContent.trim());
-                        setEditingMessageId(null);
-                      }
-                    }}
-                    className="px-3 py-1 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
-                  >
-                    Save & Send
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="relative flex items-center gap-1.5 max-w-[85%] sm:max-w-[75%]">
-                <div className="flex items-center gap-1 shrink-0">
-                  <BubbleReactionButtons
-                    messageId={`user-${msgId}`}
-                    groupScope="user"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingMessageId(msgId);
-                      setEditInputContent(cleanedText);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity p-1.5 rounded-full bg-card/80 hover:bg-card border border-border shadow-xs text-muted-foreground hover:text-foreground shrink-0"
-                    title="Edit prompt"
-                  >
-                    <Pencil size={13} />
-                  </button>
-                </div>
-                <div
-                  data-testid="user-message-bubble"
-                  className={cn(
-                    "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] px-4 py-2.5 rounded-2xl text-sm font-medium shadow-xs leading-relaxed space-y-2 overflow-hidden select-text",
-                    isGroupedWithPrev ? "rounded-tr-md" : "rounded-tr-sm",
-                    isGroupedWithNext && "rounded-br-md"
-                  )}
-                >
-                  {attachedImageUrl && (
-                    <UserAttachedImagePreview imageUrl={attachedImageUrl} />
-                  )}
-                  {cleanedText && <div className="whitespace-pre-wrap break-words select-text">{cleanedText}</div>}
-                </div>
+            {(openMenu) => (
+              <div
+                data-message="user"
+                data-grouped-with-prev={isGroupedWithPrev ? 'true' : 'false'}
+                data-grouped-with-next={isGroupedWithNext ? 'true' : 'false'}
+                data-group-position={groupMeta?.groupPosition ?? 0}
+                data-group-size={groupMeta?.groupSize ?? 1}
+                data-stagger-index={index}
+                data-stagger-delay-ms={staggerDelayMs}
+                style={staggerStyle}
+                className={cn(
+                  "flex justify-end chat-message-enter chat-message-user-enter group relative px-4 sm:px-20",
+                  isGroupedWithPrev ? "mt-0.5" : "mt-2",
+                  isGroupedWithNext ? "mb-0.5" : "mb-2"
+                )}
+              >
+                {isEditing ? (
+                  <div className="bg-card border border-border p-3 rounded-2xl max-w-[90%] sm:max-w-[80%] shadow-md w-full space-y-2">
+                    <textarea
+                      aria-label="Edit message"
+                      value={editInputContent}
+                      onChange={(e) => setEditInputContent(e.target.value)}
+                      className="w-full bg-transparent border border-border rounded-lg p-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                      rows={2}
+                    />
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditingMessageId(null)}
+                        className="px-3 py-1 rounded-lg text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isAssistantWorking || !editInputContent.trim()}
+                        onClick={() => {
+                          const editedContent = replaceVisibleUserMessageContent(msg.content, editInputContent);
+                          if (!editedContent.trim()) return;
+                          if (onEditMessage) void onEditMessage(msgId, editedContent);
+                          else onSubmit(editedContent);
+                          setEditingMessageId(null);
+                        }}
+                        className="px-3 py-1 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+                      >
+                        Save &amp; Regenerate
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="relative flex items-center gap-1.5 max-w-[85%] sm:max-w-[75%]">
+                    <div className="flex items-center gap-1 shrink-0">
+                      <BubbleReactionButtons
+                        messageId={`user-${msgId}`}
+                        groupScope="user"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingMessageId(msgId);
+                          setEditInputContent(cleanedText);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity p-1.5 rounded-full bg-card/80 hover:bg-card border border-border shadow-xs text-muted-foreground hover:text-foreground shrink-0"
+                        title="Edit prompt"
+                        aria-label="Edit message"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={openMenu}
+                        className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card/80 text-muted-foreground shadow-xs transition-colors hover:bg-card hover:text-foreground sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
+                        title="Message actions"
+                        aria-label="Message actions"
+                        data-testid="message-more-actions"
+                      >
+                        <MoreVertical size={15} />
+                      </button>
+                    </div>
+                    <div
+                      data-testid="user-message-bubble"
+                      className={cn(
+                        "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] px-4 py-2.5 rounded-2xl text-sm font-medium shadow-xs leading-relaxed space-y-2 overflow-hidden select-text",
+                        isGroupedWithPrev ? "rounded-tr-md" : "rounded-tr-sm",
+                        isGroupedWithNext && "rounded-br-md"
+                      )}
+                    >
+                      {attachedImageUrl && (
+                        <UserAttachedImagePreview imageUrl={attachedImageUrl} />
+                      )}
+                      {cleanedText && (
+                        <div
+                          id={`message-text-${msgId}`}
+                          tabIndex={0}
+                          className="whitespace-pre-wrap break-words select-text focus:outline-none"
+                        >
+                          {cleanedText}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
-          </div>
+          </MessageContextMenu>
           {memoryUpdate && (
             <div className="max-w-3xl mx-auto px-4 sm:px-20 -mt-0.5 mb-2 flex justify-start">
               <MemoryUpdatedIndicator memoryUpdate={memoryUpdate} />
@@ -1220,6 +1288,10 @@ export function ChatView({
       const previousTurnSubjects = priorUserMessages.flatMap((m: any) =>
         detectVisualSubjectQuery(cleanUserMessage(m.content || '')).subjects
       );
+      const isWritingBlock = isStandaloneWritingArtifact(
+        prevUserPromptText,
+        parsedSources.cleanedContent || cleanedContent
+      );
 
       return (
         <div
@@ -1253,14 +1325,24 @@ export function ChatView({
                   assistantContent={parsedSources.cleanedContent}
                   previousTurnSubjects={previousTurnSubjects}
                 />
-                <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
-                  <MarkdownRenderer 
-                    content={parsedSources.cleanedContent} 
+                {isWritingBlock ? (
+                  <WritingBlock
+                    content={parsedSources.cleanedContent}
+                    messageId={msgKey}
                     animateTypewriter={shouldAnimate}
                     onTypewriterComplete={() => handleTypewriterComplete(msgKey)}
                     onTypewriterTick={() => {}}
                   />
-                </div>
+                ) : (
+                  <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
+                    <MarkdownRenderer
+                      content={parsedSources.cleanedContent}
+                      animateTypewriter={shouldAnimate}
+                      onTypewriterComplete={() => handleTypewriterComplete(msgKey)}
+                      onTypewriterTick={() => {}}
+                    />
+                  </div>
+                )}
               </>
             ) : null}
 
@@ -1428,9 +1510,13 @@ export function ChatView({
                 <ConversationActionBar 
                   content={cleanedContent}
                   messageId={msgKey}
+                  hideCopyAndShare={isWritingBlock}
                   onRegenerate={() => {
-                    const lastUser = displayMessages.slice(0, index).reverse().find((m: any) => m.role === 'user');
-                    const promptToReRun = lastUser?.content ? cleanUserMessage(lastUser.content) : prompt;
+                    if (prevUserMsg?.id && onRegenerateMessage) {
+                      void onRegenerateMessage(String(prevUserMsg.id));
+                      return;
+                    }
+                    const promptToReRun = prevUserMsg?.content ? cleanUserMessage(prevUserMsg.content) : prompt;
                     if (promptToReRun) onSubmit(promptToReRun);
                   }}
                 />
@@ -1445,6 +1531,8 @@ export function ChatView({
     editingMessageId,
     editInputContent,
     onSubmit,
+    onEditMessage,
+    onRegenerateMessage,
     virtualizationBudget.maxRenderedMessagesWindow,
     isAssistantWorking,
     result,

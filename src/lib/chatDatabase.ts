@@ -37,12 +37,14 @@ export interface StoredConversation {
 import {
   saveConversationToFirestore,
   deleteConversationFromFirestore,
-  saveMessageToFirestore
+  saveMessageToFirestore,
+  deleteMessagesFromFirestore,
 } from './firestoreService';
 import {
   saveConversationToCloudSql,
   deleteConversationFromCloudSql,
-  saveMessageToCloudSql
+  saveMessageToCloudSql,
+  deleteMessagesFromCloudSql,
 } from './cloudSqlClient';
 
 const DB_NAME = 'manus_permanent_chat_db';
@@ -631,6 +633,78 @@ export async function updateMessage(id: string, updates: Partial<StoredMessage>)
   return updated;
 }
 
+export async function replaceConversationTailWithEditedMessage(
+  conversationId: string,
+  editedMessage: StoredMessage,
+  removeMessageIds: string[],
+): Promise<void> {
+  if (!conversationId || !editedMessage?.id || editedMessage.conversationId !== conversationId) {
+    throw new Error('A conversation and matching edited message are required.');
+  }
+
+  const idsToRemove = [...new Set(removeMessageIds.filter((id) => id && id !== editedMessage.id))];
+  const now = new Date().toISOString();
+  const conversation = await getConversation(conversationId);
+  let reopenedConversation: StoredConversation | null = null;
+  if (conversation) {
+    const { result: _previousResult, steps: _previousSteps, ...conversationBase } = conversation;
+    reopenedConversation = {
+      ...conversationBase,
+      status: 'running',
+      updatedAt: now,
+    };
+  }
+
+  let savedLocally = false;
+  if (isIndexedDBSupported()) {
+    try {
+      const db = await openDatabase();
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction([STORE_CONVERSATIONS, STORE_MESSAGES], 'readwrite');
+        if (reopenedConversation) {
+          tx.objectStore(STORE_CONVERSATIONS).put(reopenedConversation);
+        }
+        const store = tx.objectStore(STORE_MESSAGES);
+        store.put(editedMessage);
+        idsToRemove.forEach((id) => store.delete(id));
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('Edited conversation transaction was aborted.'));
+      });
+      savedLocally = true;
+    } catch (error) {
+      console.warn('[ChatDB] Could not atomically replace edited conversation tail in IndexedDB:', error);
+    }
+  }
+
+  const fallbackMessages = getFallbackMessages()
+    .filter((message) => message.id !== editedMessage.id && !idsToRemove.includes(message.id));
+  fallbackMessages.push(editedMessage);
+  saveFallbackMessages(fallbackMessages);
+  if (!savedLocally && !getFallbackMessages().some((message) => message.id === editedMessage.id)) {
+    throw new Error('The edited message could not be saved locally.');
+  }
+
+  if (reopenedConversation) {
+    const fallbackConversations = getFallbackConversations().map((item) =>
+      item.id === conversationId ? reopenedConversation : item
+    );
+    saveFallbackConversations(fallbackConversations);
+  }
+
+  notifyDbUpdated(conversationId);
+  await Promise.allSettled([
+    ...(reopenedConversation ? [
+      saveConversationToFirestore(reopenedConversation),
+      saveConversationToCloudSql(reopenedConversation),
+    ] : []),
+    saveMessageToFirestore(editedMessage),
+    saveMessageToCloudSql(editedMessage),
+    deleteMessagesFromFirestore(conversationId, idsToRemove),
+    deleteMessagesFromCloudSql(conversationId, idsToRemove),
+  ]);
+}
+
 /**
  * Retrieve all stored messages across all conversations (used for full-text search)
  */
@@ -714,4 +788,3 @@ export async function recoverChatHistory(jsonString: string): Promise<{ success:
     return { success: false, restoredCount: 0 };
   }
 }
-

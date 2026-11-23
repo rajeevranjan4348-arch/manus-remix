@@ -1,6 +1,7 @@
 import { 
   collection, 
   doc, 
+  deleteField,
   setDoc, 
   getDoc, 
   getDocs, 
@@ -44,6 +45,14 @@ const messagesReadCache = new BoundedLRUCache<string, StoredMessage[]>({
   maxSize: 15,
   ttlMs: 20 * 1000,
 });
+
+function hashText(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = Math.imul(hash ^ value.charCodeAt(index), 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
 
 function getAuthenticatedUser() {
   const currentUser = auth.currentUser;
@@ -193,7 +202,8 @@ export async function saveConversationToFirestore(conv: StoredConversation): Pro
       ? conv.result
       : JSON.stringify(conv.result)
     : '';
-  const signature = `${conv.title || ''}|${conv.status || 'idle'}|${conv.projectId || ''}|${serializedResult.length}`;
+  const stepsSignature = JSON.stringify(conv.steps ?? null);
+  const signature = `${conv.title || ''}|${conv.status || 'idle'}|${conv.projectId || ''}|${hashText(serializedResult)}|${hashText(stepsSignature)}`;
   if (writeSignatureCache.get(path) === signature) {
     recordFirestoreWriteCoalesced();
     return;
@@ -212,9 +222,13 @@ export async function saveConversationToFirestore(conv: StoredConversation): Pro
     if (conv.outputFormat) payload.outputFormat = conv.outputFormat;
     if (conv.chartType) payload.chartType = conv.chartType;
     if (conv.projectId) payload.projectId = conv.projectId;
-    if (serializedResult) {
+    if (conv.result !== undefined && conv.result !== null) {
       payload.result = serializedResult;
+    } else if (conv.status === 'running') {
+      payload.result = deleteField();
     }
+    if (Array.isArray(conv.steps)) payload.steps = conv.steps;
+    else if (conv.status === 'running') payload.steps = deleteField();
     await setDoc(doc(db, 'conversations', conv.id), payload, { merge: true });
     writeSignatureCache.set(path, signature);
     conversationsReadCache.delete(currentUser.uid);
@@ -278,7 +292,9 @@ export async function saveMessageToFirestore(msg: StoredMessage): Promise<void> 
   }
 
   const path = `conversations/${msg.conversationId}/messages/${msg.id}`;
-  const signature = `${msg.status || 'success'}|${(msg.content || '').length}`;
+  const content = msg.content || '';
+  const metadataSignature = JSON.stringify(msg.metadata || {});
+  const signature = `${msg.status || 'success'}|${content.length}|${hashText(content)}|${hashText(msg.error || '')}|${hashText(metadataSignature)}`;
   if (writeSignatureCache.get(path) === signature) {
     recordFirestoreWriteCoalesced();
     return;
@@ -292,7 +308,9 @@ export async function saveMessageToFirestore(msg: StoredMessage): Promise<void> 
       role: msg.role,
       content: msg.content || '',
       timestamp: msg.timestamp || new Date().toISOString(),
-      status: msg.status || 'success'
+      status: msg.status || 'success',
+      ...(msg.metadata ? { metadata: msg.metadata } : {}),
+      ...(msg.error ? { error: msg.error } : {}),
     };
     await setDoc(doc(db, 'conversations', msg.conversationId, 'messages', msg.id), payload);
     writeSignatureCache.set(path, signature);
@@ -300,6 +318,21 @@ export async function saveMessageToFirestore(msg: StoredMessage): Promise<void> 
   } catch (error) {
     console.warn(`[Firestore] Skipped message save (${path}):`, (error as any)?.message || error);
   }
+}
+
+export async function deleteMessagesFromFirestore(conversationId: string, messageIds: string[]): Promise<void> {
+  const currentUser = getAuthenticatedUser();
+  if (!currentUser || !conversationId || !Array.isArray(messageIds) || messageIds.length === 0) return;
+
+  await Promise.all(messageIds.map(async (messageId) => {
+    if (!messageId) return;
+    try {
+      await deleteDoc(doc(db, 'conversations', conversationId, 'messages', messageId));
+    } catch (error) {
+      console.warn(`[Firestore] Skipped message delete (${conversationId}/${messageId}):`, (error as any)?.message || error);
+    }
+  }));
+  messagesReadCache.delete(conversationId);
 }
 
 export async function getMessagesFromFirestore(conversationId: string): Promise<StoredMessage[]> {

@@ -108,15 +108,17 @@ service cloud.firestore {
         incoming().userId == existing().userId &&
         incoming().createdAt == existing().createdAt &&
         (existing().status != 'completed' || (
-          incoming().status == 'completed' &&
+          incoming().status in ['completed', 'running'] &&
           incoming().title == existing().title &&
           incoming().mode == existing().mode &&
           (!('outputFormat' in existing()) || ('outputFormat' in incoming() && incoming().outputFormat == existing().outputFormat)) &&
           (!('chartType' in existing()) || ('chartType' in incoming() && incoming().chartType == existing().chartType)) &&
           (!('projectId' in existing()) || ('projectId' in incoming() && incoming().projectId == existing().projectId)) &&
           (!('prompt' in existing()) || ('prompt' in incoming() && incoming().prompt == existing().prompt)) &&
-          (!('result' in existing()) || ('result' in incoming() && incoming().result == existing().result)) &&
-          (!('steps' in existing()) || ('steps' in incoming() && incoming().steps == existing().steps)) &&
+          ((incoming().status == 'running' && !('result' in incoming())) ||
+            (incoming().status == 'completed' && (!('result' in existing()) || ('result' in incoming() && incoming().result == existing().result)))) &&
+          ((incoming().status == 'running' && !('steps' in incoming())) ||
+            (incoming().status == 'completed' && (!('steps' in existing()) || ('steps' in incoming() && incoming().steps == existing().steps)))) &&
           (!('messages' in existing()) || ('messages' in incoming() && incoming().messages == existing().messages))
         ));
     }

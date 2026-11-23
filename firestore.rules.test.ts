@@ -63,16 +63,18 @@ describe('Firestore security rules contract', () => {
     expect(checkpoints).toContain("existing().status == 'interrupted' && incoming().status in ['interrupted', 'failed', 'completed']");
   });
 
-  it('protects completed conversations from reopening or changing immutable content', () => {
+  it('allows a safe edited-turn reopen while protecting identity and clearing stale run output', () => {
     const conversationUpdate = ruleBlock('function isValidConversationUpdate()', 'function isValidMessage');
     const messages = ruleBlock('match /messages/{messageId}', '\n      }\n    }\n  }\n}');
 
-    expect(conversationUpdate).toContain("incoming().status == 'completed'");
+    expect(conversationUpdate).toContain("incoming().status in ['completed', 'running']");
     expect(conversationUpdate).toContain('incoming().title == existing().title');
     expect(conversationUpdate).toContain('incoming().mode == existing().mode');
     expect(conversationUpdate).toContain('incoming().createdAt == existing().createdAt');
-    expect(conversationUpdate).toContain('incoming().result == existing().result');
-    expect(conversationUpdate).toContain("('steps' in existing()) || ('steps' in incoming() && incoming().steps == existing().steps)");
+    expect(conversationUpdate).toContain("(incoming().status == 'running' && !('result' in incoming()))");
+    expect(conversationUpdate).toContain("(incoming().status == 'completed' && (!('result' in existing()) || ('result' in incoming() && incoming().result == existing().result)))");
+    expect(conversationUpdate).toContain("(incoming().status == 'running' && !('steps' in incoming()))");
+    expect(conversationUpdate).toContain("(incoming().status == 'completed' && (!('steps' in existing()) || ('steps' in incoming() && incoming().steps == existing().steps)))");
     expect(conversationUpdate).toContain("('messages' in existing()) || ('messages' in incoming() && incoming().messages == existing().messages)");
     expect(messages).toContain("data.status != 'completed'");
   });

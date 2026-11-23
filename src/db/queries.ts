@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db } from './index.ts';
 import { conversations, messages, projects, users } from './schema.ts';
 import { getOrCreateUser } from './users.ts';
@@ -114,6 +114,32 @@ export async function listConversationMessagesFromSql(uid: string, conversationI
     return rows;
   } catch (error) {
     console.error('Database query failed in listConversationMessagesFromSql:', error);
+    throw new Error('Database query failed. Please try again later.', { cause: error });
+  }
+}
+
+export async function deleteMessagesInSql(uid: string, conversationId: string, messageIds: string[]) {
+  const ids = [...new Set(messageIds.filter((id) => typeof id === 'string' && id.length > 0))].slice(0, 500);
+  if (!uid || !conversationId || ids.length === 0) return 0;
+  try {
+    const [ownedConversation] = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(and(eq(conversations.id, conversationId), eq(conversations.userId, uid)))
+      .limit(1);
+    if (!ownedConversation) return 0;
+
+    const deleted = await db
+      .delete(messages)
+      .where(and(
+        eq(messages.conversationId, conversationId),
+        eq(messages.userId, uid),
+        inArray(messages.id, ids),
+      ))
+      .returning({ id: messages.id });
+    return deleted.length;
+  } catch (error) {
+    console.error('Database query failed in deleteMessagesInSql:', error);
     throw new Error('Database query failed. Please try again later.', { cause: error });
   }
 }

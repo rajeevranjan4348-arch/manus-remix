@@ -104,6 +104,19 @@ export async function saveMessageToCloudSql(msg: StoredMessage): Promise<void> {
   } catch {}
 }
 
+export async function deleteMessagesFromCloudSql(conversationId: string, messageIds: string[]): Promise<void> {
+  if (!conversationId || !Array.isArray(messageIds) || messageIds.length === 0) return;
+  const headers = await getAuthHeaders();
+  if (!headers) return;
+  try {
+    await fetch('/api/sql/messages', {
+      method: 'DELETE',
+      headers,
+      body: JSON.stringify({ conversationId, messageIds }),
+    });
+  } catch {}
+}
+
 export async function fetchMessagesFromCloudSql(conversationId: string): Promise<any[]> {
   const headers = await getAuthHeaders();
   if (!headers) return [];

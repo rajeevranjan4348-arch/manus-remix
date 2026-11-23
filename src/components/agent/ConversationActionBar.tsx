@@ -24,13 +24,15 @@ interface ConversationActionBarProps {
   messageId?: string;
   onRegenerate?: () => void;
   className?: string;
+  hideCopyAndShare?: boolean;
 }
 
 export const ConversationActionBar = memo(function ConversationActionBar({
   content,
   messageId,
   onRegenerate,
-  className
+  className,
+  hideCopyAndShare = false,
 }: ConversationActionBarProps) {
   const resolvedId = messageId || `msg_${content.slice(0, 32).replace(/\s+/g, '_')}`;
   const [copied, setCopied] = useState(false);
@@ -270,29 +272,31 @@ export const ConversationActionBar = memo(function ConversationActionBar({
         className
       )}
     >
-      {/* 1. Copy button */}
-      <button
-        type="button"
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={handleCopy}
-        data-testid="action-bar-copy"
-        data-popping={poppingReaction === 'copy' ? 'true' : 'false'}
-        title={copied ? "Copied" : "Copy to clipboard"}
-        aria-label="Copy to clipboard"
-        style={{
-          transitionTimingFunction: 'cubic-bezier(0.34, 1.56, 0.64, 1)',
-        }}
-        className={cn(
-          "p-1.5 rounded-lg hover:bg-[#F2F2F2] dark:hover:bg-[#171717] active:scale-90 transition-all duration-200 text-[#000000] dark:text-[#FFFFFF] cursor-pointer",
-          poppingReaction === 'copy' && "animate-reaction-spring-pop"
-        )}
-      >
-        {copied ? (
-          <Check size={18} className={cn("text-[#000000] dark:text-[#FFFFFF] animate-in zoom-in-75 duration-150", poppingReaction === 'copy' && "animate-reaction-icon-pop")} strokeWidth={2} />
-        ) : (
-          <Copy animated={false} size={18} strokeWidth={1.75} className={cn(poppingReaction === 'copy' && "animate-reaction-icon-pop")} />
-        )}
-      </button>
+      {!hideCopyAndShare && (
+        <>
+          {/* 1. Copy button */}
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={handleCopy}
+            data-testid="action-bar-copy"
+            data-popping={poppingReaction === 'copy' ? 'true' : 'false'}
+            title={copied ? "Copied" : "Copy to clipboard"}
+            aria-label="Copy to clipboard"
+            style={{ transitionTimingFunction: 'cubic-bezier(0.34, 1.56, 0.64, 1)' }}
+            className={cn(
+              "p-1.5 rounded-lg hover:bg-[#F2F2F2] dark:hover:bg-[#171717] active:scale-90 transition-all duration-200 text-[#000000] dark:text-[#FFFFFF] cursor-pointer",
+              poppingReaction === 'copy' && "animate-reaction-spring-pop"
+            )}
+          >
+            {copied ? (
+              <Check size={18} className={cn("text-[#000000] dark:text-[#FFFFFF] animate-in zoom-in-75 duration-150", poppingReaction === 'copy' && "animate-reaction-icon-pop")} strokeWidth={2} />
+            ) : (
+              <Copy animated={false} size={18} strokeWidth={1.75} className={cn(poppingReaction === 'copy' && "animate-reaction-icon-pop")} />
+            )}
+          </button>
+        </>
+      )}
 
       {/* 2. Thumbs up button */}
       <button
@@ -419,17 +423,18 @@ export const ConversationActionBar = memo(function ConversationActionBar({
         )}
       </button>
 
-      {/* 5. Share button */}
-      <button
-        type="button"
-        onClick={handleShare}
-        data-testid="action-bar-share"
-        title="Share response"
-        aria-label="Share response"
-        className="p-1.5 rounded-lg hover:bg-[#F2F2F2] dark:hover:bg-[#171717] active:scale-95 transition-all text-[#000000] dark:text-[#FFFFFF] cursor-pointer"
-      >
-        <Share2 animated={false} size={18} strokeWidth={1.75} />
-      </button>
+      {!hideCopyAndShare && (
+        <button
+          type="button"
+          onClick={handleShare}
+          data-testid="action-bar-share"
+          title="Share response"
+          aria-label="Share response"
+          className="p-1.5 rounded-lg hover:bg-[#F2F2F2] dark:hover:bg-[#171717] active:scale-95 transition-all text-[#000000] dark:text-[#FFFFFF] cursor-pointer"
+        >
+          <Share2 animated={false} size={18} strokeWidth={1.75} />
+        </button>
+      )}
 
       {/* 6. More options button */}
       <div className="relative" ref={menuRef}>
@@ -464,18 +469,20 @@ export const ConversationActionBar = memo(function ConversationActionBar({
               </button>
             )}
 
-            <button
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                setShowMenu(false);
-                void handleCopy();
-              }}
-              className="w-full px-3 py-2 text-left flex items-center gap-2.5 text-[#000000] dark:text-[#FFFFFF] hover:bg-[#F2F2F2] dark:hover:bg-[#111111] transition-colors cursor-pointer"
-            >
-              <FileText size={14} className="text-[#000000] dark:text-[#FFFFFF]" />
-              <span>Copy text</span>
-            </button>
+            {!hideCopyAndShare && (
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  setShowMenu(false);
+                  void handleCopy();
+                }}
+                className="w-full px-3 py-2 text-left flex items-center gap-2.5 text-[#000000] dark:text-[#FFFFFF] hover:bg-[#F2F2F2] dark:hover:bg-[#111111] transition-colors cursor-pointer"
+              >
+                <FileText size={14} className="text-[#000000] dark:text-[#FFFFFF]" />
+                <span>Copy text</span>
+              </button>
+            )}
 
             <button
               type="button"

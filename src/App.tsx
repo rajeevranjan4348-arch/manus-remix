@@ -65,7 +65,7 @@ function TaskView({
   onReset: () => void 
 }) {
   const { taskId } = useParams();
-  const { loadTask, resetTask, stopTask, currentTask, messages, steps, reorderSteps, result, chartData, taskStatus, phase, exportToPDF, sendMessage, appendVoiceExchange, isLoading, activities } = useAgentTaskResult;
+  const { loadTask, resetTask, stopTask, currentTask, messages, steps, reorderSteps, result, chartData, taskStatus, phase, exportToPDF, sendMessage, editMessage, regenerateMessage, appendVoiceExchange, isLoading, activities } = useAgentTaskResult;
 
   useEffect(() => {
     if (taskId) {
@@ -95,6 +95,8 @@ function TaskView({
         onReset={onReset}
         onExport={exportToPDF}
         onSubmit={sendMessage}
+        onEditMessage={editMessage}
+        onRegenerateMessage={regenerateMessage}
         onVoiceExchangeComplete={appendVoiceExchange}
         onStop={stopTask}
         isLoading={isLoading}
