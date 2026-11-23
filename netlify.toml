@@ -74,6 +74,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/geocode"
+  to = "/.netlify/functions/geocode"
+  status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

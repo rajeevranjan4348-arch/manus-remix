@@ -139,20 +139,25 @@ const UserAttachedImagePreview = React.memo(function UserAttachedImagePreview({
 });
 
 
-type ManusMapRequest =
+export type ManusMapRequest =
   | { kind: 'route'; origin: string; destination: string }
   | { kind: 'location'; location: string };
 
-function extractManusMapRequest(rawPrompt: string): ManusMapRequest | null {
+export function extractManusMapRequest(rawPrompt: string): ManusMapRequest | null {
   const text = String(rawPrompt || '').replace(/\s+/g, ' ').trim();
   if (!text) return null;
-  const clean = (value: string) => value.replace(/\b(?:please|on the map|on map)\b/ig, '').replace(/[?.!,;]+$/, '').trim();
+  const clean = (value: string) =>
+    value
+      .replace(/\b(?:please|on the map|on google maps|on map|google maps|google map)\b/gi, '')
+      .replace(/^[,\s:;-]+|[?.!,;\s]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
 
   const routePatterns = [
-    /\bdistance\s+from\s+(.+?)\s+to\s+(.+?)(?:[?.!,;]|$)/i,
-    /\b(?:route|directions|navigate)\s+from\s+(.+?)\s+to\s+(.+?)(?:[?.!,;]|$)/i,
-    /\bhow\s+far\s+is\s+(.+?)\s+from\s+(.+?)(?:[?.!,;]|$)/i,
-    /\bdistance\s+between\s+(.+?)\s+and\s+(.+?)(?:[?.!,;]|$)/i,
+    /\bdistance\s+from\s+(.+?)\s+to\s+(.+?)(?:[?.!;]|$)/i,
+    /\b(?:route|directions|navigate)\s+from\s+(.+?)\s+to\s+(.+?)(?:[?.!;]|$)/i,
+    /\bhow\s+far\s+is\s+(.+?)\s+from\s+(.+?)(?:[?.!;]|$)/i,
+    /\bdistance\s+between\s+(.+?)\s+and\s+(.+?)(?:[?.!;]|$)/i,
   ];
   for (let i = 0; i < routePatterns.length; i++) {
     const match = text.match(routePatterns[i]);
@@ -164,22 +169,25 @@ function extractManusMapRequest(rawPrompt: string): ManusMapRequest | null {
   }
 
   const locationPatterns = [
-    /\bwhere\s+(?:is|are)\s+(.+?)\s+(?:located|situated)(?:\s|$|[?.!,;])/i,
-    /\bwhere\s+(.+?)\s+located(?:\s|$|[?.!,;])/i,
-    /\bwhere\s+(.+?)\s+(?:is|are)\s+(?:located|situated)(?:\s|$|[?.!,;])/i,
-    /\b(?:show|display|open)\s+(?:me\s+)?(?:the\s+)?map(?:\s+(?:of|for))?\s+(.+?)(?:[?.!,;]|$)/i,
-    /\bmap\s+of\s+(.+?)(?:[?.!,;]|$)/i,
-    /\bwhere\s+(?:is|are)\s+(.+?)(?:[?.!,;]|$)/i,
-    /\b(?:locate|find)\s+(.+?)\s+on\s+(?:the\s+)?map(?:[?.!,;]|$)/i,
+    /\bwhere\s+(?:is|are)\s+(.+?)\s+(?:located|situated)(?:\s|$|[?.!;])/i,
+    /\bwhere\s+(.+?)\s+located(?:\s|$|[?.!;])/i,
+    /\bwhere\s+(.+?)\s+(?:is|are)\s+(?:located|situated)(?:\s|$|[?.!;])/i,
+    /\b(?:show|display|open|locate|find|pin)\s+(?:me\s+)?(.+?)\s+on\s+(?:the\s+)?(?:google\s+)?maps?(?:[?.!;]|$)/i,
+    /\b(?:show|display|open)\s+(?:me\s+)?(?:the\s+)?(?:google\s+)?maps?(?:\s+(?:of|for))?\s+(.+?)(?:[?.!;]|$)/i,
+    /\b(?:google\s+)?map\s+(?:of|for)\s+(.+?)(?:[?.!;]|$)/i,
+    /\blocation\s+(?:of|for)\s+(.+?)(?:[?.!;]|$)/i,
+    /\bwhere\s+(?:is|are)\s+(.+?)(?:[?.!;]|$)/i,
+    /^([A-Za-z][A-Za-z\s,.'-]{1,60}?)\s+(?:google\s+)?map(?:[?.!;]|$)/i,
   ];
   for (const pattern of locationPatterns) {
     const match = text.match(pattern);
     if (match) {
-      const location = clean(match[1].replace(/\b(?:on the map|on map)\b/ig, ''));
-      if (location) return { kind: 'location', location };
+      const location = clean(match[1]);
+      if (location && !/^(?:the|a|an|my|this|that|here|there)$/i.test(location)) {
+        return { kind: 'location', location };
+      }
     }
   }
-  if (/\bshow\s+(?:me\s+)?(?:the\s+)?map\b/i.test(text)) return { kind: 'location', location: 'India' };
   return null;
 }
 

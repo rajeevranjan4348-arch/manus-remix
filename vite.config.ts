@@ -43,6 +43,7 @@ import { issueGuestSessionToken, isSameOriginOrLocalRequest } from './server/gue
 import { GoogleGenAI } from '@google/genai';
 import { agentActivityHub } from './server/agentActivityService';
 import { runTechnicalVerification } from './server/agentVerificationService';
+import { geocodeLocationServer } from './server/geocodingService';
 
 class StreamCircuitBreaker {
   private failureCount = 0;
@@ -304,6 +305,84 @@ function geminiApiPlugin(): Plugin {
             } catch (err: any) {
               res.statusCode = 500;
               res.end(JSON.stringify({ ok: false, error: err?.message || 'Verification failed' }));
+            }
+          });
+          return;
+        }
+
+        // Server-Side Location Geocoding & Coordinate Validation Endpoint
+        if (url === '/api/geocode' || url === '/.netlify/functions/geocode') {
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+          res.setHeader('X-Content-Type-Options', 'nosniff');
+          if (req.method !== 'GET' && req.method !== 'POST') {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ ok: false, error: 'Method not allowed.', code: 'METHOD_NOT_ALLOWED' }));
+            return;
+          }
+          const decodedToken = await verifyBearerToken(req.headers.authorization as string | undefined);
+          if (!decodedToken?.uid) {
+            res.statusCode = 401;
+            res.end(JSON.stringify({ ok: false, error: 'Authentication required.', code: 'UNAUTHENTICATED' }));
+            return;
+          }
+          const rateLimit = await checkSharedRateLimit(`geocode:${decodedToken.uid}`, 60, 60);
+          if (rateLimit.unavailable) {
+            res.statusCode = 503;
+            res.end(JSON.stringify({ ok: false, error: 'Geocoding is temporarily unavailable.', code: 'RATE_LIMIT_UNAVAILABLE' }));
+            return;
+          }
+          if (!rateLimit.allowed) {
+            res.statusCode = 429;
+            res.setHeader('Retry-After', String(rateLimit.retryAfterSeconds));
+            res.end(JSON.stringify({ ok: false, error: 'Too many location requests. Please wait a moment.', code: 'RATE_LIMITED' }));
+            return;
+          }
+
+          const queryParams = new URLSearchParams(req.url?.split('?')[1] || '');
+          const runGeocode = async (rawQuery: unknown) => {
+            if (typeof rawQuery !== 'string' || !rawQuery.trim() || rawQuery.trim().length > 200) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ ok: false, location: null, error: 'Provide a location query between 1 and 200 characters.', code: 'INVALID_INPUT' }));
+              return;
+            }
+            try {
+              const result = await geocodeLocationServer(rawQuery.trim());
+              res.statusCode = result.ok ? 200 : 404;
+              res.end(JSON.stringify(result));
+            } catch (err: any) {
+              res.statusCode = 500;
+              res.end(JSON.stringify({ ok: false, location: null, error: err?.message || 'Geocoding service unavailable', code: 'GEOCODE_ERROR' }));
+            }
+          };
+
+          if (req.method === 'GET') {
+            const q = queryParams.get('q') || queryParams.get('query') || queryParams.get('address') || '';
+            await runGeocode(q);
+            return;
+          }
+
+          let bodyStr = '';
+          let bodyBytes = 0;
+          let bodyTooLarge = false;
+          req.on('data', (chunk: any) => {
+            bodyBytes += Buffer.byteLength(chunk);
+            if (bodyBytes > 4 * 1024) bodyTooLarge = true;
+            else if (!bodyTooLarge) bodyStr += chunk;
+          });
+          req.on('end', async () => {
+            if (bodyTooLarge) {
+              res.statusCode = 413;
+              res.end(JSON.stringify({ ok: false, error: 'Payload too large.', code: 'PAYLOAD_TOO_LARGE' }));
+              return;
+            }
+            try {
+              const body = bodyStr ? JSON.parse(bodyStr) : {};
+              const q = body?.query ?? body?.location ?? queryParams.get('q') ?? '';
+              await runGeocode(q);
+            } catch {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ ok: false, error: 'Invalid JSON payload.', code: 'INVALID_PAYLOAD' }));
             }
           });
           return;

@@ -109,7 +109,14 @@ function AppContent() {
   const [historyInitialTab, setHistoryInitialTab] = React.useState<'sessions' | 'all' | 'photos' | 'videos' | 'docs'>('sessions');
   const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = React.useState<'general' | 'robot' | 'ai' | 'personalization' | 'voice' | 'data' | 'about'>('general');
+  const [gmpQuotaExceeded, setGmpQuotaExceeded] = React.useState(false);
   const navigate = useNavigate();
+
+  React.useEffect(() => {
+    const handleGmpQuotaExceeded = () => setGmpQuotaExceeded(true);
+    window.addEventListener('gmp-quota-exceeded', handleGmpQuotaExceeded);
+    return () => window.removeEventListener('gmp-quota-exceeded', handleGmpQuotaExceeded);
+  }, []);
   const location = useLocation();
   useBlinkAuth();
   
@@ -328,6 +335,22 @@ function AppContent() {
         activeTaskId={location.pathname.startsWith('/task/') ? location.pathname.split('/')[2] : undefined}
       />
       <div className="flex-1 flex flex-col min-w-0">
+        {gmpQuotaExceeded && (
+          <div className="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50 shadow-sm">
+            <span>
+              Google Maps Platform quota reached. If you are the app owner, visit{' '}
+              <a
+                href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline font-semibold text-amber-950 hover:text-amber-800"
+              >
+                maps developer site
+              </a>{' '}
+              for instructions to update your account.
+            </span>
+          </div>
+        )}
         {!isWebsiteActive && (
           <Topbar 
             onToggleSidebar={handleToggleSidebar}

@@ -2,6 +2,7 @@
  * Real-Time Weather Service
  * Uses Open-Meteo public APIs (Worldwide coverage, live satellite/model data, no API key required).
  */
+import { geocodeWithOpenMeteo } from './locationGeocoding';
 
 export interface WeatherData {
   locationName: string;
@@ -65,17 +66,12 @@ export async function fetchWeatherByCity(cityName: string): Promise<WeatherData 
     const cleanCity = cityName.trim();
     if (!cleanCity) return null;
 
-    // 1. Geocode city name
-    const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cleanCity)}&count=1&language=en&format=json`;
-    const geoRes = await fetch(geoUrl);
-    if (!geoRes.ok) return null;
-    const geoData = await geoRes.json();
-
-    if (!geoData.results || geoData.results.length === 0) {
+    // 1. Geocode city name with multi-candidate disambiguation & coordinate validation
+    const loc = await geocodeWithOpenMeteo(cleanCity);
+    if (!loc) {
       return null;
     }
 
-    const loc = geoData.results[0];
     return fetchWeatherByCoords(loc.latitude, loc.longitude, loc.name, loc.country);
   } catch (err) {
     console.warn('[Weather Service] Failed to fetch weather for city:', cityName, err);

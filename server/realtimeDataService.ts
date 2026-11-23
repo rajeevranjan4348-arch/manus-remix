@@ -1,3 +1,5 @@
+import { geocodeLocationServer } from './geocodingService';
+
 /**
  * Server-Side Real-Time Data & Live Information Service
  *
@@ -244,13 +246,8 @@ export function detectWeatherCity(query: string): { wantsWeather: boolean; city?
 export async function fetchLiveWeatherSnapshot(cityQuery: string): Promise<LiveWeatherSnapshot | null> {
   try {
     const cleanCity = (cityQuery || 'New Delhi').trim();
-    const geoRes = await fetch(
-      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cleanCity)}&count=1&language=en&format=json`,
-      { signal: AbortSignal.timeout(5000) }
-    );
-    if (!geoRes.ok) return null;
-    const geoData: any = await geoRes.json();
-    const loc = geoData?.results?.[0];
+    const geoResult = await geocodeLocationServer(cleanCity);
+    const loc = geoResult.location;
     if (!loc) return null;
 
     const { latitude, longitude, name, country } = loc;
