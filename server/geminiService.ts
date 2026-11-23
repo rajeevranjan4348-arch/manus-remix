@@ -235,6 +235,36 @@ export function generateResilientResponse(
     return `I am **${verified.applicationName}**, an AI workspace agent powered by the **${verified.modelId}** model (${verified.provider}).\n\nHere is what I can do for you:\n- **Direct Q&A & Knowledge**: Answer questions clearly and concisely across science, technology, culture, and everyday topics.\n- **Real-Time Data & Search**: Retrieve live weather, air quality, currency exchange rates, crypto prices, world clocks, and current news headlines.\n- **Full-Stack Engineering**: Build, modify, debug, and preview web applications and interactive systems.\n- **Data Analysis & Processing**: Compute metrics, summarize complex records, and generate actionable reports.\n\nTell me what you'd like to know or work on!`;
   }
 
+  // Evaluate direct arithmetic & math expressions (e.g. "what is 2 + 2?", "15 * 24", "100 / 4")
+  const mathMatch = clean.match(
+    /(?:what\s+is|calculate|compute|solve|evaluate|whats|what's)?\s*(-?\d+(?:\.\d+)?)\s*([+\-*/x×÷^%])\s*(-?\d+(?:\.\d+)?)\s*\??$/i
+  );
+  if (mathMatch) {
+    const a = Number.parseFloat(mathMatch[1]);
+    const op = mathMatch[2];
+    const b = Number.parseFloat(mathMatch[3]);
+    if (Number.isFinite(a) && Number.isFinite(b)) {
+      let resultVal: number | null = null;
+      let symbol = op;
+      if (op === '+') resultVal = a + b;
+      else if (op === '-') resultVal = a - b;
+      else if (op === '*' || op === 'x' || op === '×') {
+        resultVal = a * b;
+        symbol = '×';
+      } else if ((op === '/' || op === '÷') && b !== 0) {
+        resultVal = Number((a / b).toFixed(6));
+        symbol = '÷';
+      } else if (op === '^') {
+        resultVal = Math.pow(a, b);
+      } else if (op === '%' && b !== 0) {
+        resultVal = a % b;
+      }
+      if (resultVal !== null && Number.isFinite(resultVal)) {
+        return `**${a} ${symbol} ${b} = ${resultVal}**`;
+      }
+    }
+  }
+
   // Check if interactive 3D scene or Three.js PBR model was requested
   const threeIntentFallback = detectThreeDSceneIntent(raw);
   if (threeIntentFallback.is3DRequest) {
@@ -780,21 +810,32 @@ export async function* streamOpenRouterResponse(
           content: m.content,
         })),
       ];
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openRouterApiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://manus.im',
-          'X-Title': 'Manus AI Agent',
-        },
-        body: JSON.stringify({
-          model: model,
-          messages: messages,
-          stream: true,
-          max_tokens: 2048,
-        }),
-      });
+      const orScope = createScopedAbortController(
+        DEFAULT_TIMEOUT_BUDGETS.firstTokenTimeoutMs,
+        options.signal,
+        'OpenRouter fallback request timed out'
+      );
+      let response: Response;
+      try {
+        response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${openRouterApiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://manus.im',
+            'X-Title': 'Manus AI Agent',
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: messages,
+            stream: true,
+            max_tokens: 2048,
+          }),
+          signal: orScope.controller.signal,
+        });
+      } finally {
+        orScope.cleanup();
+      }
 
       if (!response.ok) {
         throw new Error(`OpenRouter status ${response.status}`);

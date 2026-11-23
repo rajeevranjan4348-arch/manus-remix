@@ -37,10 +37,12 @@ import { GitHubRepositoryBrowser } from './GitHubRepositoryBrowser';
 import { 
   UserSettings, 
   AppTheme, 
+  ViewDensity,
   AppMode, 
   ResponseTone, 
   VoicePersona 
 } from '@/types/settings';
+import { normalizeViewDensity } from '@/lib/viewDensity';
 import { 
   getSettings, 
   saveSettings, 
@@ -223,6 +225,13 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
     const updated = saveSettings({ theme: newTheme });
     setSettings(updated);
     toast.success(`Theme set to ${newTheme.charAt(0).toUpperCase() + newTheme.slice(1)}`);
+  };
+
+  const handleViewDensityChange = (newDensity: ViewDensity) => {
+    const normalized = normalizeViewDensity(newDensity);
+    const updated = saveSettings({ viewDensity: normalized });
+    setSettings(updated);
+    toast.success(`View density set to ${normalized === 'compact' ? 'Compact' : 'Spacious'}`);
   };
 
   const handleExportData = () => {
@@ -457,6 +466,56 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
                             </span>
                             <span className="flex-1">{combo.label}</span>
                             {selected && <Check size={13} className="text-foreground" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* View Density */}
+                  <div className="space-y-2 pt-2 border-t border-border/40" data-testid="view-density-section">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">View Density</p>
+                      <p className="text-[11px] text-muted-foreground">Adjust spacing and font size across your workspace</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        {
+                          id: 'compact' as ViewDensity,
+                          label: 'Compact',
+                          description: 'Dense for desktop',
+                          icon: Monitor,
+                        },
+                        {
+                          id: 'spacious' as ViewDensity,
+                          label: 'Spacious',
+                          description: 'Mobile-optimized',
+                          icon: Smartphone,
+                        },
+                      ].map((option) => {
+                        const Icon = option.icon;
+                        const activeDensity = normalizeViewDensity(settings.viewDensity);
+                        const isSelected = activeDensity === option.id;
+                        return (
+                          <button
+                            key={option.id}
+                            type="button"
+                            data-testid={`view-density-${option.id}`}
+                            aria-pressed={isSelected}
+                            onClick={() => handleViewDensityChange(option.id)}
+                            className={cn(
+                              "flex items-center gap-2.5 py-2 px-3 rounded-xl border text-left transition-all cursor-pointer",
+                              isSelected
+                                ? "border-foreground/30 bg-muted/70 text-foreground shadow-2xs ring-1 ring-border"
+                                : "border-border/60 hover:border-border text-muted-foreground hover:text-foreground bg-card/50"
+                            )}
+                          >
+                            <Icon size={14} className="shrink-0" />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-medium leading-tight text-foreground">{option.label}</p>
+                              <p className="text-[10px] text-muted-foreground truncate">{option.description}</p>
+                            </div>
+                            {isSelected && <Check size={13} className="text-foreground shrink-0" />}
                           </button>
                         );
                       })}

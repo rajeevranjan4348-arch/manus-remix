@@ -30,7 +30,8 @@
     "allowUnusedLabels": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "pulsoicon-react": ["./src/lib/pulsoiconSafe.ts"]
     }
   },
   "include": ["src"],

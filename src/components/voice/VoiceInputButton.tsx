@@ -15,12 +15,49 @@ interface VoiceInputButtonProps {
   onInterimChange?: (interim: string) => void;
   onListeningStateChange?: (isListening: boolean) => void;
   onAudioLevelChange?: (level: number) => void;
+  onFrequencyDataChange?: (bands: number[]) => void;
   onAutoSubmit?: (text: string) => void;
   onExecuteCommand?: (cmd: VoiceCommandResult) => void;
   onRequestApproval?: (cmd: VoiceCommandResult) => void;
   className?: string;
   size?: number;
   autoSubmitOnSpeech?: boolean;
+}
+
+/**
+ * Reduces raw Web Audio API FFT byte frequency bins into normalized visual equalizer bands [0..1].
+ */
+export function computeFrequencyBands(dataArray: ArrayLike<number>, bandCount = 5): number[] {
+  const safeCount = Math.max(1, Math.floor(bandCount));
+  const len = dataArray?.length ?? 0;
+  if (len === 0) {
+    return Array.from({ length: safeCount }, () => 0);
+  }
+
+  // Focus primarily on voice-active frequency bins (lower ~65% of spectrum)
+  const usableBins = Math.max(safeCount, Math.min(len, Math.ceil(len * 0.65)));
+  const binsPerBand = usableBins / safeCount;
+  const bands: number[] = [];
+
+  for (let b = 0; b < safeCount; b++) {
+    const start = Math.floor(b * binsPerBand);
+    const end = Math.max(start + 1, Math.min(len, Math.floor((b + 1) * binsPerBand)));
+    let sum = 0;
+    let peak = 0;
+    for (let i = start; i < end; i++) {
+      const value = Math.max(0, Math.min(255, Number(dataArray[i]) || 0));
+      sum += value;
+      if (value > peak) peak = value;
+    }
+    const avg = sum / (end - start);
+    // Blend average and peak energy for crisp voice responsiveness
+    const blended = (avg * 0.65 + peak * 0.35) / 255;
+    // Slight speech-band gain + perceptual curve clamped to [0, 1]
+    const normalized = blended <= 0.01 ? 0 : Math.min(1, Math.max(0, Math.pow(blended * 1.45, 0.85)));
+    bands.push(Number(normalized.toFixed(3)));
+  }
+
+  return bands;
 }
 
 /**
@@ -100,6 +137,7 @@ export function VoiceInputButton({
   onInterimChange,
   onListeningStateChange,
   onAudioLevelChange,
+  onFrequencyDataChange,
   onAutoSubmit,
   onExecuteCommand,
   onRequestApproval,
@@ -147,6 +185,7 @@ export function VoiceInputButton({
     }
     setAudioLevel(0);
     onAudioLevelChange?.(0);
+    onFrequencyDataChange?.([0, 0, 0, 0, 0]);
   };
 
   const startAudioMeter = async () => {
@@ -161,6 +200,7 @@ export function VoiceInputButton({
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 64;
+      analyser.smoothingTimeConstant = 0.72;
       source.connect(analyser);
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
@@ -175,6 +215,7 @@ export function VoiceInputButton({
         const normalized = Math.min(1.0, Math.max(0, (avg / 128) * 1.5));
         setAudioLevel(normalized);
         onAudioLevelChange?.(normalized);
+        onFrequencyDataChange?.(computeFrequencyBands(dataArray, 5));
         animationFrameRef.current = requestAnimationFrame(checkVolume);
       };
       checkVolume();

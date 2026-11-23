@@ -124,7 +124,17 @@ export function startRecoveryMonitoring(options: RecoveryMonitorOptions = {}): (
   const onError = () => {
     log('error', 'ui-recovery', 'A browser runtime error was reported.');
   };
-  const onUnhandledRejection = () => {
+  const onUnhandledRejection = (event?: PromiseRejectionEvent) => {
+    const reasonMsg =
+      event?.reason instanceof Error
+        ? event.reason.message
+        : typeof event?.reason === 'string'
+          ? event.reason
+          : '';
+    if (reasonMsg.includes('controls.start() should only be called after a component has mounted')) {
+      event?.preventDefault?.();
+      return;
+    }
     log('error', 'ui-recovery', 'An unhandled asynchronous error was reported.');
   };
   const onOffline = () => {

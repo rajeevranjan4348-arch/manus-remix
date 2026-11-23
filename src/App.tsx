@@ -15,6 +15,8 @@ import {
   applyPerformanceProfileToDOM,
 } from './lib/performanceEngine';
 import { startRecoveryMonitoring } from './lib/recoveryController';
+import { getSettings } from './lib/settingsStore';
+import { applyViewDensityToDocument } from './lib/viewDensity';
 
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 
@@ -122,6 +124,21 @@ function AppContent() {
     } else {
       setTimeout(() => configureHighQualityTTS(), 250);
     }
+  }, []);
+
+  // Apply persisted View Density CSS variables on startup and settings updates
+  React.useEffect(() => {
+    applyViewDensityToDocument(getSettings().viewDensity);
+    const handleSettingsUpdated = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail && detail.viewDensity !== undefined) {
+        applyViewDensityToDocument(detail.viewDensity);
+      } else {
+        applyViewDensityToDocument(getSettings().viewDensity);
+      }
+    };
+    window.addEventListener('manus_settings_updated', handleSettingsUpdated);
+    return () => window.removeEventListener('manus_settings_updated', handleSettingsUpdated);
   }, []);
 
   // Initialize Ultra-Lite Performance Engine (2GB RAM Android Target) & adaptive battery/visibility hooks

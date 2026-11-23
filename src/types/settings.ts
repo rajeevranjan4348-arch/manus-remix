@@ -1,4 +1,5 @@
 export type AppTheme = 'light' | 'dark' | 'system';
+export type ViewDensity = 'compact' | 'spacious';
 export type AppMode = 'chat' | 'work';
 export type AppLanguage = 'en' | 'hi' | 'es' | 'fr' | 'de' | 'ja' | 'zh';
 export type ResponseTone = 'balanced' | 'concise' | 'professional' | 'creative' | 'academic';
@@ -7,6 +8,7 @@ export type VoicePersona = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimm
 export interface UserSettings {
   // General
   theme: AppTheme;
+  viewDensity?: ViewDensity;
   defaultMode: AppMode;
   language: AppLanguage;
   soundEffects: boolean;

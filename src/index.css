@@ -58,6 +58,47 @@
     --font-mono: "IBM Plex Mono", monospace;
 
     --radius: 1rem;
+
+    /* View Density Variables (default: spacious / mobile-optimized) */
+    --density-font-size-base: 16px;
+    --density-font-size-chat: 0.9375rem;
+    --density-line-height-chat: 1.6;
+    --density-spacing-unit: 0.25rem;
+    --density-chat-gap: 0.75rem;
+    --density-message-py: 0.75rem;
+    --density-bubble-px: 1rem;
+    --density-bubble-py: 0.625rem;
+    --density-input-px: 1.125rem;
+    --density-input-py: 0.75rem;
+    --density-panel-padding: 1.25rem;
+  }
+
+  :root[data-view-density="compact"] {
+    --density-font-size-base: 14.5px;
+    --density-font-size-chat: 0.84375rem;
+    --density-line-height-chat: 1.45;
+    --density-spacing-unit: 0.2rem;
+    --density-chat-gap: 0.375rem;
+    --density-message-py: 0.375rem;
+    --density-bubble-px: 0.75rem;
+    --density-bubble-py: 0.4375rem;
+    --density-input-px: 0.875rem;
+    --density-input-py: 0.5rem;
+    --density-panel-padding: 0.875rem;
+  }
+
+  :root[data-view-density="spacious"] {
+    --density-font-size-base: 16px;
+    --density-font-size-chat: 0.9375rem;
+    --density-line-height-chat: 1.6;
+    --density-spacing-unit: 0.25rem;
+    --density-chat-gap: 0.75rem;
+    --density-message-py: 0.75rem;
+    --density-bubble-px: 1rem;
+    --density-bubble-py: 0.625rem;
+    --density-input-px: 1.125rem;
+    --density-input-py: 0.75rem;
+    --density-panel-padding: 1.25rem;
   }
 
   .dark {
@@ -120,6 +161,7 @@
     box-sizing: border-box;
   }
   html {
+    font-size: var(--density-font-size-base, 16px);
     scroll-behavior: smooth;
     -webkit-tap-highlight-color: transparent;
     overflow-x: hidden;
@@ -1552,6 +1594,18 @@ html {
 .manus-voice-equalizer span:nth-child(4) { height: 11px; animation-delay: -0.35s; }
 .manus-voice-equalizer span:nth-child(5) { height: 8px; animation-delay: -0.18s; }
 
+/* Reactive live-FFT equalizer variant driven by real microphone frequency bands */
+.manus-voice-equalizer--reactive {
+  height: 20px;
+  gap: 3px;
+}
+
+.manus-voice-equalizer--reactive[data-live-signal="true"] span {
+  animation: none;
+  transition: height 75ms cubic-bezier(0.22, 1, 0.36, 1), opacity 90ms ease-out;
+  will-change: height, opacity;
+}
+
 @keyframes manus-equalizer-bar {
   0%, 100% {
     transform: scaleY(0.42);
@@ -1561,6 +1615,37 @@ html {
     transform: scaleY(1.08);
     opacity: 1;
   }
+}
+
+/* View Density layout adaptations for Compact (desktop) vs Spacious (mobile-optimized) */
+[data-view-density="compact"] [data-message="user"],
+[data-view-density="compact"] [data-message="assistant"] {
+  margin-top: var(--density-message-py);
+  margin-bottom: var(--density-message-py);
+}
+
+[data-view-density="compact"] [data-testid="user-message-bubble"] {
+  padding: var(--density-bubble-py) var(--density-bubble-px);
+  font-size: var(--density-font-size-chat);
+  line-height: var(--density-line-height-chat);
+}
+
+[data-view-density="compact"] [data-message="assistant"] .prose {
+  font-size: var(--density-font-size-chat);
+  line-height: var(--density-line-height-chat);
+}
+
+[data-view-density="compact"] .manus-input-container {
+  padding: var(--density-input-py) var(--density-input-px);
+  gap: var(--density-chat-gap);
+}
+
+[data-view-density="spacious"] [data-testid="user-message-bubble"] {
+  padding: var(--density-bubble-py) var(--density-bubble-px);
+}
+
+[data-view-density="spacious"] [data-message="assistant"] .prose {
+  line-height: var(--density-line-height-chat);
 }
 
 /* Ambient floating animation for Home hero robot */

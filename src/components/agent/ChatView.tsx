@@ -67,6 +67,12 @@ import {
   scheduleDebouncedStorageWrite,
 } from '@/lib/performanceEngine';
 import { useUltraLiteImage } from '@/hooks/useUltraLiteImage';
+import {
+  ChatMessageGroupMetadata,
+  deduplicateDisplayMessages,
+  groupConsecutiveMessages,
+} from '@/lib/messageGrouping';
+import { SseDiagnosticConsole } from './SseDiagnosticConsole';
 
 // Lazy-load heavy chart, map, Drive picker, and connector store modals
 const ChartResult = React.lazy(() =>
@@ -501,6 +507,7 @@ export function ChatView({
   const [isListening, setIsListening] = useState<boolean>(false);
   const [interimSpeech, setInterimSpeech] = useState<string>('');
   const [voiceAudioLevel, setVoiceAudioLevel] = useState<number>(0);
+  const [voiceFrequencyBands, setVoiceFrequencyBands] = useState<number[]>([0, 0, 0, 0, 0]);
   const dragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const chatWrapperRef = useRef<HTMLDivElement>(null);
@@ -819,22 +826,7 @@ export function ChatView({
   }, []);
 
   const displayMessages = React.useMemo(() => {
-    const list: any[] = [];
-    const seenIds = new Set<string>();
-    for (const msg of messages) {
-      if (!msg) continue;
-      if (msg.id && seenIds.has(msg.id)) continue;
-      const prev = list[list.length - 1];
-      if (
-        prev &&
-        prev.role === msg.role &&
-        cleanUserMessage(prev.content || '').trim().toLowerCase() === cleanUserMessage(msg.content || '').trim().toLowerCase()
-      ) {
-        continue;
-      }
-      if (msg.id) seenIds.add(msg.id);
-      list.push(msg);
-    }
+    const list = deduplicateDisplayMessages(messages, cleanUserMessage);
     if (!list.some((m) => m.role === 'assistant') && (result?.summary || result?.content || result?.text)) {
       list.push({
         id: 'result-assistant-fallback',
@@ -1069,12 +1061,14 @@ export function ChatView({
   }>>(new Map());
 
   // Helper to render each message item in the virtualized list (memoized so typing in composer doesn't re-render messages)
-  const renderMessageItem = React.useCallback((index: number, msg: any, explicitWindowStartIndex?: number) => {
+  const renderMessageItem = React.useCallback((index: number, msg: any, explicitWindowStartIndex?: number, groupMeta?: ChatMessageGroupMetadata) => {
     if (!msg) return null;
     const maxWindow = Math.max(24, virtualizationBudget.maxRenderedMessagesWindow || 60);
     const windowStartIndex = explicitWindowStartIndex ?? Math.max(0, displayMessages.length - maxWindow);
     const staggerDelayMs = getChatBubbleStaggerDelayMs(index, windowStartIndex);
     const staggerStyle = getChatMessageStaggerStyle(index, windowStartIndex);
+    const isGroupedWithPrev = Boolean(groupMeta?.isGroupedWithPrev);
+    const isGroupedWithNext = Boolean(groupMeta?.isGroupedWithNext);
 
     if (msg.role === 'user') {
       const msgId = msg.id || String(index);
@@ -1087,10 +1081,18 @@ export function ChatView({
         <React.Fragment key={msgId}>
           <div
             data-message="user"
+            data-grouped-with-prev={isGroupedWithPrev ? 'true' : 'false'}
+            data-grouped-with-next={isGroupedWithNext ? 'true' : 'false'}
+            data-group-position={groupMeta?.groupPosition ?? 0}
+            data-group-size={groupMeta?.groupSize ?? 1}
             data-stagger-index={index}
             data-stagger-delay-ms={staggerDelayMs}
             style={staggerStyle}
-            className="flex justify-end my-2 chat-message-enter chat-message-user-enter group relative px-4 sm:px-20"
+            className={cn(
+              "flex justify-end chat-message-enter chat-message-user-enter group relative px-4 sm:px-20",
+              isGroupedWithPrev ? "mt-0.5" : "mt-2",
+              isGroupedWithNext ? "mb-0.5" : "mb-2"
+            )}
           >
             {isEditing ? (
               <div className="bg-card border border-border p-3 rounded-2xl max-w-[90%] sm:max-w-[80%] shadow-md w-full space-y-2">
@@ -1137,7 +1139,11 @@ export function ChatView({
                 </button>
                 <div
                   data-testid="user-message-bubble"
-                  className="bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm font-medium shadow-xs leading-relaxed space-y-2 overflow-hidden select-text"
+                  className={cn(
+                    "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] px-4 py-2.5 rounded-2xl text-sm font-medium shadow-xs leading-relaxed space-y-2 overflow-hidden select-text",
+                    isGroupedWithPrev ? "rounded-tr-md" : "rounded-tr-sm",
+                    isGroupedWithNext && "rounded-br-md"
+                  )}
                 >
                   {attachedImageUrl && (
                     <UserAttachedImagePreview imageUrl={attachedImageUrl} />
@@ -1205,15 +1211,25 @@ export function ChatView({
           key={msg.id || index}
           data-testid={`ai-message-${msgKey}`}
           data-message="assistant"
+          data-grouped-with-prev={isGroupedWithPrev ? 'true' : 'false'}
+          data-grouped-with-next={isGroupedWithNext ? 'true' : 'false'}
+          data-group-position={groupMeta?.groupPosition ?? 0}
+          data-group-size={groupMeta?.groupSize ?? 1}
           data-stagger-index={index}
           data-stagger-delay-ms={staggerDelayMs}
           style={staggerStyle}
-          className="group/ai-message relative flex gap-4 max-w-3xl mx-auto my-3 chat-message-enter chat-message-assistant-enter px-4 sm:px-20"
+          className={cn(
+            "group/ai-message relative flex gap-4 max-w-3xl mx-auto chat-message-enter chat-message-assistant-enter px-4 sm:px-20",
+            isGroupedWithPrev ? "mt-1" : "mt-3",
+            isGroupedWithNext ? "mb-1" : "mb-3"
+          )}
         >
           <div className="flex-1 space-y-3 min-w-0">
-            <div className="flex items-center justify-between gap-3">
-              <ManusLogo showBadge={true} />
-            </div>
+            {!isGroupedWithPrev && (
+              <div className="flex items-center justify-between gap-3">
+                <ManusLogo showBadge={true} />
+              </div>
+            )}
 
             {cleanedContent ? (
               <>
@@ -1569,24 +1585,45 @@ export function ChatView({
     });
   }, [displayMessages, isAssistantWorking, prompt]);
 
-  footerRenderRef.current = () => (
-    <div className="px-4 sm:px-20 space-y-3 pb-28 pt-2">
-      {shouldShowThinkingIndicator && (
-        <div
-          data-testid="chat-thinking-indicator"
-          role="status"
-          aria-label="AI is thinking"
-          className="chat-thinking-row max-w-3xl mx-auto w-full"
-        >
-          <span className="chat-thinking-bubble" aria-hidden="true">
-            <span className="chat-thinking-dots">
-              <span />
-              <span />
-              <span />
+  footerRenderRef.current = () => {
+    const latestUserMsg = [...displayMessages].reverse().find((m: any) => m?.role === 'user');
+    const latestUserPromptText = latestUserMsg?.content
+      ? cleanUserMessage(latestUserMsg.content)
+      : cleanUserMessage(prompt);
+
+    return (
+      <div className="px-4 sm:px-20 space-y-3 pb-28 pt-2">
+        {shouldShowThinkingIndicator && (
+          <div
+            data-testid="chat-thinking-indicator"
+            role="status"
+            aria-label="AI is thinking"
+            className="chat-thinking-row max-w-3xl mx-auto w-full"
+          >
+            <span className="chat-thinking-bubble" aria-hidden="true">
+              <span className="chat-thinking-dots">
+                <span />
+                <span />
+                <span />
+              </span>
             </span>
-          </span>
-        </div>
-      )}
+          </div>
+        )}
+
+        <SseDiagnosticConsole
+          isStreamingResponse={isStreamingResponse}
+          status={status}
+          taskId={taskId}
+          lastUserPrompt={latestUserPromptText}
+          onStop={onStop}
+          onRestartStream={(promptToRestart) => {
+            const targetPrompt = (promptToRestart || latestUserPromptText || '').trim();
+            if (targetPrompt) {
+              toast.info('Restarting SSE stream...');
+              onSubmit(targetPrompt);
+            }
+          }}
+        />
 
       {/* Final Result */}
       {(() => {
@@ -1677,7 +1714,8 @@ export function ChatView({
 
       <div ref={bottomRef} className="h-4 shrink-0" />
     </div>
-  );
+    );
+  };
 
   const virtuosoContext = React.useMemo(() => ({
     isAssistantWorking,
@@ -1754,7 +1792,27 @@ export function ChatView({
             const maxWindow = Math.max(24, virtualizationBudget.maxRenderedMessagesWindow || 60);
             const startIdx = Math.max(0, displayMessages.length - maxWindow);
             const visibleSlice = displayMessages.slice(startIdx);
-            return visibleSlice.map((msg, idx) => renderMessageItem(startIdx + idx, msg));
+            const messageGroups = groupConsecutiveMessages(visibleSlice, startIdx);
+            return messageGroups.map((group) => (
+              <div
+                key={group.groupId}
+                data-testid={`message-group-${group.role}`}
+                data-message-group={group.role}
+                data-group-size={group.messages.length}
+                className={cn(
+                  "flex flex-col",
+                  group.messages.length > 1
+                    ? group.role === 'user'
+                      ? "gap-0.5 my-1.5"
+                      : "gap-1 my-2"
+                    : ""
+                )}
+              >
+                {group.messages.map((item) =>
+                  renderMessageItem(item.index, item.message, startIdx, item.meta)
+                )}
+              </div>
+            ));
           })()}
           {footerRenderRef.current()}
         </div>
@@ -1862,6 +1920,7 @@ export function ChatView({
             interimSpeech={interimSpeech}
             currentText={input}
             audioLevel={voiceAudioLevel}
+            frequencyBands={voiceFrequencyBands}
             canSendNow={Boolean(input.trim() && status !== 'running')}
             onClear={() => {
               setInput('');
@@ -1875,8 +1934,8 @@ export function ChatView({
             }}
           />
 
-          {/* Top Row: Textarea for typing message */}
-          <div className="w-full flex flex-col min-h-[26px] sm:min-h-[28px]">
+          {/* Top Row: Textarea for typing message + Reactive Voice Frequency Visualizer when listening */}
+          <div className="w-full flex items-center gap-2.5 min-h-[26px] sm:min-h-[28px]">
             <textarea
               ref={textareaRef}
               value={input}
@@ -1926,9 +1985,41 @@ export function ChatView({
                     ? "Ask with deep reasoning..." 
                     : "Type a message or ask anything..."
               }
-              className="w-full bg-transparent border-none outline-none resize-none text-[#000000] dark:text-[#FFFFFF] placeholder:text-[#777777] dark:placeholder:text-[#AAAAAA] text-[14px] sm:text-[15px] leading-snug p-0 focus:ring-0 focus:outline-none min-h-[22px] sm:min-h-[24px] max-h-[90px] custom-scrollbar"
+              className="flex-1 min-w-0 w-full bg-transparent border-none outline-none resize-none text-[#000000] dark:text-[#FFFFFF] placeholder:text-[#777777] dark:placeholder:text-[#AAAAAA] text-[14px] sm:text-[15px] leading-snug p-0 focus:ring-0 focus:outline-none min-h-[22px] sm:min-h-[24px] max-h-[90px] custom-scrollbar"
               disabled={isAssistantWorking}
             />
+            {isListening && (
+              <div
+                data-testid="chat-input-frequency-visualizer"
+                role="status"
+                aria-label="Live microphone frequency visualizer"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] shrink-0 select-none"
+              >
+                <div
+                  className="manus-voice-equalizer manus-voice-equalizer--reactive text-[#000000] dark:text-[#FFFFFF]"
+                  data-live-signal={voiceFrequencyBands.some((b) => b > 0.02) ? 'true' : 'false'}
+                  aria-hidden="true"
+                >
+                  {voiceFrequencyBands.map((band, idx) => {
+                    const hasLiveSignal = voiceFrequencyBands.some((b) => b > 0.02);
+                    const clamped = Math.min(1, Math.max(0, band));
+                    const barHeightPx = Math.round(4 + clamped * 16);
+                    const opacity = Number((0.5 + clamped * 0.5).toFixed(2));
+                    return (
+                      <span
+                        key={idx}
+                        data-band-index={idx}
+                        style={
+                          hasLiveSignal
+                            ? { height: `${barHeightPx}px`, opacity }
+                            : undefined
+                        }
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Bottom Row: Controls */}
@@ -2007,12 +2098,14 @@ export function ChatView({
                   } else {
                     setInterimSpeech('');
                     setVoiceAudioLevel(0);
+                    setVoiceFrequencyBands([0, 0, 0, 0, 0]);
                   }
                 }}
                 onInterimChange={(interim) => {
                   setInterimSpeech(interim);
                 }}
                 onAudioLevelChange={setVoiceAudioLevel}
+                onFrequencyDataChange={setVoiceFrequencyBands}
                 onTranscript={(dictatedText) => {
                   const base = speechBaseInputRef.current;
                   setInput(formatSpeechAutoFill(base, dictatedText));

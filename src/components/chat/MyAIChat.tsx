@@ -324,22 +324,40 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
 
       const authorization = await getFirebaseAuthorizationHeader();
       if (!authorization) {
-        toast.error('Please sign in to use AI chat.');
+        toast.error('Unable to initialize chat session. Please refresh and try again.');
         throw new Error('Authentication required.');
       }
-      const res = await fetch('/api/gemini/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: authorization },
-        signal: controller.signal,
-        body: JSON.stringify({
-          requestId: `myai_${Date.now()}_${reqId}`,
-          messages: payloadMessages,
-          model: 'gemini-3.8-flash',
-        }),
+      const requestIdStr = `myai_${Date.now()}_${reqId}`;
+      const requestBody = JSON.stringify({
+        requestId: requestIdStr,
+        messages: payloadMessages,
+        model: 'gemini-3-flash-preview',
       });
+      const endpoints = ['/api/gemini/stream', '/.netlify/functions/agent'];
+      let res: Response | null = null;
+      for (let i = 0; i < endpoints.length; i++) {
+        try {
+          const candidate = await fetch(endpoints[i], {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Request-ID': requestIdStr,
+              Authorization: authorization,
+            },
+            signal: controller.signal,
+            body: requestBody,
+          });
+          if (candidate.ok || i === endpoints.length - 1 || (candidate.status !== 404 && candidate.status !== 405)) {
+            res = candidate;
+            break;
+          }
+        } catch (fetchErr) {
+          if (i === endpoints.length - 1) throw fetchErr;
+        }
+      }
       resetInactivityTimer();
 
-      if (!res.ok) throw new Error(`API returned ${res.status}`);
+      if (!res || !res.ok) throw new Error(`API returned ${res?.status || 500}`);
       if (!res.body) {
         if (activeRequestIdRef.current === reqId) {
           setMessages([...updatedMessages, { role: 'assistant', content: 'Response received.' }]);

@@ -2,6 +2,7 @@ import { createClient, Agent } from '@blinkdotnew/sdk';
 import { auth } from './firebase';
 import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
 import { agentActivityTracker } from './agentActivityTracker';
+import { sseStreamDiagnostics } from './sseStreamDiagnostics';
 
 const PROJECT_ID = (import.meta as any).env?.VITE_BLINK_PROJECT_ID || 'manus-agent-clone-tkzhogvs';
 const PUBLISHABLE_KEY = (import.meta as any).env?.VITE_BLINK_PUBLISHABLE_KEY || '';
@@ -306,6 +307,12 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
           return firstRes;
         };
 
+        sseStreamDiagnostics.recordConnecting({
+          requestId,
+          taskId: activeTaskId,
+          endpoint: '/api/gemini/stream',
+        });
+
         let res = await fetchWithSafePreTokenRetry('/api/gemini/stream');
         resetInactivityWatchdog();
 
@@ -465,23 +472,46 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
           const decoder = new TextDecoder();
           let lineBuffer = '';
           let currentSseEventType = '';
+          let currentSseEventId = '';
 
           const processSseLine = (rawLine: string) => {
             resetInactivityWatchdog();
             const trimmed = rawLine.trim();
             if (!trimmed) {
               currentSseEventType = '';
+              currentSseEventId = '';
               return;
             }
-            if (trimmed.startsWith(':')) return;
+            if (trimmed.startsWith(':')) {
+              sseStreamDiagnostics.recordEventChunk({
+                requestId,
+                taskId: activeTaskId,
+                eventId: currentSseEventId || undefined,
+                eventType: 'heartbeat',
+                payloadChunk: trimmed,
+              });
+              return;
+            }
+            if (trimmed.startsWith('id:')) {
+              currentSseEventId = trimmed.slice(3).trim();
+              return;
+            }
             if (trimmed.startsWith('event:')) {
               currentSseEventType = trimmed.slice(6).trim().toLowerCase();
               return;
             }
             if (trimmed === 'data: [DONE]' || trimmed === 'data:[DONE]' || currentSseEventType === 'done') {
+              sseStreamDiagnostics.recordEventChunk({
+                requestId,
+                taskId: activeTaskId,
+                eventId: currentSseEventId || `done_${requestId}`,
+                eventType: 'done',
+                payloadChunk: '[DONE]',
+              });
               doneEmitted = true;
               safeEnqueue(encoder.encode('data: [DONE]\n\n'));
               currentSseEventType = '';
+              currentSseEventId = '';
               return;
             }
             let jsonStr = '';
@@ -496,7 +526,22 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
 
             try {
               const parsed = JSON.parse(jsonStr);
-              const eventType = String(parsed.type || currentSseEventType || '').toLowerCase();
+              const eventType = String(parsed.type || currentSseEventType || 'data').toLowerCase();
+              const resolvedEventId =
+                currentSseEventId ||
+                (typeof parsed.eventId === 'string' && parsed.eventId) ||
+                (typeof parsed?.event?.eventId === 'string' && parsed.event.eventId) ||
+                (typeof parsed.id === 'string' && parsed.id) ||
+                (typeof parsed?.event?.seq === 'number' ? `evt_seq_${parsed.event.seq}` : undefined);
+
+              sseStreamDiagnostics.recordEventChunk({
+                requestId,
+                taskId: activeTaskId,
+                eventId: resolvedEventId,
+                eventType,
+                payloadChunk: jsonStr,
+              });
+              currentSseEventId = '';
 
               // Ignore keep-alive heartbeat and stream-open metadata frames (they already reset the watchdog)
               if (eventType === 'heartbeat' || eventType === 'ping' || eventType === 'stream-open') {
@@ -644,6 +689,10 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
               });
             }
             sendDone();
+            sseStreamDiagnostics.recordStreamCompleted({
+              requestId,
+              finishReason,
+            });
             emitWindowEvent('manus_stream_done', {
               requestId,
               text: accumulatedText,
@@ -669,6 +718,10 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
           } else if (err instanceof TypeError) {
             serviceFailureMessage = 'Could not reach the AI server. Check your internet connection and try again.';
           }
+          sseStreamDiagnostics.recordStreamError({
+            requestId,
+            error: serviceFailureMessage,
+          });
           console.warn('[AI Studio] Gemini stream request failed:', err?.message || err);
         }
       } finally {
@@ -694,6 +747,10 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
             });
           }
           sendDone();
+          sseStreamDiagnostics.recordStreamCompleted({
+            requestId,
+            finishReason,
+          });
           emitWindowEvent('manus_stream_done', {
             requestId,
             text: accumulatedText,

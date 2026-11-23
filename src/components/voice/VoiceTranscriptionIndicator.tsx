@@ -6,6 +6,7 @@ export interface VoiceTranscriptionIndicatorProps {
   interimSpeech?: string;
   currentText?: string;
   audioLevel?: number;
+  frequencyBands?: number[];
   silenceCountdown?: number | null;
   canSendNow?: boolean;
   onClear?: () => void;
@@ -25,6 +26,7 @@ export function VoiceTranscriptionIndicator({
   interimSpeech = '',
   currentText = '',
   audioLevel = 0,
+  frequencyBands,
   silenceCountdown = null,
   canSendNow = false,
   onClear,
@@ -96,10 +98,27 @@ export function VoiceTranscriptionIndicator({
       <div className="flex items-center gap-2 shrink-0 ml-1">
         <div
           data-testid="speech-waveform-visualizer"
-          className="manus-voice-equalizer text-[#000000] dark:text-[#FFFFFF] flex items-center gap-0.5 h-3.5"
+          data-live-signal={
+            frequencyBands && frequencyBands.some((b) => b > 0.02)
+              ? 'true'
+              : 'false'
+          }
+          className="manus-voice-equalizer manus-voice-equalizer--reactive text-[#000000] dark:text-[#FFFFFF] flex items-center gap-0.5 h-3.5"
           aria-hidden="true"
         >
           {barMultipliers.map((mult, idx) => {
+            const bandLevel = frequencyBands?.[idx] ?? 0;
+            const hasLiveBands = Boolean(frequencyBands && frequencyBands.some((b) => b > 0.02));
+            if (hasLiveBands) {
+              const barHeightPx = Math.round(4 + Math.min(1, Math.max(0, bandLevel)) * 12);
+              const opacity = Number((0.55 + Math.min(1, bandLevel) * 0.45).toFixed(2));
+              return (
+                <span
+                  key={idx}
+                  style={{ height: `${barHeightPx}px`, opacity }}
+                />
+              );
+            }
             const dynamicScale = audioLevel > 0.02
               ? Math.min(1.4, Math.max(0.35, 0.4 + audioLevel * mult))
               : undefined;

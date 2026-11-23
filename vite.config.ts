@@ -238,7 +238,7 @@ function geminiApiPlugin(): Plugin {
             clearInterval(heartbeat);
             unsubscribe();
           };
-          req.on('close', cleanup);
+          req.on('aborted', cleanup);
           res.on('close', cleanup);
           return;
         }
@@ -1299,7 +1299,7 @@ function geminiApiPlugin(): Plugin {
                 }
               };
               res.on('close', handleClose);
-              req.on('close', handleClose);
+              req.on('aborted', handleClose);
 
               let hasEmittedDeltas = false;
 
@@ -1399,6 +1399,7 @@ export default defineConfig({
   plugins: [react(), geminiApiPlugin()],
   resolve: {
     alias: [
+      { find: /^pulsoicon-react$/, replacement: path.resolve(__dirname, './src/lib/pulsoiconSafe.ts') },
       { find: '@', replacement: path.resolve(__dirname, './src') },
     ],
   },

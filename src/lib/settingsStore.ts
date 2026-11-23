@@ -1,11 +1,13 @@
 import { UserSettings } from '@/types/settings';
 import { setPerformanceProfileConfiguration, getActivePerformanceProfile } from '@/lib/performanceEngine';
+import { applyViewDensityToDocument, DEFAULT_VIEW_DENSITY, normalizeViewDensity } from '@/lib/viewDensity';
 
 const SETTINGS_KEY = 'manus_user_settings';
 
 export const DEFAULT_SETTINGS: UserSettings = {
   // General
   theme: 'light',
+  viewDensity: DEFAULT_VIEW_DENSITY,
   defaultMode: 'chat',
   language: 'en',
   soundEffects: true,
@@ -120,8 +122,18 @@ export function saveSettings(updates: Partial<UserSettings>): UserSettings {
       localStorage.setItem('manus_chat_work_mode', updates.defaultMode);
     }
 
+    // Apply view density CSS variables immediately when updated
+    if (updates.viewDensity !== undefined) {
+      updated.viewDensity = normalizeViewDensity(updates.viewDensity);
+      cachedSettings = updated;
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
+      applyViewDensityToDocument(updated.viewDensity);
+    }
+
     // Dispatch global event for components to react in real-time
-    window.dispatchEvent(new CustomEvent('manus_settings_updated', { detail: updated }));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('manus_settings_updated', { detail: updated }));
+    }
     return updated;
   } catch (err) {
     console.error('Failed to save settings:', err);
@@ -139,6 +151,7 @@ export function resetSettings(): UserSettings {
       ultraLiteMode: defaults.ultraLiteMode,
       performanceProfile: defaults.performanceProfile,
     });
+    applyViewDensityToDocument(defaults.viewDensity);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('manus_settings_updated', { detail: defaults }));
     }
