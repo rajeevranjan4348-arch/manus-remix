@@ -19,6 +19,13 @@ import { getSettings } from './lib/settingsStore';
 import { applyViewDensityToDocument } from './lib/viewDensity';
 
 import { ErrorBoundary } from './components/common/ErrorBoundary';
+import {
+  ActiveWorkspacePanel,
+  buildSearchWithPanel,
+  isConnectorsPanelActive,
+  parsePanelFromSearch,
+  resolveConnectorsSection,
+} from './lib/panelNavigation';
 
 const Home = lazy(() =>
   import('./pages/Home').then((m) => ({ default: m.Home }))
@@ -35,6 +42,12 @@ const HistoryPanel = lazy(() =>
 );
 const SettingsModal = lazy(() =>
   import('./components/settings/SettingsModal').then((m) => ({ default: m.SettingsModal }))
+);
+const ConnectorsStorePanel = lazy(() =>
+  import('./components/connectors/ConnectorsStorePanel').then((m) => ({ default: m.ConnectorsStorePanel }))
+);
+const TagAnalyticsModal = lazy(() =>
+  import('./components/analytics/TagAnalyticsModal').then((m) => ({ default: m.TagAnalyticsModal }))
 );
 const AndroidVoiceSettings = lazy(() =>
   import('./components/settings/AndroidVoiceSettings').then((m) => ({ default: m.AndroidVoiceSettings }))
@@ -105,20 +118,97 @@ function TaskView({
 }
 
 function AppContent() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
-  const [isHistoryOpen, setIsHistoryOpen] = React.useState(false);
+  const [activePanel, setActivePanel] = React.useState<ActiveWorkspacePanel>(() =>
+    parsePanelFromSearch(location.search)
+  );
   const [historyInitialTab, setHistoryInitialTab] = React.useState<'sessions' | 'all' | 'photos' | 'videos' | 'docs'>('sessions');
-  const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = React.useState<'general' | 'robot' | 'ai' | 'personalization' | 'voice' | 'data' | 'about'>('general');
   const [gmpQuotaExceeded, setGmpQuotaExceeded] = React.useState(false);
-  const navigate = useNavigate();
+
+  const isHistoryOpen = activePanel === 'history';
+  const isSettingsOpen = activePanel === 'settings';
+  const isConnectorsOpen = isConnectorsPanelActive(activePanel);
+  const isTagAnalyticsOpen = activePanel === 'analytics';
+
+  // Latch lazy workspace panels after first open so spring close/exit transitions can complete cleanly
+  const [loadedPanels, setLoadedPanels] = React.useState(() => ({
+    history: activePanel === 'history',
+    settings: activePanel === 'settings',
+    connectors: isConnectorsPanelActive(activePanel),
+    analytics: activePanel === 'analytics',
+  }));
+
+  React.useEffect(() => {
+    if (!activePanel) return;
+    setLoadedPanels((prev) => {
+      const nextHistory = prev.history || activePanel === 'history';
+      const nextSettings = prev.settings || activePanel === 'settings';
+      const nextConnectors = prev.connectors || isConnectorsPanelActive(activePanel);
+      const nextAnalytics = prev.analytics || activePanel === 'analytics';
+      if (
+        nextHistory === prev.history &&
+        nextSettings === prev.settings &&
+        nextConnectors === prev.connectors &&
+        nextAnalytics === prev.analytics
+      ) {
+        return prev;
+      }
+      return {
+        history: nextHistory,
+        settings: nextSettings,
+        connectors: nextConnectors,
+        analytics: nextAnalytics,
+      };
+    });
+  }, [activePanel]);
+
+  // Keep activePanel synchronized with URL query param on browser navigation/refresh
+  React.useEffect(() => {
+    const panelFromUrl = parsePanelFromSearch(location.search);
+    setActivePanel((prev) => (prev === panelFromUrl ? prev : panelFromUrl));
+  }, [location.search]);
+
+  const syncPanelToUrl = useCallback(
+    (nextPanel: ActiveWorkspacePanel) => {
+      const nextSearch = buildSearchWithPanel(location.search, nextPanel);
+      if (nextSearch !== location.search) {
+        navigate(
+          { pathname: location.pathname, search: nextSearch },
+          { replace: true },
+        );
+      }
+    },
+    [location.pathname, location.search, navigate],
+  );
+
+  const openWorkspacePanel = useCallback(
+    (
+      nextPanel: Exclude<ActiveWorkspacePanel, null>,
+      options?: { closeSidebar?: boolean },
+    ) => {
+      // Synchronously update panel state and preserve current pathname BEFORE dismissing sidebar
+      setActivePanel(nextPanel);
+      syncPanelToUrl(nextPanel);
+      if (options?.closeSidebar !== false) {
+        setIsSidebarOpen(false);
+      }
+    },
+    [syncPanelToUrl],
+  );
+
+  const closeWorkspacePanel = useCallback(() => {
+    setActivePanel(null);
+    syncPanelToUrl(null);
+  }, [syncPanelToUrl]);
 
   React.useEffect(() => {
     const handleGmpQuotaExceeded = () => setGmpQuotaExceeded(true);
     window.addEventListener('gmp-quota-exceeded', handleGmpQuotaExceeded);
     return () => window.removeEventListener('gmp-quota-exceeded', handleGmpQuotaExceeded);
   }, []);
-  const location = useLocation();
   useBlinkAuth();
   
   // Data analysis hook
@@ -214,39 +304,51 @@ function AppContent() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'h') {
         e.preventDefault();
         setHistoryInitialTab('sessions');
-        setIsSettingsOpen(false);
-        setIsHistoryOpen(prev => !prev);
+        if (activePanel === 'history') {
+          closeWorkspacePanel();
+        } else {
+          openWorkspacePanel('history');
+        }
       }
       if ((e.ctrlKey || e.metaKey) && (e.key === ',' || e.key.toLowerCase() === 'p')) {
         e.preventDefault();
         setSettingsInitialTab('general');
-        setIsHistoryOpen(false);
-        setIsSettingsOpen(prev => !prev);
+        if (activePanel === 'settings') {
+          closeWorkspacePanel();
+        } else {
+          openWorkspacePanel('settings');
+        }
       }
     };
     const handleOpenSettings = (e: any) => {
       const tab = e?.detail?.tab || 'general';
       setSettingsInitialTab(tab);
-      setIsHistoryOpen(false);
-      setIsSidebarOpen(false);
-      setIsSettingsOpen(true);
+      openWorkspacePanel('settings');
     };
     const handleOpenHistory = (e?: any) => {
       const tab = e?.detail?.tab || 'sessions';
       setHistoryInitialTab(tab);
-      setIsSettingsOpen(false);
-      setIsSidebarOpen(false);
-      setIsHistoryOpen(true);
+      openWorkspacePanel('history');
+    };
+    const handleOpenConnectorsEvent = () => {
+      openWorkspacePanel('connectors');
+    };
+    const handleOpenPluginsEvent = () => {
+      openWorkspacePanel('plugins');
     };
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('manus_open_settings', handleOpenSettings);
     window.addEventListener('manus_open_history', handleOpenHistory);
+    window.addEventListener('manus_open_connectors', handleOpenConnectorsEvent);
+    window.addEventListener('manus_open_plugins', handleOpenPluginsEvent);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('manus_open_settings', handleOpenSettings);
       window.removeEventListener('manus_open_history', handleOpenHistory);
+      window.removeEventListener('manus_open_connectors', handleOpenConnectorsEvent);
+      window.removeEventListener('manus_open_plugins', handleOpenPluginsEvent);
     };
-  }, []);
+  }, [activePanel, closeWorkspacePanel, openWorkspacePanel]);
 
   // Website builder hook
   const {
@@ -282,6 +384,7 @@ function AppContent() {
   };
 
   const handleReset = useCallback(() => {
+    setActivePanel(null);
     resetBuilder();
     resetTask();
     navigate('/');
@@ -291,18 +394,30 @@ function AppContent() {
     setIsSidebarOpen(prev => !prev);
   }, []);
 
-  const handleOpenHistory = useCallback(() => {
-    setHistoryInitialTab('sessions');
-    setIsSettingsOpen(false);
+  const handleCloseSidebar = useCallback(() => {
     setIsSidebarOpen(false);
-    setIsHistoryOpen(true);
   }, []);
 
+  const handleOpenHistory = useCallback(() => {
+    setHistoryInitialTab('sessions');
+    openWorkspacePanel('history');
+  }, [openWorkspacePanel]);
+
   const handleOpenSettings = useCallback(() => {
-    setIsHistoryOpen(false);
-    setIsSidebarOpen(false);
-    setIsSettingsOpen(true);
-  }, []);
+    openWorkspacePanel('settings');
+  }, [openWorkspacePanel]);
+
+  const handleOpenConnectors = useCallback(() => {
+    openWorkspacePanel('connectors');
+  }, [openWorkspacePanel]);
+
+  const handleOpenPlugins = useCallback(() => {
+    openWorkspacePanel('plugins');
+  }, [openWorkspacePanel]);
+
+  const handleOpenTagAnalytics = useCallback(() => {
+    openWorkspacePanel('analytics');
+  }, [openWorkspacePanel]);
 
   const activeTaskInfo = useMemo(() => ({
     taskId: agentTask.taskId,
@@ -329,9 +444,14 @@ function AppContent() {
       <Sidebar 
         isOpen={isSidebarOpen} 
         onToggle={handleToggleSidebar} 
+        onCloseSidebar={handleCloseSidebar}
         onNewTask={handleReset}
         onOpenHistory={handleOpenHistory}
         onOpenSettings={handleOpenSettings}
+        onOpenConnectors={handleOpenConnectors}
+        onOpenPlugins={handleOpenPlugins}
+        onOpenTagAnalytics={handleOpenTagAnalytics}
+        activePanel={activePanel}
         isSettingsActive={isSettingsOpen || location.pathname.startsWith('/settings')}
         activeTaskId={location.pathname.startsWith('/task/') ? location.pathname.split('/')[2] : undefined}
       />
@@ -430,29 +550,50 @@ function AppContent() {
         </main>
       </div>
 
-      {/* Lazy Slide-out Activity & History Panel — only mounted when opened */}
-      {isHistoryOpen && (
+      {/* Lazy Slide-out Activity & History Panel — stays mounted after first open for spring exit transition */}
+      {loadedPanels.history && (
         <Suspense fallback={null}>
           <HistoryPanel 
             isOpen={isHistoryOpen} 
-            onClose={() => setIsHistoryOpen(false)}
+            onClose={closeWorkspacePanel}
             initialTab={historyInitialTab}
             onSelectTask={(id) => {
-              setIsHistoryOpen(false);
+              setActivePanel(null);
               navigate(`/task/${id}`);
             }}
           />
         </Suspense>
       )}
 
-      {/* Lazy Global Settings & Preferences Modal — only mounted when opened */}
-      {isSettingsOpen && (
+      {/* Lazy Global Settings & Preferences Modal — stays mounted after first open for spring exit transition */}
+      {loadedPanels.settings && (
         <Suspense fallback={null}>
           <SettingsModal
             isOpen={isSettingsOpen}
-            onClose={() => setIsSettingsOpen(false)}
+            onClose={closeWorkspacePanel}
             initialTab={settingsInitialTab}
             activeTaskInfo={activeTaskInfo}
+          />
+        </Suspense>
+      )}
+
+      {/* Lazy Connectors & Plugins Store Panel — mounted at top level so closing Sidebar never unmounts it */}
+      {loadedPanels.connectors && (
+        <Suspense fallback={null}>
+          <ConnectorsStorePanel
+            isOpen={isConnectorsOpen}
+            initialSection={resolveConnectorsSection(activePanel)}
+            onClose={closeWorkspacePanel}
+          />
+        </Suspense>
+      )}
+
+      {/* Lazy Tag Analytics Modal — mounted at top level so closing Sidebar never unmounts it */}
+      {loadedPanels.analytics && (
+        <Suspense fallback={null}>
+          <TagAnalyticsModal
+            isOpen={isTagAnalyticsOpen}
+            onClose={closeWorkspacePanel}
           />
         </Suspense>
       )}

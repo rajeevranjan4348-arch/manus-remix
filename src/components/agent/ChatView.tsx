@@ -78,6 +78,12 @@ import {
   groupConsecutiveMessages,
 } from '@/lib/messageGrouping';
 import { SseDiagnosticConsole } from './SseDiagnosticConsole';
+import {
+  formatExecutionIdentityLabel,
+  formatExecutionTooltip,
+  modelExecutionStore,
+  parseBackendExecutionMetadata,
+} from '@/lib/modelIdentity';
 
 // Lazy-load heavy chart, map, Drive picker, and connector store modals
 const ChartResult = React.lazy(() =>
@@ -284,6 +290,56 @@ export function shouldShowChatThinkingIndicator({
   return isAssistantWorking && hasCurrentUserMessage && !hasVisibleAssistantMessage;
 }
 
+const COMPLEX_REASONING_PROMPT_RE =
+  /\[think\s+harder|\b(multi[\s-]?step|step[\s-]by[\s-]step|analyze|analysis|compare|architecture|debug|explain\s+why|algorithm|implement|design\s+system|prove|strategy|trade[\s-]?offs?|evaluate|investigate|refactor|optimize|derive|research)\b/i;
+
+export function isComplexMultiStepReasoningTask({
+  steps,
+  activities,
+  phase,
+  isThinkHarder,
+  promptText,
+}: {
+  steps?: { id?: string; label?: string; status?: string }[];
+  activities?: { category?: string; status?: string }[];
+  phase?: string;
+  isThinkHarder?: boolean;
+  promptText?: string;
+}): boolean {
+  if (isThinkHarder) return true;
+
+  if (Array.isArray(steps) && steps.length >= 2) {
+    return true;
+  }
+
+  if (Array.isArray(activities)) {
+    if (activities.length >= 2) return true;
+    const hasReasoningActivity = activities.some(
+      (a) =>
+        a?.status === 'running' &&
+        (a.category === 'analysis' ||
+          a.category === 'search' ||
+          a.category === 'verification' ||
+          a.category === 'browser')
+    );
+    if (hasReasoningActivity) return true;
+  }
+
+  if (
+    phase &&
+    /planning|reasoning|tool|research|analyz|verif/i.test(phase)
+  ) {
+    return true;
+  }
+
+  const trimmed = (promptText || '').trim();
+  if (trimmed.length > 140 || COMPLEX_REASONING_PROMPT_RE.test(trimmed)) {
+    return true;
+  }
+
+  return false;
+}
+
 // Extract embedded image Data URL from user message if present
 export function extractUserImageAttachment(raw: any): string | null {
   if (!raw || typeof raw !== 'string') return null;
@@ -451,11 +507,18 @@ export function ChatView({
 }: ChatViewProps) {
   const [input, setInput] = React.useState<string>(() => getChatViewDraft());
   const [perfProfile, setPerfProfile] = React.useState(() => getActivePerformanceProfile());
+  const [, setModelIdentityTick] = React.useState(0);
 
   React.useEffect(() => {
     const onPerfChange = () => setPerfProfile(getActivePerformanceProfile());
     window.addEventListener('manus_performance_profile_changed', onPerfChange);
     return () => window.removeEventListener('manus_performance_profile_changed', onPerfChange);
+  }, []);
+
+  React.useEffect(() => {
+    return modelExecutionStore.subscribe(() => {
+      setModelIdentityTick((t) => t + 1);
+    });
   }, []);
 
   const virtualizationBudget = React.useMemo(
@@ -1362,11 +1425,28 @@ export function ChatView({
           )}
         >
           <div className="chat-bubble-hover-assistant flex-1 space-y-3 min-w-0 -mx-2.5 px-2.5 py-1.5 -my-1.5 rounded-2xl">
-            {!isGroupedWithPrev && (
-              <div className="flex items-center justify-between gap-3">
-                <ManusLogo showBadge={true} />
-              </div>
-            )}
+            {!isGroupedWithPrev && (() => {
+              const resolvedExecMeta =
+                parseBackendExecutionMetadata((msg as any).executionMetadata) ||
+                modelExecutionStore.getForMessage(msg.id) ||
+                (isLatestAssistant ? modelExecutionStore.getLatestForTask(taskId) : null);
+              const modelIdentityLabel = formatExecutionIdentityLabel(resolvedExecMeta);
+              const modelIdentityTooltip = formatExecutionTooltip(resolvedExecMeta);
+              return (
+                <div className="flex items-center justify-between gap-3">
+                  <ManusLogo showBadge={true} />
+                  <span
+                    data-testid="assistant-model-identity"
+                    data-model-verified={resolvedExecMeta?.verified ? 'true' : 'false'}
+                    data-model-fallback={resolvedExecMeta?.is_fallback ? 'true' : 'false'}
+                    title={modelIdentityTooltip}
+                    className="text-[11px] text-muted-foreground truncate max-w-[220px] sm:max-w-xs"
+                  >
+                    {modelIdentityLabel}
+                  </span>
+                </div>
+              );
+            })()}
 
             {cleanedContent ? (
               <>
@@ -1760,16 +1840,33 @@ export function ChatView({
       ? cleanUserMessage(latestUserMsg.content)
       : cleanUserMessage(prompt);
 
+    const isComplexMultiStepReasoning = shouldShowThinkingIndicator
+      ? isComplexMultiStepReasoningTask({
+          steps,
+          activities,
+          phase,
+          isThinkHarder,
+          promptText: latestUserMsg?.content || prompt,
+        })
+      : false;
+
     return (
       <div className="px-4 sm:px-20 space-y-3 pb-28 pt-2">
         {shouldShowThinkingIndicator && (
           <div
             data-testid="chat-thinking-indicator"
+            data-reasoning-pulse={isComplexMultiStepReasoning ? 'true' : 'false'}
             role="status"
-            aria-label="AI is thinking"
+            aria-label={isComplexMultiStepReasoning ? 'AI is reasoning through multiple steps' : 'AI is thinking'}
             className="chat-thinking-row max-w-3xl mx-auto w-full"
           >
-            <span className="chat-thinking-bubble" aria-hidden="true">
+            <span
+              className={cn(
+                'chat-thinking-bubble',
+                isComplexMultiStepReasoning && 'chat-thinking-bubble--reasoning'
+              )}
+              aria-hidden="true"
+            >
               <span className="chat-thinking-dots">
                 <span />
                 <span />

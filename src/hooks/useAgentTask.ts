@@ -37,6 +37,7 @@ import {
   StoredMessage,
 } from '@/lib/chatDatabase';
 import { applyUserMessageEditBranch } from '@/lib/messageBranching';
+import { modelExecutionStore, MODEL_UNAVAILABLE_TEXT } from '@/lib/modelIdentity';
 import { tagTaskAfterCompletion } from '@/lib/taskTaggingService';
 import { taskTagger } from '@/services/taskTagger';
 import { exportChatSession, ChatExportFormat } from '@/lib/chatExport';
@@ -48,8 +49,6 @@ import {
 import { SUPPORT_ISSUE_RESPONSE_GUIDANCE } from '@/lib/aiSupportGuidance';
 import { agentActivityTracker, useTaskActivities } from '@/lib/agentActivityTracker';
 import { taskMetricsStore } from '@/lib/taskMetrics';
-import { normalizeResponseModelMetadata } from '@/lib/responseModelMetadata';
-import type { ResponseModelMetadata } from '@/lib/responseModelMetadata';
 
 export type AgentTaskPhase = 'idle' | 'sending' | 'thinking' | 'tool-calling' | 'text-generation' | 'streaming' | 'completed' | 'error';
 
@@ -260,7 +259,6 @@ export function useAgentTask() {
   taskStatusRef.current = taskStatus;
   const activeRequestIdRef = useRef<number>(0);
   const activeStreamRequestIdRef = useRef<string>('');
-  const responseModelMetadataRef = useRef<ResponseModelMetadata | null>(null);
   const activeUserMsgIdRef = useRef<string>('');
   const activeAssistantMsgIdRef = useRef<string>('');
   const finalizedRequestIdsRef = useRef<Set<number>>(new Set());
@@ -312,14 +310,6 @@ export function useAgentTask() {
       clearStepTimers();
       setPhase('text-generation');
       setSteps(prev => advanceWorkflowSteps(prev, 'synthesizing'));
-    };
-    const handleStreamMetadata = (e: Event) => {
-      const detail = (e as CustomEvent)?.detail;
-      if (detail?.requestId && activeStreamRequestIdRef.current && detail.requestId !== activeStreamRequestIdRef.current) {
-        return;
-      }
-      const responseModel = normalizeResponseModelMetadata(detail?.responseModel ?? detail?.metadata);
-      if (responseModel) responseModelMetadataRef.current = responseModel;
     };
     const handleDelta = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
@@ -400,13 +390,11 @@ export function useAgentTask() {
       );
     };
     window.addEventListener('manus_stream_started', handleStreamStarted);
-    window.addEventListener('manus_stream_metadata', handleStreamMetadata);
     window.addEventListener('manus_stream_delta', handleDelta);
     window.addEventListener('manus_stream_done', handleStreamDone);
     window.addEventListener('manus_research_stage', handleResearchStage);
     return () => {
       window.removeEventListener('manus_stream_started', handleStreamStarted);
-      window.removeEventListener('manus_stream_metadata', handleStreamMetadata);
       window.removeEventListener('manus_stream_delta', handleDelta);
       window.removeEventListener('manus_stream_done', handleStreamDone);
       window.removeEventListener('manus_research_stage', handleResearchStage);
@@ -547,11 +535,13 @@ export function useAgentTask() {
 
     return new Agent({
       model: activeModel,
-      system: `You are Deku AI, a premium AI workspace agent. Your goal is to turn prompts, file uploads (CSV, Excel, PDF), or URLs into actionable data analyses, charts, and reports.
+      system: `You are Deku AI, an independent AI workspace assistant. Your goal is to turn prompts, file uploads (CSV, Excel, PDF), or URLs into actionable data analyses, charts, and reports.
 
-    RESPONSE MODEL IDENTITY:
-    - The application is Deku AI. Do not infer or claim a specific underlying model ID or provider from the selected model, alias, configuration, or conversation.
-    - If asked for the runtime model or provider, say it is not verified in the conversation context; the interface displays backend-confirmed response metadata when available.
+    DEKU AI PERMANENT IDENTITY POLICY:
+    - Your product name is permanently "Deku AI" (an independent AI workspace assistant).
+    - Always introduce yourself as Deku AI. Never introduce yourself as Gemini, Claude, ChatGPT, GPT, or any other provider persona.
+    - Never falsely claim to be a proprietary foundation model trained from scratch.
+    - Never guess or claim an underlying model name from client assumptions; rely strictly on the verified backend execution metadata injected by the server, or state "${MODEL_UNAVAILABLE_TEXT}" if unavailable.
     
     Guidelines:
     1. When given file content or CSV data, ALWAYS parse it, analyze the context, compute statistics if numeric, and identify insights.
@@ -737,15 +727,18 @@ export function useAgentTask() {
     const cleanedText = parsedChartData?.content || rawText.replace(/```json\n?[\s\S]*?\n?```/g, '').trim() || rawText;
     const assistantMsgId = activeAssistantMsgIdRef.current || ('msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8));
     taskMetricsStore.bindMessageId(activeId, activeStreamRequestIdRef.current, assistantMsgId);
+    const verifiedExecutionMetadata = modelExecutionStore.bindRequestToMessage(
+      activeStreamRequestIdRef.current,
+      assistantMsgId,
+      activeId
+    );
     const assistantMsg = {
       id: assistantMsgId,
       role: 'assistant' as const,
       content: cleanedText,
       timestamp: new Date().toISOString(),
       status: 'success' as const,
-      metadata: responseModelMetadataRef.current
-        ? { responseModel: responseModelMetadataRef.current }
-        : {},
+      executionMetadata: verifiedExecutionMetadata,
     };
 
     const nextMessages = (() => {
@@ -773,7 +766,6 @@ export function useAgentTask() {
       files: parsedFiles,
       detectedChartType: detectedType || parsedChartData?.graph?.type || (activeTask?.options?.chartType !== 'auto' ? activeTask?.options?.chartType : undefined) || 'bar',
       rawResponse: rawResponse ?? null,
-      responseModel: responseModelMetadataRef.current,
       messages: nextMessages,
     };
 
@@ -800,7 +792,6 @@ export function useAgentTask() {
         role: 'assistant',
         content: cleanedText,
         status: 'success',
-        metadata: assistantMsg.metadata,
       }).catch(err => console.warn('Failed to save assistant response to DB:', err));
 
       Promise.resolve((blink.db as any).tasks.update(activeId, {
@@ -1040,10 +1031,7 @@ export function useAgentTask() {
           if (!payloadStr || payloadStr === '[DONE]') continue;
           try {
             const json = JSON.parse(payloadStr);
-            if (json.type === 'response-metadata') {
-              const responseModel = normalizeResponseModelMetadata(json.responseModel ?? json.metadata);
-              if (responseModel) responseModelMetadataRef.current = responseModel;
-            } else if ((json.type === 'text-delta' || json.type === 'text') && !json.errorDelta) {
+            if ((json.type === 'text-delta' || json.type === 'text') && !json.errorDelta) {
               const delta = json.delta ?? json.textDelta ?? json.text ?? '';
               if (delta) {
                 accumulated += String(delta);
@@ -1537,7 +1525,6 @@ export function useAgentTask() {
     const reqId = ++activeRequestIdRef.current;
     const streamReqId = `req_${now}_${reqId}`;
     activeStreamRequestIdRef.current = streamReqId;
-    responseModelMetadataRef.current = null;
     clearStepTimers();
     liveStreamTextRef.current = '';
     setLiveStreamText('');
@@ -1945,7 +1932,6 @@ export function useAgentTask() {
     const reqId = ++activeRequestIdRef.current;
     const streamReqId = `req_${now}_${reqId}`;
     activeStreamRequestIdRef.current = streamReqId;
-    responseModelMetadataRef.current = null;
     clearStepTimers();
     liveStreamTextRef.current = '';
     setLiveStreamText('');

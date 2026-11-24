@@ -84,13 +84,20 @@ const TagAnalyticsModal = React.lazy(() =>
   import('@/components/analytics/TagAnalyticsModal').then((m) => ({ default: m.TagAnalyticsModal }))
 );
 
+import type { ActiveWorkspacePanel } from '@/lib/panelNavigation';
+
 interface SidebarProps {
   isOpen: boolean;
   onToggle: () => void;
+  onCloseSidebar?: () => void;
   onNewTask?: () => void;
   activeTaskId?: string;
   onOpenHistory?: () => void;
   onOpenSettings?: () => void;
+  onOpenConnectors?: () => void;
+  onOpenPlugins?: () => void;
+  onOpenTagAnalytics?: () => void;
+  activePanel?: ActiveWorkspacePanel;
   isSettingsActive?: boolean;
 }
 
@@ -194,7 +201,20 @@ function groupTasksByTime(tasks: TaskHistory[]): { group: string; items: TaskHis
     .map(([group, items]) => ({ group, items }));
 }
 
-export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHistory, onOpenSettings, isSettingsActive }: SidebarProps) {
+export const Sidebar = React.memo(function Sidebar({
+  isOpen,
+  onToggle,
+  onCloseSidebar,
+  onNewTask,
+  activeTaskId,
+  onOpenHistory,
+  onOpenSettings,
+  onOpenConnectors,
+  onOpenPlugins,
+  onOpenTagAnalytics,
+  activePanel = null,
+  isSettingsActive,
+}: SidebarProps) {
   const [activeTab, setActiveTab] = React.useState('new');
   const [tasks, setTasks] = useState<TaskHistory[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -449,37 +469,80 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
     }
   };
 
+  const handleOpenConnectorsNavigation = () => {
+    setActiveTab('connectors');
+    if (onOpenConnectors) {
+      onOpenConnectors();
+    } else if (onOpenPlugins) {
+      onOpenPlugins();
+    } else {
+      setIsConnectorsOpen(true);
+    }
+  };
+
+  const handleOpenTagAnalyticsNavigation = () => {
+    setActiveTab('analytics');
+    if (onOpenTagAnalytics) {
+      onOpenTagAnalytics();
+    } else {
+      setIsTagAnalyticsOpen(true);
+    }
+  };
+
   const navItems = [
     { id: 'new', label: 'New Chat', icon: MessageSquarePlus, action: onNewTask },
     { 
       id: 'connectors', 
       label: 'Connectors & Plugins', 
       icon: Plug, 
-      action: () => setIsConnectorsOpen(true) 
+      action: handleOpenConnectorsNavigation
     },
     { id: 'library', label: 'Library', icon: Library, action: onOpenHistory },
     {
       id: 'analytics',
       label: 'Tag Analytics',
       icon: BarChart3,
-      action: () => setIsTagAnalyticsOpen(true)
+      action: handleOpenTagAnalyticsNavigation
     },
   ];
+
+  const isNavItemActive = (itemId: string) => {
+    if (itemId === 'connectors') {
+      return activePanel === 'connectors' || activePanel === 'plugins' || isConnectorsOpen;
+    }
+    if (itemId === 'library') {
+      return activePanel === 'history';
+    }
+    if (itemId === 'analytics') {
+      return activePanel === 'analytics' || isTagAnalyticsOpen;
+    }
+    return false;
+  };
 
   const activeProject = useMemo(() => {
     return projects.find(p => p.id === activeProjectId);
   }, [projects, activeProjectId]);
 
-  const handleMobileSelect = (action?: () => void) => {
-    if (action) action();
+  const dismissSidebarOnMobile = () => {
     if (typeof window !== 'undefined' && window.innerWidth < 1024) {
-      onToggle();
+      if (onCloseSidebar) {
+        onCloseSidebar();
+      } else if (isOpen) {
+        onToggle();
+      }
     }
   };
 
-  // Collapsed Sidebar (Icon Mode)
-  if (!isOpen) {
-    return (
+  const handleMobileSelect = (action?: () => void) => {
+    // Update navigation/panel state BEFORE dismissing the mobile sidebar drawer
+    if (action) action();
+    dismissSidebarOnMobile();
+  };
+
+  return (
+    <>
+      {/* Collapsed Sidebar (Icon Mode) vs Expanded Sidebar */}
+      {!isOpen ? (
       <aside className="w-16 h-screen border-r border-[#E0E0E0] dark:border-[#333333] bg-[#FFFFFF] dark:bg-[#111111] flex flex-col items-center py-6 hidden lg:flex shrink-0 transition-colors">
         <TooltipProvider>
           <Tooltip>
@@ -503,17 +566,20 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
 
         {/* Primary Navigation Icons */}
         <nav className="space-y-3 w-full flex flex-col items-center">
-          {navItems.map((item) => (
+          {navItems.map((item) => {
+            const itemActive = isNavItemActive(item.id);
+            return (
             <TooltipProvider key={item.id}>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     onClick={() => item.action ? item.action() : setActiveTab(item.id)}
+                    aria-current={itemActive ? 'page' : undefined}
                     className={cn(
                       "manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-2.5 rounded-xl transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 flex items-center justify-center",
                       item.id === 'new'
                         ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] shadow-sm"
-                        : activeTab === item.id && !item.action
+                        : itemActive || (activeTab === item.id && !item.action)
                           ? "bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] shadow-sm" 
                           : "text-[#777777] dark:text-[#AAAAAA] hover:bg-[#F2F2F2] dark:hover:bg-[#171717] hover:text-[#000000] dark:hover:text-[#FFFFFF]"
                     )}
@@ -524,7 +590,8 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                 <TooltipContent side="right">{item.label}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
-          ))}
+            );
+          })}
         </nav>
 
         {/* Quick Project Shortcuts in Collapsed View */}
@@ -638,24 +705,16 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
             </TooltipProvider>
           )}
         </div>
-        <TagAnalyticsModal
-          isOpen={isTagAnalyticsOpen}
-          onClose={() => setIsTagAnalyticsOpen(false)}
-        />
       </aside>
-    );
-  }
-
-  // Expanded Sidebar
-  return (
+      ) : (
     <>
       {/* Mobile Backdrop */}
       <div 
-        onClick={onToggle}
+        onClick={onCloseSidebar || onToggle}
         className="fixed inset-0 bg-black/50 z-40 lg:hidden backdrop-blur-xs transition-opacity duration-250 ease-out animate-in fade-in"
       />
 
-      <aside className="w-[82vw] max-w-[280px] sm:w-64 h-screen border-r border-[#E0E0E0] dark:border-[#333333] bg-[#FFFFFF] dark:bg-[#111111] flex flex-col fixed inset-y-0 left-0 lg:static z-50 shrink-0 transition-[transform,width,colors] duration-250 ease-[cubic-bezier(0.16,1,0.3,1)] shadow-2xl lg:shadow-none animate-in slide-in-from-left gpu-accelerated">
+      <aside data-spring-transition="true" className="w-[82vw] max-w-[280px] sm:w-64 h-screen border-r border-[#E0E0E0] dark:border-[#333333] bg-[#FFFFFF] dark:bg-[#111111] flex flex-col fixed inset-y-0 left-0 lg:static z-50 shrink-0 transition-[transform,width,colors] duration-250 ease-[cubic-bezier(0.16,1,0.3,1)] shadow-2xl lg:shadow-none workspace-drawer-spring-left lg:animate-none gpu-accelerated">
         {/* Header with Logo and Close Toggle */}
         <div className="p-4 sm:p-5 flex items-center justify-between">
           <ManusLogo showBadge={true} />
@@ -671,15 +730,19 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
 
         {/* Primary Navigation */}
         <nav className="px-3 space-y-1">
-          {navItems.map((item) => (
+          {navItems.map((item) => {
+            const itemActive = isNavItemActive(item.id);
+            return (
             <button
               key={item.id}
+              data-testid={`sidebar-nav-${item.id}`}
+              aria-current={itemActive ? 'page' : undefined}
               onClick={() => handleMobileSelect(() => item.action ? item.action() : setActiveTab(item.id))}
               className={cn(
                 "manus-sidebar-item-slide group w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium text-sm cursor-pointer",
                 item.id === 'new'
                   ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] font-semibold shadow-sm"
-                  : activeTab === item.id && !item.action
+                  : itemActive || (activeTab === item.id && !item.action)
                     ? "bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] shadow-sm" 
                     : "text-[#000000] dark:text-[#FFFFFF] hover:bg-[#F2F2F2] dark:hover:bg-[#171717]"
               )}
@@ -691,14 +754,15 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
                   "manus-icon-spring",
                   item.id === 'new'
                     ? "text-[#FFFFFF] dark:text-[#000000]"
-                    : activeTab === item.id && !item.action
+                    : itemActive || (activeTab === item.id && !item.action)
                       ? "text-[#000000] dark:text-[#FFFFFF]"
                       : "text-[#777777] dark:text-[#AAAAAA]"
                 )}
               />
               <span>{item.label}</span>
             </button>
-          ))}
+            );
+          })}
         </nav>
 
         {/* PROJECTS SECTION */}
@@ -1231,6 +1295,8 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
           )}
         </div>
       </aside>
+    </>
+      )}
 
       <React.Suspense fallback={null}>
         {isProjectModalOpen && (

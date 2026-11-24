@@ -38,8 +38,9 @@ const DialogContent = React.forwardRef<
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 pointer-events-none overflow-y-auto overflow-x-hidden">
       <DialogPrimitive.Content
         ref={ref}
+        data-spring-transition="true"
         className={cn(
-          "relative z-50 pointer-events-auto grid w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:w-full sm:max-w-lg max-h-[calc(100dvh-1rem)] min-w-0 box-border gap-4 border bg-background p-4 sm:p-6 shadow-2xl duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 rounded-2xl overflow-y-auto overflow-x-hidden gpu-accelerated",
+          "workspace-panel-spring relative z-50 pointer-events-auto grid w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:w-full sm:max-w-lg max-h-[calc(100dvh-1rem)] min-w-0 box-border gap-4 border bg-background p-4 sm:p-6 shadow-2xl rounded-2xl overflow-y-auto overflow-x-hidden gpu-accelerated",
           className
         )}
         {...props}

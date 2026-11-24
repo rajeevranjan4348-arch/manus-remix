@@ -26,6 +26,9 @@ export default async (req: Request) => {
 
   const env = {
     gemini: configured('GEMINI_API_KEY'),
+    anthropic: configured('ANTHROPIC_API_KEY'),
+    openai: configured('OPENAI_API_KEY'),
+    openrouter: configured('OPENROUTER_API_KEY', 'OPENROUTER_CHAT_API_KEY', 'OPENROUTER_WORK_API_KEY'),
     webSearch: configured('FIRECRAWL_API_KEY', 'AGENT_REACH_BRIDGE_URL'),
     agentReachToken: configured('AGENT_REACH_BRIDGE_TOKEN'),
     database: configured('DATABASE_URL', 'POSTGRES_URL', 'FIREBASE_PROJECT_ID'),
@@ -53,7 +56,7 @@ export default async (req: Request) => {
     { id: 14, name: 'Reliable response engine', status: 'partial', note: 'Request validation, fallback handling, and stream error handling exist; regression tests are still required.' },
     { id: 15, name: 'Security center', status: 'partial', note: 'Server-side key use and request validation exist; authentication, rate limiting, audit, and authorization need deployment-level review.' },
     { id: 16, name: 'Parallel multi-agent execution', status: 'not_verified', note: 'Parallel orchestration and conflict handling are not verified.' },
-    { id: 17, name: 'Intelligent model router', status: env.gemini ? 'partial' : 'needs_configuration', note: 'Gemini fallback candidates exist; provider capability, cost, and latency routing are not verified.' },
+    { id: 17, name: 'Intelligent model router', status: env.gemini || env.anthropic || env.openai || env.openrouter ? 'partial' : 'needs_configuration', note: 'Backend emits verified provider and model execution metadata per response.' },
     { id: 18, name: 'Task checkpoints and recovery', status: env.database ? 'needs_verification' : 'needs_storage_configuration', note: 'Durable checkpoints and idempotent resume are not verified.' },
     { id: 19, name: 'Knowledge base and retrieval', status: env.database && env.embeddings ? 'needs_verification' : 'needs_storage_or_embedding_configuration', note: 'Storage and embedding configuration do not prove indexing, retrieval, or tenant isolation.' },
     { id: 20, name: 'AI evaluation and regression tests', status: 'not_verified', note: 'Automated evaluation results are not inferred from source presence.' },
@@ -66,11 +69,18 @@ export default async (req: Request) => {
 
   return new Response(JSON.stringify({
     ok: true,
+    identity: {
+      product: 'Deku AI',
+      role: 'Independent AI workspace assistant',
+    },
     requestId,
     generatedAt: new Date().toISOString(),
     note: 'Readiness reflects source-level and environment-variable indicators only. It is not a live provider health check and does not mean a feature is complete.',
     providers: {
       geminiConfigured: env.gemini,
+      anthropicConfigured: env.anthropic,
+      openaiConfigured: env.openai,
+      openrouterConfigured: env.openrouter,
       webSearchProviderConfigured: env.webSearch,
       agentReachBridgeTokenConfigured: env.agentReachToken,
       databaseConfigured: env.database,

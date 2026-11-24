@@ -4,7 +4,12 @@ import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
 import { agentActivityTracker } from './agentActivityTracker';
 import { sseStreamDiagnostics } from './sseStreamDiagnostics';
 import { taskMetricsStore } from './taskMetrics';
-import { normalizeResponseModelMetadata } from './responseModelMetadata';
+import {
+  createUnavailableMetadata,
+  modelExecutionStore,
+  parseBackendExecutionMetadata,
+  VerifiedExecutionMetadata,
+} from './modelIdentity';
 
 const PROJECT_ID = (import.meta as any).env?.VITE_BLINK_PROJECT_ID || 'manus-agent-clone-tkzhogvs';
 const PUBLISHABLE_KEY = (import.meta as any).env?.VITE_BLINK_PUBLISHABLE_KEY || '';
@@ -106,10 +111,29 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
       let firstTokenAt: number | null = null;
       let capturedUsage: any = null;
       let capturedServerDurationMs: number | null = null;
+      let capturedExecutionMetadata: VerifiedExecutionMetadata | null = null;
       const resolvedModelName = (() => {
-        const m = (agentConfig?.model?.replace(/^google\//, '') || 'gemini-3.8-flash').trim();
-        return m === 'gemini-2.5-flash' || m === 'gemini-3-flash' || m === 'gemini-3.0-flash' ? 'gemini-3.8-flash' : m;
+        const m = (agentConfig?.model?.replace(/^google\//, '') || 'gemini-3-flash-preview').trim();
+        return m === 'gemini-2.5-flash' || m === 'gemini-3-flash' || m === 'gemini-3.0-flash' || m === 'gemini-3.8-flash'
+          ? 'gemini-3-flash-preview'
+          : m;
       })();
+
+      const recordVerifiedMetadata = (rawMeta: unknown) => {
+        const parsedMeta = parseBackendExecutionMetadata(rawMeta);
+        if (!parsedMeta) return;
+        capturedExecutionMetadata = parsedMeta;
+        modelExecutionStore.recordBackendMetadata({
+          requestId,
+          taskId: activeTaskId,
+          metadata: parsedMeta,
+        });
+        emitWindowEvent('manus_execution_metadata', {
+          requestId,
+          taskId: activeTaskId,
+          executionMetadata: parsedMeta,
+        });
+      };
 
       taskMetricsStore.recordTurnStart({
         taskId: activeTaskId,
@@ -235,6 +259,17 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
             ? Math.round(capturedServerDurationMs)
             : Math.max(1, Date.now() - streamStartedAt);
         const ttftMs = firstTokenAt !== null ? Math.max(1, firstTokenAt - streamStartedAt) : undefined;
+        const resolvedExecutionMetadata =
+          capturedExecutionMetadata ||
+          createUnavailableMetadata({
+            requestedModel: resolvedModelName,
+            reason: 'Backend did not return verified model execution metadata',
+          });
+        modelExecutionStore.recordBackendMetadata({
+          requestId,
+          taskId: activeTaskId,
+          metadata: resolvedExecutionMetadata,
+        });
         if (reason === 'stop' || accumulatedText.trim().length > 0) {
           const metric = taskMetricsStore.recordTurnComplete({
             taskId: activeTaskId,
@@ -244,11 +279,14 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
             usage: capturedUsage,
             durationMs,
             ttftMs,
-            model: capturedUsage?.model || resolvedModelName,
+            model: resolvedExecutionMetadata.verified && resolvedExecutionMetadata.model
+              ? resolvedExecutionMetadata.model
+              : capturedUsage?.model || resolvedModelName,
           });
           return {
             durationMs: metric.durationMs,
             ttftMs: metric.ttftMs,
+            executionMetadata: resolvedExecutionMetadata,
             usage: {
               promptTokens: metric.promptTokens,
               completionTokens: metric.completionTokens,
@@ -260,7 +298,12 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
           };
         }
         taskMetricsStore.clearActiveTurn(activeTaskId);
-        return { durationMs, ttftMs, usage: capturedUsage || undefined };
+        return {
+          durationMs,
+          ttftMs,
+          executionMetadata: resolvedExecutionMetadata,
+          usage: capturedUsage || undefined,
+        };
       };
 
       const sourceMsgs =
@@ -401,11 +444,6 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
         // If the endpoint returned HTTP 200 with JSON instead of SSE, extract the text or error directly
         if (res.ok && finalContentType.includes('application/json')) {
           const jsonPayload = await res.json().catch(() => null);
-          const responseModel = normalizeResponseModelMetadata(jsonPayload?.responseModel ?? jsonPayload?.metadata);
-          if (responseModel) {
-            sendEvent({ type: 'response-metadata', responseModel });
-            emitWindowEvent('manus_stream_metadata', { requestId, responseModel });
-          }
           const directText =
             jsonPayload?.textDelta ??
             jsonPayload?.delta ??
@@ -421,6 +459,9 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
             }
             if (jsonPayload?.usage) {
               capturedUsage = jsonPayload.usage;
+            }
+            if (jsonPayload?.executionMetadata) {
+              recordVerifiedMetadata(jsonPayload.executionMetadata);
             }
             if (typeof jsonPayload?.durationMs === 'number' && jsonPayload.durationMs > 0) {
               capturedServerDurationMs = jsonPayload.durationMs;
@@ -623,6 +664,11 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
                 return;
               }
 
+              if (eventType === 'execution-metadata') {
+                recordVerifiedMetadata(parsed.executionMetadata ?? parsed);
+                return;
+              }
+
               if (eventType === 'agent-activity') {
                 const rawEvent = parsed.event && typeof parsed.event === 'object' ? parsed.event : parsed;
                 const normalizedTaskId = String(rawEvent.taskId || parsed.taskId || activeTaskId);
@@ -639,15 +685,6 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
                     taskId: normalizedTaskId,
                     event: ingested,
                   });
-                }
-                return;
-              }
-
-              if (eventType === 'response-metadata') {
-                const responseModel = normalizeResponseModelMetadata(parsed.responseModel ?? parsed.metadata);
-                if (responseModel) {
-                  sendEvent({ type: 'response-metadata', responseModel });
-                  emitWindowEvent('manus_stream_metadata', { requestId, responseModel });
                 }
                 return;
               }
@@ -712,6 +749,9 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
               }
               if (eventType === 'finish' || eventType === 'done') {
                 finishEmitted = true;
+                if (parsed.executionMetadata) {
+                  recordVerifiedMetadata(parsed.executionMetadata);
+                }
                 if (parsed.usage && typeof parsed.usage === 'object') {
                   capturedUsage = parsed.usage;
                 }
@@ -917,7 +957,7 @@ if (typeof window !== 'undefined' && window.fetch) {
             text: 'Analysis generated successfully.',
             steps: [],
             usage: { inputTokens: 0, outputTokens: 0 },
-            _billing: { creditsCharged: 0, costUSD: 0 }
+            _billing: { model: 'google/gemini-3.8-flash', creditsCharged: 0, costUSD: 0 }
           }
         }), {
           headers: { 'Content-Type': 'application/json' },

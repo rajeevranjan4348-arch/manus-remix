@@ -7,6 +7,12 @@ import {
   summarizeSessionHistory,
 } from './server/geminiService';
 import {
+  buildUnavailableExecutionMetadata,
+  buildVerifiedExecutionMetadata,
+  sanitizeExecutionMetadata,
+  VerifiedExecutionMetadata,
+} from './server/modelIdentity';
+import {
   generateImageWithGemini,
   formatGeneratedImageMarkdown,
   extractReferenceImagesFromContent,
@@ -44,7 +50,6 @@ import { GoogleGenAI } from '@google/genai';
 import { agentActivityHub } from './server/agentActivityService';
 import { runTechnicalVerification } from './server/agentVerificationService';
 import { geocodeLocationServer } from './server/geocodingService';
-import { normalizeResponseModelMetadata } from './src/lib/responseModelMetadata';
 
 class StreamCircuitBreaker {
   private failureCount = 0;
@@ -1196,27 +1201,34 @@ function geminiApiPlugin(): Plugin {
               const prompt = body.prompt || '';
               const messages = body.messages || (prompt ? [{ role: 'user', content: prompt }] : []);
 
-              if (process.env.GEMINI_API_KEY) {
+              if (process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY) {
                 try {
                   let accumulated = '';
-                  let responseModel: ReturnType<typeof normalizeResponseModelMetadata> = null;
+                  let capturedMeta: VerifiedExecutionMetadata | null = null;
                   const stream = streamGeminiResponse({
                     messages,
                     systemInstruction: body.systemInstruction,
-                    model: body.model || 'gemini-3.8-flash',
+                    model: body.model || 'gemini-3-flash-preview',
                     thinkHarder: Boolean(body.thinkHarder),
-                    onResponseMetadata: (metadata) => { responseModel = metadata; },
+                    onExecutionMetadata: (meta) => {
+                      capturedMeta = meta;
+                    },
                   });
                   for await (const chunk of stream) {
                     accumulated += chunk;
                   }
                   if (accumulated && accumulated.trim()) {
                     res.setHeader('Content-Type', 'application/json');
-                    res.end(JSON.stringify({ text: accumulated, ...(responseModel ? { responseModel } : {}) }));
+                    res.end(
+                      JSON.stringify({
+                        text: accumulated,
+                        executionMetadata: sanitizeExecutionMetadata(capturedMeta),
+                      })
+                    );
                     return;
                   }
                 } catch (geminiErr: any) {
-                  console.warn('[AI Completion] Gemini execution fallback:', geminiErr?.message || geminiErr);
+                  console.warn('[AI Completion] Primary execution fallback:', geminiErr?.message || geminiErr);
                 }
               }
 
@@ -1253,7 +1265,7 @@ function geminiApiPlugin(): Plugin {
                       body: JSON.stringify({
                         model: model,
                         messages: [
-                          { role: 'system', content: body.systemInstruction || 'You are Deku AI, an intelligent AI workspace agent. Provide clear, accurate, and comprehensive responses.' },
+                          { role: 'system', content: body.systemInstruction || 'You are Deku AI, an independent AI workspace assistant. Provide clear, accurate, and comprehensive responses.' },
                           ...messages
                         ],
                         max_tokens: 4096,
@@ -1264,13 +1276,21 @@ function geminiApiPlugin(): Plugin {
                     if (response.ok) {
                       const data = await response.json();
                       const text = data.choices?.[0]?.message?.content || '';
-                      const responseModel = normalizeResponseModelMetadata({
-                        modelId: data?.model,
-                        provider: data?.provider ?? data?.provider_name,
-                      });
                       if (text) {
+                        const actualModel = typeof data.model === 'string' && data.model.trim() ? data.model.trim() : model;
+                        const requestedRaw = typeof body.model === 'string' ? body.model.trim() : null;
+                        const isFallback = !requestedRaw || requestedRaw !== actualModel;
+                        const executionMetadata = buildVerifiedExecutionMetadata({
+                          actualModel,
+                          providerHint: 'openrouter',
+                          requestedModel: requestedRaw,
+                          runtimeSource: 'openrouter-api',
+                          isFallback,
+                          fallbackFrom: isFallback ? requestedRaw : null,
+                          fallbackReason: isFallback ? 'Executed via OpenRouter fallback' : null,
+                        });
                         res.setHeader('Content-Type', 'application/json');
-                        res.end(JSON.stringify({ text, ...(responseModel ? { responseModel } : {}) }));
+                        res.end(JSON.stringify({ text, executionMetadata }));
                         return;
                       }
                     }
@@ -1279,11 +1299,30 @@ function geminiApiPlugin(): Plugin {
               }
 
               res.setHeader('Content-Type', 'application/json');
-              res.end(JSON.stringify({ text: 'I have processed your request. Please let me know how you would like me to assist you further.' }));
+              res.end(
+                JSON.stringify({
+                  text: 'I have processed your request. Please let me know how you would like me to assist you further.',
+                  executionMetadata: buildUnavailableExecutionMetadata({
+                    requestedModel: typeof body.model === 'string' ? body.model : null,
+                    runtimeSource: 'local-fallback',
+                    executionStatus: 'unavailable',
+                    reason: 'No external LLM provider returned a verified response',
+                  }),
+                })
+              );
               return;
             } catch (err: any) {
               res.setHeader('Content-Type', 'application/json');
-              res.end(JSON.stringify({ text: 'Task completed successfully.' }));
+              res.end(
+                JSON.stringify({
+                  text: 'Task completed successfully.',
+                  executionMetadata: buildUnavailableExecutionMetadata({
+                    runtimeSource: 'unknown',
+                    executionStatus: 'unavailable',
+                    reason: 'Completion handler failed before model execution',
+                  }),
+                })
+              );
             }
           });
           return;
@@ -1390,6 +1429,7 @@ function geminiApiPlugin(): Plugin {
               let hasEmittedDeltas = false;
               const streamStartedAt = Date.now();
               let capturedUsage: any = null;
+              let capturedExecutionMetadata: VerifiedExecutionMetadata | null = null;
 
               try {
                 const inputMessages = body.messages || (body.prompt ? [{ role: 'user', content: body.prompt }] : []);
@@ -1411,8 +1451,11 @@ function geminiApiPlugin(): Plugin {
                   onUsage: (usage) => {
                     capturedUsage = usage;
                   },
-                  onResponseMetadata: (responseModel) => {
-                    safeWrite(`data: ${JSON.stringify({ type: 'response-metadata', responseModel, requestId })}\n\n`);
+                  onExecutionMetadata: (metadata) => {
+                    capturedExecutionMetadata = sanitizeExecutionMetadata(metadata);
+                    safeWrite(
+                      `data: ${JSON.stringify({ type: 'execution-metadata', requestId, executionMetadata: capturedExecutionMetadata })}\n\n`
+                    );
                   },
                 });
 
@@ -1426,9 +1469,10 @@ function geminiApiPlugin(): Plugin {
 
                 if (!clientAborted && !res.writableEnded) {
                   const durationMs = Math.max(1, Date.now() - streamStartedAt);
+                  const finalExecutionMetadata = sanitizeExecutionMetadata(capturedExecutionMetadata);
                   streamCircuitBreaker.recordSuccess();
                   console.info(`[AI Stream] reqId=${requestId} status=completed durationMs=${durationMs}`);
-                  safeWrite(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId, durationMs, ...(capturedUsage ? { usage: capturedUsage } : {}) })}\n\n`);
+                  safeWrite(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId, durationMs, executionMetadata: finalExecutionMetadata, ...(capturedUsage ? { usage: capturedUsage } : {}) })}\n\n`);
                   safeWrite('data: [DONE]\n\n');
                   res.end();
                 }
@@ -1442,7 +1486,8 @@ function geminiApiPlugin(): Plugin {
                   if (hasEmittedDeltas) {
                     // Preserve already-streamed partial tokens cleanly instead of overwriting with an error
                     const durationMs = Math.max(1, Date.now() - streamStartedAt);
-                    safeWrite(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', partialRecovery: true, requestId, durationMs, ...(capturedUsage ? { usage: capturedUsage } : {}) })}\n\n`);
+                    const finalExecutionMetadata = sanitizeExecutionMetadata(capturedExecutionMetadata);
+                    safeWrite(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', partialRecovery: true, requestId, durationMs, executionMetadata: finalExecutionMetadata, ...(capturedUsage ? { usage: capturedUsage } : {}) })}\n\n`);
                     safeWrite('data: [DONE]\n\n');
                     res.end();
                   } else {

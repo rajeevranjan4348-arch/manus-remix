@@ -55,7 +55,12 @@ import {
 import { requestMicrophonePermission, requestCameraAccess, getPermissionsStatus, PermissionState } from '@/lib/permissionsManager';
 import { MicrophonePermissionModal } from '@/components/voice/MicrophonePermissionModal';
 import { useTheme } from '@/context/ThemeContext';
-import { motion, useDragControls, type PanInfo } from 'framer-motion';
+import { AnimatePresence, motion, useDragControls, useReducedMotion, type PanInfo } from 'framer-motion';
+import {
+  WORKSPACE_BACKDROP_VARIANTS,
+  WORKSPACE_DIALOG_SPRING_VARIANTS,
+  WORKSPACE_REDUCED_MOTION_VARIANTS,
+} from '@/lib/panelMotion';
 import { shouldDismissModalOnSwipe } from '@/lib/swipeToDismiss';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -125,6 +130,7 @@ type SettingsTab = 'general' | 'robot' | 'ai' | 'diagnostics' | 'personalization
 export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskInfo }: SettingsModalProps) {
   const { theme, setTheme } = useTheme();
   const dragControls = useDragControls();
+  const prefersReducedMotion = useReducedMotion();
   const { user: fbUser, signInWithGoogle, signInAsGuest, signOut: fbSignOut } = useFirebase();
   const [settings, setSettings] = useState<UserSettings>(getSettings());
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab || 'general');
@@ -291,8 +297,6 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
     toast.success('Restored defaults');
   };
 
-  if (!isOpen) return null;
-
   const handleSettingsSwipeEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     if (shouldDismissModalOnSwipe(info)) {
       onClose();
@@ -316,34 +320,39 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
   // }
 
   return (
-    <>
-      {/* Mobile Android 15 Edge-to-Edge Main Settings */}
-      {/* <div className="sm:hidden fixed inset-0 z-50">
-        <AndroidGeneralSettings onBack={onClose} isOpen={isOpen} />
-      </div> */}
-
-      {/* Responsive Settings Dialog */}
-      <div 
-        className="flex fixed inset-0 z-50 items-center justify-center p-2 sm:p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-150"
-        onClick={(e) => {
-          if (e.target === e.currentTarget) onClose();
-        }}
-      >
-        <motion.div 
-          data-testid="settings-modal-swipe-container"
-          className="w-full max-w-2xl h-[min(560px,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] bg-background border border-border/70 rounded-2xl shadow-xl flex flex-col overflow-hidden text-foreground animate-in zoom-in-98 duration-150 gpu-accelerated"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="settings-dialog-title"
-          drag="y"
-          dragControls={dragControls}
-          dragListener={false}
-          dragDirectionLock
-          dragConstraints={{ top: 0, bottom: 0 }}
-          dragElastic={{ top: 0.04, bottom: 0.45 }}
-          dragMomentum={false}
-          onDragEnd={handleSettingsSwipeEnd}
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          key="settings-modal-backdrop"
+          variants={WORKSPACE_BACKDROP_VARIANTS}
+          initial="hidden"
+          animate="visible"
+          exit="exit"
+          className="flex fixed inset-0 z-50 items-center justify-center p-2 sm:p-4 bg-black/40 backdrop-blur-xs"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) onClose();
+          }}
         >
+          <motion.div 
+            data-testid="settings-modal-swipe-container"
+            data-spring-transition="true"
+            variants={prefersReducedMotion ? WORKSPACE_REDUCED_MOTION_VARIANTS : WORKSPACE_DIALOG_SPRING_VARIANTS}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            className="w-full max-w-2xl h-[min(560px,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] bg-background border border-border/70 rounded-2xl shadow-xl flex flex-col overflow-hidden text-foreground gpu-accelerated will-change-transform"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-dialog-title"
+            drag="y"
+            dragControls={dragControls}
+            dragListener={false}
+            dragDirectionLock
+            dragConstraints={{ top: 0, bottom: 0 }}
+            dragElastic={{ top: 0.04, bottom: 0.45 }}
+            dragMomentum={false}
+            onDragEnd={handleSettingsSwipeEnd}
+          >
           {/* Minimal Header */}
           <div
             data-testid="settings-modal-drag-header"
@@ -1844,8 +1853,9 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
             Done
           </button>
         </div>
+        </motion.div>
       </motion.div>
-    </div>
-  </>
-);
+      )}
+    </AnimatePresence>
+  );
 }

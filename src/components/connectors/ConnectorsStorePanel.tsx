@@ -200,13 +200,15 @@ interface ConnectorsStorePanelProps {
   onClose: () => void;
   activeConnectors?: string[];
   onToggleConnector?: (id: string) => void;
+  initialSection?: 'connectors' | 'plugins';
 }
 
 export function ConnectorsStorePanel({
   isOpen,
   onClose,
   activeConnectors: propActiveConnectors,
-  onToggleConnector: propOnToggle
+  onToggleConnector: propOnToggle,
+  initialSection = 'connectors',
 }: ConnectorsStorePanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
@@ -280,8 +282,8 @@ export function ConnectorsStorePanel({
   );
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:w-full sm:max-w-2xl min-w-0 box-border bg-card border-border/80 text-foreground p-0 overflow-hidden shadow-2xl rounded-2xl sm:rounded-3xl h-[min(88dvh,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] flex flex-col">
+    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent data-testid="connectors-store-panel" data-active-section={initialSection} className="w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:w-full sm:max-w-2xl min-w-0 box-border bg-card border-border/80 text-foreground p-0 overflow-hidden shadow-2xl rounded-2xl sm:rounded-3xl h-[min(88dvh,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] flex flex-col">
         {/* Header */}
         <div className="p-3 sm:p-5 border-b border-border/60 bg-muted/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 shrink-0 min-w-0 max-w-full overflow-hidden">
           <div className="flex items-start sm:items-center gap-2 sm:gap-3 pr-7 sm:pr-8 min-w-0 flex-1">

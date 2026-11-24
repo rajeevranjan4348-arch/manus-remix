@@ -33,7 +33,16 @@ import {
   detectThreeDSceneIntent,
   formatProcedural3DSceneMarkdown,
 } from '../../src/lib/threeSceneSpec';
-import { createResponseModelMetadataTracker } from '../../src/lib/responseModelMetadata';
+import {
+  buildDekuIdentitySystemInstruction,
+  buildUnavailableExecutionMetadata,
+  buildUnverifiedIdentityResponse,
+  buildVerifiedExecutionMetadata,
+  DEKU_PRODUCT_NAME,
+  resolveRequestedModelRoute,
+  sanitizeExecutionMetadata,
+  VerifiedExecutionMetadata,
+} from '../../server/modelIdentity';
 
 const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -120,6 +129,10 @@ export default async (req: Request) => {
   }
 
   const configuredModelId = normalizeModel(body.model);
+  const requestedRoute = resolveRequestedModelRoute(
+    typeof body.model === 'string' ? body.model : null,
+    configuredModelId
+  );
 
   function buildFallbackAnswer(
     promptText: string,
@@ -137,7 +150,7 @@ export default async (req: Request) => {
       return 'Hello! How can I help you today?';
     }
     if (/which model|what model|what llm|which llm|underlying model|what ai model|model are you|who built you|your architecture/i.test(clean)) {
-      return 'I’m Deku AI, an AI workspace assistant. I can’t verify the exact model or provider for this response from the available response metadata.';
+      return buildUnverifiedIdentityResponse();
     }
     if (/\b(what time is it|current time|time right now|what is the date|today'?s date|what day is today|current date|time in india|time in utc|world clock)\b/i.test(clean)) {
       const temporal = getLiveTemporalContext();
@@ -181,7 +194,7 @@ export default async (req: Request) => {
       );
     }
     if (/who are you|what can you do|what is (deku|manus)/i.test(clean)) {
-      return 'I am **Deku AI**, your AI workspace assistant. I can answer questions, research topics, write and debug code, analyze data, and help with everyday tasks. I cannot verify the exact model or provider for this response from the available response metadata.';
+      return `I am **${DEKU_PRODUCT_NAME}**, an independent AI workspace assistant. I can answer questions, research topics, write and debug code, analyze data, and help with everyday tasks.`;
     }
     return `Here is a direct response regarding **${promptText.trim() || 'your request'}**:\n\nI have processed your question. Let me know if you would like more specific details, examples, or a deeper breakdown.`;
   }
@@ -189,12 +202,25 @@ export default async (req: Request) => {
   function createFallbackSseResponse(
     text: string,
     finishReason: 'stop' | 'error' = 'stop',
-    stageEvents: ResearchProgressEvent[] = []
+    stageEvents: ResearchProgressEvent[] = [],
+    executionMetadata?: VerifiedExecutionMetadata | null
   ) {
+    const resolvedMetadata = sanitizeExecutionMetadata(
+      executionMetadata ||
+        buildUnavailableExecutionMetadata({
+          requestedModel: requestedRoute.requestedRaw,
+          runtimeSource: 'local-fallback',
+          executionStatus: 'degraded',
+          reason: 'External LLM provider unavailable',
+        })
+    );
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       start(controller) {
         try {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ type: 'execution-metadata', requestId, executionMetadata: resolvedMetadata })}\n\n`)
+          );
           for (const act of bufferedActivities) {
             controller.enqueue(
               encoder.encode(`data: ${JSON.stringify({ type: 'agent-activity', requestId, taskId, event: act })}\n\n`)
@@ -211,7 +237,7 @@ export default async (req: Request) => {
             );
           }
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason, requestId })}\n\n`)
+            encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason, requestId, executionMetadata: resolvedMetadata })}\n\n`)
           );
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
         } finally {
@@ -385,9 +411,11 @@ export default async (req: Request) => {
     }
 
     systemInstruction +=
-      '\n\n[RESPONSE MODEL IDENTITY POLICY]\n' +
-      '- The application is Deku AI. Do not infer or claim a specific underlying model ID or provider from a requested model, alias, configuration, or conversation text.\n' +
-      '- If asked for the runtime model or provider, say it cannot be verified from the conversation context; the interface will show backend-confirmed response metadata when available.';
+      `\n\n[VERIFIED MODEL & APPLICATION IDENTITY]\n` +
+      `- Application / Workspace Agent Name: Deku AI\n` +
+      `- Active Underlying LLM Model ID: ${configuredModelId}\n` +
+      `- Model Provider: Google Gemini\n` +
+      `- Strict Rule: When asked "which model are you", "what LLM are you running on", "who built you", or about your model/architecture, clearly distinguish between the application/agent name (Deku AI) and the actual underlying LLM model (${configuredModelId} by Google Gemini). Never invent model names, providers, or architectures.`;
 
     if (realtimeSnapshot) {
       systemInstruction += realtimeSnapshot.systemContextBlock;
@@ -533,6 +561,7 @@ export default async (req: Request) => {
             model?: string;
             source: 'exact' | 'estimated';
           } | null = null;
+          let capturedExecutionMetadata: VerifiedExecutionMetadata | null = null;
 
           try {
             const needsModelSearchGrounding = useGoogleSearch && externalSources.size === 0 && !realtimeSnapshot?.directFallbackMarkdown;
@@ -543,6 +572,24 @@ export default async (req: Request) => {
               if (Date.now() - waterfallStartMs > DEFAULT_TIMEOUT_BUDGETS.totalWaterfallBudgetMs) {
                 break modelLoop;
               }
+
+              const isGeminiFallback =
+                requestedRoute.targetProvider !== 'google' ||
+                (!requestedRoute.isAutoSelected && model !== normalizeModel(requestedRoute.targetModelId));
+              const geminiExecutionMeta = buildVerifiedExecutionMetadata({
+                actualModel: model,
+                providerHint: 'google',
+                requestedModel: requestedRoute.requestedRaw,
+                runtimeSource: 'google-genai-sdk',
+                isFallback: isGeminiFallback,
+                fallbackFrom: isGeminiFallback
+                  ? requestedRoute.requestedRaw || requestedRoute.targetModelId
+                  : null,
+                fallbackReason: isGeminiFallback
+                  ? `Routed to Google Gemini fallback candidate ${model}`
+                  : null,
+              });
+              const modelSystemInstruction = `${systemInstruction}\n\n${buildDekuIdentitySystemInstruction(geminiExecutionMeta)}`;
 
               for (const toolCfg of toolConfigs) {
                 if (req.signal?.aborted) break modelLoop;
@@ -560,16 +607,16 @@ export default async (req: Request) => {
                   const modelHandle = agentActivityHub.startActivity(
                     taskId,
                     {
-                      title: hasSearchTool ? 'Searching the web for an answer' : 'Generating response',
-                      description: 'Streaming response',
-                      toolName: hasSearchTool ? 'web_search' : 'response_generation',
+                      title: hasSearchTool ? `Querying ${model} with live web grounding` : `Generating response with ${model}`,
+                      description: 'Streaming completion from Gemini API',
+                      toolName: hasSearchTool ? 'gemini_google_search' : 'gemini_model',
                       category: 'model',
                     },
                     emitSseActivity
                   );
                   let charCount = 0;
                   let latestUsageMetadata: any = null;
-                  const responseModelTracker = createResponseModelMetadataTracker();
+                  let metadataEmitted = false;
                   try {
                     const guardedStream = iterateStreamWithTimeouts(
                       () =>
@@ -577,7 +624,7 @@ export default async (req: Request) => {
                           model,
                           contents,
                           config: {
-                            systemInstruction,
+                            systemInstruction: modelSystemInstruction,
                             ...toolCfg,
                           },
                         }),
@@ -598,14 +645,12 @@ export default async (req: Request) => {
                         latestUsageMetadata = (chunk as any).usageMetadata;
                       }
                       const text = chunk.text;
-                      const responseModel = responseModelTracker.observe({
-                        modelId: chunk?.modelVersion,
-                        provider: 'Google Gemini',
-                      }, hasEmittedText || Boolean(text));
-                      if (responseModel) {
-                        safeEnqueue(`data: ${JSON.stringify({ type: 'response-metadata', responseModel, requestId })}\n\n`);
-                      }
                       if (text) {
+                        if (!metadataEmitted) {
+                          metadataEmitted = true;
+                          capturedExecutionMetadata = geminiExecutionMeta;
+                          safeEnqueue(`data: ${JSON.stringify({ type: 'execution-metadata', requestId, executionMetadata: geminiExecutionMeta })}\n\n`);
+                        }
                         hasEmittedText = true;
                         charCount += text.length;
                         safeEnqueue(`data: ${JSON.stringify({ type: 'text-delta', delta: text, textDelta: text, requestId })}\n\n`);
@@ -623,6 +668,11 @@ export default async (req: Request) => {
                     geminiCircuitBreaker.recordSuccess();
                     recoveryTelemetry.record({ component: 'gemini', action: 'provider_recovered', outcome: 'success', requestId });
                     if (hasEmittedText) {
+                      if (!metadataEmitted) {
+                        metadataEmitted = true;
+                        capturedExecutionMetadata = geminiExecutionMeta;
+                        safeEnqueue(`data: ${JSON.stringify({ type: 'execution-metadata', requestId, executionMetadata: geminiExecutionMeta })}\n\n`);
+                      }
                       if (latestUsageMetadata) {
                         const promptTokens = Number(latestUsageMetadata.promptTokenCount) || 0;
                         const completionTokens = Number(latestUsageMetadata.candidatesTokenCount) || Math.max(1, Math.ceil(charCount / 4));
@@ -637,7 +687,7 @@ export default async (req: Request) => {
                           source: Number(latestUsageMetadata.totalTokenCount) > 0 ? 'exact' : 'estimated',
                         };
                       }
-                      modelHandle.complete(`Streamed ${charCount} chars`);
+                      modelHandle.complete(`Streamed ${charCount} chars from ${model}`);
                       break modelLoop;
                     }
                     modelHandle.fail('Empty stream response; trying fallback');
@@ -653,7 +703,7 @@ export default async (req: Request) => {
                     }
 
                     const classified = classifyGeminiError(err, Boolean(req.signal?.aborted));
-                    modelHandle.fail(`Generation attempt failed (${classified.category}); trying a fallback`);
+                    modelHandle.fail(`Model ${model} (${classified.category}); trying fallback`);
                     geminiCircuitBreaker.recordFailure(err);
                     recoveryTelemetry.record({
                       component: 'gemini',
@@ -687,6 +737,13 @@ export default async (req: Request) => {
             }
 
             if (!hasEmittedText && !req.signal?.aborted) {
+              capturedExecutionMetadata = buildUnavailableExecutionMetadata({
+                requestedModel: requestedRoute.requestedRaw,
+                runtimeSource: 'local-fallback',
+                executionStatus: 'degraded',
+                reason: 'External LLM provider unavailable',
+              });
+              safeEnqueue(`data: ${JSON.stringify({ type: 'execution-metadata', requestId, executionMetadata: capturedExecutionMetadata })}\n\n`);
               const fallback = buildFallbackAnswer(latestUserText, configuredModelId, realtimeSnapshot);
               safeEnqueue(`data: ${JSON.stringify({ type: 'text-delta', delta: fallback, textDelta: fallback, requestId })}\n\n`);
               hasEmittedText = true;
@@ -701,21 +758,23 @@ export default async (req: Request) => {
             }
 
             const durationMs = Math.max(1, Date.now() - waterfallStartMs);
-            safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId, durationMs, ...(capturedUsage ? { usage: capturedUsage } : {}) })}\n\n`);
+            const finalExecutionMetadata = sanitizeExecutionMetadata(capturedExecutionMetadata);
+            safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId, durationMs, executionMetadata: finalExecutionMetadata, ...(capturedUsage ? { usage: capturedUsage } : {}) })}\n\n`);
             safeEnqueue('data: [DONE]\n\n');
           } catch (err: any) {
             try {
               const durationMs = Math.max(1, Date.now() - waterfallStartMs);
+              const finalExecutionMetadata = sanitizeExecutionMetadata(capturedExecutionMetadata);
               if (!hasEmittedText && !req.signal?.aborted) {
                 const fallback = buildFallbackAnswer(latestUserText, configuredModelId, realtimeSnapshot);
                 safeEnqueue(`data: ${JSON.stringify({ type: 'text-delta', delta: fallback, textDelta: fallback, requestId })}\n\n`);
-                safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId, durationMs })}\n\n`);
+                safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId, durationMs, executionMetadata: finalExecutionMetadata })}\n\n`);
               } else if (hasEmittedText) {
                 // Preserve already-streamed tokens cleanly
-                safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', partialRecovery: true, requestId, durationMs, ...(capturedUsage ? { usage: capturedUsage } : {}) })}\n\n`);
+                safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', partialRecovery: true, requestId, durationMs, executionMetadata: finalExecutionMetadata, ...(capturedUsage ? { usage: capturedUsage } : {}) })}\n\n`);
               } else {
                 safeEnqueue(`data: ${JSON.stringify({ type: 'error', error: err?.message || 'Stream error', requestId })}\n\n`);
-                safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error', requestId, durationMs })}\n\n`);
+                safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error', requestId, durationMs, executionMetadata: finalExecutionMetadata })}\n\n`);
               }
               safeEnqueue('data: [DONE]\n\n');
             } catch {}
@@ -792,7 +851,8 @@ export default async (req: Request) => {
             let orUsage: any = null;
             let buffer = '';
             let hasEmittedText = false;
-            const responseModelTracker = createResponseModelMetadataTracker();
+            let actualReturnedModel = orModel;
+            let orExecutionMetadata: VerifiedExecutionMetadata | null = null;
 
             const stream = new ReadableStream({
               async start(controller) {
@@ -810,17 +870,27 @@ export default async (req: Request) => {
                         openRouterCircuitBreaker.recordSuccess();
                         recoveryTelemetry.record({ component: 'openrouter', action: 'provider_recovered', outcome: 'success', requestId });
                         if (!hasEmittedText) {
+                          orExecutionMetadata = buildUnavailableExecutionMetadata({
+                            requestedModel: requestedRoute.requestedRaw,
+                            runtimeSource: 'local-fallback',
+                            executionStatus: 'degraded',
+                            reason: 'OpenRouter returned an empty completion',
+                          });
                           const fallback = buildFallbackAnswer(latestUserText, configuredModelId, realtimeSnapshot);
                           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: fallback, textDelta: fallback, requestId })}\n\n`));
                         }
                         const durationMs = Math.max(1, Date.now() - orStartedAt);
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId, durationMs, ...(orUsage ? { usage: orUsage } : {}) })}\n\n`));
+                        const finalMeta = sanitizeExecutionMetadata(orExecutionMetadata);
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId, durationMs, executionMetadata: finalMeta, ...(orUsage ? { usage: orUsage } : {}) })}\n\n`));
                         controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                         return;
                       }
                       if (trimmed.startsWith('data: ')) {
                         try {
                           const json = JSON.parse(trimmed.slice(6));
+                          if (typeof json.model === 'string' && json.model.trim()) {
+                            actualReturnedModel = json.model.trim();
+                          }
                           if (json.usage) {
                             const promptTokens = Number(json.usage.prompt_tokens) || 0;
                             const completionTokens = Number(json.usage.completion_tokens) || 0;
@@ -831,20 +901,26 @@ export default async (req: Request) => {
                                 completionTokens,
                                 thoughtTokens: Number(json.usage.reasoning_tokens) || 0,
                                 totalTokens,
-                                model: orModel,
+                                model: actualReturnedModel,
                                 source: 'exact',
                               };
                             }
                           }
                           const delta = json.choices?.[0]?.delta?.content;
-                          const responseModel = responseModelTracker.observe({
-                            modelId: json.model,
-                            provider: json.provider ?? json.provider_name,
-                          }, hasEmittedText || Boolean(delta));
-                          if (responseModel) {
-                            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'response-metadata', responseModel, requestId })}\n\n`));
-                          }
                           if (delta) {
+                            if (!orExecutionMetadata) {
+                              const isFallback = !requestedRoute.requestedRaw || requestedRoute.requestedRaw !== actualReturnedModel;
+                              orExecutionMetadata = buildVerifiedExecutionMetadata({
+                                actualModel: actualReturnedModel,
+                                providerHint: 'openrouter',
+                                requestedModel: requestedRoute.requestedRaw,
+                                runtimeSource: 'openrouter-api',
+                                isFallback,
+                                fallbackFrom: isFallback ? requestedRoute.requestedRaw : null,
+                                fallbackReason: isFallback ? 'Executed via OpenRouter fallback' : null,
+                              });
+                              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'execution-metadata', requestId, executionMetadata: orExecutionMetadata })}\n\n`));
+                            }
                             hasEmittedText = true;
                             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta, textDelta: delta, requestId })}\n\n`));
                           }
@@ -855,11 +931,18 @@ export default async (req: Request) => {
                   openRouterCircuitBreaker.recordSuccess();
                   recoveryTelemetry.record({ component: 'openrouter', action: 'provider_recovered', outcome: 'success', requestId });
                   if (!hasEmittedText) {
+                    orExecutionMetadata = buildUnavailableExecutionMetadata({
+                      requestedModel: requestedRoute.requestedRaw,
+                      runtimeSource: 'local-fallback',
+                      executionStatus: 'degraded',
+                      reason: 'OpenRouter returned an empty completion',
+                    });
                     const fallback = buildFallbackAnswer(latestUserText, configuredModelId, realtimeSnapshot);
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: fallback, textDelta: fallback, requestId })}\n\n`));
                   }
                   const durationMs = Math.max(1, Date.now() - orStartedAt);
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId, durationMs, ...(orUsage ? { usage: orUsage } : {}) })}\n\n`));
+                  const finalMeta = sanitizeExecutionMetadata(orExecutionMetadata);
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId, durationMs, executionMetadata: finalMeta, ...(orUsage ? { usage: orUsage } : {}) })}\n\n`));
                   controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                 } catch (err: any) {
                   openRouterCircuitBreaker.recordFailure(err);
@@ -871,8 +954,9 @@ export default async (req: Request) => {
                     requestId,
                   });
                   try {
+                    const finalMeta = sanitizeExecutionMetadata(orExecutionMetadata);
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: err?.message || 'Stream error', requestId })}\n\n`));
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error', requestId })}\n\n`));
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error', requestId, executionMetadata: finalMeta })}\n\n`));
                     controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                   } catch {}
                 } finally {

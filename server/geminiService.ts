@@ -36,8 +36,18 @@ import {
   detectThreeDSceneIntent,
   formatProcedural3DSceneMarkdown,
 } from '../src/lib/threeSceneSpec';
-import { createResponseModelMetadataTracker } from '../src/lib/responseModelMetadata';
-import type { ResponseModelMetadata } from '../src/lib/responseModelMetadata';
+import {
+  VerifiedExecutionMetadata,
+  resolveRequestedModelRoute,
+  buildVerifiedExecutionMetadata,
+  buildUnavailableExecutionMetadata,
+  buildDekuIdentitySystemInstruction,
+  buildUnverifiedIdentityResponse,
+  sanitizeExecutionMetadata,
+  DEKU_PRODUCT_NAME,
+} from './modelIdentity';
+
+export type { VerifiedExecutionMetadata } from './modelIdentity';
 
 export {
   detectImageGenerationIntent,
@@ -74,7 +84,13 @@ export interface StreamChatOptions {
   onResearchProgress?: (event: ResearchProgressEvent) => void;
   onActivity?: (event: AgentActivityEvent) => void;
   onUsage?: (usage: StreamTokenUsage) => void;
-  onResponseMetadata?: (metadata: ResponseModelMetadata) => void;
+  onExecutionMetadata?: (metadata: VerifiedExecutionMetadata) => void;
+}
+
+export interface VerifiedModelConfig {
+  modelId: string;
+  provider: string;
+  applicationName: string;
 }
 
 export function normalizeModel(modelName?: string): string {
@@ -98,12 +114,59 @@ export function normalizeModel(modelName?: string): string {
   return clean;
 }
 
-export function buildModelIdentityInstruction(): string {
-  return (
-    '\n\n[RESPONSE MODEL IDENTITY POLICY]\n' +
-    '- The application is Deku AI. Do not infer or claim a specific underlying model ID or provider from a requested model, alias, configuration, or conversation text.\n' +
-    '- If asked for the runtime model or provider, say it cannot be verified from the conversation context; the interface will show backend-confirmed response metadata when available.'
-  );
+export function resolveVerifiedModelConfig(modelName?: string): VerifiedModelConfig {
+  const normalized = normalizeModel(modelName);
+  let provider = 'Google Gemini';
+  if (normalized.startsWith('anthropic/') || normalized.includes('claude')) {
+    provider = 'Anthropic';
+  } else if (normalized.startsWith('openai/') || normalized.includes('gpt')) {
+    provider = 'OpenAI';
+  } else if (normalized.startsWith('meta-llama/') || normalized.includes('llama')) {
+    provider = 'Meta';
+  } else if (normalized.startsWith('deepseek/') || normalized.includes('deepseek')) {
+    provider = 'DeepSeek';
+  } else if (normalized.startsWith('nvidia/') || normalized.includes('nemotron')) {
+    provider = 'NVIDIA';
+  } else if (normalized.startsWith('openrouter/')) {
+    provider = 'OpenRouter';
+  }
+  return {
+    modelId: normalized,
+    provider,
+    applicationName: 'Deku AI',
+  };
+}
+
+export function buildModelIdentityInstruction(
+  modelId: string,
+  providerOverride?: string,
+  verifiedMetadata?: VerifiedExecutionMetadata | null
+): string {
+  if (verifiedMetadata) {
+    return `\n\n${buildDekuIdentitySystemInstruction(verifiedMetadata)}`;
+  }
+  const verified = resolveVerifiedModelConfig(modelId);
+  const providerHint = providerOverride?.toLowerCase().includes('anthropic')
+    ? 'anthropic'
+    : providerOverride?.toLowerCase().includes('openai')
+      ? 'openai'
+      : providerOverride?.toLowerCase().includes('openrouter')
+        ? 'openrouter'
+        : 'google';
+  const meta = buildVerifiedExecutionMetadata({
+    actualModel: verified.modelId,
+    providerHint,
+    requestedModel: modelId,
+    runtimeSource:
+      providerHint === 'anthropic'
+        ? 'anthropic-api'
+        : providerHint === 'openai'
+          ? 'openai-api'
+          : providerHint === 'openrouter'
+            ? 'openrouter-api'
+            : 'google-genai-sdk',
+  });
+  return `\n\n${buildDekuIdentitySystemInstruction(meta)}`;
 }
 
 export function needsLiveSearch(text: string): boolean {
@@ -151,7 +214,8 @@ export function stripInjectedContextBlocks(text: string): string {
 
 export function generateResilientResponse(
   prompt: string,
-  messages: ChatMessage[] = []
+  messages: ChatMessage[] = [],
+  activeModel?: string
 ): string {
   const raw = stripInjectedContextBlocks(prompt)
     .replace(/\[IMAGE_DATA_URL:[^\]]+\]\s*/gi, '')
@@ -160,6 +224,7 @@ export function generateResilientResponse(
     .replace(/^\[Think Harder[^\]]*\]\s*/i, '')
     .trim();
   const clean = raw.toLowerCase();
+  const verified = resolveVerifiedModelConfig(activeModel);
   const temporal = getLiveTemporalContext();
 
   if (/^(hi|hello|hey|hiya|howdy|yo|namaste|greetings|good\s+(morning|afternoon|evening|day|night))(?:\s+(?:deku|deku\s+ai|there|ai|assistant))?[!?.,\s]*$/i.test(clean)) {
@@ -171,7 +236,7 @@ export function generateResilientResponse(
   }
 
   if (/which model|what model|what llm|which llm|underlying model|what ai model|model are you|who built you|your architecture/i.test(clean)) {
-    return 'I’m Deku AI, an AI workspace assistant. I can’t verify the exact model or provider for this response from the available response metadata.';
+    return buildUnverifiedIdentityResponse();
   }
 
   if (/\b(what\s+time\s+is\s+it|current\s+time|time\s+right\s+now|time\s+in\s+india|ist\s+time|utc\s+time|what\s+is\s+the\s+date|what's\s+the\s+date|todays?\s+date|what\s+day\s+is\s+(it|today))\b/i.test(clean)) {
@@ -224,7 +289,7 @@ export function generateResilientResponse(
   }
 
   if (/who are you|what can you do|what is (deku|manus)/i.test(clean)) {
-    return `I am **Deku AI**, an AI workspace assistant. I can help with questions, research, writing, coding, data analysis, and everyday tasks. I cannot verify the exact model or provider for this response from the available response metadata.`;
+    return `I am **${DEKU_PRODUCT_NAME}**, an independent AI workspace assistant.\n\nHere is what I can do for you:\n- **Direct Q&A & Knowledge**: Answer questions clearly and concisely across science, technology, culture, and everyday topics.\n- **Real-Time Data & Search**: Retrieve live weather, air quality, currency exchange rates, crypto prices, world clocks, and current news headlines.\n- **Full-Stack Engineering**: Build, modify, debug, and preview web applications and interactive systems.\n- **Data Analysis & Processing**: Compute metrics, summarize complex records, and generate actionable reports.\n\nTell me what you'd like to know or work on!`;
   }
 
   // Evaluate direct arithmetic & math expressions (e.g. "what is 2 + 2?", "15 * 24", "100 / 4")
@@ -455,6 +520,79 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
   const enrichedSystemInstruction =
     (options.systemInstruction || '') + realtimeSnapshot.systemContextBlock;
 
+  const requestedRoute = resolveRequestedModelRoute(options.model, preferredModel);
+  const emitExecutionMetadata = (meta: VerifiedExecutionMetadata) => {
+    options.onExecutionMetadata?.(sanitizeExecutionMetadata(meta));
+  };
+
+  // Direct Anthropic Claude execution when explicitly requested & ANTHROPIC_API_KEY is configured
+  const anthropicApiKey = (process.env.ANTHROPIC_API_KEY || '').trim();
+  if (requestedRoute.targetProvider === 'anthropic' && anthropicApiKey) {
+    const claudeHandle = agentActivityHub.startActivity(
+      activityTaskId,
+      {
+        title: `Generating response with ${requestedRoute.targetModelId}`,
+        description: 'Streaming response from Anthropic API',
+        toolName: 'anthropic_model',
+        category: 'model',
+      },
+      emitActivity
+    );
+    try {
+      let claudeChars = 0;
+      for await (const delta of streamAnthropicResponse(
+        { ...options, systemInstruction: enrichedSystemInstruction, onExecutionMetadata: emitExecutionMetadata },
+        anthropicApiKey,
+        requestedRoute.targetModelId,
+        requestedRoute.requestedRaw
+      )) {
+        claudeChars += delta.length;
+        yield delta;
+      }
+      if (claudeChars > 0) {
+        claudeHandle.complete(`Streamed ${claudeChars} chars from Anthropic`);
+        return;
+      }
+      claudeHandle.fail('Anthropic returned empty stream; evaluating fallback');
+    } catch {
+      claudeHandle.fail('Anthropic provider unavailable; evaluating fallback');
+    }
+  }
+
+  // Direct OpenAI execution when explicitly requested & OPENAI_API_KEY is configured
+  const openaiApiKey = (process.env.OPENAI_API_KEY || '').trim();
+  if (requestedRoute.targetProvider === 'openai' && openaiApiKey) {
+    const openaiHandle = agentActivityHub.startActivity(
+      activityTaskId,
+      {
+        title: `Generating response with ${requestedRoute.targetModelId}`,
+        description: 'Streaming response from OpenAI API',
+        toolName: 'openai_model',
+        category: 'model',
+      },
+      emitActivity
+    );
+    try {
+      let openaiChars = 0;
+      for await (const delta of streamOpenAIResponse(
+        { ...options, systemInstruction: enrichedSystemInstruction, onExecutionMetadata: emitExecutionMetadata },
+        openaiApiKey,
+        requestedRoute.targetModelId,
+        requestedRoute.requestedRaw
+      )) {
+        openaiChars += delta.length;
+        yield delta;
+      }
+      if (openaiChars > 0) {
+        openaiHandle.complete(`Streamed ${openaiChars} chars from OpenAI`);
+        return;
+      }
+      openaiHandle.fail('OpenAI returned empty stream; evaluating fallback');
+    } catch {
+      openaiHandle.fail('OpenAI provider unavailable; evaluating fallback');
+    }
+  }
+
   const waterfallStartTimeMs = Date.now();
 
   if (apiKey) {
@@ -546,7 +684,25 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
       const needsModelSearchGrounding = useGoogleSearch && !realtimeSnapshot.hasLiveDomainData;
       const toolConfigs = needsModelSearchGrounding ? [{ tools: [{ googleSearch: {} }] }, {}] : [{}];
       const supportsThinkingBudget = model.includes('gemini-2.5');
-      const modelSystemInstruction = baseSystemPrompt + buildModelIdentityInstruction();
+      const isGeminiFallback =
+        requestedRoute.targetProvider !== 'google' ||
+        (!requestedRoute.isAutoSelected && model !== normalizeModel(requestedRoute.targetModelId));
+      const geminiExecutionMeta = buildVerifiedExecutionMetadata({
+        actualModel: model,
+        providerHint: 'google',
+        requestedModel: requestedRoute.requestedRaw,
+        runtimeSource: 'google-genai-sdk',
+        isFallback: isGeminiFallback,
+        fallbackFrom: isGeminiFallback
+          ? requestedRoute.requestedRaw || requestedRoute.targetModelId
+          : null,
+        fallbackReason: isGeminiFallback
+          ? requestedRoute.targetProvider !== 'google'
+            ? `Primary provider ${requestedRoute.targetProvider} unavailable; routed to Google Gemini`
+            : `Primary Gemini candidate unavailable; switched to ${model}`
+          : null,
+      });
+      const modelSystemInstruction = baseSystemPrompt + buildModelIdentityInstruction(model, 'Google Gemini', geminiExecutionMeta);
 
       for (const toolConfig of toolConfigs) {
         if (options.signal?.aborted) {
@@ -565,18 +721,22 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
           const modelHandle = agentActivityHub.startActivity(
             activityTaskId,
             {
-              title: hasSearchTool ? 'Searching the web for an answer' : 'Generating response',
-              description: hasSearchTool ? 'Streaming a response with web grounding' : 'Streaming response',
-              toolName: hasSearchTool ? 'web_search' : 'response_generation',
+              title: hasSearchTool
+                ? `Querying ${model} with live web grounding`
+                : `Generating response with ${model}`,
+              description: hasSearchTool
+                ? 'Streaming grounded response from Gemini API with Google Search'
+                : 'Streaming response from Gemini API',
+              toolName: hasSearchTool ? 'gemini_google_search' : 'gemini_model',
               category: 'model',
             },
             emitActivity
           );
 
           let hasYielded = false;
+          let metadataEmitted = false;
           let streamedChars = 0;
           let latestUsageMetadata: any = null;
-          const responseMetadataTracker = createResponseModelMetadataTracker();
           const sources = new Map<string, string>();
           for (const src of realtimeSnapshot.sources) {
             if (src.url && /^https?:\/\//i.test(src.url)) {
@@ -616,14 +776,11 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
                 latestUsageMetadata = (chunk as any).usageMetadata;
               }
               const text = chunk.text;
-              const responseMetadata = responseMetadataTracker.observe({
-                modelId: chunk?.modelVersion,
-                provider: 'Google Gemini',
-              }, hasYielded || Boolean(text));
-              if (responseMetadata) {
-                options.onResponseMetadata?.(responseMetadata);
-              }
               if (text) {
+                if (!metadataEmitted) {
+                  metadataEmitted = true;
+                  emitExecutionMetadata(geminiExecutionMeta);
+                }
                 hasYielded = true;
                 streamedChars += text.length;
                 yield text;
@@ -663,6 +820,10 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
             }
 
             if (hasYielded) {
+              if (!metadataEmitted) {
+                metadataEmitted = true;
+                emitExecutionMetadata(geminiExecutionMeta);
+              }
               if (latestUsageMetadata && options.onUsage) {
                 const promptTokens = Number(latestUsageMetadata.promptTokenCount) || 0;
                 const completionTokens = Number(latestUsageMetadata.candidatesTokenCount) || Math.max(1, Math.ceil(streamedChars / 4));
@@ -680,11 +841,11 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
               modelHandle.complete(
                 sources.size > 0
                   ? `Streamed ${streamedChars} chars with ${sources.size} cited source(s)`
-                  : `Streamed ${streamedChars} chars`
+                  : `Streamed ${streamedChars} chars from ${model}`
               );
               return; // Successfully streamed the response
             }
-            modelHandle.fail('The response stream was empty; trying a fallback');
+            modelHandle.fail('Model returned empty stream; trying fallback');
             break; // Move to next toolConfig / model
           } catch (err: any) {
             if (options.signal?.aborted) {
@@ -696,6 +857,10 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
             // preserve the partial response and complete gracefully instead of restarting another model
             // (which would duplicate already-streamed tokens).
             if (hasYielded && streamedChars > 0) {
+              if (!metadataEmitted) {
+                metadataEmitted = true;
+                emitExecutionMetadata(geminiExecutionMeta);
+              }
               if (useGoogleSearch && sources.size > 0) {
                 yield '\n\n**Sources**\n' + Array.from(sources.entries())
                   .slice(0, 8)
@@ -709,8 +874,8 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
             const classified = classifyGeminiError(err, Boolean(options.signal?.aborted));
             modelHandle.fail(
               classified.category === 'auth_error'
-                ? 'The AI service is unavailable; checking a fallback'
-                : `Generation attempt failed (${classified.category}); trying a fallback`
+                ? 'Gemini API authentication failed; checking fallback provider'
+                : `Model ${model} (${classified.category}); switching`
             );
 
             if (classified.abortWaterfall) {
@@ -754,9 +919,9 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     const orHandle = agentActivityHub.startActivity(
       activityTaskId,
       {
-        title: 'Using a fallback response service',
-        description: 'Streaming response',
-        toolName: 'response_generation',
+        title: 'Routing request via fallback model provider',
+        description: 'Streaming completion through OpenRouter fallback gateway',
+        toolName: 'openrouter_model',
         category: 'model',
       },
       emitActivity
@@ -764,7 +929,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     try {
       let orChars = 0;
       for await (const delta of streamOpenRouterResponse(
-        { ...options, systemInstruction: enrichedSystemInstruction },
+        { ...options, systemInstruction: enrichedSystemInstruction, onExecutionMetadata: emitExecutionMetadata },
         openRouterKey
       )) {
         orChars += delta.length;
@@ -779,6 +944,15 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
   }
 
   // Graceful resilient synthesizer fallback ensures user requests never receive unhandled 500 crashes
+  // Strictly emit unavailable/degraded model metadata so the UI never fabricates an LLM model name.
+  emitExecutionMetadata(
+    buildUnavailableExecutionMetadata({
+      requestedModel: requestedRoute.requestedRaw,
+      runtimeSource: 'local-fallback',
+      executionStatus: 'degraded',
+      reason: 'External LLM provider unavailable',
+    })
+  );
   const synthHandle = agentActivityHub.startActivity(
     activityTaskId,
     {
@@ -792,7 +966,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
   console.log('[AI Model Router] Using resilient response synthesizer for user query');
   const fallbackText =
     realtimeSnapshot.directFallbackMarkdown ||
-    generateResilientResponse(latestUserText, options.messages);
+    generateResilientResponse(latestUserText, options.messages, preferredModel);
   const words = fallbackText.split(/(\s+)/);
   for (let i = 0; i < words.length; i += 3) {
     if (options.signal?.aborted) {
@@ -805,23 +979,269 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
   synthHandle.complete(`Completed response (${fallbackText.length} chars)`);
 }
 
+export async function* streamAnthropicResponse(
+  options: StreamChatOptions,
+  anthropicApiKey: string,
+  targetModelId: string,
+  requestedModel: string | null
+) {
+  const initialMeta = buildVerifiedExecutionMetadata({
+    actualModel: targetModelId,
+    providerHint: 'anthropic',
+    requestedModel,
+    runtimeSource: 'anthropic-api',
+    isFallback: false,
+  });
+  const baseSystemContent = options.systemInstruction || `You are ${DEKU_PRODUCT_NAME}, an independent AI workspace assistant.`;
+  const systemContent =
+    baseSystemContent +
+    (baseSystemContent.includes('[MEMORY USAGE POLICY]') ? '' : SERVER_MEMORY_BEHAVIOR_POLICY) +
+    `\n\n${buildDekuIdentitySystemInstruction(initialMeta)}`;
+
+  const anthropicMessages = options.messages
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .map(m => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: m.content,
+    }));
+
+  const scope = createScopedAbortController(
+    DEFAULT_TIMEOUT_BUDGETS.firstTokenTimeoutMs,
+    options.signal,
+    'Anthropic request timed out'
+  );
+  let response: Response;
+  try {
+    response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': anthropicApiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: targetModelId,
+        max_tokens: 2048,
+        system: systemContent,
+        messages: anthropicMessages.length > 0 ? anthropicMessages : [{ role: 'user', content: 'Hello' }],
+        stream: true,
+      }),
+      signal: scope.controller.signal,
+    });
+  } finally {
+    scope.cleanup();
+  }
+
+  if (!response.ok || !response.body) {
+    throw new Error(`Anthropic status ${response.status}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let verifiedModel = targetModelId;
+  let metadataEmitted = false;
+  let inputTokens = 0;
+  let outputTokens = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data: ')) continue;
+      try {
+        const payload = JSON.parse(trimmed.slice(6));
+        if (payload.type === 'message_start' && payload.message) {
+          if (typeof payload.message.model === 'string' && payload.message.model.trim()) {
+            verifiedModel = payload.message.model.trim();
+          }
+          if (payload.message.usage?.input_tokens) {
+            inputTokens = Number(payload.message.usage.input_tokens) || 0;
+          }
+        }
+        if (payload.type === 'message_delta' && payload.usage?.output_tokens) {
+          outputTokens = Number(payload.usage.output_tokens) || 0;
+        }
+        if (payload.type === 'content_block_delta' && payload.delta?.type === 'text_delta' && payload.delta.text) {
+          if (!metadataEmitted) {
+            metadataEmitted = true;
+            options.onExecutionMetadata?.(
+              buildVerifiedExecutionMetadata({
+                actualModel: verifiedModel,
+                providerHint: 'anthropic',
+                requestedModel,
+                runtimeSource: 'anthropic-api',
+                isFallback: false,
+              })
+            );
+          }
+          yield String(payload.delta.text);
+        }
+      } catch {}
+    }
+  }
+
+  if (options.onUsage && (inputTokens > 0 || outputTokens > 0)) {
+    options.onUsage({
+      promptTokens: inputTokens,
+      completionTokens: outputTokens,
+      totalTokens: inputTokens + outputTokens,
+      model: verifiedModel,
+      source: 'exact',
+    });
+  }
+}
+
+export async function* streamOpenAIResponse(
+  options: StreamChatOptions,
+  openaiApiKey: string,
+  targetModelId: string,
+  requestedModel: string | null
+) {
+  const initialMeta = buildVerifiedExecutionMetadata({
+    actualModel: targetModelId,
+    providerHint: 'openai',
+    requestedModel,
+    runtimeSource: 'openai-api',
+    isFallback: false,
+  });
+  const baseSystemContent = options.systemInstruction || `You are ${DEKU_PRODUCT_NAME}, an independent AI workspace assistant.`;
+  const systemContent =
+    baseSystemContent +
+    (baseSystemContent.includes('[MEMORY USAGE POLICY]') ? '' : SERVER_MEMORY_BEHAVIOR_POLICY) +
+    `\n\n${buildDekuIdentitySystemInstruction(initialMeta)}`;
+
+  const openaiMessages: any[] = [
+    { role: 'system', content: systemContent },
+    ...options.messages
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content,
+      })),
+  ];
+
+  const scope = createScopedAbortController(
+    DEFAULT_TIMEOUT_BUDGETS.firstTokenTimeoutMs,
+    options.signal,
+    'OpenAI request timed out'
+  );
+  let response: Response;
+  try {
+    response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openaiApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: targetModelId,
+        messages: openaiMessages,
+        stream: true,
+        stream_options: { include_usage: true },
+        max_tokens: 2048,
+      }),
+      signal: scope.controller.signal,
+    });
+  } finally {
+    scope.cleanup();
+  }
+
+  if (!response.ok || !response.body) {
+    throw new Error(`OpenAI status ${response.status}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let verifiedModel = targetModelId;
+  let metadataEmitted = false;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith(':')) continue;
+      if (trimmed === 'data: [DONE]') return;
+      if (trimmed.startsWith('data: ')) {
+        try {
+          const json = JSON.parse(trimmed.slice(6));
+          if (typeof json.model === 'string' && json.model.trim()) {
+            verifiedModel = json.model.trim();
+          }
+          if (json.usage && options.onUsage) {
+            const promptTokens = Number(json.usage.prompt_tokens) || 0;
+            const completionTokens = Number(json.usage.completion_tokens) || 0;
+            const totalTokens = Number(json.usage.total_tokens) || (promptTokens + completionTokens);
+            if (totalTokens > 0) {
+              options.onUsage({
+                promptTokens,
+                completionTokens,
+                totalTokens,
+                model: verifiedModel,
+                source: 'exact',
+              });
+            }
+          }
+          const delta = json.choices?.[0]?.delta?.content;
+          if (delta) {
+            if (!metadataEmitted) {
+              metadataEmitted = true;
+              options.onExecutionMetadata?.(
+                buildVerifiedExecutionMetadata({
+                  actualModel: verifiedModel,
+                  providerHint: 'openai',
+                  requestedModel,
+                  runtimeSource: 'openai-api',
+                  isFallback: false,
+                })
+              );
+            }
+            yield String(delta);
+          }
+        } catch {}
+      }
+    }
+  }
+}
+
 export async function* streamOpenRouterResponse(
   options: StreamChatOptions,
   openRouterApiKey: string
 ) {
+  const requestedRaw = options.model?.trim() || null;
   const candidateModels = Array.from(new Set([
+    ...(requestedRaw && requestedRaw.includes('/') ? [requestedRaw] : []),
     'openrouter/auto',
     'inclusionai/ling-3.1-flash',
     'nvidia/nemotron-3.5-lightning:free',
   ]));
 
   let lastOrError: any = null;
-  let responseMetadataEmitted: ResponseModelMetadata | null = null;
 
   for (const model of candidateModels) {
     try {
-      const modelIdentity = buildModelIdentityInstruction();
-      const baseSystemContent = options.systemInstruction || 'You are Deku AI, an AI workspace agent. Never expose private internal chain-of-thought.';
+      const preMeta = buildVerifiedExecutionMetadata({
+        actualModel: model,
+        providerHint: 'openrouter',
+        requestedModel: requestedRaw,
+        runtimeSource: 'openrouter-api',
+        isFallback: !requestedRaw || requestedRaw !== model,
+        fallbackFrom: requestedRaw && requestedRaw !== model ? requestedRaw : null,
+        fallbackReason: requestedRaw && requestedRaw !== model ? 'Routed via OpenRouter fallback gateway' : null,
+      });
+      const modelIdentity = buildModelIdentityInstruction(model, 'OpenRouter', preMeta);
+      const baseSystemContent = options.systemInstruction || `You are ${DEKU_PRODUCT_NAME}, an independent AI workspace assistant. Never expose private internal chain-of-thought.`;
       const systemContent =
         baseSystemContent +
         (baseSystemContent.includes('[MEMORY USAGE POLICY]') ? '' : SERVER_MEMORY_BEHAVIOR_POLICY) +
@@ -873,7 +1293,8 @@ export async function* streamOpenRouterResponse(
       const decoder = new TextDecoder();
       let buffer = '';
       let hasYielded = false;
-      const responseMetadataTracker = createResponseModelMetadataTracker();
+      let metadataEmitted = false;
+      let actualReturnedModel: string = model;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -889,6 +1310,9 @@ export async function* streamOpenRouterResponse(
           if (trimmed.startsWith('data: ')) {
             try {
               const json = JSON.parse(trimmed.slice(6));
+              if (typeof json.model === 'string' && json.model.trim()) {
+                actualReturnedModel = json.model.trim();
+              }
               if (json.usage && options.onUsage) {
                 const promptTokens = Number(json.usage.prompt_tokens) || 0;
                 const completionTokens = Number(json.usage.completion_tokens) || 0;
@@ -899,20 +1323,28 @@ export async function* streamOpenRouterResponse(
                     completionTokens,
                     thoughtTokens: Number(json.usage.reasoning_tokens) || 0,
                     totalTokens,
-                    model,
+                    model: actualReturnedModel,
                     source: 'exact',
                   });
                 }
               }
               const delta = json.choices?.[0]?.delta?.content;
-              const responseMetadata = responseMetadataTracker.observe({
-                modelId: json.model,
-                provider: json.provider ?? json.provider_name,
-              }, hasYielded || Boolean(delta));
-              if (responseMetadata) {
-                options.onResponseMetadata?.(responseMetadata);
-              }
               if (delta) {
+                if (!metadataEmitted) {
+                  metadataEmitted = true;
+                  const isFallback = !requestedRaw || requestedRaw !== actualReturnedModel;
+                  options.onExecutionMetadata?.(
+                    buildVerifiedExecutionMetadata({
+                      actualModel: actualReturnedModel,
+                      providerHint: 'openrouter',
+                      requestedModel: requestedRaw,
+                      runtimeSource: 'openrouter-api',
+                      isFallback,
+                      fallbackFrom: isFallback ? requestedRaw : null,
+                      fallbackReason: isFallback ? 'Primary provider unavailable; executed via OpenRouter fallback' : null,
+                    })
+                  );
+                }
                 hasYielded = true;
                 yield delta;
               }
@@ -1425,3 +1857,5 @@ export async function categorizeSessionWithGemini(
     source: 'fallback',
   };
 }
+
+

@@ -21,7 +21,7 @@ const SheetOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SheetPrimitive.Overlay
     className={cn(
-      "fixed inset-0 z-50 bg-black/60 backdrop-blur-xs transition-opacity duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      "fixed inset-0 z-50 bg-black/60 backdrop-blur-xs transition-opacity duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:pointer-events-none",
       className
     )}
     {...props}
@@ -31,16 +31,16 @@ const SheetOverlay = React.forwardRef<
 SheetOverlay.displayName = SheetPrimitive.Overlay.displayName
 
 const sheetVariants = cva(
-  "fixed z-50 gap-4 bg-background p-4 sm:p-6 shadow-2xl transition duration-250 ease-[cubic-bezier(0.16,1,0.3,1)] data-[state=closed]:duration-200 data-[state=open]:duration-250 data-[state=open]:animate-in data-[state=closed]:animate-out max-w-[100vw]",
+  "fixed z-50 gap-4 bg-background p-4 sm:p-6 shadow-2xl max-w-[100vw] will-change-transform data-[state=closed]:pointer-events-none",
   {
     variants: {
       side: {
-        top: "inset-x-0 top-0 max-h-[92dvh] border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
+        top: "inset-x-0 top-0 max-h-[92dvh] border-b workspace-sheet-spring-top",
         bottom:
-          "inset-x-0 bottom-0 max-h-[92dvh] border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
-        left: "inset-y-0 left-0 h-full h-[100dvh] max-h-[100dvh] w-[88vw] max-w-[100vw] border-r data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left sm:max-w-sm",
+          "inset-x-0 bottom-0 max-h-[92dvh] border-t workspace-sheet-spring-bottom",
+        left: "inset-y-0 left-0 h-full h-[100dvh] max-h-[100dvh] w-[88vw] max-w-[100vw] border-r workspace-sheet-spring-left sm:max-w-sm",
         right:
-          "inset-y-0 right-0 h-full h-[100dvh] max-h-[100dvh] w-full max-w-[100vw] border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-sm",
+          "inset-y-0 right-0 h-full h-[100dvh] max-h-[100dvh] w-full max-w-[100vw] border-l workspace-sheet-spring-right sm:max-w-sm",
       },
     },
     defaultVariants: {
@@ -52,17 +52,20 @@ const sheetVariants = cva(
 interface SheetContentProps
   extends React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
     VariantProps<typeof sheetVariants> {
-  hideCloseButton?: boolean
+  hideCloseButton?: boolean;
+  forceMount?: true;
 }
 
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Content>,
   SheetContentProps
->(({ side = "right", className, children, hideCloseButton = false, ...props }, ref) => (
-  <SheetPortal>
-    <SheetOverlay />
+>(({ side = "right", className, children, hideCloseButton = false, forceMount, ...props }, ref) => (
+  <SheetPortal forceMount={forceMount}>
+    <SheetOverlay forceMount={forceMount} />
     <SheetPrimitive.Content
       ref={ref}
+      forceMount={forceMount}
+      data-spring-transition="true"
       className={cn(sheetVariants({ side }), className)}
       {...props}
     >
