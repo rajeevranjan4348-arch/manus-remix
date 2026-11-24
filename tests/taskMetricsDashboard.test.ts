@@ -41,7 +41,7 @@ describe('Task Metrics Engine & Recharts Dashboard Telemetry', () => {
     expect(formatDurationLabel(3660000)).toBe('1h 1m');
   });
 
-  it('normalizes Gemini usageMetadata and OpenRouter usage payloads with fallback', () => {
+  it('normalizes provider usage and enforces input plus output equals total', () => {
     const geminiUsage = normalizeUsagePayload({
       promptTokenCount: 310,
       candidatesTokenCount: 190,
@@ -187,7 +187,7 @@ describe('Task Metrics Engine & Recharts Dashboard Telemetry', () => {
     expect(summary.turnSeries[0].source).toBe('unavailable');
   });
 
-  it('derives deterministic estimates for historical tasks without stored telemetry', () => {
+  it('leaves historical metrics unavailable when provider telemetry is missing', () => {
     const t0 = '2026-11-23T10:00:00.000Z';
     const t1 = '2026-11-23T10:00:04.200Z';
     const summary = buildTaskMetricsSummary({
