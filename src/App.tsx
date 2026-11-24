@@ -23,6 +23,9 @@ import { ErrorBoundary } from './components/common/ErrorBoundary';
 const Home = lazy(() =>
   import('./pages/Home').then((m) => ({ default: m.Home }))
 );
+const LegalPage = lazy(() =>
+  import('./pages/LegalPage').then((m) => ({ default: m.LegalPage }))
+);
 const ChatView = lazy(() =>
   import('./components/agent/ChatView').then((m) => ({ default: m.ChatView }))
 );
@@ -383,6 +386,9 @@ function AppContent() {
                 <Suspense fallback={<RouteLoadingFallback />}>
                   <Routes>
                     <Route path="/" element={<Home onStartTask={handleStartTask} />} />
+                    <Route path="/legal" element={<LegalPage />} />
+                    <Route path="/privacy" element={<LegalPage />} />
+                    <Route path="/terms" element={<LegalPage />} />
                     <Route 
                       path="/task/:taskId" 
                       element={
