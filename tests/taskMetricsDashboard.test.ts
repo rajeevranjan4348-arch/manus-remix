@@ -51,7 +51,7 @@ describe('Task Metrics Engine & Recharts Dashboard Telemetry', () => {
     });
     expect(geminiUsage).toMatchObject({
       promptTokens: 310,
-      completionTokens: 190,
+      completionTokens: 235,
       thoughtTokens: 45,
       totalTokens: 545,
       source: 'exact',
@@ -70,11 +70,10 @@ describe('Task Metrics Engine & Recharts Dashboard Telemetry', () => {
       source: 'exact',
     });
 
-    const fallbackUsage = normalizeUsagePayload(null, 'Explain Recharts', 'Recharts is a React charting library.');
-    expect(fallbackUsage.source).toBe('estimated');
-    expect(fallbackUsage.promptTokens).toBeGreaterThan(0);
-    expect(fallbackUsage.completionTokens).toBeGreaterThan(0);
-    expect(fallbackUsage.totalTokens).toBe(fallbackUsage.promptTokens + fallbackUsage.completionTokens);
+    const missingUsage = normalizeUsagePayload(null, 'Explain Recharts', 'Recharts is a React charting library.');
+    expect(missingUsage).toMatchObject({ promptTokens: 0, completionTokens: 0, totalTokens: 0, source: 'unavailable' });
+    expect(geminiUsage.promptTokens + geminiUsage.completionTokens).toBe(geminiUsage.totalTokens);
+    expect(openRouterUsage.promptTokens + openRouterUsage.completionTokens).toBe(openRouterUsage.totalTokens);
   });
 
   it('records multi-turn exact telemetry, binds message IDs, and aggregates summary metrics', () => {
@@ -145,7 +144,7 @@ describe('Task Metrics Engine & Recharts Dashboard Telemetry', () => {
     expect(summary.hasLiveTurn).toBe(false);
     expect(summary.completedTurnCount).toBe(2);
     expect(summary.totalPromptTokens).toBe(520);
-    expect(summary.totalCompletionTokens).toBe(430);
+    expect(summary.totalCompletionTokens).toBe(480);
     expect(summary.totalThoughtTokens).toBe(50);
     expect(summary.totalTokens).toBe(1000);
     expect(summary.totalDurationMs).toBe(6000);
@@ -153,7 +152,8 @@ describe('Task Metrics Engine & Recharts Dashboard Telemetry', () => {
     expect(summary.turnSeries).toHaveLength(2);
     expect(summary.turnSeries[0].ttftMs).toBe(450);
     expect(summary.turnSeries[1].durationSec).toBe(3.5);
-    expect(summary.tokenBreakdown.map((s) => s.key)).toEqual(['prompt', 'completion', 'thought']);
+    expect(summary.tokenBreakdown.map((s) => s.key)).toEqual(['prompt', 'completion']);
+    expect(summary.totalPromptTokens + summary.totalCompletionTokens).toBe(summary.totalTokens);
   });
 
   it('tracks live in-progress turn elapsed time and streaming tokens smoothly', () => {
@@ -183,7 +183,8 @@ describe('Task Metrics Engine & Recharts Dashboard Telemetry', () => {
     expect(summary.turnSeries[0].isLive).toBe(true);
     expect(summary.turnSeries[0].durationMs).toBe(2250);
     expect(summary.turnSeries[0].ttftMs).toBe(400);
-    expect(summary.totalTokens).toBeGreaterThan(10);
+    expect(summary.totalTokens).toBe(0);
+    expect(summary.turnSeries[0].source).toBe('unavailable');
   });
 
   it('derives deterministic estimates for historical tasks without stored telemetry', () => {
@@ -199,11 +200,9 @@ describe('Task Metrics Engine & Recharts Dashboard Telemetry', () => {
     });
 
     expect(summary.hasExactUsage).toBe(false);
-    expect(summary.turnSeries).toHaveLength(1);
-    expect(summary.turnSeries[0].durationMs).toBe(4200);
-    expect(summary.turnSeries[0].durationSec).toBe(4.2);
-    expect(summary.totalTokens).toBeGreaterThan(0);
-    expect(summary.tokenBreakdown.map((s) => s.key)).toEqual(['prompt', 'completion']);
+    expect(summary.turnSeries).toHaveLength(0);
+    expect(summary.totalTokens).toBe(0);
+    expect(summary.totalDurationMs).toBe(0);
   });
 
   it('verifies Recharts dashboard wiring and server telemetry capture across Vite & Netlify', () => {
