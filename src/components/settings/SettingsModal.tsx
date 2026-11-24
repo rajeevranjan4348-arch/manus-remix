@@ -1620,6 +1620,15 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
               </div>
             )}
 
+            <div className="mb-4 rounded-xl border border-border/60 bg-muted/20 p-3">
+              <p className="text-xs font-semibold text-foreground">Legal & privacy</p>
+              <p className="mt-1 text-[11px] leading-5 text-muted-foreground">Read how workspace data is handled and the rules for using Deku AI.</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <a href="/privacy" className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-medium hover:bg-muted/60">Privacy Policy</a>
+                <a href="/terms" className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-medium hover:bg-muted/60">Terms & Conditions</a>
+              </div>
+            </div>
+
             {/* DATA & PRIVACY TAB */}
             {activeTab === 'data' && (
               <div className="space-y-6 animate-in fade-in duration-100">
