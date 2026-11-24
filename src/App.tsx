@@ -291,6 +291,10 @@ function AppContent() {
     setIsSidebarOpen(prev => !prev);
   }, []);
 
+  const handleCloseSidebar = useCallback(() => {
+    setIsSidebarOpen(false);
+  }, []);
+
   const handleOpenHistory = useCallback(() => {
     setHistoryInitialTab('sessions');
     setIsSettingsOpen(false);
@@ -328,7 +332,8 @@ function AppContent() {
     <div className="flex h-[100dvh] w-full max-w-full bg-background overflow-hidden">
       <Sidebar 
         isOpen={isSidebarOpen} 
-        onToggle={handleToggleSidebar} 
+        onToggle={handleToggleSidebar}
+        onClose={handleCloseSidebar}
         onNewTask={handleReset}
         onOpenHistory={handleOpenHistory}
         onOpenSettings={handleOpenSettings}

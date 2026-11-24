@@ -4,7 +4,7 @@ export interface TokenUsagePayload {
   thoughtTokens?: number;
   totalTokens: number;
   model?: string;
-  source?: 'exact' | 'estimated';
+  source?: 'exact' | 'estimated' | 'unavailable';
 }
 
 export interface TurnMetricRecord {
@@ -21,7 +21,7 @@ export interface TurnMetricRecord {
   ttftMs?: number;
   tokensPerSec: number;
   model?: string;
-  source: 'exact' | 'estimated';
+  source: 'exact' | 'estimated' | 'unavailable';
   timestamp: string;
   isLive?: boolean;
   promptPreview?: string;
@@ -38,7 +38,7 @@ export interface TurnChartPoint {
   durationSec: number;
   ttftMs?: number;
   tokensPerSec: number;
-  source: 'exact' | 'estimated';
+  source: 'exact' | 'estimated' | 'unavailable';
   isLive: boolean;
   promptPreview?: string;
   model?: string;
@@ -137,61 +137,50 @@ export function formatDurationLabel(ms: number): string {
 
 export function normalizeUsagePayload(
   raw: any,
-  fallbackPromptText?: string,
-  fallbackResponseText?: string
+  _fallbackPromptText?: string,
+  _fallbackResponseText?: string
 ): TokenUsagePayload {
-  const rawPrompt = Number(
-    raw?.promptTokens ?? raw?.promptTokenCount ?? raw?.inputTokens ?? raw?.prompt_tokens
-  );
-  const rawCompletion = Number(
-    raw?.completionTokens ?? raw?.candidatesTokenCount ?? raw?.outputTokens ?? raw?.completion_tokens
-  );
-  const rawThought = Number(
-    raw?.thoughtTokens ?? raw?.thoughtsTokenCount ?? raw?.reasoning_tokens ?? 0
-  );
-  const rawTotal = Number(
-    raw?.totalTokens ?? raw?.totalTokenCount ?? raw?.total_tokens
-  );
+  const rawPrompt = Number(raw?.promptTokens ?? raw?.promptTokenCount ?? raw?.inputTokens ?? raw?.prompt_tokens);
+  const rawCompletion = Number(raw?.completionTokens ?? raw?.candidatesTokenCount ?? raw?.outputTokens ?? raw?.completion_tokens);
+  const rawThought = Number(raw?.thoughtTokens ?? raw?.thoughtsTokenCount ?? raw?.reasoning_tokens ?? 0);
+  const rawTotal = Number(raw?.totalTokens ?? raw?.totalTokenCount ?? raw?.total_tokens);
 
-  const hasExactPrompt = Number.isFinite(rawPrompt) && rawPrompt > 0;
-  const hasExactCompletion = Number.isFinite(rawCompletion) && rawCompletion > 0;
-  const hasExactTotal = Number.isFinite(rawTotal) && rawTotal > 0;
-
-  if (hasExactPrompt || hasExactCompletion || hasExactTotal) {
-    const thoughtTokens = Number.isFinite(rawThought) && rawThought > 0 ? Math.round(rawThought) : 0;
-    const promptTokens = hasExactPrompt
-      ? Math.round(rawPrompt)
-      : hasExactTotal && hasExactCompletion
-        ? Math.max(0, Math.round(rawTotal - rawCompletion - thoughtTokens))
-        : estimateTokenCount(fallbackPromptText);
-    const completionTokens = hasExactCompletion
-      ? Math.round(rawCompletion)
-      : hasExactTotal && hasExactPrompt
-        ? Math.max(0, Math.round(rawTotal - rawPrompt - thoughtTokens))
-        : estimateTokenCount(fallbackResponseText);
-    const totalTokens = hasExactTotal
-      ? Math.max(Math.round(rawTotal), promptTokens + completionTokens)
-      : promptTokens + completionTokens + thoughtTokens;
-
+  const hasPrompt = Number.isFinite(rawPrompt) && rawPrompt > 0;
+  const hasCompletion = Number.isFinite(rawCompletion) && rawCompletion > 0;
+  const hasTotal = Number.isFinite(rawTotal) && rawTotal > 0;
+  const hasEnoughUsage = (hasPrompt && hasCompletion) || (hasPrompt && hasTotal) || (hasCompletion && hasTotal);
+  if (!hasEnoughUsage) {
     return {
-      promptTokens,
-      completionTokens,
-      thoughtTokens,
-      totalTokens,
+      promptTokens: 0,
+      completionTokens: 0,
+      thoughtTokens: 0,
+      totalTokens: 0,
       model: typeof raw?.model === 'string' ? raw.model : undefined,
-      source: raw?.source === 'estimated' ? 'estimated' : 'exact',
+      source: 'unavailable',
     };
   }
 
-  const promptTokens = estimateTokenCount(fallbackPromptText);
-  const completionTokens = estimateTokenCount(fallbackResponseText);
+  const thoughtTokens = Number.isFinite(rawThought) && rawThought > 0 ? Math.round(rawThought) : 0;
+  const promptTokens = hasPrompt
+    ? Math.round(rawPrompt)
+    : hasTotal && hasCompletion
+      ? Math.max(0, Math.round(rawTotal - rawCompletion - thoughtTokens))
+      : 0;
+  // Reasoning is a subset of output, so the dashboard invariant is input + output = total.
+  const completionTokens = hasTotal && hasPrompt
+    ? Math.max(0, Math.round(rawTotal - promptTokens))
+    : hasCompletion
+      ? Math.round(rawCompletion) + thoughtTokens
+      : 0;
+  const totalTokens = promptTokens + completionTokens;
+
   return {
     promptTokens,
     completionTokens,
-    thoughtTokens: 0,
-    totalTokens: promptTokens + completionTokens,
+    thoughtTokens: Math.min(thoughtTokens, completionTokens),
+    totalTokens,
     model: typeof raw?.model === 'string' ? raw.model : undefined,
-    source: 'estimated',
+    source: raw?.source === 'estimated' ? 'estimated' : 'exact',
   };
 }
 
@@ -351,15 +340,14 @@ class TaskMetricsStore {
     const completedAt = params.completedAt ?? Date.now();
 
     const promptText = params.promptText ?? active?.promptText ?? '';
-    const responseText = params.responseText ?? '';
-    const usage = normalizeUsagePayload(params.usage, promptText, responseText);
+    const usage = normalizeUsagePayload(params.usage);
 
     const computedDurationMs =
       typeof params.durationMs === 'number' && Number.isFinite(params.durationMs) && params.durationMs > 0
         ? Math.round(params.durationMs)
         : active
           ? Math.max(1, Math.round(completedAt - active.startedAt))
-          : Math.max(150, Math.round((Math.max(1, usage.completionTokens) / 48) * 1000));
+          : 0;
 
     const ttftMs =
       typeof params.ttftMs === 'number' && Number.isFinite(params.ttftMs) && params.ttftMs > 0
@@ -389,7 +377,7 @@ class TaskMetricsStore {
       ttftMs,
       tokensPerSec: computeTokensPerSec(usage.completionTokens, computedDurationMs),
       model: params.model || usage.model || active?.model,
-      source: usage.source === 'exact' ? 'exact' : 'estimated',
+      source: usage.source ?? 'unavailable',
       timestamp: new Date(completedAt).toISOString(),
       promptPreview: promptText.replace(/\s+/g, ' ').trim().slice(0, 80) || undefined,
     };
@@ -578,17 +566,14 @@ export function buildTaskMetricsSummary(params: BuildTaskMetricsParams): TaskMet
 
     if (isLive) {
       hasLiveTurn = true;
-      const liveText = (params.liveStreamText && params.liveStreamText.length >= assistantText.length)
-        ? params.liveStreamText
-        : assistantText;
       const startedAt =
         activeTurn?.startedAt ??
         parseTimestampMs(pair.userMsg?.timestamp) ??
         nowMs;
       const durationMs = Math.max(100, Math.round(nowMs - startedAt));
-      const promptTokens = estimateTokenCount(activeTurn?.promptText || userText);
-      const completionTokens = estimateTokenCount(liveText);
-      const totalTokens = promptTokens + completionTokens;
+      const promptTokens = 0;
+      const completionTokens = 0;
+      const totalTokens = 0;
       turnSeries.push({
         turn: `Turn ${turnNumber}`,
         turnNumber,
@@ -600,7 +585,7 @@ export function buildTaskMetricsSummary(params: BuildTaskMetricsParams): TaskMet
         durationSec: Number((durationMs / 1000).toFixed(2)),
         ttftMs: activeTurn?.firstTokenAt ? Math.max(1, Math.round(activeTurn.firstTokenAt - startedAt)) : undefined,
         tokensPerSec: computeTokensPerSec(completionTokens, durationMs),
-        source: 'estimated',
+        source: 'unavailable',
         isLive: true,
         promptPreview: userText.replace(/\s+/g, ' ').trim().slice(0, 80) || undefined,
         model: activeTurn?.model,
@@ -621,7 +606,7 @@ export function buildTaskMetricsSummary(params: BuildTaskMetricsParams): TaskMet
       if (storedPos >= 0) usedStoredIndices.add(storedPos);
     } else if (pair.assistantMsg?.metadata?.metrics) {
       const m = pair.assistantMsg.metadata.metrics;
-      const usage = normalizeUsagePayload(m, userText, assistantText);
+      const usage = normalizeUsagePayload(m);
       const dur = Number(m.durationMs) > 0 ? Math.round(Number(m.durationMs)) : 0;
       matchedRecord = {
         id: `meta_${pair.assistantMsg.id || idx}`,
@@ -632,11 +617,11 @@ export function buildTaskMetricsSummary(params: BuildTaskMetricsParams): TaskMet
         completionTokens: usage.completionTokens,
         thoughtTokens: usage.thoughtTokens ?? 0,
         totalTokens: usage.totalTokens,
-        durationMs: dur || Math.max(250, Math.round((Math.max(1, usage.completionTokens) / 48) * 1000)),
+        durationMs: dur,
         ttftMs: Number(m.ttftMs) > 0 ? Math.round(Number(m.ttftMs)) : undefined,
-        tokensPerSec: computeTokensPerSec(usage.completionTokens, dur || 1000),
+        tokensPerSec: computeTokensPerSec(usage.completionTokens, dur),
         model: m.model || usage.model,
-        source: usage.source === 'exact' ? 'exact' : 'estimated',
+        source: usage.source ?? 'unavailable',
         timestamp: pair.assistantMsg.timestamp || new Date(nowMs).toISOString(),
       };
     } else if (storedTurns[idx] && !usedStoredIndices.has(idx)) {
@@ -645,57 +630,30 @@ export function buildTaskMetricsSummary(params: BuildTaskMetricsParams): TaskMet
     }
 
     if (matchedRecord) {
-      if (matchedRecord.source === 'exact') {
-        hasExactUsage = true;
-      }
+      const matchedUsage = normalizeUsagePayload(matchedRecord);
+      if (matchedUsage.source === 'exact') hasExactUsage = true;
+      const durationMs = Math.max(0, Number(matchedRecord.durationMs) || 0);
       turnSeries.push({
         turn: `Turn ${turnNumber}`,
         turnNumber,
-        promptTokens: matchedRecord.promptTokens,
-        completionTokens: matchedRecord.completionTokens,
-        thoughtTokens: matchedRecord.thoughtTokens || 0,
-        totalTokens: matchedRecord.totalTokens,
-        durationMs: matchedRecord.durationMs,
-        durationSec: Number((matchedRecord.durationMs / 1000).toFixed(2)),
+        promptTokens: matchedUsage.promptTokens,
+        completionTokens: matchedUsage.completionTokens,
+        thoughtTokens: matchedUsage.thoughtTokens ?? 0,
+        totalTokens: matchedUsage.totalTokens,
+        durationMs,
+        durationSec: Number((durationMs / 1000).toFixed(2)),
         ttftMs: matchedRecord.ttftMs,
-        tokensPerSec: matchedRecord.tokensPerSec || computeTokensPerSec(matchedRecord.completionTokens, matchedRecord.durationMs),
-        source: matchedRecord.source,
+        tokensPerSec: computeTokensPerSec(matchedUsage.completionTokens, durationMs),
+        source: matchedUsage.source ?? 'unavailable',
         isLive: false,
-        promptPreview: matchedRecord.promptPreview || userText.replace(/\s+/g, ' ').trim().slice(0, 80) || undefined,
+        promptPreview: matchedRecord.promptPreview || userText.replace(/\\s+/g, ' ').trim().slice(0, 80) || undefined,
         model: matchedRecord.model,
       });
       return;
     }
 
-    // Historical fallback when messages were loaded without stored telemetry
-    const promptTokens = estimateTokenCount(userText);
-    const completionTokens = estimateTokenCount(assistantText);
-    const totalTokens = promptTokens + completionTokens;
-
-    const userTs = parseTimestampMs(pair.userMsg?.timestamp);
-    const assistantTs = parseTimestampMs(pair.assistantMsg?.timestamp);
-    let durationMs: number;
-    if (userTs !== null && assistantTs !== null && assistantTs > userTs && assistantTs - userTs <= 180_000) {
-      durationMs = Math.max(250, Math.round(assistantTs - userTs));
-    } else {
-      // Deterministic realistic fallback based on completion size (~48 tokens/sec + 450ms TTFT)
-      durationMs = Math.max(350, Math.round(450 + (completionTokens / 48) * 1000));
-    }
-
-    turnSeries.push({
-      turn: `Turn ${turnNumber}`,
-      turnNumber,
-      promptTokens,
-      completionTokens,
-      thoughtTokens: 0,
-      totalTokens,
-      durationMs,
-      durationSec: Number((durationMs / 1000).toFixed(2)),
-      tokensPerSec: computeTokensPerSec(completionTokens, durationMs),
-      source: 'estimated',
-      isLive: false,
-      promptPreview: userText.replace(/\s+/g, ' ').trim().slice(0, 80) || undefined,
-    });
+    // Historical turns without provider telemetry remain unavailable rather than estimated.
+    return;
   });
 
   const totalPromptTokens = turnSeries.reduce((acc, t) => acc + t.promptTokens, 0);
@@ -709,7 +667,7 @@ export function buildTaskMetricsSummary(params: BuildTaskMetricsParams): TaskMet
     turnSeries.length > 0 ? Math.round(totalDurationMs / turnSeries.length) : 0;
   const avgTokensPerSec = computeTokensPerSec(totalCompletionTokens, totalDurationMs);
 
-  const safeBreakdownTotal = Math.max(1, totalPromptTokens + totalCompletionTokens + totalThoughtTokens);
+  const safeBreakdownTotal = Math.max(1, totalPromptTokens + totalCompletionTokens);
   const tokenBreakdown: TokenBreakdownSlice[] = [
     {
       name: 'Input',
@@ -724,15 +682,6 @@ export function buildTaskMetricsSummary(params: BuildTaskMetricsParams): TaskMet
       percentage: Math.round((totalCompletionTokens / safeBreakdownTotal) * 100),
     },
   ];
-  if (totalThoughtTokens > 0) {
-    tokenBreakdown.push({
-      name: 'Reasoning',
-      key: 'thought',
-      value: totalThoughtTokens,
-      percentage: Math.round((totalThoughtTokens / safeBreakdownTotal) * 100),
-    });
-  }
-
   return {
     taskId: taskKey,
     totalTokens,

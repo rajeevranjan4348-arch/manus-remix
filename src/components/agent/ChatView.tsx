@@ -1758,7 +1758,7 @@ export function ChatView({
       : cleanUserMessage(prompt);
 
     return (
-      <div className="px-4 sm:px-20 space-y-3 pb-28 pt-2">
+      <div className={`px-4 sm:px-20 space-y-3 ${showScrollToBottom ? "pb-40" : "pb-28"} pt-2`}>
         {shouldShowThinkingIndicator && (
           <div
             data-testid="chat-thinking-indicator"
@@ -2000,28 +2000,28 @@ export function ChatView({
         </div>
       </div>
 
-      {/* Floating Scroll-to-bottom button when user scrolled up */}
-      {showScrollToBottom && (
-        <button
-          type="button"
-          onClick={() => scrollToBottom('smooth')}
-          className="absolute bottom-40 right-4 sm:right-10 z-30 flex items-center gap-2 px-4 py-2.5 rounded-full bg-foreground text-background shadow-2xl hover:scale-105 active:scale-95 transition-all text-xs font-semibold cursor-pointer animate-in fade-in slide-in-from-bottom-3 duration-200 border border-border/40 backdrop-blur-md"
-          title="Scroll to latest message"
-          aria-label="Scroll to latest message"
-        >
-          <ArrowDown size={14} className="animate-bounce" />
-          <span>{isStreamingResponse ? 'New response streaming...' : 'Scroll to bottom'}</span>
-          {isStreamingResponse && (
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping ml-0.5" />
-          )}
-        </button>
-      )}
-
       {/* Input Area - Floating Bottom */}
       <div 
         className="fixed bottom-0 left-0 right-0 px-4 pb-3 pt-2 flex flex-col items-center gap-2 z-50 bg-manus-cream/80 dark:bg-background/80 backdrop-blur-md"
         style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}
       >
+        {showScrollToBottom && (
+          <div className="w-full max-w-3xl flex justify-end px-2 animate-in fade-in slide-in-from-bottom-3 duration-200">
+            <button
+              type="button"
+              onClick={() => scrollToBottom('smooth')}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-foreground text-background shadow-2xl hover:scale-105 active:scale-95 transition-all text-xs font-semibold cursor-pointer border border-border/40 backdrop-blur-md"
+              title="Scroll to latest message"
+              aria-label="Scroll to latest message"
+            >
+              <ArrowDown size={14} className="animate-bounce" />
+              <span>{isStreamingResponse ? 'New response streaming...' : 'Scroll to bottom'}</span>
+              {isStreamingResponse && (
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping ml-0.5" />
+              )}
+            </button>
+          </div>
+        )}
         {(attachedFile || isThinkHarder) && (
           <div className="flex items-center gap-2 flex-wrap max-w-3xl w-full px-2">
             {isThinkHarder && (

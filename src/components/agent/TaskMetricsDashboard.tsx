@@ -319,7 +319,7 @@ export function TaskMetricsDashboard({
                 </span>
               ) : (
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border border-border/60 bg-muted/40 text-muted-foreground">
-                  {summary.hasExactUsage ? 'API Exact' : 'Estimated'}
+                  {summary.hasExactUsage ? 'API Exact' : summary.turnSeries.some((turn) => turn.source === 'estimated') ? 'Estimated' : 'Telemetry pending'}
                 </span>
               )}
             </div>
@@ -488,7 +488,7 @@ export function TaskMetricsDashboard({
                         stackId="tokens"
                         fill={palette.prompt}
                         maxBarSize={42}
-                        radius={summary.totalCompletionTokens === 0 && summary.totalThoughtTokens === 0 ? [5, 5, 0, 0] : [0, 0, 0, 0]}
+                        radius={summary.totalCompletionTokens === 0 ? [5, 5, 0, 0] : [0, 0, 0, 0]}
                         isAnimationActive={false}
                       />
                       <Bar
@@ -497,20 +497,10 @@ export function TaskMetricsDashboard({
                         stackId="tokens"
                         fill={palette.completion}
                         maxBarSize={42}
-                        radius={summary.totalThoughtTokens > 0 ? [0, 0, 0, 0] : [5, 5, 0, 0]}
+                        radius={[5, 5, 0, 0]}
                         isAnimationActive={false}
                       />
-                      {summary.totalThoughtTokens > 0 && (
-                        <Bar
-                          dataKey="thoughtTokens"
-                          name="Reasoning"
-                          stackId="tokens"
-                          fill={palette.thought}
-                          maxBarSize={42}
-                          radius={[5, 5, 0, 0]}
-                          isAnimationActive={false}
-                        />
-                      )}
+
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
@@ -596,7 +586,7 @@ export function TaskMetricsDashboard({
                   {summary.totalThoughtTokens > 0 && (
                     <span className="inline-flex items-center gap-1.5">
                       <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: palette.thought }} />
-                      Reasoning ({formatTokenCount(summary.totalThoughtTokens)})
+                      Reasoning included in output ({formatTokenCount(summary.totalThoughtTokens)})
                     </span>
                   )}
                 </div>
