@@ -573,10 +573,14 @@ describe('AI Response Streaming and Loading State Regression Tests', () => {
     expect(thinkingAnimSource).not.toContain('setTimeout');
     expect(thinkingAnimSource).not.toContain('LatticeLoader');
     expect(thinkingAnimSource).not.toContain('animate-ping');
-    // ChatView must render visibleSlice messages directly inside data-virtuoso-scroller so messages never wait on ResizeObserver
+    // ChatView synchronously groups and renders the bounded visible slice inside the scroller.
     expect(chatViewSource).toContain('data-virtuoso-scroller="true"');
     expect(chatViewSource).toContain('const windowStartIndex = explicitWindowStartIndex ?? Math.max(0, displayMessages.length - maxWindow)');
-    expect(chatViewSource).toContain('visibleSlice.map((msg, idx) => renderMessageItem(startIdx + idx, msg))');
+    expect(chatViewSource).toContain('const visibleSlice = displayMessages.slice(startIdx);');
+    expect(chatViewSource).toContain('const messageGroups = groupConsecutiveMessages(visibleSlice, startIdx);');
+    expect(chatViewSource).toContain('return messageGroups.map((group) => (');
+    expect(chatViewSource).toContain('group.messages.map((item) =>');
+    expect(chatViewSource).toContain('renderMessageItem(item.index, item.message, startIdx, item.meta)');
   });
 
   it('handles invalid API key (401/403) and API timeout gracefully with readable retryable error output', async () => {

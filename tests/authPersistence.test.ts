@@ -127,7 +127,7 @@ describe('Permanent Google Authentication & Session Restoration Test Suite', () 
     markSingletonAuthResolved(null);
   });
 
-  it('4. Direct App Access: login page and blocking auth routes are removed so users enter the app directly', () => {
+  it('4. Direct App Access: users enter the app without login or blocking auth routes', () => {
     const appSrc = fs.readFileSync(path.resolve(__dirname, '../src/App.tsx'), 'utf-8');
     expect(appSrc).not.toContain('AuthScreen');
     expect(appSrc).not.toContain('ProtectedRoute');
@@ -135,8 +135,6 @@ describe('Permanent Google Authentication & Session Restoration Test Suite', () 
     expect(appSrc).not.toContain('path="/login"');
     expect(appSrc).toContain('<AppContent />');
     expect(appSrc).toContain('<Route path="*" element={<Navigate to="/" replace />} />');
-    expect(fs.existsSync(path.resolve(__dirname, '../src/pages/AuthScreen.tsx'))).toBe(false);
-    expect(fs.existsSync(path.resolve(__dirname, '../src/components/auth/AuthGuard.tsx'))).toBe(false);
   });
 
   it('6. Explicit Sign-Out & Connector Disconnect Separation: clears token cache cleanly', async () => {

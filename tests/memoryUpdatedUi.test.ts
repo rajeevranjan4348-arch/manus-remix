@@ -192,12 +192,19 @@ describe('ChatGPT-style Memory Updated UI & Long-Term Memory Persistence', () =>
       expect(chatView).toContain('<MemoryUpdatedIndicator memoryUpdate={memoryUpdate} />');
     });
 
-    it('useAgentTask runs verified memory capture in both startTask and sendMessage and preserves metadata in loadTask', () => {
+    it('useAgentTask captures memory for sends, edits, and startTask and preserves metadata in loadTask', () => {
       const hook = readFile('src/hooks/useAgentTask.ts');
       expect(hook).toContain('const captureAndAttachUserMemory = useCallback');
       expect(hook).toContain('await longTermMemory.captureFromUserMessage');
-      const callCount = (hook.match(/await captureAndAttachUserMemory\(/g) || []).length;
-      expect(callCount).toBe(2); // Both sendMessage and startTask
+      const sendMessageStart = hook.indexOf('const sendMessage = useCallback');
+      const editLifecycleStart = hook.indexOf('const runEditLifecycle = async');
+      const startTaskStart = hook.indexOf('const startTask = useCallback');
+      expect(sendMessageStart).toBeGreaterThanOrEqual(0);
+      expect(editLifecycleStart).toBeGreaterThan(sendMessageStart);
+      expect(startTaskStart).toBeGreaterThan(editLifecycleStart);
+      expect(hook.slice(sendMessageStart, editLifecycleStart)).toContain('await captureAndAttachUserMemory(');
+      expect(hook.slice(editLifecycleStart, startTaskStart)).toContain('await captureAndAttachUserMemory(');
+      expect(hook.slice(startTaskStart)).toContain('await captureAndAttachUserMemory(');
       expect(hook).toContain('...(m.metadata ? { metadata: m.metadata } : {})');
       expect(hook).toContain('memoryKey: captureRes.record?.key');
       expect(hook).toContain('memoryValue: captureRes.record?.value');

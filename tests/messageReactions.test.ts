@@ -109,23 +109,21 @@ describe('AI Message Hover Reactions (Thumbs Up/Down)', () => {
     expect(myAiChatSource).toContain('group/ai-message');
   });
 
-  it('adds BubbleReactionButtons (thumbs up/down) triggering animate-reaction-spring-pop on chat message bubbles', () => {
-    const bubbleCompPath = path.resolve(__dirname, '../src/components/agent/BubbleReactionButtons.tsx');
+  it('keeps reactions in the single action bar rather than rendering the removed bubble widget', () => {
+    const actionBarPath = path.resolve(__dirname, '../src/components/agent/ConversationActionBar.tsx');
     const chatViewPath = path.resolve(__dirname, '../src/components/agent/ChatView.tsx');
     const myAiChatPath = path.resolve(__dirname, '../src/components/chat/MyAIChat.tsx');
 
-    const bubbleSource = fs.readFileSync(bubbleCompPath, 'utf-8');
+    const actionBarSource = fs.readFileSync(actionBarPath, 'utf-8');
     const chatViewSource = fs.readFileSync(chatViewPath, 'utf-8');
     const myAiChatSource = fs.readFileSync(myAiChatPath, 'utf-8');
 
-    expect(bubbleSource).toContain('data-testid="bubble-reaction-buttons"');
-    expect(bubbleSource).toContain('data-testid="bubble-reaction-thumbs-up"');
-    expect(bubbleSource).toContain('data-testid="bubble-reaction-thumbs-down"');
-    expect(bubbleSource).toContain('animate-reaction-spring-pop');
-    expect(bubbleSource).toContain('animate-reaction-icon-pop');
-    expect(bubbleSource).toContain('toggleMessageReaction');
-
-    expect(chatViewSource).toContain('<BubbleReactionButtons');
-    expect(myAiChatSource).toContain('<BubbleReactionButtons');
+    expect(actionBarSource).toContain('data-testid="action-bar-like"');
+    expect(actionBarSource).toContain('data-testid="action-bar-heart"');
+    expect(actionBarSource).toContain('data-testid="action-bar-dislike"');
+    expect(chatViewSource).not.toContain('<BubbleReactionButtons');
+    expect(myAiChatSource).not.toContain('<BubbleReactionButtons');
+    expect(chatViewSource.match(/<ConversationActionBar\b/g) || []).toHaveLength(1);
+    expect(myAiChatSource.match(/<ConversationActionBar\b/g) || []).toHaveLength(1);
   });
 });

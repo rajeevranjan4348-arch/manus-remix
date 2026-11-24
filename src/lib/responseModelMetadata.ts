@@ -30,6 +30,21 @@ export function mergeResponseModelMetadata(current: unknown, incoming: unknown):
   return normalizeResponseModelMetadata({ ...normalizedCurrent, ...normalizedIncoming });
 }
 
+export function createResponseModelMetadataTracker() {
+  let observed: ResponseModelMetadata | null = null;
+  let emitted: ResponseModelMetadata | null = null;
+
+  return {
+    observe(incoming: unknown, hasResponseContent: boolean): ResponseModelMetadata | null {
+      observed = mergeResponseModelMetadata(observed, incoming);
+      if (!hasResponseContent || !observed) return null;
+      if (observed.modelId === emitted?.modelId && observed.provider === emitted?.provider) return null;
+      emitted = observed;
+      return observed;
+    },
+  };
+}
+
 export function formatResponseModelMetadata(metadata: unknown): string {
   const normalized = normalizeResponseModelMetadata(metadata);
   if (!normalized) return 'Model information unavailable';

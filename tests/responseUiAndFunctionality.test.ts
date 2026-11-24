@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import { sanitizeReasoningSummary } from '../src/components/agent/ThoughtProcess';
@@ -11,8 +11,10 @@ import {
   buildModelIdentityInstruction,
   generateResilientResponse,
   needsLiveSearch,
+  streamOpenRouterResponse,
 } from '../server/geminiService';
 import {
+  createResponseModelMetadataTracker,
   formatResponseModelMetadata,
   mergeResponseModelMetadata,
   normalizeResponseModelMetadata,
@@ -69,6 +71,43 @@ describe('Response UI & Functionality Fixes (Global Audit)', () => {
         .toEqual({ modelId: 'runtime-model-7', provider: 'Provider A' });
     });
 
+    it('holds metadata from non-text chunks until response content exists, then emits it once', () => {
+      const tracker = createResponseModelMetadataTracker();
+      expect(tracker.observe({ modelId: 'runtime-model-7', provider: 'Provider A' }, false)).toBeNull();
+      expect(tracker.observe(undefined, true)).toEqual({ modelId: 'runtime-model-7', provider: 'Provider A' });
+      expect(tracker.observe({ modelId: 'runtime-model-7', provider: 'Provider A' }, true)).toBeNull();
+      expect(tracker.observe({ modelId: 'runtime-model-8' }, true)).toEqual({ modelId: 'runtime-model-8', provider: 'Provider A' });
+    });
+
+    it('forwards OpenRouter metadata from a non-text chunk when the following text chunk omits model identity', async () => {
+      const streamBody = [
+        `data: ${JSON.stringify({ model: 'runtime-model-7', provider: 'Provider A', choices: [{ delta: { role: 'assistant' } }] })}`,
+        `data: ${JSON.stringify({ choices: [{ delta: { content: 'Hello' } }] })}`,
+        'data: [DONE]',
+        '',
+      ].join('\n');
+      const fetchMock = vi.fn().mockResolvedValue(new Response(streamBody, {
+        headers: { 'Content-Type': 'text/event-stream' },
+      }));
+      const responseMetadata: { modelId?: string; provider?: string }[] = [];
+      const deltas: string[] = [];
+
+      vi.stubGlobal('fetch', fetchMock);
+      try {
+        for await (const delta of streamOpenRouterResponse({
+          messages: [{ role: 'user', content: 'Hello' }],
+          onResponseMetadata: (metadata) => responseMetadata.push(metadata),
+        }, 'test-key')) {
+          deltas.push(delta);
+        }
+      } finally {
+        vi.unstubAllGlobals();
+      }
+
+      expect(deltas.join('')).toBe('Hello');
+      expect(responseMetadata).toEqual([{ modelId: 'runtime-model-7', provider: 'Provider A' }]);
+    });
+
     it('passes stream metadata from backend responses through both chat paths and persists it with assistant messages', () => {
       const readSource = (file: string) => fs.readFileSync(path.resolve(__dirname, '..', file), 'utf-8');
       const backend = readSource('server/geminiService.ts');
@@ -80,8 +119,10 @@ describe('Response UI & Functionality Fixes (Global Audit)', () => {
       const myAIChat = readSource('src/components/chat/MyAIChat.tsx');
 
       expect(backend).toContain('modelId: chunk?.modelVersion');
-      expect(backend).toContain('options.onResponseMetadata?.(mergedResponseMetadata)');
+      expect(backend).toContain('responseMetadataTracker.observe');
+      expect(backend).toContain('options.onResponseMetadata?.(responseMetadata)');
       expect(netlify).toContain("type: 'response-metadata'");
+      expect(netlify).toContain('responseModelTracker.observe');
       expect(vite).toContain("type: 'response-metadata'");
       expect(streamAdapter).toContain("emitWindowEvent('manus_stream_metadata'");
       expect(hook).toContain("window.addEventListener('manus_stream_metadata'");

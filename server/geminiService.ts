@@ -36,7 +36,7 @@ import {
   detectThreeDSceneIntent,
   formatProcedural3DSceneMarkdown,
 } from '../src/lib/threeSceneSpec';
-import { mergeResponseModelMetadata, normalizeResponseModelMetadata } from '../src/lib/responseModelMetadata';
+import { createResponseModelMetadataTracker } from '../src/lib/responseModelMetadata';
 import type { ResponseModelMetadata } from '../src/lib/responseModelMetadata';
 
 export {
@@ -531,7 +531,6 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
       });
     }
 
-    let responseMetadataEmitted: ResponseModelMetadata | null = null;
     modelLoop: for (const model of candidateModels) {
       if (options.signal?.aborted) {
         agentActivityHub.cancelActiveActivities(activityTaskId, 'Request aborted by client');
@@ -577,6 +576,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
           let hasYielded = false;
           let streamedChars = 0;
           let latestUsageMetadata: any = null;
+          const responseMetadataTracker = createResponseModelMetadataTracker();
           const sources = new Map<string, string>();
           for (const src of realtimeSnapshot.sources) {
             if (src.url && /^https?:\/\//i.test(src.url)) {
@@ -616,16 +616,14 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
                 latestUsageMetadata = (chunk as any).usageMetadata;
               }
               const text = chunk.text;
+              const responseMetadata = responseMetadataTracker.observe({
+                modelId: chunk?.modelVersion,
+                provider: 'Google Gemini',
+              }, hasYielded || Boolean(text));
+              if (responseMetadata) {
+                options.onResponseMetadata?.(responseMetadata);
+              }
               if (text) {
-                const responseMetadata = normalizeResponseModelMetadata({
-                  modelId: chunk?.modelVersion,
-                  provider: 'Google Gemini',
-                });
-                const mergedResponseMetadata = mergeResponseModelMetadata(responseMetadataEmitted, responseMetadata);
-                if (mergedResponseMetadata && JSON.stringify(mergedResponseMetadata) !== JSON.stringify(responseMetadataEmitted)) {
-                  responseMetadataEmitted = mergedResponseMetadata;
-                  options.onResponseMetadata?.(mergedResponseMetadata);
-                }
                 hasYielded = true;
                 streamedChars += text.length;
                 yield text;
@@ -875,6 +873,7 @@ export async function* streamOpenRouterResponse(
       const decoder = new TextDecoder();
       let buffer = '';
       let hasYielded = false;
+      const responseMetadataTracker = createResponseModelMetadataTracker();
 
       while (true) {
         const { done, value } = await reader.read();
@@ -906,14 +905,12 @@ export async function* streamOpenRouterResponse(
                 }
               }
               const delta = json.choices?.[0]?.delta?.content;
-              const responseMetadata = normalizeResponseModelMetadata({
+              const responseMetadata = responseMetadataTracker.observe({
                 modelId: json.model,
                 provider: json.provider ?? json.provider_name,
-              });
-              const mergedResponseMetadata = mergeResponseModelMetadata(responseMetadataEmitted, responseMetadata);
-              if (mergedResponseMetadata && JSON.stringify(mergedResponseMetadata) !== JSON.stringify(responseMetadataEmitted) && (hasYielded || delta)) {
-                responseMetadataEmitted = mergedResponseMetadata;
-                options.onResponseMetadata?.(mergedResponseMetadata);
+              }, hasYielded || Boolean(delta));
+              if (responseMetadata) {
+                options.onResponseMetadata?.(responseMetadata);
               }
               if (delta) {
                 hasYielded = true;

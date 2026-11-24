@@ -33,7 +33,7 @@ import {
   detectThreeDSceneIntent,
   formatProcedural3DSceneMarkdown,
 } from '../../src/lib/threeSceneSpec';
-import { mergeResponseModelMetadata, normalizeResponseModelMetadata } from '../../src/lib/responseModelMetadata';
+import { createResponseModelMetadataTracker } from '../../src/lib/responseModelMetadata';
 
 const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -569,7 +569,7 @@ export default async (req: Request) => {
                   );
                   let charCount = 0;
                   let latestUsageMetadata: any = null;
-                  let responseModelEmitted: ReturnType<typeof normalizeResponseModelMetadata> = null;
+                  const responseModelTracker = createResponseModelMetadataTracker();
                   try {
                     const guardedStream = iterateStreamWithTimeouts(
                       () =>
@@ -598,16 +598,14 @@ export default async (req: Request) => {
                         latestUsageMetadata = (chunk as any).usageMetadata;
                       }
                       const text = chunk.text;
+                      const responseModel = responseModelTracker.observe({
+                        modelId: chunk?.modelVersion,
+                        provider: 'Google Gemini',
+                      }, hasEmittedText || Boolean(text));
+                      if (responseModel) {
+                        safeEnqueue(`data: ${JSON.stringify({ type: 'response-metadata', responseModel, requestId })}\n\n`);
+                      }
                       if (text) {
-                        const responseModel = normalizeResponseModelMetadata({
-                          modelId: chunk?.modelVersion,
-                          provider: 'Google Gemini',
-                        });
-                        const mergedResponseModel = mergeResponseModelMetadata(responseModelEmitted, responseModel);
-                        if (mergedResponseModel && JSON.stringify(mergedResponseModel) !== JSON.stringify(responseModelEmitted)) {
-                          responseModelEmitted = mergedResponseModel;
-                          safeEnqueue(`data: ${JSON.stringify({ type: 'response-metadata', responseModel: mergedResponseModel, requestId })}\n\n`);
-                        }
                         hasEmittedText = true;
                         charCount += text.length;
                         safeEnqueue(`data: ${JSON.stringify({ type: 'text-delta', delta: text, textDelta: text, requestId })}\n\n`);
@@ -794,7 +792,7 @@ export default async (req: Request) => {
             let orUsage: any = null;
             let buffer = '';
             let hasEmittedText = false;
-            let responseModelEmitted: ReturnType<typeof normalizeResponseModelMetadata> = null;
+            const responseModelTracker = createResponseModelMetadataTracker();
 
             const stream = new ReadableStream({
               async start(controller) {
@@ -839,14 +837,12 @@ export default async (req: Request) => {
                             }
                           }
                           const delta = json.choices?.[0]?.delta?.content;
-                          const responseModel = normalizeResponseModelMetadata({
+                          const responseModel = responseModelTracker.observe({
                             modelId: json.model,
                             provider: json.provider ?? json.provider_name,
-                          });
-                          const mergedResponseModel = mergeResponseModelMetadata(responseModelEmitted, responseModel);
-                          if (mergedResponseModel && JSON.stringify(mergedResponseModel) !== JSON.stringify(responseModelEmitted) && (hasEmittedText || delta)) {
-                            responseModelEmitted = mergedResponseModel;
-                            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'response-metadata', responseModel: mergedResponseModel, requestId })}\n\n`));
+                          }, hasEmittedText || Boolean(delta));
+                          if (responseModel) {
+                            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'response-metadata', responseModel, requestId })}\n\n`));
                           }
                           if (delta) {
                             hasEmittedText = true;
