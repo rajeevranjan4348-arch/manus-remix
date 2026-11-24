@@ -148,7 +148,8 @@ export function normalizeUsagePayload(
   const hasPrompt = Number.isFinite(rawPrompt) && rawPrompt > 0;
   const hasCompletion = Number.isFinite(rawCompletion) && rawCompletion > 0;
   const hasTotal = Number.isFinite(rawTotal) && rawTotal > 0;
-  if (!hasPrompt && !hasCompletion && !hasTotal) {
+  const hasEnoughUsage = (hasPrompt && hasCompletion) || (hasPrompt && hasTotal) || (hasCompletion && hasTotal);
+  if (!hasEnoughUsage) {
     return {
       promptTokens: 0,
       completionTokens: 0,
