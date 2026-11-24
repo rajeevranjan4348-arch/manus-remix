@@ -1758,7 +1758,7 @@ export function ChatView({
       : cleanUserMessage(prompt);
 
     return (
-      <div className="px-4 sm:px-20 space-y-3 pb-28 pt-2">
+      <div className={`px-4 sm:px-20 space-y-3 ${showScrollToBottom ? "pb-40" : "pb-28"} pt-2`}>
         {shouldShowThinkingIndicator && (
           <div
             data-testid="chat-thinking-indicator"
