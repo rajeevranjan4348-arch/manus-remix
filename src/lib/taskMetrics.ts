@@ -38,7 +38,7 @@ export interface TurnChartPoint {
   durationSec: number;
   ttftMs?: number;
   tokensPerSec: number;
-  source: 'exact' | 'estimated';
+  source: 'exact' | 'estimated' | 'unavailable';
   isLive: boolean;
   promptPreview?: string;
   model?: string;
@@ -339,7 +339,6 @@ class TaskMetricsStore {
     const completedAt = params.completedAt ?? Date.now();
 
     const promptText = params.promptText ?? active?.promptText ?? '';
-    const responseText = params.responseText ?? '';
     const usage = normalizeUsagePayload(params.usage);
 
     const computedDurationMs =
@@ -566,9 +565,6 @@ export function buildTaskMetricsSummary(params: BuildTaskMetricsParams): TaskMet
 
     if (isLive) {
       hasLiveTurn = true;
-      const liveText = (params.liveStreamText && params.liveStreamText.length >= assistantText.length)
-        ? params.liveStreamText
-        : assistantText;
       const startedAt =
         activeTurn?.startedAt ??
         parseTimestampMs(pair.userMsg?.timestamp) ??
@@ -622,9 +618,9 @@ export function buildTaskMetricsSummary(params: BuildTaskMetricsParams): TaskMet
         totalTokens: usage.totalTokens,
         durationMs: dur,
         ttftMs: Number(m.ttftMs) > 0 ? Math.round(Number(m.ttftMs)) : undefined,
-        tokensPerSec: computeTokensPerSec(usage.completionTokens, dur || 1000),
+        tokensPerSec: computeTokensPerSec(usage.completionTokens, dur),
         model: m.model || usage.model,
-        source: usage.source === 'exact' ? 'exact' : 'estimated',
+        source: usage.source ?? 'unavailable',
         timestamp: pair.assistantMsg.timestamp || new Date(nowMs).toISOString(),
       };
     } else if (storedTurns[idx] && !usedStoredIndices.has(idx)) {
