@@ -87,6 +87,7 @@ const TagAnalyticsModal = React.lazy(() =>
 interface SidebarProps {
   isOpen: boolean;
   onToggle: () => void;
+  onClose?: () => void;
   onNewTask?: () => void;
   activeTaskId?: string;
   onOpenHistory?: () => void;
@@ -194,7 +195,7 @@ function groupTasksByTime(tasks: TaskHistory[]): { group: string; items: TaskHis
     .map(([group, items]) => ({ group, items }));
 }
 
-export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask, activeTaskId, onOpenHistory, onOpenSettings, isSettingsActive }: SidebarProps) {
+export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onClose, onNewTask, activeTaskId, onOpenHistory, onOpenSettings, isSettingsActive }: SidebarProps) {
   const [activeTab, setActiveTab] = React.useState('new');
   const [tasks, setTasks] = useState<TaskHistory[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -470,10 +471,12 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
     return projects.find(p => p.id === activeProjectId);
   }, [projects, activeProjectId]);
 
+  const closeSidebar = onClose || onToggle;
+
   const handleMobileSelect = (action?: () => void) => {
     if (action) action();
     if (typeof window !== 'undefined' && window.innerWidth < 1024) {
-      onToggle();
+      closeSidebar();
     }
   };
 
@@ -651,7 +654,7 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
     <>
       {/* Mobile Backdrop */}
       <div 
-        onClick={onToggle}
+        onClick={closeSidebar}
         className="fixed inset-0 bg-black/50 z-40 lg:hidden backdrop-blur-xs transition-opacity duration-250 ease-out animate-in fade-in"
       />
 
@@ -660,7 +663,7 @@ export const Sidebar = React.memo(function Sidebar({ isOpen, onToggle, onNewTask
         <div className="p-4 sm:p-5 flex items-center justify-between">
           <ManusLogo showBadge={true} />
           <button 
-            onClick={onToggle}
+            onClick={closeSidebar}
             className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-2 text-[#777777] dark:text-[#AAAAAA] hover:text-[#000000] dark:hover:text-[#FFFFFF] hover:bg-[#F2F2F2] dark:hover:bg-[#171717] rounded-lg transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 smooth-press inline-flex items-center justify-center"
             title="Collapse sidebar"
             aria-label="Collapse sidebar"
