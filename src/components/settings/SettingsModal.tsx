@@ -1620,6 +1620,9 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
               </div>
             )}
 
+            {/* DATA & PRIVACY TAB */}
+            {activeTab === 'data' && (
+              <div className="space-y-6 animate-in fade-in duration-100">
             <div className="mb-4 rounded-xl border border-border/60 bg-muted/20 p-3">
               <p className="text-xs font-semibold text-foreground">Legal & privacy</p>
               <p className="mt-1 text-[11px] leading-5 text-muted-foreground">Read how workspace data is handled and the rules for using Deku AI.</p>
@@ -1629,9 +1632,7 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
               </div>
             </div>
 
-            {/* DATA & PRIVACY TAB */}
-            {activeTab === 'data' && (
-              <div className="space-y-6 animate-in fade-in duration-100">
+
                 {/* Firebase Cloud Sync & Database Card */}
                 <div className="p-4 rounded-xl border border-border/80 bg-card/60 space-y-3">
                   <div className="flex items-center justify-between">
