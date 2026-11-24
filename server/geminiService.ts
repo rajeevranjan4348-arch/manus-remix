@@ -52,6 +52,15 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface StreamTokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  thoughtTokens?: number;
+  totalTokens: number;
+  model?: string;
+  source: 'exact' | 'estimated';
+}
+
 export interface StreamChatOptions {
   messages: ChatMessage[];
   systemInstruction?: string;
@@ -62,6 +71,7 @@ export interface StreamChatOptions {
   taskId?: string;
   onResearchProgress?: (event: ResearchProgressEvent) => void;
   onActivity?: (event: AgentActivityEvent) => void;
+  onUsage?: (usage: StreamTokenUsage) => void;
 }
 
 export interface VerifiedModelConfig {
@@ -601,6 +611,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
 
           let hasYielded = false;
           let streamedChars = 0;
+          let latestUsageMetadata: any = null;
           const sources = new Map<string, string>();
           for (const src of realtimeSnapshot.sources) {
             if (src.url && /^https?:\/\//i.test(src.url)) {
@@ -635,6 +646,9 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
               if (options.signal?.aborted) {
                 modelHandle.cancel('Generation cancelled by client');
                 return;
+              }
+              if ((chunk as any)?.usageMetadata) {
+                latestUsageMetadata = (chunk as any).usageMetadata;
               }
               const text = chunk.text;
               if (text) {
@@ -677,6 +691,20 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
             }
 
             if (hasYielded) {
+              if (latestUsageMetadata && options.onUsage) {
+                const promptTokens = Number(latestUsageMetadata.promptTokenCount) || 0;
+                const completionTokens = Number(latestUsageMetadata.candidatesTokenCount) || Math.max(1, Math.ceil(streamedChars / 4));
+                const thoughtTokens = Number(latestUsageMetadata.thoughtsTokenCount) || 0;
+                const totalTokens = Number(latestUsageMetadata.totalTokenCount) || (promptTokens + completionTokens + thoughtTokens);
+                options.onUsage({
+                  promptTokens,
+                  completionTokens,
+                  thoughtTokens,
+                  totalTokens,
+                  model,
+                  source: Number(latestUsageMetadata.totalTokenCount) > 0 ? 'exact' : 'estimated',
+                });
+              }
               modelHandle.complete(
                 sources.size > 0
                   ? `Streamed ${streamedChars} chars with ${sources.size} cited source(s)`
@@ -851,6 +879,7 @@ export async function* streamOpenRouterResponse(
             model: model,
             messages: messages,
             stream: true,
+            stream_options: { include_usage: true },
             max_tokens: 2048,
           }),
           signal: orScope.controller.signal,
@@ -886,6 +915,21 @@ export async function* streamOpenRouterResponse(
           if (trimmed.startsWith('data: ')) {
             try {
               const json = JSON.parse(trimmed.slice(6));
+              if (json.usage && options.onUsage) {
+                const promptTokens = Number(json.usage.prompt_tokens) || 0;
+                const completionTokens = Number(json.usage.completion_tokens) || 0;
+                const totalTokens = Number(json.usage.total_tokens) || (promptTokens + completionTokens);
+                if (totalTokens > 0) {
+                  options.onUsage({
+                    promptTokens,
+                    completionTokens,
+                    thoughtTokens: Number(json.usage.reasoning_tokens) || 0,
+                    totalTokens,
+                    model,
+                    source: 'exact',
+                  });
+                }
+              }
               const delta = json.choices?.[0]?.delta?.content;
               if (delta) {
                 hasYielded = true;

@@ -210,6 +210,16 @@
     -webkit-user-select: text;
     -webkit-touch-callout: default;
   }
+  /* On touch devices (Android/iOS/tablets), prevent OS selection handles & callout from cancelling long-press on user bubbles; native text selection remains available via the Select text action */
+  @media (pointer: coarse), (hover: none), (any-pointer: coarse) {
+    [data-testid="user-message-bubble"],
+    [data-testid="user-message-bubble"] * {
+      user-select: none !important;
+      -webkit-user-select: none !important;
+      -webkit-touch-callout: none !important;
+      touch-action: pan-y;
+    }
+  }
   [data-testid="user-message-bubble"]::selection,
   [data-testid="user-message-bubble"] *::selection {
     background-color: rgba(96, 165, 250, 0.45) !important;
@@ -1715,6 +1725,59 @@ html {
   }
 }
 
+/* Subtle desktop-only hover transition animation for chat message bubbles */
+.chat-bubble-hover-user,
+.chat-bubble-hover-assistant {
+  transition:
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .chat-bubble-hover-user[data-long-press-state="idle"]:hover,
+  .chat-bubble-hover-user:not([data-long-press-state]):hover {
+    transform: translate3d(0, -1.5px, 0);
+    box-shadow:
+      0 6px 18px -6px rgba(0, 0, 0, 0.22),
+      0 2px 6px -2px rgba(0, 0, 0, 0.1);
+  }
+
+  .dark .chat-bubble-hover-user[data-long-press-state="idle"]:hover,
+  .dark .chat-bubble-hover-user:not([data-long-press-state]):hover {
+    box-shadow:
+      0 6px 20px -6px rgba(255, 255, 255, 0.18),
+      0 2px 8px -2px rgba(0, 0, 0, 0.45);
+  }
+
+  .chat-bubble-hover-assistant:hover {
+    transform: translate3d(0, -1px, 0);
+    background-color: rgba(0, 0, 0, 0.024);
+    box-shadow: 0 4px 14px -8px rgba(0, 0, 0, 0.12);
+  }
+
+  .dark .chat-bubble-hover-assistant:hover {
+    background-color: rgba(255, 255, 255, 0.032);
+    box-shadow: 0 4px 16px -8px rgba(0, 0, 0, 0.55);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-bubble-hover-user,
+  .chat-bubble-hover-assistant {
+    transition: none !important;
+    transform: none !important;
+  }
+}
+
+[data-perf-mode="ultra-lite"] .chat-bubble-hover-user:hover,
+[data-perf-mode="ultra-lite"] .chat-bubble-hover-assistant:hover {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
 /* Show Sources drawer & staggered citation item animations */
 .manus-sources-drawer-enter {
   animation: manus-sources-drawer-unfold 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -2534,5 +2597,97 @@ select,
 [data-perf-mode="ultra-lite"] .voice-mic-ripple {
   animation: none !important;
 }
+
+/* ============================================================================
+   MESSAGE CONTEXT MENU & SELECT TEXT MODAL — OPAQUE SURFACE & TOP-LAYER STACK
+   Guarantees zero bleed-through from underlying chat cards or diagnostic bars
+   ============================================================================ */
+@keyframes manus-context-menu-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes manus-context-backdrop-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.manus-context-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483640 !important;
+  isolation: isolate;
+  background-color: rgba(0, 0, 0, 0.24);
+  animation: manus-context-backdrop-fade 140ms ease-out both;
+}
+
+.dark .manus-context-menu-backdrop {
+  background-color: rgba(0, 0, 0, 0.56);
+}
+
+.manus-context-menu-card {
+  position: fixed;
+  z-index: 2147483641 !important;
+  isolation: isolate;
+  background-color: #FFFFFF !important;
+  color: #111111 !important;
+  border-color: rgba(0, 0, 0, 0.09);
+  box-shadow:
+    0 20px 50px -12px rgba(0, 0, 0, 0.28),
+    0 6px 18px -4px rgba(0, 0, 0, 0.12);
+  animation: manus-context-menu-pop 150ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.dark .manus-context-menu-card {
+  background-color: #1F1F22 !important;
+  color: #F5F5F7 !important;
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 24px 56px -12px rgba(0, 0, 0, 0.82),
+    0 8px 20px -4px rgba(0, 0, 0, 0.58);
+}
+
+.manus-select-text-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483645 !important;
+  isolation: isolate;
+  background-color: rgba(0, 0, 0, 0.56);
+  animation: manus-context-backdrop-fade 150ms ease-out both;
+}
+
+.manus-select-text-card {
+  isolation: isolate;
+  background-color: #FFFFFF !important;
+  color: #111111 !important;
+  border-color: rgba(0, 0, 0, 0.09);
+  animation: manus-context-menu-pop 150ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.dark .manus-select-text-card {
+  background-color: #1F1F22 !important;
+  color: #F5F5F7 !important;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .manus-context-menu-backdrop,
+  .manus-context-menu-card,
+  .manus-select-text-backdrop,
+  .manus-select-text-card {
+    animation: none !important;
+  }
+}
+
 
 

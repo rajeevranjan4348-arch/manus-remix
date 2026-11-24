@@ -38,13 +38,12 @@ import {
   saveConversationToFirestore,
   deleteConversationFromFirestore,
   saveMessageToFirestore,
-  deleteMessagesFromFirestore,
+  deleteMessageFromFirestore
 } from './firestoreService';
 import {
   saveConversationToCloudSql,
   deleteConversationFromCloudSql,
-  saveMessageToCloudSql,
-  deleteMessagesFromCloudSql,
+  saveMessageToCloudSql
 } from './cloudSqlClient';
 
 const DB_NAME = 'manus_permanent_chat_db';
@@ -630,79 +629,50 @@ export async function updateMessage(id: string, updates: Partial<StoredMessage>)
   saveFallbackMessages(fallbackList);
 
   notifyDbUpdated(existing.conversationId);
+  saveMessageToFirestore(updated).catch(() => {});
   return updated;
 }
 
-export async function replaceConversationTailWithEditedMessage(
+/**
+ * Deletes specific messages by ID within a conversation (used when editing a previous
+ * user message and cleanly branching subsequent turns).
+ */
+export async function deleteMessagesByIds(
   conversationId: string,
-  editedMessage: StoredMessage,
-  removeMessageIds: string[],
-): Promise<void> {
-  if (!conversationId || !editedMessage?.id || editedMessage.conversationId !== conversationId) {
-    throw new Error('A conversation and matching edited message are required.');
+  messageIds: string[]
+): Promise<boolean> {
+  if (!conversationId || !Array.isArray(messageIds) || messageIds.length === 0) {
+    return false;
   }
 
-  const idsToRemove = [...new Set(removeMessageIds.filter((id) => id && id !== editedMessage.id))];
-  const now = new Date().toISOString();
-  const conversation = await getConversation(conversationId);
-  let reopenedConversation: StoredConversation | null = null;
-  if (conversation) {
-    const { result: _previousResult, steps: _previousSteps, ...conversationBase } = conversation;
-    reopenedConversation = {
-      ...conversationBase,
-      status: 'running',
-      updatedAt: now,
-    };
-  }
+  const idSet = new Set(messageIds.filter(Boolean));
+  if (idSet.size === 0) return false;
 
-  let savedLocally = false;
   if (isIndexedDBSupported()) {
     try {
       const db = await openDatabase();
       await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction([STORE_CONVERSATIONS, STORE_MESSAGES], 'readwrite');
-        if (reopenedConversation) {
-          tx.objectStore(STORE_CONVERSATIONS).put(reopenedConversation);
-        }
+        const tx = db.transaction(STORE_MESSAGES, 'readwrite');
         const store = tx.objectStore(STORE_MESSAGES);
-        store.put(editedMessage);
-        idsToRemove.forEach((id) => store.delete(id));
+        idSet.forEach((msgId) => {
+          store.delete(msgId);
+        });
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error || new Error('Edited conversation transaction was aborted.'));
       });
-      savedLocally = true;
-    } catch (error) {
-      console.warn('[ChatDB] Could not atomically replace edited conversation tail in IndexedDB:', error);
+    } catch (err) {
+      console.warn('[ChatDB] IndexedDB deleteMessagesByIds error:', err);
     }
   }
 
-  const fallbackMessages = getFallbackMessages()
-    .filter((message) => message.id !== editedMessage.id && !idsToRemove.includes(message.id));
-  fallbackMessages.push(editedMessage);
-  saveFallbackMessages(fallbackMessages);
-  if (!savedLocally && !getFallbackMessages().some((message) => message.id === editedMessage.id)) {
-    throw new Error('The edited message could not be saved locally.');
-  }
-
-  if (reopenedConversation) {
-    const fallbackConversations = getFallbackConversations().map((item) =>
-      item.id === conversationId ? reopenedConversation : item
-    );
-    saveFallbackConversations(fallbackConversations);
-  }
+  const fallbackMsgs = getFallbackMessages().filter((m) => !idSet.has(m.id));
+  saveFallbackMessages(fallbackMsgs);
 
   notifyDbUpdated(conversationId);
-  await Promise.allSettled([
-    ...(reopenedConversation ? [
-      saveConversationToFirestore(reopenedConversation),
-      saveConversationToCloudSql(reopenedConversation),
-    ] : []),
-    saveMessageToFirestore(editedMessage),
-    saveMessageToCloudSql(editedMessage),
-    deleteMessagesFromFirestore(conversationId, idsToRemove),
-    deleteMessagesFromCloudSql(conversationId, idsToRemove),
-  ]);
+  idSet.forEach((msgId) => {
+    deleteMessageFromFirestore(conversationId, msgId).catch(() => {});
+  });
+  return true;
 }
 
 /**
@@ -788,3 +758,4 @@ export async function recoverChatHistory(jsonString: string): Promise<{ success:
     return { success: false, restoredCount: 0 };
   }
 }
+

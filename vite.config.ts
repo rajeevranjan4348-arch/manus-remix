@@ -1381,6 +1381,8 @@ function geminiApiPlugin(): Plugin {
               req.on('aborted', handleClose);
 
               let hasEmittedDeltas = false;
+              const streamStartedAt = Date.now();
+              let capturedUsage: any = null;
 
               try {
                 const inputMessages = body.messages || (body.prompt ? [{ role: 'user', content: body.prompt }] : []);
@@ -1399,6 +1401,9 @@ function geminiApiPlugin(): Plugin {
                   onActivity: (activityEvent) => {
                     safeWrite(`data: ${JSON.stringify({ type: 'agent-activity', requestId, taskId, event: activityEvent })}\n\n`);
                   },
+                  onUsage: (usage) => {
+                    capturedUsage = usage;
+                  },
                 });
 
                 for await (const delta of stream) {
@@ -1410,9 +1415,10 @@ function geminiApiPlugin(): Plugin {
                 }
 
                 if (!clientAborted && !res.writableEnded) {
+                  const durationMs = Math.max(1, Date.now() - streamStartedAt);
                   streamCircuitBreaker.recordSuccess();
-                  console.info(`[AI Stream] reqId=${requestId} status=completed`);
-                  safeWrite(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId })}\n\n`);
+                  console.info(`[AI Stream] reqId=${requestId} status=completed durationMs=${durationMs}`);
+                  safeWrite(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId, durationMs, ...(capturedUsage ? { usage: capturedUsage } : {}) })}\n\n`);
                   safeWrite('data: [DONE]\n\n');
                   res.end();
                 }
@@ -1425,7 +1431,8 @@ function geminiApiPlugin(): Plugin {
                 if (!clientAborted && !res.writableEnded) {
                   if (hasEmittedDeltas) {
                     // Preserve already-streamed partial tokens cleanly instead of overwriting with an error
-                    safeWrite(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', partialRecovery: true, requestId })}\n\n`);
+                    const durationMs = Math.max(1, Date.now() - streamStartedAt);
+                    safeWrite(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', partialRecovery: true, requestId, durationMs, ...(capturedUsage ? { usage: capturedUsage } : {}) })}\n\n`);
                     safeWrite('data: [DONE]\n\n');
                     res.end();
                   } else {

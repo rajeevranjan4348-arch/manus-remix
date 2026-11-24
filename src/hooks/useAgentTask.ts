@@ -28,14 +28,15 @@ import { modelRouter } from '@/lib/modelRouter';
 import { skillsRegistry } from '@/lib/skillsSystem';
 import {
   saveMessage,
+  updateMessage,
+  deleteMessagesByIds,
   getMessages,
   createConversation,
   updateConversation,
   cleanChatTitle,
   StoredMessage,
-  replaceConversationTailWithEditedMessage,
 } from '@/lib/chatDatabase';
-import { replaceEditedUserTurn } from '@/lib/messageEditing';
+import { applyUserMessageEditBranch } from '@/lib/messageBranching';
 import { tagTaskAfterCompletion } from '@/lib/taskTaggingService';
 import { taskTagger } from '@/services/taskTagger';
 import { exportChatSession, ChatExportFormat } from '@/lib/chatExport';
@@ -46,6 +47,7 @@ import {
 } from '@/lib/performanceEngine';
 import { SUPPORT_ISSUE_RESPONSE_GUIDANCE } from '@/lib/aiSupportGuidance';
 import { agentActivityTracker, useTaskActivities } from '@/lib/agentActivityTracker';
+import { taskMetricsStore } from '@/lib/taskMetrics';
 
 export type AgentTaskPhase = 'idle' | 'sending' | 'thinking' | 'tool-calling' | 'text-generation' | 'streaming' | 'completed' | 'error';
 
@@ -239,7 +241,6 @@ export function useAgentTask() {
   const messagesRef = useRef<any[]>([]);
   const persistentMessagesRef = useRef<any[]>([]);
   const isSubmittingRef = useRef<boolean>(false);
-  const isEditingMessageRef = useRef<boolean>(false);
   if (!isSubmittingRef.current || persistentMessages.length >= persistentMessagesRef.current.length) {
     persistentMessagesRef.current = persistentMessages;
   }
@@ -723,6 +724,7 @@ export function useAgentTask() {
 
     const cleanedText = parsedChartData?.content || rawText.replace(/```json\n?[\s\S]*?\n?```/g, '').trim() || rawText;
     const assistantMsgId = activeAssistantMsgIdRef.current || ('msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8));
+    taskMetricsStore.bindMessageId(activeId, activeStreamRequestIdRef.current, assistantMsgId);
     const assistantMsg = {
       id: assistantMsgId,
       role: 'assistant' as const,
@@ -1529,7 +1531,7 @@ export function useAgentTask() {
     setSteps(createInitialWorkflowSteps(hasImageAttachment));
 
     const activeId = currentTaskIdRef.current || taskId;
-    let userMsgId = 'msg_' + now + '_' + Math.random().toString(36).substring(2, 8);
+    const userMsgId = 'msg_' + now + '_' + Math.random().toString(36).substring(2, 8);
     const assistantMsgId = 'msg_assistant_' + now + '_' + Math.random().toString(36).substring(2, 8);
     activeUserMsgIdRef.current = userMsgId;
     activeAssistantMsgIdRef.current = assistantMsgId;
@@ -1554,7 +1556,6 @@ export function useAgentTask() {
       : [...cleanedHistory, userMsg];
 
     if (isRetryOfLastUserTurn && lastExisting?.id) {
-      userMsgId = lastExisting.id;
       activeUserMsgIdRef.current = lastExisting.id;
     }
 
@@ -1721,96 +1722,188 @@ export function useAgentTask() {
     void runSendLifecycle();
   }, [executeReliableAgentTurn, preparePromptWithConnectors, captureAndAttachUserMemory, taskId, taskStatus, user, clearStepTimers, finalizeRequestTurn, markExistingSdkMessagesCompleted]);
 
-  const editMessage = useCallback(async (messageId: string, content: string, forceRegenerate = false) => {
-    if (!messageId || !content?.trim()) return;
-    if (isSubmittingRef.current || isEditingMessageRef.current) {
-      toast.info('Wait for the current response to finish before editing a message.');
+  /**
+   * Real in-place user message editing with clean conversation branching:
+   * - Updates the target user message in-place (preserving its id, timestamp, and attachments).
+   * - Truncates all subsequent messages in React state, IndexedDB, localStorage, and Firestore.
+   * - Regenerates a fresh AI response using the edited message and branched history.
+   * - Prevents duplicate messages and duplicate concurrent generations.
+   */
+  const editMessage = useCallback(async (messageId: string, newContent: string) => {
+    const trimmedNew = (newContent || '').trim();
+    if (!messageId || !trimmedNew) return;
+    if (isSubmittingRef.current) {
+      console.warn('[Deku Agent] Ignored editMessage while a request is still active.');
       return;
     }
 
-    const edit = replaceEditedUserTurn(persistentMessagesRef.current, messageId, content, undefined, forceRegenerate);
-    if (!edit) {
-      toast.info('This message has no changes to save.');
+    const now = Date.now();
+    const currentList = persistentMessagesRef.current;
+    const branch = applyUserMessageEditBranch(
+      currentList,
+      messageId,
+      trimmedNew,
+      new Date(now).toISOString()
+    );
+
+    if (!branch.editedMessage) {
+      console.warn('[Deku Agent] editMessage could not find target user message:', messageId);
       return;
     }
 
-    isEditingMessageRef.current = true;
-    try {
-      const activeId = currentTaskIdRef.current || taskId;
-      const editedMessage = {
-        ...edit.editedMessage,
-        id: messageId,
-        conversationId: activeId || edit.editedMessage.conversationId || '',
-        userId: edit.editedMessage.userId || auth?.currentUser?.uid || user?.id || 'usr_manus_default',
-        role: 'user' as const,
-        content: String(edit.editedMessage.content || '').trim(),
-        timestamp: edit.editedMessage.timestamp || new Date().toISOString(),
-        status: 'success' as const,
-      } as StoredMessage;
+    isSubmittingRef.current = true;
+    abortActiveAutonomousStreams();
+    markExistingSdkMessagesCompleted();
 
-      if (activeId) {
-        await replaceConversationTailWithEditedMessage(
-          activeId,
-          editedMessage,
-          edit.removedMessages.map((message) => String(message.id || '')).filter(Boolean),
-        );
-      }
-
-      const firstUserMessage = edit.messages.find((message) => message.role === 'user');
-      const isFirstUserTurn = firstUserMessage?.id === editedMessage.id;
-      if (activeId && isFirstUserTurn && !forceRegenerate) {
-        await updateConversation(activeId, { title: cleanChatTitle(editedMessage.content) });
-      }
-
-      const activeHistory = edit.messages.map((message, index) =>
-        index === edit.messages.length - 1 ? editedMessage : message
-      );
-      persistentMessagesRef.current = activeHistory;
-      setPersistentMessages(activeHistory);
-      setResult(null);
-      setChartData(null);
-
-      if (isFirstUserTurn && currentTaskRef.current) {
-        const updatedTask = { ...currentTaskRef.current, prompt: editedMessage.content };
-        currentTaskRef.current = updatedTask;
-        setCurrentTask(updatedTask);
-      }
-
-      markExistingSdkMessagesCompleted();
-      const restoredSdkHistory = activeHistory.map((message: any) => ({
-        id: message.id,
-        role: message.role,
-        content: message.content,
-        createdAt: message.timestamp,
-        status: 'completed',
-      }));
-      if (typeof setMessages === 'function') {
-        setMessages(restoredSdkHistory);
-      } else if (clearMessages) {
-        clearMessages();
-      }
-      completedSdkMsgIdsRef.current = new Set(
-        activeHistory.map((message: any) => message?.id).filter(Boolean).map(String)
-      );
-
-      toast.success(forceRegenerate ? 'Regenerating this response…' : 'Message updated. Regenerating the response…');
-      sendMessage(editedMessage.content);
-    } catch (error) {
-      console.error('[Deku Agent] Could not edit message:', error);
-      toast.error('Could not complete this edit. The prompt may have been updated locally; try again or regenerate the response.');
-    } finally {
-      isEditingMessageRef.current = false;
+    if (clearMessages) {
+      clearMessages();
+    } else if (setMessages) {
+      setMessages([]);
     }
-  }, [taskId, user, setMessages, clearMessages, markExistingSdkMessagesCompleted, sendMessage]);
 
-  const regenerateMessage = useCallback(async (messageId: string) => {
-    const message = persistentMessagesRef.current.find((item) => item?.id === messageId && item.role === 'user');
-    if (!message) {
-      toast.error('Could not find the prompt for this response.');
-      return;
+    const reqId = ++activeRequestIdRef.current;
+    const streamReqId = `req_edit_${now}_${reqId}`;
+    activeStreamRequestIdRef.current = streamReqId;
+    clearStepTimers();
+    liveStreamTextRef.current = '';
+    setLiveStreamText('');
+    lastStreamFinishReasonRef.current = null;
+    lastStreamErrorRef.current = null;
+
+    const editedContent = branch.editedMessage.content;
+    const activeId = currentTaskIdRef.current || taskId;
+    const assistantMsgId = 'msg_assistant_' + now + '_' + Math.random().toString(36).substring(2, 8);
+    activeUserMsgIdRef.current = messageId;
+    activeAssistantMsgIdRef.current = assistantMsgId;
+    lastSubmitRef.current = { prompt: editedContent.trim(), timestamp: now };
+
+    setTaskStatus('running');
+    setPhase('tool-calling');
+    emitRobotEvent('USER_SUBMITTED');
+    setResult(null);
+    const hasImageAttachment = editedContent.includes('[IMAGE_DATA_URL:') || editedContent.includes('[Attached Image');
+    setSteps(createInitialWorkflowSteps(hasImageAttachment));
+
+    // Apply branched history atomically in React state
+    persistentMessagesRef.current = branch.updatedMessages;
+    setPersistentMessages(branch.updatedMessages);
+
+    if (branch.isFirstUserMessage) {
+      setCurrentTask((prev: any) => (prev ? { ...prev, prompt: trimmedNew } : prev));
     }
-    await editMessage(messageId, String(message.content || ''), true);
-  }, [editMessage]);
+
+    setActiveStreamContext({
+      requestId: streamReqId,
+      taskId: activeId,
+      messages: branch.updatedMessages
+        .filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
+        .map((m) => ({ role: m.role, content: m.content.trim() })),
+    });
+
+    // Persist the edited user message & prune branched subsequent messages in DB + Firestore
+    if (activeId) {
+      await Promise.allSettled([
+        updateMessage(messageId, {
+          content: editedContent,
+          status: 'success',
+          metadata: branch.editedMessage.metadata,
+        }),
+        branch.removedMessageIds.length > 0
+          ? deleteMessagesByIds(activeId, branch.removedMessageIds)
+          : Promise.resolve(false),
+        branch.isFirstUserMessage
+          ? updateConversation(activeId, { title: cleanChatTitle(trimmedNew) })
+          : Promise.resolve(null),
+      ]);
+    }
+
+    const runEditLifecycle = async () => {
+      try {
+        const textWithoutImagePayload = editedContent.replace(/\[IMAGE_DATA_URL:[^\]]+\]\n?/gi, '').trim();
+
+        const activeMemoryUserId = auth?.currentUser?.uid || user?.id || 'usr_manus_default';
+        await captureAndAttachUserMemory({
+          userId: activeMemoryUserId,
+          rawPrompt: editedContent,
+          userMsgId: messageId,
+          conversationId: activeId,
+        });
+
+        const isExplicitChartPrompt = /\b(graph|chart|plot|diagram|histogram|pie\s+chart|bar\s+chart|line\s+chart|scatter\s+plot|visualize\s+data)\b/i.test(textWithoutImagePayload);
+        const targetPrompt = isExplicitChartPrompt
+          ? `${textWithoutImagePayload}\n\n[INSTRUCTION: Format your chart data as a JSON code block using the format below so it renders as an interactive chart]\n\`\`\`json\n{\n  "graph": {\n    "type": "bar",\n    "labels": ["Category A", "Category B", "Category C", "Category D"],\n    "datasets": [{\n      "label": "Metric",\n      "data": [45, 72, 88, 95]\n    }]\n  }\n}\n\`\`\``
+          : textWithoutImagePayload;
+
+        const preparedPrompt = await preparePromptWithConnectors(targetPrompt, activeId);
+        if (activeRequestIdRef.current !== reqId) return;
+        setPhase('text-generation');
+        setSteps(prev => advanceWorkflowSteps(prev, 'synthesizing'));
+        await executeReliableAgentTurn(preparedPrompt, reqId);
+      } catch (error) {
+        if (activeRequestIdRef.current !== reqId) return;
+        console.error('[Deku AI] Failed to regenerate response for edited message:', error);
+        finalizedRequestIdsRef.current.add(reqId);
+        setActiveStreamContext(null);
+        setTaskStatus('error');
+        setPhase('error');
+        setResult({
+          type: 'chat',
+          content: "I couldn't reach the AI service. Check your connection and try again.",
+          error: true,
+          retryable: true,
+        });
+        setSteps(prev => prev.map(step => ({ ...step, status: 'error' as const })));
+        emitRobotEvent('TASK_FAILED');
+        toast.error("Couldn't reach the AI service. Please try again.");
+      } finally {
+        if (activeRequestIdRef.current === reqId) {
+          clearStepTimers();
+          isSubmittingRef.current = false;
+          setActiveStreamContext(null);
+          const hadErrorFinish = lastStreamFinishReasonRef.current === 'error';
+          const finalized = !hadErrorFinish && finalizeRequestTurn(reqId, activeId);
+          liveStreamTextRef.current = '';
+          setLiveStreamText('');
+          if (hadErrorFinish) {
+            const errText = lastStreamErrorRef.current || 'The AI service encountered an error. Please retry.';
+            setTaskStatus('error');
+            setPhase('error');
+            setResult((prev: any) => prev?.error ? prev : {
+              type: 'chat',
+              content: errText,
+              error: true,
+              retryable: true,
+            });
+            setSteps(prev => prev.map(step => step.status === 'running' ? { ...step, status: 'error' as const } : step));
+          } else {
+            const lastMsg = persistentMessagesRef.current[persistentMessagesRef.current.length - 1];
+            const hasAssistantReply = finalized || lastMsg?.role === 'assistant';
+            if (!hasAssistantReply) {
+              const fallbackErr = lastStreamErrorRef.current || 'The AI connection ended before a response was received. Please retry.';
+              setTaskStatus('error');
+              setPhase('error');
+              setResult((prev: any) => prev?.error ? prev : {
+                type: 'chat',
+                content: fallbackErr,
+                error: true,
+                retryable: true,
+              });
+              setSteps(prev => prev.map(step => step.status === 'running' ? { ...step, status: 'error' as const } : step));
+            } else {
+              setTaskStatus(prev => (prev === 'running' || prev === 'idle') ? 'completed' : prev);
+              setPhase(prev => (prev === 'tool-calling' || prev === 'text-generation' || prev === 'sending' || prev === 'thinking' || prev === 'streaming' || prev === 'idle') ? 'completed' : prev);
+              setSteps(prev => prev.map(step => step.status === 'running' ? { ...step, status: 'completed' as const } : step));
+            }
+          }
+          window.dispatchEvent(new CustomEvent('manus_agent_generating', {
+            detail: { isGenerating: false, mode: 'work' }
+          }));
+        }
+      }
+    };
+
+    void runEditLifecycle();
+  }, [executeReliableAgentTurn, preparePromptWithConnectors, captureAndAttachUserMemory, taskId, user, clearStepTimers, finalizeRequestTurn, markExistingSdkMessagesCompleted, clearMessages, setMessages]);
 
   const startTask = useCallback(async (prompt: string, options: any = {}) => {
     if (!prompt || !prompt.trim()) return null;
@@ -2472,7 +2565,6 @@ export function useAgentTask() {
     startTask,
     sendMessage,
     editMessage,
-    regenerateMessage,
     appendVoiceExchange,
     resetTask,
     stopTask,

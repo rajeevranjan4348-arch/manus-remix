@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, Mic, MicOff } from 'lucide-react';
+import { ArrowLeft, Mic, MicOff, MoreVertical } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatSpokenPunctuation } from '@/components/voice/VoiceInputButton';
 import { VoiceTranscriptionIndicator } from '@/components/voice/VoiceTranscriptionIndicator';
@@ -19,11 +19,18 @@ import { ConversationActionBar } from '../agent/ConversationActionBar';
 import { BubbleReactionButtons } from '../agent/BubbleReactionButtons';
 import { MemoryUpdatedIndicator } from '../agent/MemoryUpdatedIndicator';
 import { MarkdownRenderer } from '../agent/MarkdownRenderer';
+import { MessageContextMenu, SelectTextModal, ContextMenuAnchor, useMessageLongPressController } from '../agent/MessageContextMenu';
+import { MessageEditController } from '../agent/MessageEditController';
+import { WritingBlock } from '../agent/WritingBlock';
+import { detectWritingBlock } from '@/lib/writingDetector';
+import { applyUserMessageEditBranch } from '@/lib/messageBranching';
 
 interface Message {
   id?: string;
   role: 'user' | 'assistant';
   content: string;
+  timestamp?: string;
+  metadata?: Record<string, any>;
   memoryUpdate?: MessageMemoryUpdate;
 }
 
@@ -47,6 +54,74 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
   const mainRef = useRef<HTMLElement>(null);
   const activeRequestIdRef = useRef<number>(0);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const [editingTarget, setEditingTarget] = useState<{ id: string; originalText: string } | null>(null);
+  const savedDraftBeforeEditRef = useRef<string | null>(null);
+  const [contextMenuState, setContextMenuState] = useState<{
+    isOpen: boolean;
+    anchor: ContextMenuAnchor | null;
+    messageId: string;
+    messageText: string;
+    timestamp?: string;
+    role: 'user' | 'assistant';
+  }>({
+    isOpen: false,
+    anchor: null,
+    messageId: '',
+    messageText: '',
+    role: 'user',
+  });
+  const [selectTextModalContent, setSelectTextModalContent] = useState<string | null>(null);
+
+  const openUserContextMenu = React.useCallback(
+    (payload: {
+      anchor: ContextMenuAnchor;
+      messageId: string;
+      messageText: string;
+      timestamp?: string | number | Date;
+      role: 'user';
+    }) => {
+      setContextMenuState({
+        isOpen: true,
+        anchor: payload.anchor,
+        messageId: payload.messageId,
+        messageText: payload.messageText,
+        timestamp: typeof payload.timestamp === 'string' ? payload.timestamp : undefined,
+        role: 'user',
+      });
+    },
+    []
+  );
+
+  const { pressedMessageId, getUserMessageGestureProps, clearLongPressTimers } =
+    useMessageLongPressController({
+      isMenuOpen: contextMenuState.isOpen,
+      onOpenMenu: openUserContextMenu,
+    });
+
+  const beginEditMessage = (messageId: string, originalText: string) => {
+    if (!messageId) return;
+    if (savedDraftBeforeEditRef.current === null && !editingTarget) {
+      savedDraftBeforeEditRef.current = input;
+    }
+    setEditingTarget({ id: messageId, originalText });
+    setInput(originalText);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) {
+        el.focus();
+        try {
+          el.setSelectionRange(originalText.length, originalText.length);
+        } catch {}
+      }
+    });
+  };
+
+  const cancelEditMessage = () => {
+    const prev = savedDraftBeforeEditRef.current;
+    savedDraftBeforeEditRef.current = null;
+    setEditingTarget(null);
+    setInput(prev ?? '');
+  };
 
   const scrollToBottom = () => {
     requestAnimationFrame(() => {
@@ -120,6 +195,7 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
         abortControllerRef.current = null;
       }
       clearSilenceTimer();
+      clearLongPressTimers();
       if (recognitionRef.current) {
         try {
           recognitionRef.current.abort();
@@ -241,6 +317,11 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Escape' && editingTarget) {
+      e.preventDefault();
+      cancelEditMessage();
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (input.trim() && !isGenerating) {
@@ -262,9 +343,27 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
       setIsListening(false);
     }
 
-    const userMsgId = `myai_u_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const userMessage: Message = { id: userMsgId, role: 'user', content: query };
-    const updatedMessages = [...messages, userMessage];
+    const activeEdit = overrideText === undefined ? editingTarget : null;
+    let userMsgId: string;
+    let updatedMessages: Message[];
+
+    if (activeEdit) {
+      const branch = applyUserMessageEditBranch(messages, activeEdit.id, query);
+      if (branch.editedMessage) {
+        userMsgId = activeEdit.id;
+        updatedMessages = branch.updatedMessages;
+      } else {
+        userMsgId = `myai_u_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        updatedMessages = [...messages, { id: userMsgId, role: 'user', content: query, timestamp: new Date().toISOString() }];
+      }
+      setEditingTarget(null);
+      savedDraftBeforeEditRef.current = null;
+    } else {
+      userMsgId = `myai_u_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const userMessage: Message = { id: userMsgId, role: 'user', content: query, timestamp: new Date().toISOString() };
+      updatedMessages = [...messages, userMessage];
+    }
+
     setMessages(updatedMessages);
     setInput('');
     baseInputRef.current = '';
@@ -526,60 +625,159 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
           </section>
         ) : (
           <section className="w-full max-w-[760px] mx-auto p-4 sm:p-5 flex flex-col gap-5 flex-1">
-            {messages.map((msg, index) => (
-              <React.Fragment key={msg.id || `myai-${msg.role}-${index}`}>
-                <div
-                  className={`flex w-full animate-in fade-in duration-200 ${
-                    msg.role === 'user' ? 'justify-end group relative' : 'justify-start group/ai-message relative'
-                  }`}
-                >
-                  <div className={`flex flex-col max-w-[88%] sm:max-w-[82%] gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                    <div className={msg.role === 'user' ? 'flex items-center gap-1.5 max-w-full' : 'w-full'}>
-                      {msg.role === 'user' && msg.content && (
-                        <BubbleReactionButtons
-                          messageId={msg.id ? `myai-user-${msg.id}` : `myai-user-msg-${index}`}
-                          groupScope="user"
-                        />
-                      )}
-                      <div
-                        className={`w-full px-4 py-3 rounded-[18px] text-[15px] leading-relaxed break-words whitespace-pre-wrap select-text ${
-                          msg.role === 'user'
-                            ? 'bg-muted/80 dark:bg-card border border-border text-foreground rounded-br-xs'
-                            : 'bg-transparent text-foreground rounded-bl-xs'
-                        }`}
-                      >
-                        {msg.content ? (
-                          msg.role === 'assistant' && msg.content.includes('```') ? (
-                            <MarkdownRenderer content={msg.content} />
-                          ) : (
-                            msg.content
-                          )
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-muted-foreground">
-                            <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce [animation-delay:-0.3s]" />
-                            <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce [animation-delay:-0.15s]" />
-                            <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce" />
-                          </span>
+            {messages.map((msg, index) => {
+              const msgId = msg.id || `myai-${msg.role}-${index}`;
+              const prevUser = msg.role === 'assistant'
+                ? messages.slice(0, index).reverse().find((m) => m.role === 'user')
+                : undefined;
+              const writingDetection =
+                msg.role === 'assistant' && msg.content
+                  ? detectWritingBlock(msg.content, prevUser?.content)
+                  : null;
+              const longPressHandlers =
+                msg.role === 'user' && msg.content
+                  ? getUserMessageGestureProps({
+                      messageId: msgId,
+                      messageText: msg.content,
+                      timestamp: msg.timestamp,
+                    })
+                  : {};
+              const isEditingThis = editingTarget?.id === msgId;
+              const isPressedThis = msg.role === 'user' && pressedMessageId === msgId;
+              const isSelectedThis =
+                msg.role === 'user' &&
+                contextMenuState.isOpen &&
+                contextMenuState.messageId === msgId;
+
+              return (
+                <React.Fragment key={msgId}>
+                  <div
+                    className={`flex w-full animate-in fade-in duration-200 ${
+                      msg.role === 'user' ? 'justify-end group relative' : 'justify-start group/ai-message relative'
+                    }`}
+                  >
+                    <div className={`flex flex-col max-w-[88%] sm:max-w-[82%] gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                      <div className={msg.role === 'user' ? 'flex items-center gap-1.5 max-w-full' : 'w-full'}>
+                        {msg.role === 'user' && msg.content && (
+                          <div className="flex items-center gap-1 shrink-0">
+                            <BubbleReactionButtons
+                              messageId={msg.id ? `myai-user-${msg.id}` : `myai-user-msg-${index}`}
+                              groupScope="user"
+                            />
+                            <button
+                              type="button"
+                              data-testid="user-message-menu-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const bubbleEl = e.currentTarget.parentElement?.nextElementSibling as HTMLElement | null;
+                                const rect = (bubbleEl || e.currentTarget).getBoundingClientRect();
+                                setContextMenuState({
+                                  isOpen: true,
+                                  anchor: {
+                                    x: rect.right,
+                                    y: rect.bottom,
+                                    rect: {
+                                      top: rect.top,
+                                      bottom: rect.bottom,
+                                      left: rect.left,
+                                      right: rect.right,
+                                      width: rect.width,
+                                      height: rect.height,
+                                    },
+                                    align: 'right',
+                                  },
+                                  messageId: msgId,
+                                  messageText: msg.content,
+                                  timestamp: msg.timestamp,
+                                  role: 'user',
+                                });
+                              }}
+                              className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-sm:opacity-70 transition-opacity p-1.5 rounded-full bg-card/80 hover:bg-card border border-border shadow-xs text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
+                              title="Message actions"
+                              aria-label="Message actions"
+                            >
+                              <MoreVertical size={13} />
+                            </button>
+                          </div>
                         )}
+                        <div
+                          data-testid={msg.role === 'user' ? 'user-message-bubble' : undefined}
+                          data-long-press-state={
+                            msg.role === 'user'
+                              ? isSelectedThis
+                                ? 'selected'
+                                : isPressedThis
+                                  ? 'pressed'
+                                  : 'idle'
+                              : undefined
+                          }
+                          style={msg.role === 'user' ? { WebkitTouchCallout: 'none' } : undefined}
+                          {...longPressHandlers}
+                          className={`w-full px-4 py-3 rounded-[18px] text-[15px] leading-relaxed break-words transition-[transform,box-shadow,opacity] duration-150 ease-out ${
+                            msg.role === 'user'
+                              ? `chat-bubble-hover-user bg-muted/80 dark:bg-card border border-border text-foreground rounded-br-xs whitespace-pre-wrap max-sm:select-none sm:select-text ${isPressedThis ? 'scale-[0.975] opacity-90' : ''} ${isSelectedThis ? 'ring-2 ring-foreground/30 dark:ring-white/40 scale-[1.01]' : ''} ${isEditingThis ? 'ring-2 ring-primary/50 dark:ring-white/40' : ''}`
+                              : 'chat-bubble-hover-assistant bg-transparent text-foreground rounded-bl-xs select-text'
+                          }`}
+                        >
+                          {msg.content ? (
+                            msg.role === 'assistant' ? (
+                              writingDetection?.isWritingBlock ? (
+                                <div className="space-y-2.5 min-w-0">
+                                  {writingDetection.introText && (
+                                    <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/95 font-medium">
+                                      <MarkdownRenderer content={writingDetection.introText} />
+                                    </div>
+                                  )}
+                                  <WritingBlock
+                                    content={writingDetection.writingContent}
+                                    title={writingDetection.title}
+                                  />
+                                  {writingDetection.outroText && (
+                                    <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
+                                      <MarkdownRenderer content={writingDetection.outroText} />
+                                    </div>
+                                  )}
+                                </div>
+                              ) : msg.content.includes('```') ? (
+                                <MarkdownRenderer content={msg.content} />
+                              ) : (
+                                <div className="whitespace-pre-wrap">{msg.content}</div>
+                              )
+                            ) : (
+                              msg.content
+                            )
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-muted-foreground">
+                              <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce [animation-delay:-0.3s]" />
+                              <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce [animation-delay:-0.15s]" />
+                              <span className="w-1.5 h-1.5 rounded-full bg-foreground/60 animate-bounce" />
+                            </span>
+                          )}
+                        </div>
                       </div>
+                      {msg.role === 'user' && msg.metadata?.edited && (
+                        <span className="pr-1 text-[10px] text-muted-foreground select-none">
+                          Edited
+                        </span>
+                      )}
+                      {msg.role === 'assistant' && msg.content && (
+                        <div className="pl-3 flex items-center gap-1">
+                          <ConversationActionBar
+                            messageId={`myai-msg-${index}`}
+                            content={msg.content}
+                          />
+                        </div>
+                      )}
                     </div>
-                    {msg.role === 'assistant' && msg.content && (
-                      <div className="pl-3">
-                        <ConversationActionBar
-                          messageId={`myai-msg-${index}`}
-                          content={msg.content}
-                        />
-                      </div>
-                    )}
                   </div>
-                </div>
-                {msg.role === 'user' && msg.memoryUpdate && (
-                  <div className="w-full -mt-3 flex justify-start">
-                    <MemoryUpdatedIndicator memoryUpdate={msg.memoryUpdate} />
-                  </div>
-                )}
-              </React.Fragment>
-            ))}
+                  {msg.role === 'user' && msg.memoryUpdate && (
+                    <div className="w-full -mt-3 flex justify-start">
+                      <MemoryUpdatedIndicator memoryUpdate={msg.memoryUpdate} />
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            })}
             <div ref={messagesEndRef} />
           </section>
         )}
@@ -593,6 +791,17 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
           data-listening={isListening ? 'true' : 'false'}
           className="manus-input-container max-w-[760px] mx-auto flex flex-col gap-2 border border-border rounded-[24px] px-3.5 py-2 shadow-xs bg-background focus-within:ring-1 focus-within:ring-foreground/20"
         >
+          {editingTarget && (
+            <MessageEditController
+              originalText={editingTarget.originalText}
+              currentValue={input}
+              isSubmitting={isGenerating}
+              onCancel={cancelEditMessage}
+              onSave={() => {
+                void handleSubmit();
+              }}
+            />
+          )}
           <VoiceTranscriptionIndicator
             isListening={isListening}
             interimSpeech={interimSpeech}
@@ -615,7 +824,7 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
               value={input}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              placeholder={isListening ? "Listening... speak now to auto-fill prompt..." : "Message your AI..."}
+              placeholder={editingTarget ? "Edit your message..." : isListening ? "Listening... speak now to auto-fill prompt..." : "Message your AI..."}
               aria-label="Message your AI"
               className="flex-1 min-w-0 max-h-[120px] resize-none border-0 outline-none bg-transparent text-foreground text-base leading-[1.45] py-1.5 custom-scrollbar"
               required
@@ -651,6 +860,24 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
           AI can make mistakes. Check important information.
         </div>
       </div>
+
+      <MessageContextMenu
+        isOpen={contextMenuState.isOpen}
+        anchor={contextMenuState.anchor}
+        messageText={contextMenuState.messageText}
+        timestamp={contextMenuState.timestamp}
+        role={contextMenuState.role}
+        canEdit={contextMenuState.role === 'user' && !isGenerating}
+        onClose={() => setContextMenuState((prev) => ({ ...prev, isOpen: false }))}
+        onEdit={() => beginEditMessage(contextMenuState.messageId, contextMenuState.messageText)}
+        onSelectText={() => setSelectTextModalContent(contextMenuState.messageText)}
+      />
+
+      <SelectTextModal
+        isOpen={selectTextModalContent !== null}
+        text={selectTextModalContent || ''}
+        onClose={() => setSelectTextModalContent(null)}
+      />
     </div>
   );
 }

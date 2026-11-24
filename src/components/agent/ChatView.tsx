@@ -20,8 +20,7 @@ import {
   Zap,
   AlertCircle,
   RotateCw,
-  Pencil,
-  MoreVertical,
+  MoreVertical
 } from 'lucide-react';
 import { ArrowUp, Plus, Search, ChevronUp, ChevronDown } from 'pulsoicon-react';
 import { ConnectorsPopupMenu } from '../chat/ConnectorsPopupMenu';
@@ -37,8 +36,10 @@ import { FileAttachments } from './FileAttachments';
 import { AttachmentMenu } from '../chat/AttachmentMenu';
 import { ConversationActionBar } from './ConversationActionBar';
 import { BubbleReactionButtons } from './BubbleReactionButtons';
-import { MessageContextMenu } from './MessageContextMenu';
+import { MessageContextMenu, SelectTextModal, ContextMenuAnchor, useMessageLongPressController } from './MessageContextMenu';
+import { MessageEditController } from './MessageEditController';
 import { WritingBlock } from './WritingBlock';
+import { detectWritingBlock } from '@/lib/writingDetector';
 import { VoiceInputButton, formatSpeechAutoFill } from '../voice/VoiceInputButton';
 import { VoiceTranscriptionIndicator } from '../voice/VoiceTranscriptionIndicator';
 import { SourceCitations, parseSourcesFromMarkdown, resolveMessageSourcesAndQueries } from './SourceCitations';
@@ -77,7 +78,6 @@ import {
   groupConsecutiveMessages,
 } from '@/lib/messageGrouping';
 import { SseDiagnosticConsole } from './SseDiagnosticConsole';
-import { isStandaloneWritingArtifact } from '@/lib/writingBlockClassifier';
 
 // Lazy-load heavy chart, map, Drive picker, and connector store modals
 const ChartResult = React.lazy(() =>
@@ -97,6 +97,9 @@ const GoogleMapWidgetCard = React.lazy(() =>
 );
 const RoutePlannerCard = React.lazy(() =>
   import('../maps/RoutePlannerCard').then((m) => ({ default: m.RoutePlannerCard }))
+);
+const TaskMetricsDashboard = React.lazy(() =>
+  import('./TaskMetricsDashboard').then((m) => ({ default: m.TaskMetricsDashboard }))
 );
 
 const boundedWeatherCache = new BoundedLRUCache<string, WeatherData>({
@@ -206,8 +209,7 @@ interface ChatViewProps {
   onReset: () => void;
   onExport?: (format?: ChatExportFormat) => void;
   onSubmit: (prompt: string) => void;
-  onEditMessage?: (messageId: string, content: string) => void | Promise<void>;
-  onRegenerateMessage?: (messageId: string) => void | Promise<void>;
+  onEditMessage?: (messageId: string, newContent: string) => void | Promise<void>;
   onStop?: () => void;
   onReorderSteps?: (steps: Step[]) => void;
   isLoading: boolean;
@@ -334,23 +336,6 @@ export function cleanUserMessage(raw: any): string {
   return text.trim() || (typeof raw === 'string' && !raw.includes('[IMAGE_DATA_URL:') ? raw : '');
 }
 
-export function replaceVisibleUserMessageContent(raw: any, editedText: string): string {
-  const nextText = String(editedText || '').trim();
-  const source = typeof raw === 'string' ? raw : String(raw?.content || raw?.text || '');
-  if (!source) return nextText;
-
-  const visibleText = cleanUserMessage(source);
-  if (visibleText) {
-    const visibleIndex = source.lastIndexOf(visibleText);
-    if (visibleIndex >= 0) {
-      return `${source.slice(0, visibleIndex)}${nextText}${source.slice(visibleIndex + visibleText.length)}`.trim();
-    }
-  }
-
-  const attachmentPrefix = source.match(/^(?:(?:\[Attached Image:[^\n]*\]\s*)?\[IMAGE_DATA_URL:[^\]]+\]\s*|\[Attached File:[^\n]*\]\s*)/i)?.[0] || '';
-  return `${attachmentPrefix}${nextText}`.trim();
-}
-
 export function centerElementInContainer(
   container: HTMLElement,
   target: HTMLElement,
@@ -454,11 +439,10 @@ export function ChatView({
   chartData,
   status, 
   phase,
-  onReset,
-  onExport,
+  onReset, 
+  onExport, 
   onSubmit,
   onEditMessage,
-  onRegenerateMessage,
   onStop,
   isLoading,
   taskId,
@@ -493,8 +477,84 @@ export function ChatView({
   // Prevent duplicate weather requests when streaming updates re-render the message list.
   const weatherRequestsRef = useRef<Set<string>>(new Set());
   const [completedTypewriters, setCompletedTypewriters] = useState<Record<string, boolean>>({});
-  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-  const [editInputContent, setEditInputContent] = useState<string>('');
+  const [editingTarget, setEditingTarget] = useState<{
+    id: string;
+    originalText: string;
+  } | null>(null);
+  const savedDraftBeforeEditRef = useRef<string | null>(null);
+  const [contextMenuState, setContextMenuState] = useState<{
+    isOpen: boolean;
+    anchor: ContextMenuAnchor | null;
+    messageId: string;
+    messageText: string;
+    timestamp?: string | number | Date;
+    role: 'user' | 'assistant';
+  }>({
+    isOpen: false,
+    anchor: null,
+    messageId: '',
+    messageText: '',
+    role: 'user',
+  });
+  const [selectTextModalContent, setSelectTextModalContent] = useState<string | null>(null);
+
+  const openMessageContextMenu = React.useCallback(
+    (payload: {
+      anchor: ContextMenuAnchor;
+      messageId: string;
+      messageText: string;
+      timestamp?: string | number | Date;
+      role: 'user' | 'assistant';
+    }) => {
+      setContextMenuState({
+        isOpen: true,
+        anchor: payload.anchor,
+        messageId: payload.messageId,
+        messageText: payload.messageText,
+        timestamp: payload.timestamp,
+        role: payload.role,
+      });
+    },
+    []
+  );
+
+  const closeMessageContextMenu = React.useCallback(() => {
+    setContextMenuState((prev) => (prev.isOpen ? { ...prev, isOpen: false } : prev));
+  }, []);
+
+  const { pressedMessageId, getUserMessageGestureProps } = useMessageLongPressController({
+    isMenuOpen: contextMenuState.isOpen,
+    onOpenMenu: openMessageContextMenu,
+  });
+
+  const beginEditMessage = React.useCallback(
+    (messageId: string, originalText: string) => {
+      if (!messageId) return;
+      if (savedDraftBeforeEditRef.current === null && !editingTarget) {
+        savedDraftBeforeEditRef.current = input;
+      }
+      setEditingTarget({ id: messageId, originalText });
+      setInput(originalText);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (el) {
+          el.focus();
+          const len = originalText.length;
+          try {
+            el.setSelectionRange(len, len);
+          } catch {}
+        }
+      });
+    },
+    [editingTarget, input]
+  );
+
+  const cancelEditMessage = React.useCallback(() => {
+    const previousDraft = savedDraftBeforeEditRef.current;
+    savedDraftBeforeEditRef.current = null;
+    setEditingTarget(null);
+    setInput(previousDraft ?? '');
+  }, []);
 
   // Granular robot reaction sync with task status and active execution step
   useEffect(() => {
@@ -763,8 +823,31 @@ export function ChatView({
 
   const isAssistantWorking = (isLoading || status === 'running') && status !== 'error' && status !== 'completed';
 
+  const confirmEditMessage = React.useCallback(async () => {
+    if (!editingTarget || isAssistantWorking) return;
+    const updatedText = input.trim();
+    if (!updatedText) return;
+    const targetId = editingTarget.id;
+
+    setEditingTarget(null);
+    savedDraftBeforeEditRef.current = null;
+    clearChatViewDraft();
+    setInput('');
+    setShowMentionPicker(false);
+
+    if (onEditMessage) {
+      await onEditMessage(targetId, updatedText);
+    } else {
+      onSubmit(updatedText);
+    }
+  }, [editingTarget, isAssistantWorking, input, onEditMessage, onSubmit]);
+
   const handleSend = async () => {
     if (isAssistantWorking) return;
+    if (editingTarget) {
+      await confirmEditMessage();
+      return;
+    }
     if (!input.trim() && !attachedFile && activeConnectorTags.length === 0) return;
     let message = input.trim();
 
@@ -1106,136 +1189,108 @@ export function ChatView({
 
     if (msg.role === 'user') {
       const msgId = msg.id || String(index);
-      const isEditing = editingMessageId === msgId;
+      const isEditingThis = editingTarget?.id === msgId;
+      const isPressedThis = pressedMessageId === msgId;
+      const isSelectedThis = contextMenuState.isOpen && contextMenuState.messageId === msgId;
       const cleanedText = cleanUserMessage(msg.content);
       const attachedImageUrl = extractUserImageAttachment(msg.content);
       const memoryUpdate = msg.metadata?.memoryUpdate;
+      const isEdited = Boolean(msg.metadata?.edited);
+      const userLongPressHandlers = getUserMessageGestureProps({
+        messageId: msgId,
+        messageText: cleanedText,
+        timestamp: msg.timestamp,
+      });
 
       return (
         <React.Fragment key={msgId}>
-          <MessageContextMenu
-            content={cleanedText}
-            onEdit={() => {
-              setEditingMessageId(msgId);
-              setEditInputContent(cleanedText);
-            }}
-            onSelectText={() => {
-              const messageElement = document.getElementById(`message-text-${msgId}`);
-              if (!messageElement) return;
-              messageElement.focus({ preventScroll: true });
-              const selection = window.getSelection();
-              if (!selection) return;
-              const range = document.createRange();
-              range.selectNodeContents(messageElement);
-              selection.removeAllRanges();
-              selection.addRange(range);
-            }}
+          <div
+            data-message="user"
+            data-grouped-with-prev={isGroupedWithPrev ? 'true' : 'false'}
+            data-grouped-with-next={isGroupedWithNext ? 'true' : 'false'}
+            data-group-position={groupMeta?.groupPosition ?? 0}
+            data-group-size={groupMeta?.groupSize ?? 1}
+            data-stagger-index={index}
+            data-stagger-delay-ms={staggerDelayMs}
+            style={staggerStyle}
+            className={cn(
+              "flex justify-end chat-message-enter chat-message-user-enter group relative px-4 sm:px-20",
+              isGroupedWithPrev ? "mt-0.5" : "mt-2",
+              isGroupedWithNext ? "mb-0.5" : "mb-2"
+            )}
           >
-            {(openMenu) => (
-              <div
-                data-message="user"
-                data-grouped-with-prev={isGroupedWithPrev ? 'true' : 'false'}
-                data-grouped-with-next={isGroupedWithNext ? 'true' : 'false'}
-                data-group-position={groupMeta?.groupPosition ?? 0}
-                data-group-size={groupMeta?.groupSize ?? 1}
-                data-stagger-index={index}
-                data-stagger-delay-ms={staggerDelayMs}
-                style={staggerStyle}
-                className={cn(
-                  "flex justify-end chat-message-enter chat-message-user-enter group relative px-4 sm:px-20",
-                  isGroupedWithPrev ? "mt-0.5" : "mt-2",
-                  isGroupedWithNext ? "mb-0.5" : "mb-2"
-                )}
-              >
-                {isEditing ? (
-                  <div className="bg-card border border-border p-3 rounded-2xl max-w-[90%] sm:max-w-[80%] shadow-md w-full space-y-2">
-                    <textarea
-                      aria-label="Edit message"
-                      value={editInputContent}
-                      onChange={(e) => setEditInputContent(e.target.value)}
-                      className="w-full bg-transparent border border-border rounded-lg p-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
-                      rows={2}
-                    />
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setEditingMessageId(null)}
-                        className="px-3 py-1 rounded-lg text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isAssistantWorking || !editInputContent.trim()}
-                        onClick={() => {
-                          const editedContent = replaceVisibleUserMessageContent(msg.content, editInputContent);
-                          if (!editedContent.trim()) return;
-                          if (onEditMessage) void onEditMessage(msgId, editedContent);
-                          else onSubmit(editedContent);
-                          setEditingMessageId(null);
-                        }}
-                        className="px-3 py-1 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
-                      >
-                        Save &amp; Regenerate
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="relative flex items-center gap-1.5 max-w-[85%] sm:max-w-[75%]">
-                    <div className="flex items-center gap-1 shrink-0">
-                      <BubbleReactionButtons
-                        messageId={`user-${msgId}`}
-                        groupScope="user"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingMessageId(msgId);
-                          setEditInputContent(cleanedText);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity p-1.5 rounded-full bg-card/80 hover:bg-card border border-border shadow-xs text-muted-foreground hover:text-foreground shrink-0"
-                        title="Edit prompt"
-                        aria-label="Edit message"
-                      >
-                        <Pencil size={13} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={openMenu}
-                        className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card/80 text-muted-foreground shadow-xs transition-colors hover:bg-card hover:text-foreground sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
-                        title="Message actions"
-                        aria-label="Message actions"
-                        data-testid="message-more-actions"
-                      >
-                        <MoreVertical size={15} />
-                      </button>
-                    </div>
-                    <div
-                      data-testid="user-message-bubble"
-                      className={cn(
-                        "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] px-4 py-2.5 rounded-2xl text-sm font-medium shadow-xs leading-relaxed space-y-2 overflow-hidden select-text",
-                        isGroupedWithPrev ? "rounded-tr-md" : "rounded-tr-sm",
-                        isGroupedWithNext && "rounded-br-md"
-                      )}
-                    >
-                      {attachedImageUrl && (
-                        <UserAttachedImagePreview imageUrl={attachedImageUrl} />
-                      )}
-                      {cleanedText && (
-                        <div
-                          id={`message-text-${msgId}`}
-                          tabIndex={0}
-                          className="whitespace-pre-wrap break-words select-text focus:outline-none"
-                        >
-                          {cleanedText}
-                        </div>
-                      )}
-                    </div>
-                  </div>
+            <div className="relative flex items-center gap-1.5 max-w-[85%] sm:max-w-[75%]">
+              <div className="flex items-center gap-1 shrink-0">
+                <BubbleReactionButtons
+                  messageId={`user-${msgId}`}
+                  groupScope="user"
+                />
+                <button
+                  type="button"
+                  data-testid="user-message-menu-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const bubbleColumn = e.currentTarget.parentElement?.nextElementSibling as HTMLElement | null;
+                    const bubbleEl = (bubbleColumn?.querySelector('[data-testid="user-message-bubble"]') as HTMLElement | null) || bubbleColumn;
+                    const rect = (bubbleEl || e.currentTarget).getBoundingClientRect();
+                    openMessageContextMenu({
+                      anchor: {
+                        x: rect.right,
+                        y: rect.bottom,
+                        rect: {
+                          top: rect.top,
+                          bottom: rect.bottom,
+                          left: rect.left,
+                          right: rect.right,
+                          width: rect.width,
+                          height: rect.height,
+                        },
+                        align: 'right',
+                      },
+                      messageId: msgId,
+                      messageText: cleanedText,
+                      timestamp: msg.timestamp,
+                      role: 'user',
+                    });
+                  }}
+                  className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 sm:opacity-0 max-sm:opacity-70 transition-opacity p-1.5 rounded-full bg-card/80 hover:bg-card border border-border shadow-xs text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
+                  title="Message actions"
+                  aria-label="Message actions"
+                >
+                  <MoreVertical size={13} />
+                </button>
+              </div>
+              <div className="flex flex-col items-end min-w-0">
+                <div
+                  data-testid="user-message-bubble"
+                  data-long-press-state={isSelectedThis ? 'selected' : isPressedThis ? 'pressed' : 'idle'}
+                  style={{ WebkitTouchCallout: 'none' }}
+                  {...userLongPressHandlers}
+                  className={cn(
+                    "chat-bubble-hover-user bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] px-4 py-2.5 rounded-2xl text-sm font-medium shadow-xs leading-relaxed space-y-2 overflow-hidden max-sm:select-none sm:select-text transition-[transform,box-shadow,opacity] duration-150 ease-out",
+                    isGroupedWithPrev ? "rounded-tr-md" : "rounded-tr-sm",
+                    isGroupedWithNext && "rounded-br-md",
+                    isPressedThis && "scale-[0.975] opacity-90",
+                    isSelectedThis && "ring-2 ring-foreground/30 dark:ring-white/40 scale-[1.01]",
+                    isEditingThis && "ring-2 ring-primary/50 dark:ring-white/40"
+                  )}
+                >
+                  {attachedImageUrl && (
+                    <UserAttachedImagePreview imageUrl={attachedImageUrl} />
+                  )}
+                  {cleanedText && <div className="whitespace-pre-wrap break-words max-sm:select-none sm:select-text">{cleanedText}</div>}
+                </div>
+                {isEdited && (
+                  <span
+                    data-testid="message-edited-badge"
+                    className="mt-0.5 pr-1 text-[10px] text-muted-foreground select-none"
+                  >
+                    Edited
+                  </span>
                 )}
               </div>
-            )}
-          </MessageContextMenu>
+            </div>
+          </div>
           {memoryUpdate && (
             <div className="max-w-3xl mx-auto px-4 sm:px-20 -mt-0.5 mb-2 flex justify-start">
               <MemoryUpdatedIndicator memoryUpdate={memoryUpdate} />
@@ -1288,10 +1343,8 @@ export function ChatView({
       const previousTurnSubjects = priorUserMessages.flatMap((m: any) =>
         detectVisualSubjectQuery(cleanUserMessage(m.content || '')).subjects
       );
-      const isWritingBlock = isStandaloneWritingArtifact(
-        prevUserPromptText,
-        parsedSources.cleanedContent || cleanedContent
-      );
+
+      const writingDetection = detectWritingBlock(parsedSources.cleanedContent, prevUserPromptText);
 
       return (
         <div
@@ -1311,7 +1364,7 @@ export function ChatView({
             isGroupedWithNext ? "mb-1" : "mb-3"
           )}
         >
-          <div className="flex-1 space-y-3 min-w-0">
+          <div className="chat-bubble-hover-assistant flex-1 space-y-3 min-w-0 -mx-2.5 px-2.5 py-1.5 -my-1.5 rounded-2xl">
             {!isGroupedWithPrev && (
               <div className="flex items-center justify-between gap-3">
                 <ManusLogo showBadge={true} />
@@ -1325,18 +1378,30 @@ export function ChatView({
                   assistantContent={parsedSources.cleanedContent}
                   previousTurnSubjects={previousTurnSubjects}
                 />
-                {isWritingBlock ? (
-                  <WritingBlock
-                    content={parsedSources.cleanedContent}
-                    messageId={msgKey}
-                    animateTypewriter={shouldAnimate}
-                    onTypewriterComplete={() => handleTypewriterComplete(msgKey)}
-                    onTypewriterTick={() => {}}
-                  />
+                {writingDetection.isWritingBlock ? (
+                  <div className="space-y-2.5 min-w-0">
+                    {writingDetection.introText && (
+                      <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/95 font-medium">
+                        <MarkdownRenderer content={writingDetection.introText} />
+                      </div>
+                    )}
+                    <WritingBlock
+                      content={writingDetection.writingContent}
+                      title={writingDetection.title}
+                      animateTypewriter={shouldAnimate}
+                      onTypewriterComplete={() => handleTypewriterComplete(msgKey)}
+                      onTypewriterTick={() => {}}
+                    />
+                    {writingDetection.outroText && (
+                      <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
+                        <MarkdownRenderer content={writingDetection.outroText} />
+                      </div>
+                    )}
+                  </div>
                 ) : (
                   <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
-                    <MarkdownRenderer
-                      content={parsedSources.cleanedContent}
+                    <MarkdownRenderer 
+                      content={parsedSources.cleanedContent} 
                       animateTypewriter={shouldAnimate}
                       onTypewriterComplete={() => handleTypewriterComplete(msgKey)}
                       onTypewriterTick={() => {}}
@@ -1510,13 +1575,9 @@ export function ChatView({
                 <ConversationActionBar 
                   content={cleanedContent}
                   messageId={msgKey}
-                  hideCopyAndShare={isWritingBlock}
                   onRegenerate={() => {
-                    if (prevUserMsg?.id && onRegenerateMessage) {
-                      void onRegenerateMessage(String(prevUserMsg.id));
-                      return;
-                    }
-                    const promptToReRun = prevUserMsg?.content ? cleanUserMessage(prevUserMsg.content) : prompt;
+                    const lastUser = displayMessages.slice(0, index).reverse().find((m: any) => m.role === 'user');
+                    const promptToReRun = lastUser?.content ? cleanUserMessage(lastUser.content) : prompt;
                     if (promptToReRun) onSubmit(promptToReRun);
                   }}
                 />
@@ -1528,11 +1589,13 @@ export function ChatView({
     }
     return null;
   }, [
-    editingMessageId,
-    editInputContent,
+    editingTarget,
+    pressedMessageId,
+    contextMenuState.isOpen,
+    contextMenuState.messageId,
+    getUserMessageGestureProps,
+    openMessageContextMenu,
     onSubmit,
-    onEditMessage,
-    onRegenerateMessage,
     virtualizationBudget.maxRenderedMessagesWindow,
     isAssistantWorking,
     result,
@@ -1711,6 +1774,22 @@ export function ChatView({
               </span>
             </span>
           </div>
+        )}
+
+        {displayMessages.length > 0 && (
+          <React.Suspense fallback={null}>
+            <TaskMetricsDashboard
+              taskId={taskId}
+              messages={displayMessages}
+              isRunning={isAssistantWorking || isStreamingResponse}
+              status={status}
+              liveStreamText={
+                displayMessages[displayMessages.length - 1]?.role === 'assistant'
+                  ? String(displayMessages[displayMessages.length - 1]?.content || '')
+                  : undefined
+              }
+            />
+          </React.Suspense>
         )}
 
         <SseDiagnosticConsole
@@ -2037,6 +2116,19 @@ export function ChatView({
             }}
           />
 
+          {/* Composer Edit Mode Bar when editing a previous user message */}
+          {editingTarget && (
+            <MessageEditController
+              originalText={editingTarget.originalText}
+              currentValue={input}
+              isSubmitting={isAssistantWorking}
+              onCancel={cancelEditMessage}
+              onSave={() => {
+                void confirmEditMessage();
+              }}
+            />
+          )}
+
           {/* Top Row: Textarea for typing message + Reactive Voice Frequency Visualizer when listening */}
           <div className="w-full flex items-center gap-2.5 min-h-[26px] sm:min-h-[28px]">
             <textarea
@@ -2075,6 +2167,12 @@ export function ChatView({
                   }
                 }
 
+                if (e.key === 'Escape' && editingTarget) {
+                  e.preventDefault();
+                  cancelEditMessage();
+                  return;
+                }
+
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   handleSend();
@@ -2082,11 +2180,13 @@ export function ChatView({
               }}
               rows={1}
               placeholder={
-                isListening 
-                  ? "Listening... speak now to auto-fill prompt..." 
-                  : isThinkHarder 
-                    ? "Ask with deep reasoning..." 
-                    : "Type a message or ask anything..."
+                editingTarget
+                  ? "Edit your message..."
+                  : isListening 
+                    ? "Listening... speak now to auto-fill prompt..." 
+                    : isThinkHarder 
+                      ? "Ask with deep reasoning..." 
+                      : "Type a message or ask anything..."
               }
               className="flex-1 min-w-0 w-full bg-transparent border-none outline-none resize-none text-[#000000] dark:text-[#FFFFFF] placeholder:text-[#777777] dark:placeholder:text-[#AAAAAA] text-[14px] sm:text-[15px] leading-snug p-0 focus:ring-0 focus:outline-none min-h-[22px] sm:min-h-[24px] max-h-[90px] custom-scrollbar"
               disabled={isAssistantWorking}
@@ -2256,6 +2356,26 @@ export function ChatView({
           </div>
         </div>
       </div>
+
+      {/* Message Long-Press / Three-Dot Contextual Action Menu */}
+      <MessageContextMenu
+        isOpen={contextMenuState.isOpen}
+        anchor={contextMenuState.anchor}
+        messageText={contextMenuState.messageText}
+        timestamp={contextMenuState.timestamp}
+        role={contextMenuState.role}
+        canEdit={contextMenuState.role === 'user' && !isAssistantWorking}
+        onClose={closeMessageContextMenu}
+        onEdit={() => beginEditMessage(contextMenuState.messageId, contextMenuState.messageText)}
+        onSelectText={() => setSelectTextModalContent(contextMenuState.messageText)}
+      />
+
+      {/* Accessible Select Text Modal for highlighting individual portions */}
+      <SelectTextModal
+        isOpen={selectTextModalContent !== null}
+        text={selectTextModalContent || ''}
+        onClose={() => setSelectTextModalContent(null)}
+      />
 
       {/* Google Drive Picker Modal — lazy-mounted only when opened */}
       {isDrivePickerOpen && (

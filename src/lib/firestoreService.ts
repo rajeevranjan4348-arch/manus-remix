@@ -1,7 +1,6 @@
 import { 
   collection, 
   doc, 
-  deleteField,
   setDoc, 
   getDoc, 
   getDocs, 
@@ -45,14 +44,6 @@ const messagesReadCache = new BoundedLRUCache<string, StoredMessage[]>({
   maxSize: 15,
   ttlMs: 20 * 1000,
 });
-
-function hashText(value: string): string {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash = Math.imul(hash ^ value.charCodeAt(index), 16777619);
-  }
-  return (hash >>> 0).toString(36);
-}
 
 function getAuthenticatedUser() {
   const currentUser = auth.currentUser;
@@ -202,8 +193,7 @@ export async function saveConversationToFirestore(conv: StoredConversation): Pro
       ? conv.result
       : JSON.stringify(conv.result)
     : '';
-  const stepsSignature = JSON.stringify(conv.steps ?? null);
-  const signature = `${conv.title || ''}|${conv.status || 'idle'}|${conv.projectId || ''}|${hashText(serializedResult)}|${hashText(stepsSignature)}`;
+  const signature = `${conv.title || ''}|${conv.status || 'idle'}|${conv.projectId || ''}|${serializedResult.length}`;
   if (writeSignatureCache.get(path) === signature) {
     recordFirestoreWriteCoalesced();
     return;
@@ -222,13 +212,9 @@ export async function saveConversationToFirestore(conv: StoredConversation): Pro
     if (conv.outputFormat) payload.outputFormat = conv.outputFormat;
     if (conv.chartType) payload.chartType = conv.chartType;
     if (conv.projectId) payload.projectId = conv.projectId;
-    if (conv.result !== undefined && conv.result !== null) {
+    if (serializedResult) {
       payload.result = serializedResult;
-    } else if (conv.status === 'running') {
-      payload.result = deleteField();
     }
-    if (Array.isArray(conv.steps)) payload.steps = conv.steps;
-    else if (conv.status === 'running') payload.steps = deleteField();
     await setDoc(doc(db, 'conversations', conv.id), payload, { merge: true });
     writeSignatureCache.set(path, signature);
     conversationsReadCache.delete(currentUser.uid);
@@ -292,9 +278,8 @@ export async function saveMessageToFirestore(msg: StoredMessage): Promise<void> 
   }
 
   const path = `conversations/${msg.conversationId}/messages/${msg.id}`;
-  const content = msg.content || '';
-  const metadataSignature = JSON.stringify(msg.metadata || {});
-  const signature = `${msg.status || 'success'}|${content.length}|${hashText(content)}|${hashText(msg.error || '')}|${hashText(metadataSignature)}`;
+  const rawContent = msg.content || '';
+  const signature = `${msg.status || 'success'}|${rawContent.length}|${rawContent.slice(0, 64)}|${rawContent.slice(-64)}`;
   if (writeSignatureCache.get(path) === signature) {
     recordFirestoreWriteCoalesced();
     return;
@@ -306,11 +291,9 @@ export async function saveMessageToFirestore(msg: StoredMessage): Promise<void> 
       conversationId: msg.conversationId,
       userId: currentUser.uid,
       role: msg.role,
-      content: msg.content || '',
+      content: rawContent,
       timestamp: msg.timestamp || new Date().toISOString(),
-      status: msg.status || 'success',
-      ...(msg.metadata ? { metadata: msg.metadata } : {}),
-      ...(msg.error ? { error: msg.error } : {}),
+      status: msg.status || 'success'
     };
     await setDoc(doc(db, 'conversations', msg.conversationId, 'messages', msg.id), payload);
     writeSignatureCache.set(path, signature);
@@ -320,19 +303,21 @@ export async function saveMessageToFirestore(msg: StoredMessage): Promise<void> 
   }
 }
 
-export async function deleteMessagesFromFirestore(conversationId: string, messageIds: string[]): Promise<void> {
+export async function deleteMessageFromFirestore(
+  conversationId: string,
+  messageId: string
+): Promise<void> {
   const currentUser = getAuthenticatedUser();
-  if (!currentUser || !conversationId || !Array.isArray(messageIds) || messageIds.length === 0) return;
+  if (!currentUser || !conversationId || !messageId) return;
 
-  await Promise.all(messageIds.map(async (messageId) => {
-    if (!messageId) return;
-    try {
-      await deleteDoc(doc(db, 'conversations', conversationId, 'messages', messageId));
-    } catch (error) {
-      console.warn(`[Firestore] Skipped message delete (${conversationId}/${messageId}):`, (error as any)?.message || error);
-    }
-  }));
-  messagesReadCache.delete(conversationId);
+  const path = `conversations/${conversationId}/messages/${messageId}`;
+  try {
+    await deleteDoc(doc(db, 'conversations', conversationId, 'messages', messageId));
+    writeSignatureCache.delete(path);
+    messagesReadCache.delete(conversationId);
+  } catch (error) {
+    console.warn(`[Firestore] Skipped message delete (${path}):`, (error as any)?.message || error);
+  }
 }
 
 export async function getMessagesFromFirestore(conversationId: string): Promise<StoredMessage[]> {

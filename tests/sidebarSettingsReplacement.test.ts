@@ -17,18 +17,29 @@ describe('Sidebar — Replace Logout Button with Settings Button', () => {
     expect(sidebarSource).not.toContain('Click to sign out');
   });
 
-  it('renders a single Settings button in the sidebar footer matching the reference style and prevents duplicates', () => {
+  it('places the Settings gear icon on the right side of the profile card and prevents duplicate Settings icons', () => {
     // No duplicate settings entry in top navItems
     expect(sidebarSource).not.toContain("id: 'settings'");
 
-    // Expanded sidebar footer Settings button
+    // Standalone Settings label row above the profile card is removed
+    expect(sidebarSource).not.toContain('<span>Settings</span>');
+
+    // Relocated Settings gear icon button inside the profile card on the right of Cloud Synced
+    expect(sidebarSource).toContain('data-testid="sidebar-profile-card"');
     expect(sidebarSource).toContain('data-testid="sidebar-settings-button"');
+    expect(sidebarSource).toContain('aria-label="Settings"');
     expect(sidebarSource).toContain('<Settings2');
     expect(sidebarSource).toContain('size={21}');
     expect(sidebarSource).toContain('strokeWidth={2.4}');
-    expect(sidebarSource).toContain('<span>Settings</span>');
 
-    // Collapsed sidebar Settings icon button
+    const profileCardIdx = sidebarSource.indexOf('data-testid="sidebar-profile-card"');
+    const cloudSyncedIdx = sidebarSource.indexOf('Cloud Synced', profileCardIdx);
+    const settingsBtnIdx = sidebarSource.indexOf('data-testid="sidebar-settings-button"', profileCardIdx);
+    expect(profileCardIdx).toBeGreaterThan(-1);
+    expect(cloudSyncedIdx).toBeGreaterThan(profileCardIdx);
+    expect(settingsBtnIdx).toBeGreaterThan(cloudSyncedIdx);
+
+    // Collapsed sidebar Settings icon button remains intact
     expect(sidebarSource).toContain('data-testid="sidebar-collapsed-settings-button"');
   });
 

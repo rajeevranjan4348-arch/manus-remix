@@ -3,6 +3,7 @@ import { auth } from './firebase';
 import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
 import { agentActivityTracker } from './agentActivityTracker';
 import { sseStreamDiagnostics } from './sseStreamDiagnostics';
+import { taskMetricsStore } from './taskMetrics';
 
 const PROJECT_ID = (import.meta as any).env?.VITE_BLINK_PROJECT_ID || 'manus-agent-clone-tkzhogvs';
 const PUBLISHABLE_KEY = (import.meta as any).env?.VITE_BLINK_PUBLISHABLE_KEY || '';
@@ -100,6 +101,22 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
       let finishEmitted = false;
       let doneEmitted = false;
       let accumulatedText = '';
+      const streamStartedAt = Date.now();
+      let firstTokenAt: number | null = null;
+      let capturedUsage: any = null;
+      let capturedServerDurationMs: number | null = null;
+      const resolvedModelName = (() => {
+        const m = (agentConfig?.model?.replace(/^google\//, '') || 'gemini-3.8-flash').trim();
+        return m === 'gemini-2.5-flash' || m === 'gemini-3-flash' || m === 'gemini-3.0-flash' ? 'gemini-3.8-flash' : m;
+      })();
+
+      taskMetricsStore.recordTurnStart({
+        taskId: activeTaskId,
+        requestId,
+        promptText: typeof lastUserMsg === 'string' ? lastUserMsg : '',
+        startedAt: streamStartedAt,
+        model: resolvedModelName,
+      });
 
       const streamAbortController = new AbortController();
       activeStreamControllers.add(streamAbortController);
@@ -189,6 +206,14 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
 
       const emitTextDelta = (deltaText: string) => {
         if (!deltaText) return;
+        if (firstTokenAt === null) {
+          firstTokenAt = Date.now();
+          taskMetricsStore.recordFirstToken({
+            taskId: activeTaskId,
+            requestId,
+            at: firstTokenAt,
+          });
+        }
         accumulatedText += deltaText;
         sendEvent({
           type: 'text-delta',
@@ -201,6 +226,40 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
           delta: deltaText,
           text: accumulatedText,
         });
+      };
+
+      const recordFinalTurnMetrics = (reason: 'stop' | 'error') => {
+        const durationMs =
+          typeof capturedServerDurationMs === 'number' && Number.isFinite(capturedServerDurationMs) && capturedServerDurationMs > 0
+            ? Math.round(capturedServerDurationMs)
+            : Math.max(1, Date.now() - streamStartedAt);
+        const ttftMs = firstTokenAt !== null ? Math.max(1, firstTokenAt - streamStartedAt) : undefined;
+        if (reason === 'stop' || accumulatedText.trim().length > 0) {
+          const metric = taskMetricsStore.recordTurnComplete({
+            taskId: activeTaskId,
+            requestId,
+            promptText: typeof lastUserMsg === 'string' ? lastUserMsg : '',
+            responseText: accumulatedText,
+            usage: capturedUsage,
+            durationMs,
+            ttftMs,
+            model: capturedUsage?.model || resolvedModelName,
+          });
+          return {
+            durationMs: metric.durationMs,
+            ttftMs: metric.ttftMs,
+            usage: {
+              promptTokens: metric.promptTokens,
+              completionTokens: metric.completionTokens,
+              thoughtTokens: metric.thoughtTokens,
+              totalTokens: metric.totalTokens,
+              model: metric.model,
+              source: metric.source,
+            },
+          };
+        }
+        taskMetricsStore.clearActiveTurn(activeTaskId);
+        return { durationMs, ttftMs, usage: capturedUsage || undefined };
       };
 
       const sourceMsgs =
@@ -354,15 +413,23 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
             if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
               window.dispatchEvent(new CustomEvent('manus_stream_started', { detail: { requestId } }));
             }
+            if (jsonPayload?.usage) {
+              capturedUsage = jsonPayload.usage;
+            }
+            if (typeof jsonPayload?.durationMs === 'number' && jsonPayload.durationMs > 0) {
+              capturedServerDurationMs = jsonPayload.durationMs;
+            }
             streamFinalized = true;
             emitTextDelta(directText);
             finishEmitted = true;
-            sendEvent({ type: 'finish', finishReason: 'stop' });
+            const finalTelemetry = recordFinalTurnMetrics('stop');
+            sendEvent({ type: 'finish', finishReason: 'stop', ...finalTelemetry });
             sendDone();
             emitWindowEvent('manus_stream_done', {
               requestId,
               text: accumulatedText,
               finishReason: 'stop',
+              ...finalTelemetry,
             });
             safeClose();
             return;
@@ -420,12 +487,14 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
           streamFinalized = true;
           emitTextDelta(fallbackText);
           finishEmitted = true;
-          sendEvent({ type: 'finish', finishReason: 'stop' });
+          const finalTelemetry = recordFinalTurnMetrics('stop');
+          sendEvent({ type: 'finish', finishReason: 'stop', ...finalTelemetry });
           sendDone();
           emitWindowEvent('manus_stream_done', {
             requestId,
             text: accumulatedText,
             finishReason: 'stop',
+            ...finalTelemetry,
           });
           safeClose();
           return;
@@ -628,6 +697,12 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
               }
               if (eventType === 'finish' || eventType === 'done') {
                 finishEmitted = true;
+                if (parsed.usage && typeof parsed.usage === 'object') {
+                  capturedUsage = parsed.usage;
+                }
+                if (typeof parsed.durationMs === 'number' && Number.isFinite(parsed.durationMs) && parsed.durationMs > 0) {
+                  capturedServerDurationMs = parsed.durationMs;
+                }
                 if (parsed.finishReason === 'error' && !accumulatedText.trim()) {
                   finishReason = 'error';
                   if (parsed.error) serviceFailureMessage = String(parsed.error);
@@ -689,6 +764,7 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
               });
             }
             sendDone();
+            const finalTelemetry = recordFinalTurnMetrics(finishReason);
             sseStreamDiagnostics.recordStreamCompleted({
               requestId,
               finishReason,
@@ -697,6 +773,7 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
               requestId,
               text: accumulatedText,
               finishReason,
+              ...finalTelemetry,
               ...(finishReason === 'error' ? { error: serviceFailureMessage } : {}),
             });
             safeClose();
@@ -747,6 +824,7 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
             });
           }
           sendDone();
+          const finalTelemetry = recordFinalTurnMetrics(finishReason);
           sseStreamDiagnostics.recordStreamCompleted({
             requestId,
             finishReason,
@@ -755,6 +833,7 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
             requestId,
             text: accumulatedText,
             finishReason,
+            ...finalTelemetry,
             ...(finishReason === 'error' ? { error: serviceFailureMessage } : {}),
           });
           safeClose();

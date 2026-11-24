@@ -526,6 +526,14 @@ export default async (req: Request) => {
           }
 
           const waterfallStartMs = Date.now();
+          let capturedUsage: {
+            promptTokens: number;
+            completionTokens: number;
+            thoughtTokens?: number;
+            totalTokens: number;
+            model?: string;
+            source: 'exact' | 'estimated';
+          } | null = null;
 
           try {
             const needsModelSearchGrounding = useGoogleSearch && externalSources.size === 0 && !realtimeSnapshot?.directFallbackMarkdown;
@@ -561,6 +569,7 @@ export default async (req: Request) => {
                     emitSseActivity
                   );
                   let charCount = 0;
+                  let latestUsageMetadata: any = null;
                   try {
                     const guardedStream = iterateStreamWithTimeouts(
                       () =>
@@ -585,6 +594,9 @@ export default async (req: Request) => {
                         modelHandle.cancel('Generation cancelled by client');
                         break modelLoop;
                       }
+                      if ((chunk as any)?.usageMetadata) {
+                        latestUsageMetadata = (chunk as any).usageMetadata;
+                      }
                       const text = chunk.text;
                       if (text) {
                         hasEmittedText = true;
@@ -604,6 +616,20 @@ export default async (req: Request) => {
                     geminiCircuitBreaker.recordSuccess();
                     recoveryTelemetry.record({ component: 'gemini', action: 'provider_recovered', outcome: 'success', requestId });
                     if (hasEmittedText) {
+                      if (latestUsageMetadata) {
+                        const promptTokens = Number(latestUsageMetadata.promptTokenCount) || 0;
+                        const completionTokens = Number(latestUsageMetadata.candidatesTokenCount) || Math.max(1, Math.ceil(charCount / 4));
+                        const thoughtTokens = Number(latestUsageMetadata.thoughtsTokenCount) || 0;
+                        const totalTokens = Number(latestUsageMetadata.totalTokenCount) || (promptTokens + completionTokens + thoughtTokens);
+                        capturedUsage = {
+                          promptTokens,
+                          completionTokens,
+                          thoughtTokens,
+                          totalTokens,
+                          model,
+                          source: Number(latestUsageMetadata.totalTokenCount) > 0 ? 'exact' : 'estimated',
+                        };
+                      }
                       modelHandle.complete(`Streamed ${charCount} chars from ${model}`);
                       break modelLoop;
                     }
@@ -667,20 +693,22 @@ export default async (req: Request) => {
               safeEnqueue(`data: ${JSON.stringify({ type: 'text-delta', delta: sourceMarkdown, textDelta: sourceMarkdown, requestId })}\n\n`);
             }
 
-            safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId })}\n\n`);
+            const durationMs = Math.max(1, Date.now() - waterfallStartMs);
+            safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId, durationMs, ...(capturedUsage ? { usage: capturedUsage } : {}) })}\n\n`);
             safeEnqueue('data: [DONE]\n\n');
           } catch (err: any) {
             try {
+              const durationMs = Math.max(1, Date.now() - waterfallStartMs);
               if (!hasEmittedText && !req.signal?.aborted) {
                 const fallback = buildFallbackAnswer(latestUserText, configuredModelId, realtimeSnapshot);
                 safeEnqueue(`data: ${JSON.stringify({ type: 'text-delta', delta: fallback, textDelta: fallback, requestId })}\n\n`);
-                safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId })}\n\n`);
+                safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId, durationMs })}\n\n`);
               } else if (hasEmittedText) {
                 // Preserve already-streamed tokens cleanly
-                safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', partialRecovery: true, requestId })}\n\n`);
+                safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', partialRecovery: true, requestId, durationMs, ...(capturedUsage ? { usage: capturedUsage } : {}) })}\n\n`);
               } else {
                 safeEnqueue(`data: ${JSON.stringify({ type: 'error', error: err?.message || 'Stream error', requestId })}\n\n`);
-                safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error', requestId })}\n\n`);
+                safeEnqueue(`data: ${JSON.stringify({ type: 'finish', finishReason: 'error', requestId, durationMs })}\n\n`);
               }
               safeEnqueue('data: [DONE]\n\n');
             } catch {}
@@ -730,6 +758,7 @@ export default async (req: Request) => {
                 ...messages.map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })),
               ],
               stream: true,
+              stream_options: { include_usage: true },
               max_tokens: 4096,
             }),
             signal: AbortSignal.timeout(25000),
@@ -752,6 +781,8 @@ export default async (req: Request) => {
             const reader = orRes.body.getReader();
             const decoder = new TextDecoder();
             const encoder = new TextEncoder();
+            const orStartedAt = Date.now();
+            let orUsage: any = null;
             let buffer = '';
             let hasEmittedText = false;
 
@@ -774,13 +805,29 @@ export default async (req: Request) => {
                           const fallback = buildFallbackAnswer(latestUserText, configuredModelId, realtimeSnapshot);
                           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: fallback, textDelta: fallback, requestId })}\n\n`));
                         }
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId })}\n\n`));
+                        const durationMs = Math.max(1, Date.now() - orStartedAt);
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId, durationMs, ...(orUsage ? { usage: orUsage } : {}) })}\n\n`));
                         controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                         return;
                       }
                       if (trimmed.startsWith('data: ')) {
                         try {
                           const json = JSON.parse(trimmed.slice(6));
+                          if (json.usage) {
+                            const promptTokens = Number(json.usage.prompt_tokens) || 0;
+                            const completionTokens = Number(json.usage.completion_tokens) || 0;
+                            const totalTokens = Number(json.usage.total_tokens) || (promptTokens + completionTokens);
+                            if (totalTokens > 0) {
+                              orUsage = {
+                                promptTokens,
+                                completionTokens,
+                                thoughtTokens: Number(json.usage.reasoning_tokens) || 0,
+                                totalTokens,
+                                model: orModel,
+                                source: 'exact',
+                              };
+                            }
+                          }
                           const delta = json.choices?.[0]?.delta?.content;
                           if (delta) {
                             hasEmittedText = true;
@@ -796,7 +843,8 @@ export default async (req: Request) => {
                     const fallback = buildFallbackAnswer(latestUserText, configuredModelId, realtimeSnapshot);
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: fallback, textDelta: fallback, requestId })}\n\n`));
                   }
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId })}\n\n`));
+                  const durationMs = Math.max(1, Date.now() - orStartedAt);
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'finish', finishReason: 'stop', requestId, durationMs, ...(orUsage ? { usage: orUsage } : {}) })}\n\n`));
                   controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                 } catch (err: any) {
                   openRouterCircuitBreaker.recordFailure(err);
