@@ -206,11 +206,8 @@ describe('Task Metrics Engine & Recharts Dashboard Telemetry', () => {
     expect(summary.tokenBreakdown.map((s) => s.key)).toEqual(['prompt', 'completion']);
   });
 
-  it('verifies Recharts dashboard wiring and server telemetry capture across Vite & Netlify', () => {
-    const dashboardSrc = fs.readFileSync(
-      path.resolve(__dirname, '../src/components/agent/TaskMetricsDashboard.tsx'),
-      'utf8'
-    );
+  it('verifies Task Performance Dashboard UI is removed from ChatView while server telemetry capture remains intact', () => {
+    const dashboardPath = path.resolve(__dirname, '../src/components/agent/TaskMetricsDashboard.tsx');
     const chatViewSrc = fs.readFileSync(
       path.resolve(__dirname, '../src/components/agent/ChatView.tsx'),
       'utf8'
@@ -228,15 +225,9 @@ describe('Task Metrics Engine & Recharts Dashboard Telemetry', () => {
       'utf8'
     );
 
-    expect(dashboardSrc).toContain("from 'recharts'");
-    expect(dashboardSrc).toContain('BarChart');
-    expect(dashboardSrc).toContain('AreaChart');
-    expect(dashboardSrc).toContain('PieChart');
-    expect(dashboardSrc).toContain('ResponsiveContainer');
-    expect(dashboardSrc).toContain('data-testid="task-metrics-dashboard"');
-
-    expect(chatViewSrc).toContain('TaskMetricsDashboard');
-    expect(chatViewSrc).toContain("import('./TaskMetricsDashboard')");
+    expect(fs.existsSync(dashboardPath)).toBe(false);
+    expect(chatViewSrc).not.toContain('TaskMetricsDashboard');
+    expect(chatViewSrc).not.toContain("import('./TaskMetricsDashboard')");
 
     expect(geminiSvcSrc).toContain('usageMetadata');
     expect(geminiSvcSrc).toContain('onUsage');

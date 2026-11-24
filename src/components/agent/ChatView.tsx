@@ -104,9 +104,6 @@ const GoogleMapWidgetCard = React.lazy(() =>
 const RoutePlannerCard = React.lazy(() =>
   import('../maps/RoutePlannerCard').then((m) => ({ default: m.RoutePlannerCard }))
 );
-const TaskMetricsDashboard = React.lazy(() =>
-  import('./TaskMetricsDashboard').then((m) => ({ default: m.TaskMetricsDashboard }))
-);
 
 const boundedWeatherCache = new BoundedLRUCache<string, WeatherData>({
   maxSize: 15,
@@ -1874,22 +1871,6 @@ export function ChatView({
               </span>
             </span>
           </div>
-        )}
-
-        {displayMessages.length > 0 && (
-          <React.Suspense fallback={null}>
-            <TaskMetricsDashboard
-              taskId={taskId}
-              messages={displayMessages}
-              isRunning={isAssistantWorking || isStreamingResponse}
-              status={status}
-              liveStreamText={
-                displayMessages[displayMessages.length - 1]?.role === 'assistant'
-                  ? String(displayMessages[displayMessages.length - 1]?.content || '')
-                  : undefined
-              }
-            />
-          </React.Suspense>
         )}
 
         <SseDiagnosticConsole
