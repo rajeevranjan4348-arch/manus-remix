@@ -72,6 +72,12 @@ describe('Task Metrics Engine & Recharts Dashboard Telemetry', () => {
 
     const missingUsage = normalizeUsagePayload(null, 'Explain Recharts', 'Recharts is a React charting library.');
     expect(missingUsage).toMatchObject({ promptTokens: 0, completionTokens: 0, totalTokens: 0, source: 'unavailable' });
+    expect(normalizeUsagePayload({ totalTokenCount: 545 })).toMatchObject({
+      promptTokens: 0, completionTokens: 0, totalTokens: 0, source: 'unavailable',
+    });
+    expect(normalizeUsagePayload({ promptTokenCount: 310 })).toMatchObject({
+      promptTokens: 0, completionTokens: 0, totalTokens: 0, source: 'unavailable',
+    });
     expect(geminiUsage.promptTokens + geminiUsage.completionTokens).toBe(geminiUsage.totalTokens);
     expect(openRouterUsage.promptTokens + openRouterUsage.completionTokens).toBe(openRouterUsage.totalTokens);
   });
