@@ -18,6 +18,8 @@ import {
 import { ConversationActionBar } from '../agent/ConversationActionBar';
 import { MemoryUpdatedIndicator } from '../agent/MemoryUpdatedIndicator';
 import { MarkdownRenderer } from '../agent/MarkdownRenderer';
+import { formatResponseModelMetadata, normalizeResponseModelMetadata } from '@/lib/responseModelMetadata';
+import type { ResponseModelMetadata } from '@/lib/responseModelMetadata';
 import { MessageContextMenu, SelectTextModal, ContextMenuAnchor, useMessageLongPressController } from '../agent/MessageContextMenu';
 import { MessageEditController } from '../agent/MessageEditController';
 import { WritingBlock } from '../agent/WritingBlock';
@@ -31,6 +33,7 @@ interface Message {
   timestamp?: string;
   metadata?: Record<string, any>;
   memoryUpdate?: MessageMemoryUpdate;
+  responseModel?: ResponseModelMetadata;
 }
 
 interface MyAIChatProps {
@@ -395,6 +398,7 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
     setMessages([...updatedMessages, assistantPlaceholder]);
 
     let accumulated = '';
+    let responseModel: ResponseModelMetadata | null = null;
     try {
       const activeUserId = auth?.currentUser?.uid || 'usr_manus_default';
       const captureRes = await longTermMemory.captureFromUserMessage({
@@ -447,7 +451,6 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
         requestId: requestIdStr,
         messages: payloadMessages,
         systemInstruction,
-        model: 'gemini-3-flash-preview',
       });
       const endpoints = ['/api/gemini/stream', '/.netlify/functions/agent'];
       let res: Response | null = null;
@@ -495,6 +498,18 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
 
         try {
           const parsed = JSON.parse(dataStr);
+          if (parsed.type === 'response-metadata') {
+            responseModel = normalizeResponseModelMetadata(parsed.responseModel ?? parsed.metadata);
+            if (responseModel) {
+              setMessages(prev => {
+                if (activeRequestIdRef.current !== reqId) return prev;
+                const next = [...prev];
+                next[next.length - 1] = { role: 'assistant', content: accumulated, responseModel };
+                return next;
+              });
+            }
+            return;
+          }
           if (parsed.type === 'heartbeat' || parsed.type === 'ping' || parsed.type === 'stream-open') {
             return;
           }
@@ -504,7 +519,7 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
             setMessages(prev => {
               if (activeRequestIdRef.current !== reqId) return prev;
               const next = [...prev];
-              next[next.length - 1] = { role: 'assistant', content: accumulated };
+              next[next.length - 1] = { role: 'assistant', content: accumulated, responseModel: responseModel || undefined };
               return next;
             });
             scrollToBottom();
@@ -513,7 +528,7 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
             setMessages(prev => {
               if (activeRequestIdRef.current !== reqId) return prev;
               const next = [...prev];
-              next[next.length - 1] = { role: 'assistant', content: accumulated };
+              next[next.length - 1] = { role: 'assistant', content: accumulated, responseModel: responseModel || undefined };
               return next;
             });
           }
@@ -655,8 +670,8 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
                       msg.role === 'user' ? 'justify-end group relative' : 'justify-start group/ai-message relative'
                     }`}
                   >
-                    <div className={`flex flex-col max-w-[88%] sm:max-w-[82%] gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                      <div className={msg.role === 'user' ? 'flex items-center gap-1.5 max-w-full' : 'w-full'}>
+                    <div className={`flex flex-col max-w-[88%] sm:max-w-[82%] min-w-0 gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                      <div className={msg.role === 'user' ? 'flex items-center gap-1.5 max-w-full min-w-0' : 'w-full min-w-0'}>
                         {msg.role === 'user' && msg.content && (
                           <div className="flex items-center gap-1 shrink-0">
                             <button
@@ -708,9 +723,9 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
                           }
                           style={msg.role === 'user' ? { WebkitTouchCallout: 'none' } : undefined}
                           {...longPressHandlers}
-                          className={`w-full px-4 py-3 rounded-[18px] text-[15px] leading-relaxed break-words transition-[transform,box-shadow,opacity] duration-150 ease-out ${
+                          className={`w-full max-w-full min-w-0 px-4 py-3 rounded-[18px] text-[15px] leading-relaxed transition-[transform,box-shadow,opacity] duration-150 ease-out ${
                             msg.role === 'user'
-                              ? `chat-bubble-hover-user bg-muted/80 dark:bg-card border border-border text-foreground rounded-br-xs whitespace-pre-wrap max-sm:select-none sm:select-text ${isPressedThis ? 'scale-[0.975] opacity-90' : ''} ${isSelectedThis ? 'ring-2 ring-foreground/30 dark:ring-white/40 scale-[1.01]' : ''} ${isEditingThis ? 'ring-2 ring-primary/50 dark:ring-white/40' : ''}`
+                              ? `chat-bubble-hover-user break-words bg-muted/80 dark:bg-card border border-border text-foreground rounded-br-xs whitespace-pre-wrap max-sm:select-none sm:select-text ${isPressedThis ? 'scale-[0.975] opacity-90' : ''} ${isSelectedThis ? 'ring-2 ring-foreground/30 dark:ring-white/40 scale-[1.01]' : ''} ${isEditingThis ? 'ring-2 ring-primary/50 dark:ring-white/40' : ''}`
                               : 'chat-bubble-hover-assistant bg-transparent text-foreground rounded-bl-xs select-text'
                           }`}
                         >
@@ -733,10 +748,8 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
                                     </div>
                                   )}
                                 </div>
-                              ) : msg.content.includes('```') ? (
-                                <MarkdownRenderer content={msg.content} />
                               ) : (
-                                <div className="whitespace-pre-wrap">{msg.content}</div>
+                                <MarkdownRenderer content={msg.content} />
                               )
                             ) : (
                               msg.content
@@ -756,12 +769,17 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
                         </span>
                       )}
                       {msg.role === 'assistant' && msg.content && (
-                        <div className="pl-3 flex items-center gap-1">
+                        <>
+                          <div className="pl-3 text-[10px] text-muted-foreground/80" data-testid="response-model-metadata">
+                            {formatResponseModelMetadata(msg.responseModel)}
+                          </div>
+                          <div className="pl-3 flex items-center gap-1">
                           <ConversationActionBar
                             messageId={`myai-msg-${index}`}
                             content={msg.content}
                           />
-                        </div>
+                          </div>
+                        </>
                       )}
                     </div>
                   </div>

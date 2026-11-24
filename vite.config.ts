@@ -44,6 +44,7 @@ import { GoogleGenAI } from '@google/genai';
 import { agentActivityHub } from './server/agentActivityService';
 import { runTechnicalVerification } from './server/agentVerificationService';
 import { geocodeLocationServer } from './server/geocodingService';
+import { normalizeResponseModelMetadata } from './src/lib/responseModelMetadata';
 
 class StreamCircuitBreaker {
   private failureCount = 0;
@@ -1198,18 +1199,20 @@ function geminiApiPlugin(): Plugin {
               if (process.env.GEMINI_API_KEY) {
                 try {
                   let accumulated = '';
+                  let responseModel: ReturnType<typeof normalizeResponseModelMetadata> = null;
                   const stream = streamGeminiResponse({
                     messages,
                     systemInstruction: body.systemInstruction,
                     model: body.model || 'gemini-3.8-flash',
                     thinkHarder: Boolean(body.thinkHarder),
+                    onResponseMetadata: (metadata) => { responseModel = metadata; },
                   });
                   for await (const chunk of stream) {
                     accumulated += chunk;
                   }
                   if (accumulated && accumulated.trim()) {
                     res.setHeader('Content-Type', 'application/json');
-                    res.end(JSON.stringify({ text: accumulated }));
+                    res.end(JSON.stringify({ text: accumulated, ...(responseModel ? { responseModel } : {}) }));
                     return;
                   }
                 } catch (geminiErr: any) {
@@ -1261,9 +1264,13 @@ function geminiApiPlugin(): Plugin {
                     if (response.ok) {
                       const data = await response.json();
                       const text = data.choices?.[0]?.message?.content || '';
+                      const responseModel = normalizeResponseModelMetadata({
+                        modelId: data?.model,
+                        provider: data?.provider ?? data?.provider_name,
+                      });
                       if (text) {
                         res.setHeader('Content-Type', 'application/json');
-                        res.end(JSON.stringify({ text }));
+                        res.end(JSON.stringify({ text, ...(responseModel ? { responseModel } : {}) }));
                         return;
                       }
                     }
@@ -1403,6 +1410,9 @@ function geminiApiPlugin(): Plugin {
                   },
                   onUsage: (usage) => {
                     capturedUsage = usage;
+                  },
+                  onResponseMetadata: (responseModel) => {
+                    safeWrite(`data: ${JSON.stringify({ type: 'response-metadata', responseModel, requestId })}\n\n`);
                   },
                 });
 

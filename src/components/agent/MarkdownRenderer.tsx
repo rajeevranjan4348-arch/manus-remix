@@ -155,10 +155,28 @@ function MarkdownCodeElement(
   );
 }
 
+function MarkdownTable({
+  children,
+  node: _node,
+  ...props
+}: React.TableHTMLAttributes<HTMLTableElement> & { node?: unknown }) {
+  return (
+    <div
+      className="manus-markdown-table-scroll w-full max-w-full min-w-0 overflow-x-auto"
+      role="region"
+      aria-label="Scrollable table"
+      tabIndex={0}
+    >
+      <table {...props}>{children}</table>
+    </div>
+  );
+}
+
 const MARKDOWN_COMPONENTS = {
   img: UltraLiteMarkdownImage,
   pre: MarkdownPreBlock,
   code: MarkdownCodeElement,
+  table: MarkdownTable,
 };
 
 /**

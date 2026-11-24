@@ -48,6 +48,8 @@ import {
 import { SUPPORT_ISSUE_RESPONSE_GUIDANCE } from '@/lib/aiSupportGuidance';
 import { agentActivityTracker, useTaskActivities } from '@/lib/agentActivityTracker';
 import { taskMetricsStore } from '@/lib/taskMetrics';
+import { normalizeResponseModelMetadata } from '@/lib/responseModelMetadata';
+import type { ResponseModelMetadata } from '@/lib/responseModelMetadata';
 
 export type AgentTaskPhase = 'idle' | 'sending' | 'thinking' | 'tool-calling' | 'text-generation' | 'streaming' | 'completed' | 'error';
 
@@ -258,6 +260,7 @@ export function useAgentTask() {
   taskStatusRef.current = taskStatus;
   const activeRequestIdRef = useRef<number>(0);
   const activeStreamRequestIdRef = useRef<string>('');
+  const responseModelMetadataRef = useRef<ResponseModelMetadata | null>(null);
   const activeUserMsgIdRef = useRef<string>('');
   const activeAssistantMsgIdRef = useRef<string>('');
   const finalizedRequestIdsRef = useRef<Set<number>>(new Set());
@@ -309,6 +312,14 @@ export function useAgentTask() {
       clearStepTimers();
       setPhase('text-generation');
       setSteps(prev => advanceWorkflowSteps(prev, 'synthesizing'));
+    };
+    const handleStreamMetadata = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail?.requestId && activeStreamRequestIdRef.current && detail.requestId !== activeStreamRequestIdRef.current) {
+        return;
+      }
+      const responseModel = normalizeResponseModelMetadata(detail?.responseModel ?? detail?.metadata);
+      if (responseModel) responseModelMetadataRef.current = responseModel;
     };
     const handleDelta = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
@@ -389,11 +400,13 @@ export function useAgentTask() {
       );
     };
     window.addEventListener('manus_stream_started', handleStreamStarted);
+    window.addEventListener('manus_stream_metadata', handleStreamMetadata);
     window.addEventListener('manus_stream_delta', handleDelta);
     window.addEventListener('manus_stream_done', handleStreamDone);
     window.addEventListener('manus_research_stage', handleResearchStage);
     return () => {
       window.removeEventListener('manus_stream_started', handleStreamStarted);
+      window.removeEventListener('manus_stream_metadata', handleStreamMetadata);
       window.removeEventListener('manus_stream_delta', handleDelta);
       window.removeEventListener('manus_stream_done', handleStreamDone);
       window.removeEventListener('manus_research_stage', handleResearchStage);
@@ -536,10 +549,9 @@ export function useAgentTask() {
       model: activeModel,
       system: `You are Deku AI, a premium AI workspace agent. Your goal is to turn prompts, file uploads (CSV, Excel, PDF), or URLs into actionable data analyses, charts, and reports.
 
-    VERIFIED MODEL & APPLICATION IDENTITY:
-    - Application / Workspace Agent Name: Deku AI
-    - Active Underlying LLM Model: ${activeModel.replace(/^google\//, '')} (Provider: ${activeModel.startsWith('anthropic/') ? 'Anthropic' : 'Google Gemini'})
-    - When asked which model you are, what LLM you use, or about your architecture, always identify your actual underlying model (${activeModel.replace(/^google\//, '')}) and clearly distinguish between the application/agent name (Deku AI) and the underlying LLM model. Never invent model names, providers, or architectures.
+    RESPONSE MODEL IDENTITY:
+    - The application is Deku AI. Do not infer or claim a specific underlying model ID or provider from the selected model, alias, configuration, or conversation.
+    - If asked for the runtime model or provider, say it is not verified in the conversation context; the interface displays backend-confirmed response metadata when available.
     
     Guidelines:
     1. When given file content or CSV data, ALWAYS parse it, analyze the context, compute statistics if numeric, and identify insights.
@@ -731,6 +743,9 @@ export function useAgentTask() {
       content: cleanedText,
       timestamp: new Date().toISOString(),
       status: 'success' as const,
+      metadata: responseModelMetadataRef.current
+        ? { responseModel: responseModelMetadataRef.current }
+        : {},
     };
 
     const nextMessages = (() => {
@@ -758,6 +773,7 @@ export function useAgentTask() {
       files: parsedFiles,
       detectedChartType: detectedType || parsedChartData?.graph?.type || (activeTask?.options?.chartType !== 'auto' ? activeTask?.options?.chartType : undefined) || 'bar',
       rawResponse: rawResponse ?? null,
+      responseModel: responseModelMetadataRef.current,
       messages: nextMessages,
     };
 
@@ -784,6 +800,7 @@ export function useAgentTask() {
         role: 'assistant',
         content: cleanedText,
         status: 'success',
+        metadata: assistantMsg.metadata,
       }).catch(err => console.warn('Failed to save assistant response to DB:', err));
 
       Promise.resolve((blink.db as any).tasks.update(activeId, {
@@ -1023,7 +1040,10 @@ export function useAgentTask() {
           if (!payloadStr || payloadStr === '[DONE]') continue;
           try {
             const json = JSON.parse(payloadStr);
-            if ((json.type === 'text-delta' || json.type === 'text') && !json.errorDelta) {
+            if (json.type === 'response-metadata') {
+              const responseModel = normalizeResponseModelMetadata(json.responseModel ?? json.metadata);
+              if (responseModel) responseModelMetadataRef.current = responseModel;
+            } else if ((json.type === 'text-delta' || json.type === 'text') && !json.errorDelta) {
               const delta = json.delta ?? json.textDelta ?? json.text ?? '';
               if (delta) {
                 accumulated += String(delta);
@@ -1517,6 +1537,7 @@ export function useAgentTask() {
     const reqId = ++activeRequestIdRef.current;
     const streamReqId = `req_${now}_${reqId}`;
     activeStreamRequestIdRef.current = streamReqId;
+    responseModelMetadataRef.current = null;
     clearStepTimers();
     liveStreamTextRef.current = '';
     setLiveStreamText('');
@@ -1924,6 +1945,7 @@ export function useAgentTask() {
     const reqId = ++activeRequestIdRef.current;
     const streamReqId = `req_${now}_${reqId}`;
     activeStreamRequestIdRef.current = streamReqId;
+    responseModelMetadataRef.current = null;
     clearStepTimers();
     liveStreamTextRef.current = '';
     setLiveStreamText('');

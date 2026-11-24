@@ -440,8 +440,7 @@ form.addEventListener("submit", async (event) => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        messages: conversationHistory,
-        model: "gemini-3.8-flash"
+        messages: conversationHistory
       })
     });
 

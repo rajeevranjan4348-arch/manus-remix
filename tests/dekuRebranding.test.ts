@@ -2,9 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  resolveVerifiedModelConfig,
   buildModelIdentityInstruction,
-  generateResilientResponse,
   normalizeModel,
 } from '../server/geminiService';
 import { formatChatAsMarkdown } from '../src/lib/chatExport';
@@ -36,25 +34,16 @@ describe('Global Rebranding Verification — Manus AI → Deku AI', () => {
     expect(capacitorConfig).toContain("appId: 'com.rajeevranjan.manusremix'");
   });
 
-  it('configures backend model identity and resilient responses as Deku AI while preserving legacy model aliases', async () => {
-    const verifiedLite = resolveVerifiedModelConfig('deku-1.6-lite');
-    expect(verifiedLite.applicationName).toBe('Deku AI');
-    expect(verifiedLite.modelId).toBe('gemini-3.1-flash-lite-preview');
-
-    const legacyLite = resolveVerifiedModelConfig('manus-1.6-lite');
-    expect(legacyLite.applicationName).toBe('Deku AI');
-    expect(legacyLite.modelId).toBe('gemini-3.1-flash-lite-preview');
-
+  it('keeps model identity claims generic while preserving backend aliases', () => {
     expect(normalizeModel('deku-1.6-max')).toBe('gemini-3.1-pro-preview');
     expect(normalizeModel('manus-1.6-max')).toBe('gemini-3.1-pro-preview');
 
-    const instruction = buildModelIdentityInstruction('deku-1.6-lite');
-    expect(instruction).toContain('Application / Workspace Agent Name: Deku AI');
-    expect(instruction).not.toContain('Application / Workspace Agent Name: Manus AI');
-
-    const identityReply = generateResilientResponse('Who are you?', [], 'deku-1.6-lite');
-    expect(identityReply).toContain('Deku AI');
-    expect(identityReply).not.toContain('Manus AI');
+    const instruction = buildModelIdentityInstruction();
+    expect(instruction).toContain('The application is Deku AI');
+    expect(instruction).toContain('Do not infer or claim a specific underlying model ID or provider');
+    expect(instruction).toContain('backend-confirmed response metadata');
+    expect(instruction).not.toContain('Active Underlying LLM Model ID:');
+    expect(instruction).not.toContain('Model Provider: Google Gemini');
   });
 
   it('updates visible brand UI components (Logo, Topbar, WorkModeThinkingAnimation, SettingsModal) to Deku AI', () => {

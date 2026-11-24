@@ -144,7 +144,7 @@ export const CodeBlock = memo(function CodeBlock({
       data-testid="chatgpt-code-block"
       data-theme={resolvedTheme}
       data-language={language.id}
-      className="manus-codeblock-wrapper w-full min-w-0 my-4 select-text"
+      className="manus-codeblock-wrapper w-full max-w-full min-w-0 my-4 select-text"
     >
       {/* Standalone Filename Pill Above the Code Container (when filename is attached to fence/comment) */}
       {displayFilename && (
@@ -159,7 +159,7 @@ export const CodeBlock = memo(function CodeBlock({
       )}
 
       {/* Full-Width Rounded Code Container Automatically Following Application Theme */}
-      <div className="manus-codeblock-card w-full min-w-0 rounded-[22px] sm:rounded-[24px] border overflow-hidden transition-colors duration-150">
+      <div className="manus-codeblock-card w-full max-w-full min-w-0 rounded-[22px] sm:rounded-[24px] border overflow-hidden transition-colors duration-150">
         {/* Top Bar: Language Label on Left, Copy Action on Right */}
         <div className="manus-codeblock-header flex items-center justify-between gap-3 px-4 sm:px-5 pt-3.5 pb-2 select-none">
           <span
@@ -197,7 +197,7 @@ export const CodeBlock = memo(function CodeBlock({
         {/* Scrollable Code Viewport (Horizontal for long lines, Vertical for large files) */}
         <div
           data-testid="code-block-scroll-viewport"
-          className="manus-codeblock-scroll w-full overflow-x-auto overflow-y-auto max-h-[540px] px-4 sm:px-5 pb-4 sm:pb-5 pt-1.5 custom-scrollbar"
+          className="manus-codeblock-scroll w-full max-w-full min-w-0 overflow-x-auto overflow-y-auto max-h-[540px] px-4 sm:px-5 pb-4 sm:pb-5 pt-1.5 custom-scrollbar"
         >
           {shikiHtml ? (
             <div

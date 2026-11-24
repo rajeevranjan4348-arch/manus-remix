@@ -439,8 +439,37 @@
 }
 
 /* Markdown & Table Styles */
+.manus-markdown {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.manus-markdown > *,
+.manus-markdown :where(p, li, blockquote, h1, h2, h3, h4, h5, h6, a, th, td) {
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.manus-markdown-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
 .manus-markdown table {
-  @apply w-full border-collapse text-sm text-left mb-6;
+  @apply border-collapse text-sm text-left;
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  margin-bottom: 1.5rem;
 }
 
 .manus-markdown th {
@@ -483,6 +512,11 @@
   @apply mb-4 leading-relaxed;
 }
 
+.manus-markdown hr {
+  @apply border-border;
+  margin: 1.5rem 0;
+}
+
 .manus-markdown strong {
   @apply font-bold text-foreground;
 }
@@ -501,6 +535,19 @@
   font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.875em;
   font-weight: 500;
+}
+
+.manus-markdown code.manus-inline-code-pill {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.manus-markdown pre,
+.manus-codeblock-wrapper,
+.manus-codeblock-card,
+.manus-codeblock-scroll {
+  max-width: 100%;
+  min-width: 0;
 }
 
 .dark .manus-markdown code.manus-inline-code-pill,
@@ -2688,6 +2735,3 @@ select,
     animation: none !important;
   }
 }
-
-
-

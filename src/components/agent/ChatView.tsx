@@ -32,6 +32,7 @@ import { cn } from '@/lib/utils';
 import { hasActiveTextSelection } from '@/lib/clipboard';
 import { ManusLogo } from '../layout/Logo';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { formatResponseModelMetadata } from '@/lib/responseModelMetadata';
 import { FileAttachments } from './FileAttachments';
 import { AttachmentMenu } from '../chat/AttachmentMenu';
 import { ConversationActionBar } from './ConversationActionBar';
@@ -948,6 +949,7 @@ export function ChatView({
         id: 'result-assistant-fallback',
         role: 'assistant',
         content: String(result.summary || result.content || result.text),
+        metadata: result.responseModel ? { responseModel: result.responseModel } : undefined,
       });
     }
     return list;
@@ -1576,6 +1578,12 @@ export function ChatView({
                     if (promptToReRun) onSubmit(promptToReRun);
                   }}
                 />
+                <div
+                  className="mt-1 text-[10px] text-muted-foreground/80"
+                  data-testid="response-model-metadata"
+                >
+                  {formatResponseModelMetadata(msg.metadata?.responseModel)}
+                </div>
               </div>
             ) : null}
           </div>

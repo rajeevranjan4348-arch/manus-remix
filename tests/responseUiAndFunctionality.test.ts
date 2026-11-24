@@ -8,11 +8,15 @@ import {
   resolveMessageSourcesAndQueries,
 } from '../src/components/agent/SourceCitations';
 import {
-  resolveVerifiedModelConfig,
   buildModelIdentityInstruction,
   generateResilientResponse,
   needsLiveSearch,
 } from '../server/geminiService';
+import {
+  formatResponseModelMetadata,
+  mergeResponseModelMetadata,
+  normalizeResponseModelMetadata,
+} from '../src/lib/responseModelMetadata';
 
 describe('Response UI & Functionality Fixes (Global Audit)', () => {
   describe('1. Single Action Toolbar (No Duplicate Action Buttons)', () => {
@@ -51,41 +55,50 @@ describe('Response UI & Functionality Fixes (Global Audit)', () => {
     });
   });
 
-  describe('2. Verified Model Identification', () => {
-    it('resolves verified backend model configuration and distinguishes Deku AI application from underlying LLM', () => {
-      const defaultConfig = resolveVerifiedModelConfig('gemini-3.8-flash');
-      expect(defaultConfig.applicationName).toBe('Deku AI');
-      expect(defaultConfig.modelId).toBe('gemini-3-flash-preview');
-      expect(defaultConfig.provider).toBe('Google Gemini');
-
-      const liteConfig = resolveVerifiedModelConfig('manus-1.6-lite');
-      expect(liteConfig.applicationName).toBe('Deku AI');
-      expect(liteConfig.modelId).toBe('gemini-3.1-flash-lite-preview');
-      expect(liteConfig.provider).toBe('Google Gemini');
-
-      const dekuLiteConfig = resolveVerifiedModelConfig('deku-1.6-lite');
-      expect(dekuLiteConfig.applicationName).toBe('Deku AI');
-      expect(dekuLiteConfig.modelId).toBe('gemini-3.1-flash-lite-preview');
-
-      const instruction = buildModelIdentityInstruction('gemini-3-flash-preview', 'Google Gemini');
-      expect(instruction).toContain('Application / Workspace Agent Name: Deku AI');
-      expect(instruction).toContain('Active Underlying LLM Model ID: gemini-3-flash-preview');
-      expect(instruction).toContain('Model Provider: Google Gemini');
-      expect(instruction).toContain('Never invent model names');
+  describe('2. Backend-confirmed response model metadata', () => {
+    it('formats only confirmed metadata and falls back when model identity is missing', () => {
+      expect(normalizeResponseModelMetadata({ modelId: '  runtime-model-7  ', provider: ' Provider A ' }))
+        .toEqual({ modelId: 'runtime-model-7', provider: 'Provider A' });
+      expect(formatResponseModelMetadata({ modelId: 'runtime-model-7', provider: 'Provider A' }))
+        .toBe('Model: runtime-model-7 · Provider: Provider A');
+      expect(formatResponseModelMetadata({ provider: 'Provider A' }))
+        .toBe('Model information unavailable · Provider: Provider A');
+      expect(formatResponseModelMetadata(undefined)).toBe('Model information unavailable');
+      expect(normalizeResponseModelMetadata({ modelId: '  ', provider: 17 })).toBeNull();
+      expect(mergeResponseModelMetadata({ provider: 'Provider A' }, { modelId: 'runtime-model-7' }))
+        .toEqual({ modelId: 'runtime-model-7', provider: 'Provider A' });
     });
 
-    it('identifies the actual underlying model and distinguishes Deku AI vs LLM when asked "Which model are you"', () => {
-      const reply = generateResilientResponse('Which model are you', [], 'gemini-3-flash-preview');
-      expect(reply).toContain('Deku AI');
-      expect(reply).toContain('gemini-3-flash-preview');
-      expect(reply).toContain('Google Gemini');
-      expect(reply).toContain('Application / Agent:');
-      expect(reply).toContain('Underlying LLM Model:');
+    it('passes stream metadata from backend responses through both chat paths and persists it with assistant messages', () => {
+      const readSource = (file: string) => fs.readFileSync(path.resolve(__dirname, '..', file), 'utf-8');
+      const backend = readSource('server/geminiService.ts');
+      const netlify = readSource('netlify/functions/agent.ts');
+      const vite = readSource('vite.config.ts');
+      const streamAdapter = readSource('src/lib/blink.ts');
+      const hook = readSource('src/hooks/useAgentTask.ts');
+      const chatView = readSource('src/components/agent/ChatView.tsx');
+      const myAIChat = readSource('src/components/chat/MyAIChat.tsx');
+
+      expect(backend).toContain('modelId: chunk?.modelVersion');
+      expect(backend).toContain('options.onResponseMetadata?.(mergedResponseMetadata)');
+      expect(netlify).toContain("type: 'response-metadata'");
+      expect(vite).toContain("type: 'response-metadata'");
+      expect(streamAdapter).toContain("emitWindowEvent('manus_stream_metadata'");
+      expect(hook).toContain("window.addEventListener('manus_stream_metadata'");
+      expect(hook).toContain('metadata: assistantMsg.metadata');
+      expect(chatView).toContain('formatResponseModelMetadata(msg.metadata?.responseModel)');
+      expect(myAIChat).toContain('formatResponseModelMetadata(msg.responseModel)');
+      expect(myAIChat).toContain("parsed.type === 'response-metadata'");
     });
 
     it('does not trigger live web search for model identity questions', () => {
       expect(needsLiveSearch('Which model are you')).toBe(false);
       expect(needsLiveSearch('What LLM model are you running on?')).toBe(false);
+      expect(buildModelIdentityInstruction()).toContain('Do not infer or claim a specific underlying model ID or provider');
+      expect(generateResilientResponse('Which model are you?')).toContain('can’t verify the exact model or provider');
+      const identityReply = generateResilientResponse('Who are you?');
+      expect(identityReply).toContain('Deku AI');
+      expect(identityReply).not.toMatch(/powered by|Gemini|OpenRouter|gemini-[\w.-]+/i);
     });
   });
 
@@ -134,7 +147,7 @@ describe('Response UI & Functionality Fixes (Global Audit)', () => {
 
     it('hides Sources when no meaningful external sources were used (e.g., "Which model are you" or "Hello")', () => {
       const parsed = parseSourcesFromMarkdown(
-        'I am operating inside Manus, powered by the gemini-3-flash-preview large language model from Google Gemini.'
+        'I can’t verify the exact model or provider for this response from available metadata.'
       );
       const resolved = resolveMessageSourcesAndQueries({
         parsed,

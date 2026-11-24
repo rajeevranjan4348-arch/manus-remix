@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { getSafeLocalPointerX } from '../src/components/analytics/D3TagTimelineChart';
+import { MarkdownRenderer } from '../src/components/agent/MarkdownRenderer';
 
 const readWorkspaceFile = (relPath: string): string => {
   return fs.readFileSync(path.resolve(__dirname, '..', relPath), 'utf-8');
@@ -38,6 +41,53 @@ describe('Global Mobile Responsiveness & UI Overflow Fixes', () => {
     it('scopes icon-only button rule strictly to direct child SVGs so composite buttons never collapse', () => {
       expect(indexCss).toContain('button[aria-label]:has(> svg:only-child)');
       expect(indexCss).not.toContain('button[aria-label]:has(svg:only-child)');
+    });
+  });
+
+  describe('Assistant response overflow and Markdown rendering', () => {
+    it('wraps long response tokens and confines horizontal scrolling to tables and code blocks', () => {
+      const css = readWorkspaceFile('src/index.css');
+      const renderer = readWorkspaceFile('src/components/agent/MarkdownRenderer.tsx');
+      const codeBlock = readWorkspaceFile('src/components/agent/CodeBlock.tsx');
+      const myAIChat = readWorkspaceFile('src/components/chat/MyAIChat.tsx');
+
+      expect(css).toContain('.manus-markdown');
+      expect(css).toContain('overflow-wrap: anywhere;');
+      expect(css).toContain('min-width: 0;');
+      expect(css).toContain('.manus-markdown-table-scroll');
+      expect(css).toContain('overscroll-behavior-x: contain;');
+      expect(css).toContain('width: max-content;');
+      expect(renderer).toContain('manus-markdown-table-scroll w-full max-w-full min-w-0 overflow-x-auto');
+      expect(codeBlock).toContain('manus-codeblock-scroll w-full max-w-full min-w-0 overflow-x-auto');
+      expect(myAIChat).toContain('<MarkdownRenderer content={msg.content} />');
+      expect(css).toContain('.manus-markdown hr');
+    });
+
+    it('renders long and Markdown-heavy assistant responses as semantic, width-constrained elements', () => {
+      const longWord = 'unbroken-token-'.repeat(36);
+      const longUrl = `https://example.com/${'very-long-path-segment-'.repeat(18)}`;
+      const longInlineCode = `inline-${'code-token-'.repeat(14)}`;
+      const markdown =
+        `# Response heading\n\nA paragraph with **bold text**, an unbroken token ${longWord}, a [long URL](${longUrl}), and \`${longInlineCode}\`.\n\n` +
+        '- First list item with a long wrapped value\n- Second list item\n\n---\n\n' +
+        `| Column A | Column B |\n| --- | --- |\n| ${longWord} | table content |\n\n` +
+        `\`\`\`text\n${longWord}\n\`\`\``;
+      const html = renderToStaticMarkup(
+        React.createElement(MarkdownRenderer, { content: markdown, animateTypewriter: false })
+      );
+
+      expect(html).toContain('<h1>Response heading</h1>');
+      expect(html).toContain('<p>');
+      expect(html).toContain('<strong>bold text</strong>');
+      expect(html).toContain('<ul>');
+      expect(html).toContain('<li>');
+      expect(html).toContain('<hr');
+      expect(html).toContain('manus-inline-code-pill');
+      expect(html).toContain(longUrl);
+      expect(html).toContain('manus-markdown-table-scroll');
+      expect(html).toContain('<table>');
+      expect(html).toContain('data-testid="code-block-scroll-viewport"');
+      expect(html).toContain('manus-markdown');
     });
   });
 

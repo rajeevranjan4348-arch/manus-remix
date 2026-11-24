@@ -33,6 +33,7 @@ import {
   detectThreeDSceneIntent,
   formatProcedural3DSceneMarkdown,
 } from '../../src/lib/threeSceneSpec';
+import { mergeResponseModelMetadata, normalizeResponseModelMetadata } from '../../src/lib/responseModelMetadata';
 
 const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -122,7 +123,7 @@ export default async (req: Request) => {
 
   function buildFallbackAnswer(
     promptText: string,
-    modelId = configuredModelId,
+    _modelId = configuredModelId,
     realtimeSnapshot?: ResearchOrchestrationResult | null
   ): string {
     if (realtimeSnapshot?.directFallbackMarkdown) {
@@ -136,7 +137,7 @@ export default async (req: Request) => {
       return 'Hello! How can I help you today?';
     }
     if (/which model|what model|what llm|which llm|underlying model|what ai model|model are you|who built you|your architecture/i.test(clean)) {
-      return `I am operating inside **Deku AI** (the AI workspace agent and application), powered by the **${modelId}** large language model from **Google Gemini**.\n\n- **Application / Agent:** Deku AI\n- **Underlying LLM Model:** \`${modelId}\`\n- **Model Provider:** Google Gemini`;
+      return 'I’m Deku AI, an AI workspace assistant. I can’t verify the exact model or provider for this response from the available response metadata.';
     }
     if (/\b(what time is it|current time|time right now|what is the date|today'?s date|what day is today|current date|time in india|time in utc|world clock)\b/i.test(clean)) {
       const temporal = getLiveTemporalContext();
@@ -180,7 +181,7 @@ export default async (req: Request) => {
       );
     }
     if (/who are you|what can you do|what is (deku|manus)/i.test(clean)) {
-      return `I am **Deku AI**, your AI workspace agent powered by the **${modelId}** model (Google Gemini). I can answer questions, research topics, write and debug code, analyze data, and help with everyday tasks.`;
+      return 'I am **Deku AI**, your AI workspace assistant. I can answer questions, research topics, write and debug code, analyze data, and help with everyday tasks. I cannot verify the exact model or provider for this response from the available response metadata.';
     }
     return `Here is a direct response regarding **${promptText.trim() || 'your request'}**:\n\nI have processed your question. Let me know if you would like more specific details, examples, or a deeper breakdown.`;
   }
@@ -384,11 +385,9 @@ export default async (req: Request) => {
     }
 
     systemInstruction +=
-      `\n\n[VERIFIED MODEL & APPLICATION IDENTITY]\n` +
-      `- Application / Workspace Agent Name: Deku AI\n` +
-      `- Active Underlying LLM Model ID: ${configuredModelId}\n` +
-      `- Model Provider: Google Gemini\n` +
-      `- Strict Rule: When asked "which model are you", "what LLM are you running on", "who built you", or about your model/architecture, clearly distinguish between the application/agent name (Deku AI) and the actual underlying LLM model (${configuredModelId} by Google Gemini). Never invent model names, providers, or architectures.`;
+      '\n\n[RESPONSE MODEL IDENTITY POLICY]\n' +
+      '- The application is Deku AI. Do not infer or claim a specific underlying model ID or provider from a requested model, alias, configuration, or conversation text.\n' +
+      '- If asked for the runtime model or provider, say it cannot be verified from the conversation context; the interface will show backend-confirmed response metadata when available.';
 
     if (realtimeSnapshot) {
       systemInstruction += realtimeSnapshot.systemContextBlock;
@@ -561,15 +560,16 @@ export default async (req: Request) => {
                   const modelHandle = agentActivityHub.startActivity(
                     taskId,
                     {
-                      title: hasSearchTool ? `Querying ${model} with live web grounding` : `Generating response with ${model}`,
-                      description: 'Streaming completion from Gemini API',
-                      toolName: hasSearchTool ? 'gemini_google_search' : 'gemini_model',
+                      title: hasSearchTool ? 'Searching the web for an answer' : 'Generating response',
+                      description: 'Streaming response',
+                      toolName: hasSearchTool ? 'web_search' : 'response_generation',
                       category: 'model',
                     },
                     emitSseActivity
                   );
                   let charCount = 0;
                   let latestUsageMetadata: any = null;
+                  let responseModelEmitted: ReturnType<typeof normalizeResponseModelMetadata> = null;
                   try {
                     const guardedStream = iterateStreamWithTimeouts(
                       () =>
@@ -599,6 +599,15 @@ export default async (req: Request) => {
                       }
                       const text = chunk.text;
                       if (text) {
+                        const responseModel = normalizeResponseModelMetadata({
+                          modelId: chunk?.modelVersion,
+                          provider: 'Google Gemini',
+                        });
+                        const mergedResponseModel = mergeResponseModelMetadata(responseModelEmitted, responseModel);
+                        if (mergedResponseModel && JSON.stringify(mergedResponseModel) !== JSON.stringify(responseModelEmitted)) {
+                          responseModelEmitted = mergedResponseModel;
+                          safeEnqueue(`data: ${JSON.stringify({ type: 'response-metadata', responseModel: mergedResponseModel, requestId })}\n\n`);
+                        }
                         hasEmittedText = true;
                         charCount += text.length;
                         safeEnqueue(`data: ${JSON.stringify({ type: 'text-delta', delta: text, textDelta: text, requestId })}\n\n`);
@@ -630,7 +639,7 @@ export default async (req: Request) => {
                           source: Number(latestUsageMetadata.totalTokenCount) > 0 ? 'exact' : 'estimated',
                         };
                       }
-                      modelHandle.complete(`Streamed ${charCount} chars from ${model}`);
+                      modelHandle.complete(`Streamed ${charCount} chars`);
                       break modelLoop;
                     }
                     modelHandle.fail('Empty stream response; trying fallback');
@@ -646,7 +655,7 @@ export default async (req: Request) => {
                     }
 
                     const classified = classifyGeminiError(err, Boolean(req.signal?.aborted));
-                    modelHandle.fail(`Model ${model} (${classified.category}); trying fallback`);
+                    modelHandle.fail(`Generation attempt failed (${classified.category}); trying a fallback`);
                     geminiCircuitBreaker.recordFailure(err);
                     recoveryTelemetry.record({
                       component: 'gemini',
@@ -785,6 +794,7 @@ export default async (req: Request) => {
             let orUsage: any = null;
             let buffer = '';
             let hasEmittedText = false;
+            let responseModelEmitted: ReturnType<typeof normalizeResponseModelMetadata> = null;
 
             const stream = new ReadableStream({
               async start(controller) {
@@ -829,6 +839,15 @@ export default async (req: Request) => {
                             }
                           }
                           const delta = json.choices?.[0]?.delta?.content;
+                          const responseModel = normalizeResponseModelMetadata({
+                            modelId: json.model,
+                            provider: json.provider ?? json.provider_name,
+                          });
+                          const mergedResponseModel = mergeResponseModelMetadata(responseModelEmitted, responseModel);
+                          if (mergedResponseModel && JSON.stringify(mergedResponseModel) !== JSON.stringify(responseModelEmitted) && (hasEmittedText || delta)) {
+                            responseModelEmitted = mergedResponseModel;
+                            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'response-metadata', responseModel: mergedResponseModel, requestId })}\n\n`));
+                          }
                           if (delta) {
                             hasEmittedText = true;
                             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta, textDelta: delta, requestId })}\n\n`));

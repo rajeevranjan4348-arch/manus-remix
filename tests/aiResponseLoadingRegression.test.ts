@@ -80,6 +80,7 @@ describe('AI Response Streaming and Loading State Regression Tests', () => {
         new ReadableStream({
           start(controller) {
             const encoder = new TextEncoder();
+            controller.enqueue(encoder.encode('data: {"type":"response-metadata","responseModel":{"modelId":"confirmed-model-test","provider":"Test Provider"}}\n\n'));
             // Split SSE line across two chunks to test chunk buffering
             controller.enqueue(encoder.encode('data: {"type":"text-delta","textDelta":"Hello '));
             controller.enqueue(encoder.encode('there!"}\n\ndata: {"type":"finish","finishReason":"stop"}\n\ndata: [DONE]\n\n'));
@@ -97,6 +98,9 @@ describe('AI Response Streaming and Loading State Regression Tests', () => {
         { role: 'user', content: 'Hi' },
       ]);
       const text = await response.text();
+      expect(text).toContain('"type":"response-metadata"');
+      expect(text).toContain('"modelId":"confirmed-model-test"');
+      expect(text).toContain('"provider":"Test Provider"');
       expect(text).toContain('"type":"text-delta"');
       expect(text).toContain('Hello there!');
       expect(text).toContain('"type":"finish"');

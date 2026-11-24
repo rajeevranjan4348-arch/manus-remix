@@ -318,8 +318,8 @@ describe('Real-Time AI Agent Activity & Verification System', () => {
             taskId: 't_stagger',
             eventId: 'e2',
             seq: 2,
-            title: 'Generating response with gemini-3-flash-preview',
-            toolName: 'gemini_stream',
+            title: 'Generating response',
+            toolName: 'response_generation',
             status: 'RUNNING',
             timestamp: new Date().toISOString(),
           },
@@ -332,4 +332,3 @@ describe('Real-Time AI Agent Activity & Verification System', () => {
     expect(expandedMarkup).toContain('data-stagger-delay-sec="0.045"');
   });
 });
-

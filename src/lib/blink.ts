@@ -4,6 +4,7 @@ import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
 import { agentActivityTracker } from './agentActivityTracker';
 import { sseStreamDiagnostics } from './sseStreamDiagnostics';
 import { taskMetricsStore } from './taskMetrics';
+import { normalizeResponseModelMetadata } from './responseModelMetadata';
 
 const PROJECT_ID = (import.meta as any).env?.VITE_BLINK_PROJECT_ID || 'manus-agent-clone-tkzhogvs';
 const PUBLISHABLE_KEY = (import.meta as any).env?.VITE_BLINK_PUBLISHABLE_KEY || '';
@@ -400,6 +401,11 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
         // If the endpoint returned HTTP 200 with JSON instead of SSE, extract the text or error directly
         if (res.ok && finalContentType.includes('application/json')) {
           const jsonPayload = await res.json().catch(() => null);
+          const responseModel = normalizeResponseModelMetadata(jsonPayload?.responseModel ?? jsonPayload?.metadata);
+          if (responseModel) {
+            sendEvent({ type: 'response-metadata', responseModel });
+            emitWindowEvent('manus_stream_metadata', { requestId, responseModel });
+          }
           const directText =
             jsonPayload?.textDelta ??
             jsonPayload?.delta ??
@@ -633,6 +639,15 @@ export function createAutonomousStreamResponse(options: any, agentConfig?: any):
                     taskId: normalizedTaskId,
                     event: ingested,
                   });
+                }
+                return;
+              }
+
+              if (eventType === 'response-metadata') {
+                const responseModel = normalizeResponseModelMetadata(parsed.responseModel ?? parsed.metadata);
+                if (responseModel) {
+                  sendEvent({ type: 'response-metadata', responseModel });
+                  emitWindowEvent('manus_stream_metadata', { requestId, responseModel });
                 }
                 return;
               }
@@ -902,7 +917,7 @@ if (typeof window !== 'undefined' && window.fetch) {
             text: 'Analysis generated successfully.',
             steps: [],
             usage: { inputTokens: 0, outputTokens: 0 },
-            _billing: { model: 'google/gemini-3.8-flash', creditsCharged: 0, costUSD: 0 }
+            _billing: { creditsCharged: 0, costUSD: 0 }
           }
         }), {
           headers: { 'Content-Type': 'application/json' },

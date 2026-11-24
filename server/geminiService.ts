@@ -36,6 +36,8 @@ import {
   detectThreeDSceneIntent,
   formatProcedural3DSceneMarkdown,
 } from '../src/lib/threeSceneSpec';
+import { mergeResponseModelMetadata, normalizeResponseModelMetadata } from '../src/lib/responseModelMetadata';
+import type { ResponseModelMetadata } from '../src/lib/responseModelMetadata';
 
 export {
   detectImageGenerationIntent,
@@ -72,12 +74,7 @@ export interface StreamChatOptions {
   onResearchProgress?: (event: ResearchProgressEvent) => void;
   onActivity?: (event: AgentActivityEvent) => void;
   onUsage?: (usage: StreamTokenUsage) => void;
-}
-
-export interface VerifiedModelConfig {
-  modelId: string;
-  provider: string;
-  applicationName: string;
+  onResponseMetadata?: (metadata: ResponseModelMetadata) => void;
 }
 
 export function normalizeModel(modelName?: string): string {
@@ -101,38 +98,11 @@ export function normalizeModel(modelName?: string): string {
   return clean;
 }
 
-export function resolveVerifiedModelConfig(modelName?: string): VerifiedModelConfig {
-  const normalized = normalizeModel(modelName);
-  let provider = 'Google Gemini';
-  if (normalized.startsWith('anthropic/') || normalized.includes('claude')) {
-    provider = 'Anthropic';
-  } else if (normalized.startsWith('openai/') || normalized.includes('gpt')) {
-    provider = 'OpenAI';
-  } else if (normalized.startsWith('meta-llama/') || normalized.includes('llama')) {
-    provider = 'Meta';
-  } else if (normalized.startsWith('deepseek/') || normalized.includes('deepseek')) {
-    provider = 'DeepSeek';
-  } else if (normalized.startsWith('nvidia/') || normalized.includes('nemotron')) {
-    provider = 'NVIDIA';
-  } else if (normalized.startsWith('openrouter/')) {
-    provider = 'OpenRouter';
-  }
-  return {
-    modelId: normalized,
-    provider,
-    applicationName: 'Deku AI',
-  };
-}
-
-export function buildModelIdentityInstruction(modelId: string, providerOverride?: string): string {
-  const verified = resolveVerifiedModelConfig(modelId);
-  const provider = providerOverride || verified.provider;
+export function buildModelIdentityInstruction(): string {
   return (
-    `\n\n[VERIFIED MODEL & APPLICATION IDENTITY]\n` +
-    `- Application / Workspace Agent Name: ${verified.applicationName}\n` +
-    `- Active Underlying LLM Model ID: ${verified.modelId}\n` +
-    `- Model Provider: ${provider}\n` +
-    `- Strict Rule: When asked "which model are you", "what LLM are you running on", "who built you", or about your model/architecture, you MUST clearly distinguish between the application/agent name (${verified.applicationName}, the AI workspace application/agent) and the actual underlying LLM model (${verified.modelId} by ${provider}). Never invent model names, version numbers, providers, or architectures.`
+    '\n\n[RESPONSE MODEL IDENTITY POLICY]\n' +
+    '- The application is Deku AI. Do not infer or claim a specific underlying model ID or provider from a requested model, alias, configuration, or conversation text.\n' +
+    '- If asked for the runtime model or provider, say it cannot be verified from the conversation context; the interface will show backend-confirmed response metadata when available.'
   );
 }
 
@@ -181,8 +151,7 @@ export function stripInjectedContextBlocks(text: string): string {
 
 export function generateResilientResponse(
   prompt: string,
-  messages: ChatMessage[] = [],
-  activeModel?: string
+  messages: ChatMessage[] = []
 ): string {
   const raw = stripInjectedContextBlocks(prompt)
     .replace(/\[IMAGE_DATA_URL:[^\]]+\]\s*/gi, '')
@@ -191,7 +160,6 @@ export function generateResilientResponse(
     .replace(/^\[Think Harder[^\]]*\]\s*/i, '')
     .trim();
   const clean = raw.toLowerCase();
-  const verified = resolveVerifiedModelConfig(activeModel);
   const temporal = getLiveTemporalContext();
 
   if (/^(hi|hello|hey|hiya|howdy|yo|namaste|greetings|good\s+(morning|afternoon|evening|day|night))(?:\s+(?:deku|deku\s+ai|there|ai|assistant))?[!?.,\s]*$/i.test(clean)) {
@@ -203,7 +171,7 @@ export function generateResilientResponse(
   }
 
   if (/which model|what model|what llm|which llm|underlying model|what ai model|model are you|who built you|your architecture/i.test(clean)) {
-    return `I am operating inside **${verified.applicationName}** (the AI workspace agent and application), powered by the **${verified.modelId}** large language model from **${verified.provider}**.\n\n- **Application / Agent:** ${verified.applicationName}\n- **Underlying LLM Model:** \`${verified.modelId}\`\n- **Model Provider:** ${verified.provider}`;
+    return 'I’m Deku AI, an AI workspace assistant. I can’t verify the exact model or provider for this response from the available response metadata.';
   }
 
   if (/\b(what\s+time\s+is\s+it|current\s+time|time\s+right\s+now|time\s+in\s+india|ist\s+time|utc\s+time|what\s+is\s+the\s+date|what's\s+the\s+date|todays?\s+date|what\s+day\s+is\s+(it|today))\b/i.test(clean)) {
@@ -256,7 +224,7 @@ export function generateResilientResponse(
   }
 
   if (/who are you|what can you do|what is (deku|manus)/i.test(clean)) {
-    return `I am **${verified.applicationName}**, an AI workspace agent powered by the **${verified.modelId}** model (${verified.provider}).\n\nHere is what I can do for you:\n- **Direct Q&A & Knowledge**: Answer questions clearly and concisely across science, technology, culture, and everyday topics.\n- **Real-Time Data & Search**: Retrieve live weather, air quality, currency exchange rates, crypto prices, world clocks, and current news headlines.\n- **Full-Stack Engineering**: Build, modify, debug, and preview web applications and interactive systems.\n- **Data Analysis & Processing**: Compute metrics, summarize complex records, and generate actionable reports.\n\nTell me what you'd like to know or work on!`;
+    return `I am **Deku AI**, an AI workspace assistant. I can help with questions, research, writing, coding, data analysis, and everyday tasks. I cannot verify the exact model or provider for this response from the available response metadata.`;
   }
 
   // Evaluate direct arithmetic & math expressions (e.g. "what is 2 + 2?", "15 * 24", "100 / 4")
@@ -563,6 +531,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
       });
     }
 
+    let responseMetadataEmitted: ResponseModelMetadata | null = null;
     modelLoop: for (const model of candidateModels) {
       if (options.signal?.aborted) {
         agentActivityHub.cancelActiveActivities(activityTaskId, 'Request aborted by client');
@@ -578,7 +547,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
       const needsModelSearchGrounding = useGoogleSearch && !realtimeSnapshot.hasLiveDomainData;
       const toolConfigs = needsModelSearchGrounding ? [{ tools: [{ googleSearch: {} }] }, {}] : [{}];
       const supportsThinkingBudget = model.includes('gemini-2.5');
-      const modelSystemInstruction = baseSystemPrompt + buildModelIdentityInstruction(model, 'Google Gemini');
+      const modelSystemInstruction = baseSystemPrompt + buildModelIdentityInstruction();
 
       for (const toolConfig of toolConfigs) {
         if (options.signal?.aborted) {
@@ -597,13 +566,9 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
           const modelHandle = agentActivityHub.startActivity(
             activityTaskId,
             {
-              title: hasSearchTool
-                ? `Querying ${model} with live web grounding`
-                : `Generating response with ${model}`,
-              description: hasSearchTool
-                ? 'Streaming grounded response from Gemini API with Google Search'
-                : 'Streaming response from Gemini API',
-              toolName: hasSearchTool ? 'gemini_google_search' : 'gemini_model',
+              title: hasSearchTool ? 'Searching the web for an answer' : 'Generating response',
+              description: hasSearchTool ? 'Streaming a response with web grounding' : 'Streaming response',
+              toolName: hasSearchTool ? 'web_search' : 'response_generation',
               category: 'model',
             },
             emitActivity
@@ -652,6 +617,15 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
               }
               const text = chunk.text;
               if (text) {
+                const responseMetadata = normalizeResponseModelMetadata({
+                  modelId: chunk?.modelVersion,
+                  provider: 'Google Gemini',
+                });
+                const mergedResponseMetadata = mergeResponseModelMetadata(responseMetadataEmitted, responseMetadata);
+                if (mergedResponseMetadata && JSON.stringify(mergedResponseMetadata) !== JSON.stringify(responseMetadataEmitted)) {
+                  responseMetadataEmitted = mergedResponseMetadata;
+                  options.onResponseMetadata?.(mergedResponseMetadata);
+                }
                 hasYielded = true;
                 streamedChars += text.length;
                 yield text;
@@ -708,11 +682,11 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
               modelHandle.complete(
                 sources.size > 0
                   ? `Streamed ${streamedChars} chars with ${sources.size} cited source(s)`
-                  : `Streamed ${streamedChars} chars from ${model}`
+                  : `Streamed ${streamedChars} chars`
               );
               return; // Successfully streamed the response
             }
-            modelHandle.fail('Model returned empty stream; trying fallback');
+            modelHandle.fail('The response stream was empty; trying a fallback');
             break; // Move to next toolConfig / model
           } catch (err: any) {
             if (options.signal?.aborted) {
@@ -737,8 +711,8 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
             const classified = classifyGeminiError(err, Boolean(options.signal?.aborted));
             modelHandle.fail(
               classified.category === 'auth_error'
-                ? 'Gemini API authentication failed; checking fallback provider'
-                : `Model ${model} (${classified.category}); switching`
+                ? 'The AI service is unavailable; checking a fallback'
+                : `Generation attempt failed (${classified.category}); trying a fallback`
             );
 
             if (classified.abortWaterfall) {
@@ -782,9 +756,9 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     const orHandle = agentActivityHub.startActivity(
       activityTaskId,
       {
-        title: 'Routing request via fallback model provider',
-        description: 'Streaming completion through OpenRouter fallback gateway',
-        toolName: 'openrouter_model',
+        title: 'Using a fallback response service',
+        description: 'Streaming response',
+        toolName: 'response_generation',
         category: 'model',
       },
       emitActivity
@@ -820,7 +794,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
   console.log('[AI Model Router] Using resilient response synthesizer for user query');
   const fallbackText =
     realtimeSnapshot.directFallbackMarkdown ||
-    generateResilientResponse(latestUserText, options.messages, preferredModel);
+    generateResilientResponse(latestUserText, options.messages);
   const words = fallbackText.split(/(\s+)/);
   for (let i = 0; i < words.length; i += 3) {
     if (options.signal?.aborted) {
@@ -844,10 +818,11 @@ export async function* streamOpenRouterResponse(
   ]));
 
   let lastOrError: any = null;
+  let responseMetadataEmitted: ResponseModelMetadata | null = null;
 
   for (const model of candidateModels) {
     try {
-      const modelIdentity = buildModelIdentityInstruction(model, 'OpenRouter');
+      const modelIdentity = buildModelIdentityInstruction();
       const baseSystemContent = options.systemInstruction || 'You are Deku AI, an AI workspace agent. Never expose private internal chain-of-thought.';
       const systemContent =
         baseSystemContent +
@@ -931,6 +906,15 @@ export async function* streamOpenRouterResponse(
                 }
               }
               const delta = json.choices?.[0]?.delta?.content;
+              const responseMetadata = normalizeResponseModelMetadata({
+                modelId: json.model,
+                provider: json.provider ?? json.provider_name,
+              });
+              const mergedResponseMetadata = mergeResponseModelMetadata(responseMetadataEmitted, responseMetadata);
+              if (mergedResponseMetadata && JSON.stringify(mergedResponseMetadata) !== JSON.stringify(responseMetadataEmitted) && (hasYielded || delta)) {
+                responseMetadataEmitted = mergedResponseMetadata;
+                options.onResponseMetadata?.(mergedResponseMetadata);
+              }
               if (delta) {
                 hasYielded = true;
                 yield delta;
@@ -1444,5 +1428,3 @@ export async function categorizeSessionWithGemini(
     source: 'fallback',
   };
 }
-
-
