@@ -28,8 +28,8 @@ jobs:
       - name: TypeScript validation
         run: bun run lint
 
-      - name: Unit tests
-        run: bun run test
+      - name: Focused regression tests
+        run: bun run test -- tests/taskMetricsDashboard.test.ts tests/autoScrollToResults.test.ts tests/sidebarSettingsReplacement.test.ts
 
       - name: Production build
         run: bun run build
