@@ -628,9 +628,9 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
       {/* Main chat area */}
       <main ref={mainRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain scroll-smooth flex flex-col">
         {showWelcome ? (
-          <section className="min-h-full flex flex-col items-center justify-center p-6 text-center m-auto animate-in fade-in duration-300">
-            <div className="text-[64px] mb-3 select-none">🤖</div>
-            <h1 className="text-[clamp(23px,5vw,32px)] font-bold tracking-tight mb-2 text-foreground">
+          <section className="min-h-full flex flex-col items-center justify-center p-6 text-center m-auto animate-in fade-in duration-300 manus-welcome-enter">
+            <div className="text-[64px] mb-3 select-none manus-float-soft">🤖</div>
+            <h1 className="text-[clamp(23px,5vw,32px)] font-bold tracking-tight mb-2 manus-gradient-heading">
               How can I help you?
             </h1>
             <p className="text-muted-foreground text-[15px] leading-relaxed max-w-sm">
@@ -802,6 +802,7 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
           onSubmit={handleSubmit}
           data-testid="manus-input-container"
           data-listening={isListening ? 'true' : 'false'}
+          data-generating={isGenerating ? 'true' : 'false'}
           className="manus-input-container max-w-[760px] mx-auto flex flex-col gap-2 border border-border rounded-[24px] px-3.5 py-2 shadow-xs bg-background focus-within:ring-1 focus-within:ring-foreground/20"
         >
           {editingTarget && (
@@ -894,5 +895,7 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
     </div>
   );
 }
+
+
 
 
