@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { 
   Library, 
   Clock, 
   ExternalLink, 
@@ -47,11 +46,7 @@ import { generateSessionSummary, getStoredSessionSummaries, removeSessionSummary
 import { TaskQuickPreviewCard } from './TaskQuickPreviewCard';
 import { SwipeableHistoryItem } from './SwipeableHistoryItem';
 import { useUltraLiteImage } from '@/hooks/useUltraLiteImage';
-import { AnimatePresence, motion, useReducedMotion, type PanInfo, type Variants } from 'framer-motion';
-import {
-  WORKSPACE_REDUCED_MOTION_VARIANTS,
-  WORKSPACE_RIGHT_SHEET_SPRING_VARIANTS,
-} from '@/lib/panelMotion';
+import { motion, useReducedMotion, type PanInfo, type Variants } from 'framer-motion';
 import { shouldDismissRightDrawerOnSwipe } from '@/lib/swipeToDismiss';
 
 const TagAnalyticsModal = React.lazy(() =>
@@ -152,7 +147,22 @@ interface HistoryPanelProps {
   initialTab?: 'sessions' | 'all' | 'photos' | 'videos' | 'docs';
 }
 
-export const HISTORY_PANEL_SLIDE_VARIANTS: Variants = WORKSPACE_RIGHT_SHEET_SPRING_VARIANTS;
+export const HISTORY_PANEL_SLIDE_VARIANTS: Variants = {
+  hidden: {
+    x: '100%',
+    opacity: 0.92,
+  },
+  visible: {
+    x: 0,
+    opacity: 1,
+    transition: {
+      type: 'spring',
+      stiffness: 340,
+      damping: 34,
+      mass: 0.85,
+    },
+  },
+};
 
 export function getHistoryItemStaggerDelay(
   index: number,
@@ -1185,31 +1195,26 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
 
   return (
     <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <AnimatePresence>
-        {isOpen && (
-          <SheetContent 
-            key="history-panel-sheet"
-            forceMount
-            side="right" 
-            hideCloseButton
-            className="w-full max-w-[100vw] sm:max-w-xl p-0 flex flex-col h-full h-[100dvh] max-h-[100dvh] bg-transparent border-0 shadow-none data-[state=open]:animate-none data-[state=closed]:animate-none z-50 overflow-visible"
-          >
-            <motion.div
-              data-testid="history-panel-swipe-container"
-              data-animation="slide-in"
-              data-spring-transition="true"
-              variants={prefersReducedMotion ? WORKSPACE_REDUCED_MOTION_VARIANTS : HISTORY_PANEL_SLIDE_VARIANTS}
-              initial="hidden"
-              animate="visible"
-              exit="exit"
-              className="flex flex-col flex-1 min-h-0 w-full h-full overflow-hidden bg-[#FFFFFF] dark:bg-[#000000] text-[#000000] dark:text-[#FFFFFF] border-l border-[#E0E0E0] dark:border-[#262626] shadow-2xl will-change-transform"
-              drag="x"
-              dragDirectionLock
-              dragConstraints={{ left: 0, right: 0 }}
-              dragElastic={{ left: 0, right: 0.45 }}
-              dragMomentum={false}
-              onDragEnd={handleHistorySwipeEnd}
-            >
+      <SheetContent 
+        side="right" 
+        hideCloseButton
+        className="w-full max-w-[100vw] sm:max-w-xl p-0 flex flex-col h-full h-[100dvh] max-h-[100dvh] bg-transparent border-0 shadow-none data-[state=open]:animate-none data-[state=closed]:animate-none z-50 overflow-visible"
+      >
+        <motion.div
+          key={isOpen ? 'history-panel-open' : 'history-panel-closed'}
+          data-testid="history-panel-swipe-container"
+          data-animation="slide-in"
+          variants={prefersReducedMotion ? undefined : HISTORY_PANEL_SLIDE_VARIANTS}
+          initial={prefersReducedMotion ? false : 'hidden'}
+          animate="visible"
+          className="flex flex-col flex-1 min-h-0 w-full h-full overflow-hidden bg-[#FFFFFF] dark:bg-[#000000] text-[#000000] dark:text-[#FFFFFF] border-l border-[#E0E0E0] dark:border-[#262626] shadow-2xl will-change-transform"
+          drag="x"
+          dragDirectionLock
+          dragConstraints={{ left: 0, right: 0 }}
+          dragElastic={{ left: 0, right: 0.45 }}
+          dragMomentum={false}
+          onDragEnd={handleHistorySwipeEnd}
+        >
         {/* Minimal Fixed Header */}
         <div className="px-4 py-3 border-b border-[#E0E0E0] dark:border-[#262626] bg-[#FFFFFF] dark:bg-[#000000] shrink-0">
           <SheetHeader className="text-left space-y-0">
@@ -1425,160 +1430,9 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
               </div>
             )}
 
-            {/* Horizontal Scrollable Tag Filter Row */}
-            {activeTab === 'sessions' && (
-              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar touch-pan-x py-0.5">
-                {['all', ...getAvailableTags()].map((tag) => {
-                  const isActive = selectedTagFilter === tag;
-                  return (
-                    <button
-                      key={tag}
-                      type="button"
-                      data-size="icon"
-                      onClick={() => {
-                        setSelectedTagFilter(tag);
-                        if (tag === 'all') {
-                          setVisibleChartTags([]);
-                        }
-                      }}
-                      className={cn(
-                        "h-7 px-3 rounded-full text-[11px] transition-all shrink-0 cursor-pointer border",
-                        isActive
-                          ? "bg-[#000000] dark:bg-[#FFFFFF] text-[#FFFFFF] dark:text-[#000000] border-[#000000] dark:border-[#FFFFFF] font-semibold"
-                          : "bg-[#FAFAFA] dark:bg-[#111111] border-[#E0E0E0] dark:border-[#262626] text-[#777777] dark:text-[#888888] hover:text-[#000000] dark:hover:text-[#FFFFFF]"
-                      )}
-                    >
-                      {tag === 'all' ? 'All Tags' : tag}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
 
-            {/* Collapsible Tag Distribution Dashboard (Compact by Default) */}
-            {activeTab === 'sessions' && (
-              <div
-                data-testid="tag-distribution-card"
-                className="rounded-xl bg-[#FAFAFA] dark:bg-[#111111] border border-[#E0E0E0] dark:border-[#262626] overflow-hidden"
-              >
-                <div className="flex items-center justify-between gap-2 px-3 py-2">
-                  <button
-                    type="button"
-                    data-size="icon"
-                    data-testid="toggle-tag-distribution-btn"
-                    onClick={() => setShowTagBars((prev) => !prev)}
-                    className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer"
-                  >
-                    <BarChart3 size={13} className="text-[#000000] dark:text-[#FFFFFF] shrink-0" />
-                    <span className="text-xs font-semibold text-[#000000] dark:text-[#FFFFFF] shrink-0">
-                      Tag Distribution
-                    </span>
-                    {topTagMetric && (
-                      <span className="text-[11px] text-[#777777] dark:text-[#888888] truncate">
-                        • Top: {topTagMetric.tag} ({topTagMetric.count} / {topTagMetric.percentage}%)
-                      </span>
-                    )}
-                  </button>
 
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      data-size="icon"
-                      onClick={() => setIsTagAnalyticsOpen(true)}
-                      className="h-6 px-2 rounded-md border border-[#E0E0E0] dark:border-[#262626] bg-[#FFFFFF] dark:bg-[#1A1A1A] text-[#000000] dark:text-[#FFFFFF] text-[10px] font-medium hover:opacity-80 transition-opacity cursor-pointer"
-                      title="Open Full Tag Analytics"
-                    >
-                      Analytics
-                    </button>
-                    <button
-                      type="button"
-                      data-size="icon"
-                      onClick={() => setShowTagBars((prev) => !prev)}
-                      aria-expanded={showTagBars}
-                      aria-label={showTagBars ? "Collapse tag distribution" : "Expand tag distribution"}
-                      className="w-6 h-6 rounded-md flex items-center justify-center text-[#777777] hover:text-[#000000] dark:hover:text-[#FFFFFF] cursor-pointer"
-                    >
-                      {showTagBars ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                    </button>
-                  </div>
-                </div>
 
-                {showTagBars && (
-                  <div className="px-3 pb-3 pt-1.5 border-t border-[#E0E0E0] dark:border-[#262626] space-y-2.5">
-                    {/* Compact Time Range Switcher */}
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] text-[#777777] dark:text-[#888888]">
-                        Click a tag bar to filter tasks
-                      </span>
-                      <div className="flex items-center gap-1">
-                        {[
-                          { id: 'today', label: 'Today' },
-                          { id: 'week', label: '7D' },
-                          { id: 'month', label: '30D' },
-                          { id: 'all', label: 'All' },
-                        ].map((range) => (
-                          <button
-                            key={range.id}
-                            type="button"
-                            data-size="icon"
-                            onClick={() => setDateFilter(range.id as any)}
-                            className={cn(
-                              "h-6 px-2 rounded-md text-[10px] font-medium transition-all cursor-pointer",
-                              dateFilter === range.id
-                                ? "bg-[#000000] dark:bg-[#FFFFFF] text-[#FFFFFF] dark:text-[#000000] font-semibold"
-                                : "bg-[#F2F2F2] dark:bg-[#1A1A1A] text-[#777777] hover:text-[#000000] dark:hover:text-[#FFFFFF]"
-                            )}
-                          >
-                            {range.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Simple Horizontal Progress Bars */}
-                    <div className="space-y-1.5">
-                      {inlineTagSummaries.map((item) => {
-                        const isSelectedTag = selectedTagFilter === item.tag;
-                        return (
-                          <button
-                            key={item.tag}
-                            type="button"
-                            data-size="icon"
-                            onClick={() =>
-                              setSelectedTagFilter(isSelectedTag ? 'all' : item.tag)
-                            }
-                            className={cn(
-                              "w-full flex items-center gap-2.5 py-1 px-1.5 rounded-lg text-left transition-colors cursor-pointer",
-                              isSelectedTag
-                                ? "bg-[#F2F2F2] dark:bg-[#1A1A1A]"
-                                : "hover:bg-[#F2F2F2]/60 dark:hover:bg-[#1A1A1A]/60"
-                            )}
-                          >
-                            <span className={cn(
-                              "w-20 text-[11px] truncate shrink-0",
-                              isSelectedTag
-                                ? "font-bold text-[#000000] dark:text-[#FFFFFF]"
-                                : "font-medium text-[#333333] dark:text-[#CCCCCC]"
-                            )}>
-                              {item.tag}
-                            </span>
-                            <div className="flex-1 h-2 rounded-full bg-[#E0E0E0] dark:bg-[#262626] overflow-hidden">
-                              <div
-                                className="h-full rounded-full bg-[#000000] dark:bg-[#FFFFFF] transition-all duration-300"
-                                style={{ width: `${Math.max(item.count > 0 ? 4 : 0, item.percentage)}%` }}
-                              />
-                            </div>
-                            <span className="w-16 text-right font-mono text-[10px] text-[#777777] dark:text-[#888888] shrink-0">
-                              {item.count} ({item.percentage}%)
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* Real-time search match indicator */}
             {searchQuery.trim() && (
@@ -2541,10 +2395,9 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
             />
           </React.Suspense>
         )}
-            </motion.div>
-          </SheetContent>
-        )}
-      </AnimatePresence>
+        </motion.div>
+      </SheetContent>
     </Sheet>
   );
 }
+

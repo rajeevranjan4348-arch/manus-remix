@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { 
   X, 
   Monitor, 
   Sun, 
@@ -305,10 +304,8 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
 
   const tabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
     { id: 'general', label: 'General', icon: Sun },
-    { id: 'connectors', label: 'GitHub & Repos', icon: Github },
     { id: 'robot', label: 'Robot', icon: Bot },
     { id: 'ai', label: 'AI & Models', icon: Brain },
-    { id: 'diagnostics', label: 'Diagnostics', icon: Activity },
     { id: 'personalization', label: 'Personalization', icon: User },
     { id: 'voice', label: 'Voice & Audio', icon: Volume2 },
     { id: 'data', label: 'Data & Privacy', icon: Shield },
@@ -1859,3 +1856,4 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
     </AnimatePresence>
   );
 }
+
