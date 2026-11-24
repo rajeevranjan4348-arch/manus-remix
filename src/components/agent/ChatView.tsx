@@ -35,7 +35,6 @@ import { MarkdownRenderer } from './MarkdownRenderer';
 import { FileAttachments } from './FileAttachments';
 import { AttachmentMenu } from '../chat/AttachmentMenu';
 import { ConversationActionBar } from './ConversationActionBar';
-import { BubbleReactionButtons } from './BubbleReactionButtons';
 import { MessageContextMenu, SelectTextModal, ContextMenuAnchor, useMessageLongPressController } from './MessageContextMenu';
 import { MessageEditController } from './MessageEditController';
 import { WritingBlock } from './WritingBlock';
@@ -1221,10 +1220,6 @@ export function ChatView({
           >
             <div className="relative flex items-center gap-1.5 max-w-[85%] sm:max-w-[75%]">
               <div className="flex items-center gap-1 shrink-0">
-                <BubbleReactionButtons
-                  messageId={`user-${msgId}`}
-                  groupScope="user"
-                />
                 <button
                   type="button"
                   data-testid="user-message-menu-btn"
@@ -2422,3 +2417,5 @@ export function ChatView({
     </div>
   );
 }
+
+

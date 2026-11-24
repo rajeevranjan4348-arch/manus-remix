@@ -16,7 +16,6 @@ import {
   type MessageMemoryUpdate,
 } from '@/lib/longTermMemory';
 import { ConversationActionBar } from '../agent/ConversationActionBar';
-import { BubbleReactionButtons } from '../agent/BubbleReactionButtons';
 import { MemoryUpdatedIndicator } from '../agent/MemoryUpdatedIndicator';
 import { MarkdownRenderer } from '../agent/MarkdownRenderer';
 import { MessageContextMenu, SelectTextModal, ContextMenuAnchor, useMessageLongPressController } from '../agent/MessageContextMenu';
@@ -660,10 +659,6 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
                       <div className={msg.role === 'user' ? 'flex items-center gap-1.5 max-w-full' : 'w-full'}>
                         {msg.role === 'user' && msg.content && (
                           <div className="flex items-center gap-1 shrink-0">
-                            <BubbleReactionButtons
-                              messageId={msg.id ? `myai-user-${msg.id}` : `myai-user-msg-${index}`}
-                              groupScope="user"
-                            />
                             <button
                               type="button"
                               data-testid="user-message-menu-btn"
@@ -881,3 +876,5 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
     </div>
   );
 }
+
+
