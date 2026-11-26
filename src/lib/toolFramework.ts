@@ -18,6 +18,7 @@ import {
   StudioFinishId,
   StudioEnvironmentPresetId,
 } from './threeSceneSpec';
+import { registerSandboxTools } from './sandboxTools';
 
 export type ToolRiskLevel = 'read-only' | 'destructive' | 'privileged' | 'safe' | 'moderate' | 'sensitive';
 
@@ -182,6 +183,9 @@ class ToolRegistryService {
    * Built-in tool definitions
    */
   private registerCoreTools() {
+    // Feature 06: sandboxed coding & real browser execution engine.
+    registerSandboxTools(this);
+
     // 1. Calculator
     this.register({
       name: 'calculate',
