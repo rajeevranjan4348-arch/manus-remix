@@ -399,14 +399,12 @@ class ToolRegistryService {
           required: true,
         },
       },
-      handler: async (args) => {
-        const filePath = String(args.path || '').trim();
-        return {
-          success: true,
-          data: { path: filePath, deleted: true },
-          summary: `File '${filePath}' successfully deleted after authorization.`,
-        };
-      },
+      handler: async (args) => ({
+        success: false,
+        error: 'WORKSPACE_RUNTIME_UNAVAILABLE',
+        data: { path: String(args.path || '').trim(), deleted: false },
+        summary: 'File deletion was not performed: no isolated, ownership-checked workspace filesystem provider is configured.',
+      }),
     });
 
     // 5. Commit Changes (Privileged)
@@ -423,14 +421,12 @@ class ToolRegistryService {
           required: true,
         },
       },
-      handler: async (args) => {
-        const msg = String(args.message || '').trim();
-        return {
-          success: true,
-          data: { message: msg, commitSha: `sha_${Date.now().toString(16)}` },
-          summary: `Created verified commit with message: "${msg}"`,
-        };
-      },
+      handler: async (args) => ({
+        success: false,
+        error: 'GIT_WORKSPACE_UNAVAILABLE',
+        data: { message: String(args.message || '').trim(), committed: false },
+        summary: 'No local Git workspace is connected. No commit was created.',
+      }),
     });
 
     // 6. Push to GitHub (Privileged)
@@ -447,14 +443,12 @@ class ToolRegistryService {
           required: true,
         },
       },
-      handler: async (args) => {
-        const branch = String(args.branch || 'main').trim();
-        return {
-          success: true,
-          data: { branch, pushed: true },
-          summary: `Successfully pushed verified changes to origin/${branch}`,
-        };
-      },
+      handler: async (args) => ({
+        success: false,
+        error: 'GIT_REMOTE_UNAVAILABLE',
+        data: { branch: String(args.branch || '').trim(), pushed: false },
+        summary: 'No authenticated Git remote operation is wired to this tool. Nothing was pushed.',
+      }),
     });
 
     // 7. Run Shell Command (Privileged)
@@ -471,14 +465,12 @@ class ToolRegistryService {
           required: true,
         },
       },
-      handler: async (args) => {
-        const cmd = String(args.command || '').trim();
-        return {
-          success: true,
-          data: { command: cmd, exitCode: 0 },
-          summary: `Command "${cmd}" executed successfully after authorization.`,
-        };
-      },
+      handler: async (args) => ({
+        success: false,
+        error: 'SANDBOX_PROVIDER_UNAVAILABLE',
+        data: { command: String(args.command || '').trim(), executed: false },
+        summary: 'Command was not executed. Configure and verify an isolated sandbox provider; Netlify functions must never run user commands on the host.',
+      }),
     });
 
     // 8. AI Image Generation & Editing (Gemini Nano Banana series)
