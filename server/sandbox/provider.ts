@@ -112,7 +112,7 @@ export function resolveProvider(): ResolvedProvider {
         `SANDBOX_PROVIDER='${configured}' is not a supported provider. Supported values: e2b, off.`,
       ),
       available: false,
-      reason: `Unsupported provider: ${configured}`,
+      reason: `SANDBOX_PROVIDER='${configured}' is not a supported provider. Supported values: e2b, off.`,
     };
   }
 

@@ -206,12 +206,31 @@ class FirestorePermissionStore implements PermissionStore {
 
 let cached: PermissionStore | null = null;
 
+const STORE_PROBE_TIMEOUT_MS = 3000;
+
+/**
+ * Firestore only fails when credentials are actually used, so a successful
+ * init() does not prove durability. Probe with a bounded read: on error or
+ * timeout fall back to the explicit non-durable memory store rather than
+ * hanging requests or failing them 13s late.
+ */
 export async function resolvePermissionStore(): Promise<PermissionStore> {
   if (cached) return cached;
+  if ((process.env.DURABLE_STORE_BACKEND || '').trim().toLowerCase() === 'memory') {
+    cached = new MemoryPermissionStore();
+    return cached;
+  }
   try {
     const store = new FirestorePermissionStore();
     await store.init();
-    cached = store;
+    const probe = store
+      .getChallenge('__resolution_probe__', '__resolution_probe__')
+      .then(() => true as const);
+    const reachable = await Promise.race([
+      probe,
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), STORE_PROBE_TIMEOUT_MS)),
+    ]);
+    cached = reachable ? store : new MemoryPermissionStore();
   } catch {
     cached = new MemoryPermissionStore();
   }

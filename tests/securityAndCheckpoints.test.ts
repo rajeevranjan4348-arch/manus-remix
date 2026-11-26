@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { permissionsGateway, CHALLENGES_COLLECTION } from '../server/permissionsGateway';
+import { permissionsGateway } from '../server/permissionsGateway';
+import { resolvePermissionStore } from '../server/security/permissionsStore';
 import { taskCheckpoint } from '../src/lib/taskCheckpoint';
 import { toolRegistry } from '../src/lib/toolFramework';
 import { settingsStore } from '../src/lib/settingsStore';
@@ -26,8 +27,8 @@ describe('Centralized Permission Gateway, Security Review & Durable Checkpoints'
       expect(privilegedPolicy.requiresConfirmation).toBe(true);
     });
 
-    it('automatically allows read-only operations without requiring user confirmation', () => {
-      const result = permissionsGateway.evaluateAction({
+    it('automatically allows read-only operations without requiring user confirmation', async () => {
+      const result = await permissionsGateway.evaluateAction({
         toolName: 'web_search',
         args: { query: 'latest typescript features 2026' },
         userId: 'usr_alice',
@@ -39,8 +40,8 @@ describe('Centralized Permission Gateway, Security Review & Durable Checkpoints'
       expect(result.challenge).toBeUndefined();
     });
 
-    it('blocks destructive operations and creates an explicit confirmation challenge', () => {
-      const result = permissionsGateway.evaluateAction({
+    it('blocks destructive operations and creates an explicit confirmation challenge', async () => {
+      const result = await permissionsGateway.evaluateAction({
         toolName: 'delete_file',
         args: { path: 'src/legacy/data.json' },
         userId: 'usr_alice',
@@ -55,8 +56,8 @@ describe('Centralized Permission Gateway, Security Review & Durable Checkpoints'
       expect(result.challenge?.parametersHash).toBeDefined();
     });
 
-    it('blocks privileged operations (such as git_push or run_command) pending explicit confirmation', () => {
-      const result = permissionsGateway.evaluateAction({
+    it('blocks privileged operations (such as git_push or run_command) pending explicit confirmation', async () => {
+      const result = await permissionsGateway.evaluateAction({
         toolName: 'git_push',
         args: { branch: 'main' },
         userId: 'usr_alice',
@@ -70,7 +71,7 @@ describe('Centralized Permission Gateway, Security Review & Durable Checkpoints'
     });
 
     it('detects parameter tampering via cryptographic hash', async () => {
-      const evaluation = permissionsGateway.evaluateAction({
+      const evaluation = await permissionsGateway.evaluateAction({
         toolName: 'delete_file',
         args: { path: 'test_temp.txt' },
         userId: 'usr_alice',
@@ -99,7 +100,7 @@ describe('Centralized Permission Gateway, Security Review & Durable Checkpoints'
     });
 
     it('mints single-use approval token and prevents replay attacks by burning on execution', async () => {
-      const evaluation = permissionsGateway.evaluateAction({
+      const evaluation = await permissionsGateway.evaluateAction({
         toolName: 'run_command',
         args: { command: 'npm run test' },
         userId: 'usr_alice',
@@ -135,20 +136,16 @@ describe('Centralized Permission Gateway, Security Review & Durable Checkpoints'
     });
 
     it('rejects expired challenges', async () => {
-      const evaluation = permissionsGateway.evaluateAction({
+      const evaluation = await permissionsGateway.evaluateAction({
         toolName: 'purge_memories',
         args: { all: true },
         userId: 'usr_alice',
       });
 
       const challenge = evaluation.challenge!;
-      // Artificially expire the durable challenge record
-      const backend = permissionsGateway.getDurableStoreForTests();
-      const stored = await backend.get(CHALLENGES_COLLECTION, challenge.challengeId);
-      await backend.set(CHALLENGES_COLLECTION, challenge.challengeId, {
-        ...(stored ?? (challenge as unknown as Record<string, any>)),
-        expiresAt: Date.now() - 5000,
-      });
+      const backend = await resolvePermissionStore();
+      const stored = await backend.getChallenge(challenge.challengeId, 'usr_alice');
+      await backend.putChallenge({ ...stored!, expiresAt: Date.now() - 5000 });
 
       const resolution = await permissionsGateway.resolveChallenge({
         challengeId: challenge.challengeId,

@@ -68,7 +68,7 @@ describe('API authentication boundaries', () => {
 
 describe('Permission challenge ownership', () => {
   it('prevents another user from approving or consuming an approval challenge', async () => {
-    const evaluation = permissionsGateway.evaluateAction({
+    const evaluation = await permissionsGateway.evaluateAction({
       toolName: 'delete_file',
       args: { path: 'private.txt' },
       userId: `owner_${Date.now()}`,
@@ -108,8 +108,8 @@ describe('Permission challenge ownership', () => {
     expect(ownerExecution.valid).toBe(true);
   });
 
-  it('does not create permission challenges without an authenticated user ID', () => {
-    const result = permissionsGateway.evaluateAction({ toolName: 'delete_file', args: { path: 'private.txt' } });
+  it('does not create permission challenges without an authenticated user ID', async () => {
+    const result = await permissionsGateway.evaluateAction({ toolName: 'delete_file', args: { path: 'private.txt' } });
     expect(result.allowed).toBe(false);
     expect(result.challenge).toBeUndefined();
   });

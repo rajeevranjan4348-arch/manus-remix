@@ -317,7 +317,7 @@ describe('Feature 06: preview pipeline never fabricates success', () => {
 });
 
 describe('Feature 06: agent tool registration', () => {
-  it('registers exactly the 20 specified tools with sane risk levels', () => {
+  it('registers exactly the Feature 06 tools plus durable background task tools', () => {
     const registered = new Map<string, any>();
     const registry = { register: (tool: any) => registered.set(tool.name, tool) };
     registerSandboxTools(registry);
@@ -327,6 +327,7 @@ describe('Feature 06: agent tool registration', () => {
       'filesystem_list', 'filesystem_read', 'filesystem_write', 'filesystem_delete', 'filesystem_search',
       'browser_session_create', 'browser_navigate', 'browser_inspect', 'browser_click', 'browser_fill',
       'browser_screenshot', 'browser_session_close', 'preview_start', 'preview_status', 'sandbox_cleanup',
+      'enqueue_background_task', 'task_status',
     ];
     expect([...registered.keys()].sort()).toEqual([...expected].sort());
 

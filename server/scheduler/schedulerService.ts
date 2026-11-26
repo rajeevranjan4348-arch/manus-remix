@@ -40,7 +40,7 @@ export function validateSpec(spec: ScheduleSpec): ScheduleValidation {
   }
   if (spec.kind === 'recurring') {
     const hasInterval = spec.everyMinutes != null;
-    const hasDaily = spec.dailyAt && Number.isInteger(spec.dailyAt.hour) && Number.isInteger(spec.dailyAt.minute);
+    const hasDaily = spec.dailyAt != null && Number.isInteger(spec.dailyAt.hour) && Number.isInteger(spec.dailyAt.minute);
     if (hasInterval === hasDaily) return { valid: false, error: 'recurring schedules need exactly one of everyMinutes or dailyAt.' };
     if (hasInterval) {
       if (spec.everyMinutes! < SCHEDULE_HARD_LIMITS.everyMinutesMin || spec.everyMinutes! > SCHEDULE_HARD_LIMITS.everyMinutesMax) {

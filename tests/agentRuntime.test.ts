@@ -84,7 +84,7 @@ describe('Feature 03: fail-closed execution', () => {
     delete process.env.AGENT_MODEL_API_KEY;
     delete process.env.AGENT_MODEL_BASE_URL;
     delete process.env.AGENT_MODEL_ID;
-    const { service } = makeRuntime();
+    const service = new AgentRuntimeService(new MemoryAgentStore());
     await expect(service.createRun('userA', 'Do a thing')).rejects.toMatchObject({ code: 'MODEL_PROVIDER_UNAVAILABLE' });
   });
 

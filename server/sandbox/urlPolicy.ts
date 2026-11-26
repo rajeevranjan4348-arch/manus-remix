@@ -22,7 +22,7 @@ function ipv4Octets(host: string): number[] | null {
   if (parts.length !== 4) return null;
   const octets: number[] = [];
   for (const part of parts) {
-    if (!/^\\d{1,3}$/.test(part)) return null;
+    if (!/^\d{1,3}$/.test(part)) return null;
     const value = Number(part);
     if (value > 255) return null;
     octets.push(value);
@@ -36,7 +36,7 @@ function ipv4Octets(host: string): number[] | null {
  * carrier-grade NAT and IPv6 ULA/link-local are all rejected.
  */
 export function hostnameViolation(host: string): string | null {
-  const normalized = String(host || '').trim().toLowerCase().replace(/\\.$/, '');
+  const normalized = String(host || '').trim().toLowerCase().replace(/\.$/, '');
   if (!normalized) return 'Empty hostname';
 
   if (BLOCKED_HOSTNAMES.has(normalized)) {
@@ -64,9 +64,9 @@ export function hostnameViolation(host: string): string | null {
 
   // IPv6 (colon present)
   if (normalized.includes(':')) {
-    const bare = normalized.replace(/^\\[|\\]$/g, '');
+    const bare = normalized.replace(/^\[|\]$/g, '');
     // ::1 or ::1 equivalents, ::ffff:127.0.0.1 style mapped addresses
-    if (bare === '::1' || bare === '::' || /^::ffff:127\\./.test(bare) || /^::ffff:10\\./.test(bare) || /^::ffff:192\\.168\\./.test(bare) || /^::ffff:169\\.254\\./.test(bare)) {
+    if (bare === '::1' || bare === '::' || /^::ffff:127\./.test(bare) || /^::ffff:10\./.test(bare) || /^::ffff:192\.168\./.test(bare) || /^::ffff:169\.254\./.test(bare)) {
       return 'Access to loopback or private networks is forbidden';
     }
     const leadGroups = bare.split(':')[0];

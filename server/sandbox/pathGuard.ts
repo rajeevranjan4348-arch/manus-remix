@@ -36,10 +36,10 @@ export function resolveWorkspacePath(rawPath: string): PathResolution {
   }
   // Control characters
   // eslint-disable-next-line no-control-regex
-  if (/\\u0000-\\u001f|\\u007f/.test(input)) {
+  if (/[\u0000-\u001f\u007f]/.test(input)) {
     return { valid: false, error: 'Path contains control characters' };
   }
-  if (input.startsWith('/') || input.startsWith('\\\\')) {
+  if (input.startsWith('/') || input.startsWith('\\')) {
     return { valid: false, error: 'Absolute paths are not permitted inside a workspace' };
   }
   if (/^[a-zA-Z]:/.test(input)) {
@@ -49,7 +49,7 @@ export function resolveWorkspacePath(rawPath: string): PathResolution {
     return { valid: false, error: 'Alternate data streams are not permitted' };
   }
 
-  const segments = input.split(/[\\\\/]+/);
+  const segments = input.split(/[\\/]+/);
   const normalized: string[] = [];
   for (const segment of segments) {
     if (segment === '' || segment === '.') continue;
@@ -75,8 +75,8 @@ export function resolveWorkspacePath(rawPath: string): PathResolution {
  * provider supports it) still sits inside the workspace root. Escapes fail closed.
  */
 export function assertWithinWorkspaceRoot(realPath: string, workspaceRoot: string): boolean {
-  const normalizedReal = String(realPath || '').replace(/\\\\/g, '/');
-  const normalizedRoot = String(workspaceRoot || '').replace(/\\\\/g, '/').replace(/\\/$/, '');
+  const normalizedReal = String(realPath || '').replace(/\\/g, '/');
+  const normalizedRoot = String(workspaceRoot || '').replace(/\\/g, '/').replace(/\/$/, '');
   if (!normalizedRoot) return false;
   if (normalizedReal === normalizedRoot) return true;
   return normalizedReal.startsWith(normalizedRoot + '/');

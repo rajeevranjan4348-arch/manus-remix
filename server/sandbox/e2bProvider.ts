@@ -52,7 +52,7 @@ const RUNTIME_TO_TEMPLATE: Record<RuntimeId, string | null> = {
   node: null,            // e2b default image ships Node.js
   typescript: null,
   javascript: null,
-  html-css: null,
+  'html-css': null,
   python: null,          // e2b default image ships Python
   'react-vite': process.env.E2B_TEMPLATE_REACT_VITE || null,
   next: process.env.E2B_TEMPLATE_NEXT || null,
