@@ -60,6 +60,7 @@ import {
   WORKSPACE_BACKDROP_VARIANTS,
   WORKSPACE_DIALOG_SPRING_VARIANTS,
   WORKSPACE_REDUCED_MOTION_VARIANTS,
+  WORKSPACE_TAB_HEADER_SPRING,
 } from '@/lib/panelMotion';
 import { shouldDismissModalOnSwipe } from '@/lib/swipeToDismiss';
 import { toast } from 'sonner';
@@ -393,19 +394,34 @@ export function SettingsModal({ isOpen, onClose, onBack, initialTab, activeTaskI
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
               return (
-                <button
+                <motion.button
                   key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  data-state={isActive ? 'active' : 'inactive'}
+                  data-spring-tab="true"
                   onClick={() => setActiveTab(tab.id)}
+                  whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
+                  transition={prefersReducedMotion ? { duration: 0.01 } : WORKSPACE_TAB_HEADER_SPRING}
                   className={cn(
-                    "flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors text-left whitespace-nowrap cursor-pointer shrink-0",
+                    "relative flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors text-left whitespace-nowrap cursor-pointer shrink-0",
                     isActive
-                      ? "bg-foreground text-background font-semibold shadow-2xs"
+                      ? "text-background font-semibold"
                       : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                   )}
                 >
-                  <Icon size={14} className="shrink-0" />
-                  <span>{tab.label}</span>
-                </button>
+                  {isActive && (
+                    <motion.span
+                      layoutId="settings-active-tab-pill"
+                      transition={prefersReducedMotion ? { duration: 0.01 } : WORKSPACE_TAB_HEADER_SPRING}
+                      className="absolute inset-0 rounded-lg bg-foreground shadow-2xs"
+                      aria-hidden="true"
+                    />
+                  )}
+                  <Icon size={14} className="relative z-10 shrink-0" />
+                  <span className="relative z-10">{tab.label}</span>
+                </motion.button>
               );
             })}
           </nav>

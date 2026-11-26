@@ -52,6 +52,7 @@ import { shouldDismissRightDrawerOnSwipe } from '@/lib/swipeToDismiss';
 import {
   WORKSPACE_RIGHT_SHEET_SPRING_VARIANTS,
   WORKSPACE_REDUCED_MOTION_VARIANTS,
+  WORKSPACE_TAB_HEADER_SPRING,
 } from '@/lib/panelMotion';
 
 const TagAnalyticsModal = React.lazy(() =>
@@ -1455,41 +1456,40 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
           >
             <div className="flex items-center justify-between gap-2 min-w-0 border-b border-[#E0E0E0] dark:border-[#262626] pb-2">
               <TabsList className="bg-[#F2F2F2] dark:bg-[#111111] p-1 rounded-xl h-9 gap-1 overflow-x-auto no-scrollbar touch-pan-x max-w-full justify-start border border-[#E0E0E0] dark:border-[#262626]">
-                <TabsTrigger
-                  value="sessions"
-                  data-size="icon"
-                  className="text-xs px-2.5 py-1 rounded-lg font-medium shrink-0 text-[#777777] data-[state=active]:bg-[#000000] dark:data-[state=active]:bg-[#FFFFFF] data-[state=active]:text-[#FFFFFF] dark:data-[state=active]:text-[#000000]"
-                >
-                  Past Tasks ({tasks.length})
-                </TabsTrigger>
-                <TabsTrigger
-                  value="all"
-                  data-size="icon"
-                  className="text-xs px-2.5 py-1 rounded-lg font-medium shrink-0 text-[#777777] data-[state=active]:bg-[#000000] dark:data-[state=active]:bg-[#FFFFFF] data-[state=active]:text-[#FFFFFF] dark:data-[state=active]:text-[#000000]"
-                >
-                  All Items
-                </TabsTrigger>
-                <TabsTrigger
-                  value="photos"
-                  data-size="icon"
-                  className="text-xs px-2.5 py-1 rounded-lg font-medium shrink-0 text-[#777777] data-[state=active]:bg-[#000000] dark:data-[state=active]:bg-[#FFFFFF] data-[state=active]:text-[#FFFFFF] dark:data-[state=active]:text-[#000000]"
-                >
-                  Photos
-                </TabsTrigger>
-                <TabsTrigger
-                  value="videos"
-                  data-size="icon"
-                  className="text-xs px-2.5 py-1 rounded-lg font-medium shrink-0 text-[#777777] data-[state=active]:bg-[#000000] dark:data-[state=active]:bg-[#FFFFFF] data-[state=active]:text-[#FFFFFF] dark:data-[state=active]:text-[#000000]"
-                >
-                  Videos
-                </TabsTrigger>
-                <TabsTrigger
-                  value="docs"
-                  data-size="icon"
-                  className="text-xs px-2.5 py-1 rounded-lg font-medium shrink-0 text-[#777777] data-[state=active]:bg-[#000000] dark:data-[state=active]:bg-[#FFFFFF] data-[state=active]:text-[#FFFFFF] dark:data-[state=active]:text-[#000000]"
-                >
-                  Docs & Files
-                </TabsTrigger>
+                {([
+                  { value: 'sessions', label: `Past Tasks (${tasks.length})` },
+                  { value: 'all', label: 'All Items' },
+                  { value: 'photos', label: 'Photos' },
+                  { value: 'videos', label: 'Videos' },
+                  { value: 'docs', label: 'Docs & Files' },
+                ] as const).map((tab) => {
+                  const isTabActive = activeTab === tab.value;
+                  return (
+                    <TabsTrigger
+                      key={tab.value}
+                      value={tab.value}
+                      data-size="icon"
+                      data-spring-tab="true"
+                      className="relative overflow-hidden text-xs px-2.5 py-1 rounded-lg font-medium shrink-0 text-[#777777] data-[state=active]:bg-transparent dark:data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-[#FFFFFF] dark:data-[state=active]:text-[#000000]"
+                    >
+                      {isTabActive && (
+                        <motion.span
+                          layoutId="history-active-tab-pill"
+                          transition={prefersReducedMotion ? { duration: 0.01 } : WORKSPACE_TAB_HEADER_SPRING}
+                          className="absolute inset-0 rounded-lg bg-[#000000] dark:bg-[#FFFFFF] shadow-xs"
+                          aria-hidden="true"
+                        />
+                      )}
+                      <motion.span
+                        className="relative z-10 inline-flex items-center"
+                        whileTap={prefersReducedMotion ? undefined : { scale: 0.94 }}
+                        transition={prefersReducedMotion ? { duration: 0.01 } : WORKSPACE_TAB_HEADER_SPRING}
+                      >
+                        {tab.label}
+                      </motion.span>
+                    </TabsTrigger>
+                  );
+                })}
               </TabsList>
 
               {/* View Mode Switcher (List vs Grid) */}

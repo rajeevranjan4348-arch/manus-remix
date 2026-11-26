@@ -168,6 +168,13 @@ export const WORKSPACE_MODE_PILL_SPRING: Transition = {
   mass: 0.45,
 };
 
+export const WORKSPACE_TAB_HEADER_SPRING: Transition = {
+  type: 'spring',
+  stiffness: 580,
+  damping: 28,
+  mass: 0.55,
+};
+
 export const WORKSPACE_SECTION_REVEAL_VARIANTS: Variants = {
   hidden: {
     opacity: 0,

@@ -10,6 +10,7 @@ import {
   WORKSPACE_DIALOG_SPRING_VARIANTS,
   WORKSPACE_RIGHT_SHEET_SPRING_VARIANTS,
   WORKSPACE_REDUCED_MOTION_VARIANTS,
+  WORKSPACE_TAB_HEADER_SPRING,
 } from '../src/lib/panelMotion';
 import { HISTORY_PANEL_SLIDE_VARIANTS } from '../src/components/history/HistoryPanel';
 
@@ -43,8 +44,12 @@ describe('Workspace Panel Spring-Based Open/Close Transitions', () => {
       (WORKSPACE_SHEET_SPRING_OPEN as any).stiffness
     );
 
-    // Entrance springs should be subtly underdamped (0.65 < zeta < 0.92) for a slight physical spring settle
-    for (const openPreset of [WORKSPACE_PANEL_SPRING_OPEN, WORKSPACE_SHEET_SPRING_OPEN] as Array<Record<string, any>>) {
+    // Entrance and tab header springs should be subtly underdamped (0.65 < zeta < 0.92) for a slight physical spring settle
+    for (const openPreset of [
+      WORKSPACE_PANEL_SPRING_OPEN,
+      WORKSPACE_SHEET_SPRING_OPEN,
+      WORKSPACE_TAB_HEADER_SPRING,
+    ] as Array<Record<string, any>>) {
       const criticalDamping = 2 * Math.sqrt(openPreset.stiffness * openPreset.mass);
       const dampingRatio = openPreset.damping / criticalDamping;
       expect(dampingRatio).toBeGreaterThan(0.65);
@@ -92,6 +97,9 @@ describe('Workspace Panel Spring-Based Open/Close Transitions', () => {
     expect(settingsSrc).toContain('exit="exit"');
     expect(settingsSrc).not.toContain('if (!isOpen) return null;');
     expect(settingsSrc).toContain('onDragEnd={handleSettingsSwipeEnd}');
+    expect(settingsSrc).toContain('WORKSPACE_TAB_HEADER_SPRING');
+    expect(settingsSrc).toContain('layoutId="settings-active-tab-pill"');
+    expect(settingsSrc).toContain('data-spring-tab="true"');
 
     const historySrc = readSource('src/components/history/HistoryPanel.tsx');
     expect(historySrc).toContain('AnimatePresence');
@@ -101,6 +109,9 @@ describe('Workspace Panel Spring-Based Open/Close Transitions', () => {
     expect(historySrc).toContain('data-spring-transition="true"');
     expect(historySrc).toContain('exit="exit"');
     expect(historySrc).toContain('onDragEnd={handleHistorySwipeEnd}');
+    expect(historySrc).toContain('WORKSPACE_TAB_HEADER_SPRING');
+    expect(historySrc).toContain('layoutId="history-active-tab-pill"');
+    expect(historySrc).toContain('data-spring-tab="true"');
   });
 
   it('upgrades Dialog, Sheet, and Sidebar primitives to spring transitions and defines CSS spring curves with reduced-motion and ultra-lite guards', () => {
