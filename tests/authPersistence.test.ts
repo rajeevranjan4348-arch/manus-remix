@@ -45,15 +45,24 @@ describe('Authentication Persistence Test Suite', () => {
   it('4. Offline Resilience: retains auth token during network interruption without immediate session drop', () => {
     setCachedAccessToken('active_offline_token');
     
-    // Simulate offline network event
-    const originalOnLine = navigator.onLine;
-    Object.defineProperty(navigator, 'onLine', { value: false, configurable: true });
+    // Simulate offline network event (fall back to a plain object when no DOM navigator exists)
+    const nav: any = typeof globalThis.navigator !== 'undefined' ? globalThis.navigator : {};
+    const originalOnLine = nav.onLine;
+    try {
+      Object.defineProperty(nav, 'onLine', { value: false, configurable: true });
+    } catch {
+      nav.onLine = false;
+    }
 
     // Session token should remain intact
     expect(getAccessToken()).toBe('active_offline_token');
 
     // Restore online state
-    Object.defineProperty(navigator, 'onLine', { value: originalOnLine, configurable: true });
+    try {
+      Object.defineProperty(nav, 'onLine', { value: originalOnLine, configurable: true });
+    } catch {
+      nav.onLine = originalOnLine;
+    }
   });
 
   it('5. User Isolation: verifies separate accounts receive unique tokens and user metadata', () => {

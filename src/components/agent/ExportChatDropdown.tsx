@@ -24,7 +24,7 @@ export const EXPORT_FORMAT_OPTIONS: Array<{
   extension: string;
   description: string;
   testId: string;
-  icon: React.ComponentType<{ size?: number; className?: string; strokeWidth?: number }>;
+  icon: React.ComponentType<{ size?: string | number; className?: string; strokeWidth?: string | number }>;
 }> = [
   {
     format: 'pdf',
