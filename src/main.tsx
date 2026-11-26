@@ -5,6 +5,8 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import './index.css'
 import './manus-motion.css'
+import './icon-motion.css'
+import { initIconMotion } from './lib/iconMotion'
 
 // Tier 1 Google Maps Platform auth & quota detection (registered before React mount)
 if (typeof window !== 'undefined') {
@@ -20,6 +22,10 @@ if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'))
     }
   }
+
+  // Universal icon motion system (src/icon-motion.css + src/lib/iconMotion.ts):
+  // tag dynamically rendered icons so they inherit the shared animation layer.
+  initIconMotion()
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
