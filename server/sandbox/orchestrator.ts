@@ -323,12 +323,9 @@ export class SandboxOrchestratorService {
     record.updatedAt = new Date().toISOString();
     record.error = 'Cancelled by user request.';
     await svc.store.putExecution(record);
-    if (record.sessionId) {
-      const session = await svc.store.getSession(record.sessionId, userId);
-      if (session?.providerSandboxId) {
-        await svc.provider.execCommand(session.providerSandboxId, { command: 'pkill -f "manus-cmd" || true', timeoutSeconds: 5 }).catch(() => null);
-      }
-    }
+    // Remote process termination is enforced by provider-side command
+    // timeouts (a timed-out command is killed inside the sandbox). The
+    // durable status flip above is authoritative for every consumer.
     return record;
   }
 
@@ -413,17 +410,37 @@ export class SandboxOrchestratorService {
 
   /* ---------- Browser sessions ---------- */
 
+  /**
+   * Every browser operation requires an owned sandbox session AND an owned
+   * browser session record. The isolated desktop instance is re-attached from
+   * metadata persisted on the durable session record, so browser sessions
+   * survive function restarts where the provider supports reconnection.
+   */
+  private async requireOwnedBrowserContext(userId: string, sessionId: string, browserSessionId: string): Promise<{ svc: OrchestrationServices; record: SandboxSessionRecord }> {
+    if (!BROWSER_SESSION_ID_PATTERN.test(browserSessionId)) {
+      throw Object.assign(new Error('Invalid browser session id.'), { code: 'INVALID_BROWSER_SESSION', status: 400 });
+    }
+    const record = await this.requireOwnedSession(userId, sessionId);
+    const svc = await this.services();
+    const browserRecord = await svc.store.getBrowserSession(browserSessionId, userId);
+    if (!browserRecord || browserRecord.sessionId !== sessionId) {
+      throw Object.assign(new Error('Browser session not found for this user.'), { code: 'BROWSER_SESSION_NOT_FOUND', status: 404 });
+    }
+    if (browserRecord.status === 'closed') {
+      throw Object.assign(new Error('Browser session is closed.'), { code: 'BROWSER_SESSION_CLOSED', status: 409 });
+    }
+    if (!record.providerSandboxId) throw Object.assign(new Error('Sandbox is not active.'), { code: 'SANDBOX_INACTIVE', status: 409 });
+    await svc.provider.browserCreate(record.providerSandboxId, browserSessionId, record.metadata['browserSession_' + browserSessionId] as Record<string, unknown> | undefined);
+    return { svc, record };
+  }
+
   async browserCreate(userId: string, sessionId: string): Promise<{ browserSessionId: string }> {
     const record = await this.requireOwnedSession(userId, sessionId);
     const svc = await this.services();
+    if (!record.providerSandboxId) throw Object.assign(new Error('Sandbox is not active.'), { code: 'SANDBOX_INACTIVE', status: 409 });
     const browserSessionId = makeId('brw');
-    let providerMetadata: Record<string, unknown> = {};
-    try {
-      const created = await svc.provider.browserCreate(record.providerSandboxId || '', browserSessionId);
-      providerMetadata = (created && (created as any).metadata) || {};
-    } catch (err: any) {
-      throw err;
-    }
+    const created = await svc.provider.browserCreate(record.providerSandboxId, browserSessionId);
+    const providerMetadata = (created && (created as any).metadata) || {};
     const browserRecord = {
       browserSessionId,
       sessionId,
@@ -432,107 +449,74 @@ export class SandboxOrchestratorService {
       createdAt: new Date().toISOString(),
     };
     await svc.store.putBrowserSession(browserRecord);
-    await svc.store.putSession({ ...record, metadata: { ...record.metadata, browserSessions: [...(Object.keys(providerMetadata))] } }).catch(() => {});
-    await svc.provider.browserCreate(record.providerSandboxId || '', browserSessionId, providerMetadata).catch(() => {});
     record.metadata = { ...record.metadata, ['browserSession_' + browserSessionId]: providerMetadata };
-    await (await this.services()).store.putSession(record);
+    await svc.store.putSession(record);
     svc.audit({ at: new Date().toISOString(), userId, action: 'browser_session_create', category: 'browser', sessionId, outcome: 'succeeded' });
     return { browserSessionId };
   }
 
-  private async requireOwnedBrowserSession(userId: string, sessionId: string, browserSessionId: string) {
-    if (!BROWSER_SESSION_ID_PATTERN.test(browserSessionId)) {
-      throw Object.assign(new Error('Invalid browser session id.'), { code: 'INVALID_BROWSER_SESSION', status: 400 });
-    }
-    await this.requireOwnedSession(userId, sessionId);
-    const svc = await this.services();
-    const record = await svc.store.getBrowserSession(browserSessionId, userId);
-    if (!record || record.sessionId !== sessionId) {
-      throw Object.assign(new Error('Browser session not found for this user.'), { code: 'BROWSER_SESSION_NOT_FOUND', status: 404 });
-    }
-    if (record.status === 'closed') {
-      throw Object.assign(new Error('Browser session is closed.'), { code: 'BROWSER_SESSION_CLOSED', status: 409 });
-    }
-    return { svc, browserRecord: record };
-  }
-
-  private async withBrowserSessionRecord<T>(userId: string, sessionId: string, browserSessionId: string, action: string, fn: () => Promise<T>, onDone?: (r: SandboxSessionRecord) => Promise<void>): Promise<T> {
-    const { svc, browserRecord } = await this.requireOwnedBrowserSession(userId, sessionId, browserSessionId);
-    browserRecord.status = 'ready';
-    return fn();
-  }
-
   async browserNavigate(userId: string, sessionId: string, browserSessionId: string, url: string, timeoutMs = 20000): Promise<{ url: string; title: string; textContent: string; consoleErrors: string[] }> {
-    const record = await this.requireOwnedSession(userId, sessionId);
-    const svc = await this.services();
-    const { browserRecord } = await this.requireOwnedBrowserSession(userId, sessionId, browserSessionId);
+    const { svc, record } = await this.requireOwnedBrowserContext(userId, sessionId, browserSessionId);
     const decision = validateNavigationUrl(url);
     if (!decision.allowed) {
       svc.audit({ at: new Date().toISOString(), userId, action: 'browser_navigate', category: 'browser', sessionId, outcome: 'denied', detail: decision.reason });
       throw Object.assign(new Error(decision.reason || 'Blocked'), { code: 'NAVIGATION_BLOCKED', status: 403 });
     }
-    const restore = record.metadata['browserSession_' + browserSessionId] as Record<string, unknown> | undefined;
-    const result = await svc.provider.browserNavigate(record.providerSandboxId || '', browserSessionId, url, timeoutMs);
-    void browserRecord;
+    const result = await svc.provider.browserNavigate(record.providerSandboxId as string, browserSessionId, url, timeoutMs);
     svc.audit({ at: new Date().toISOString(), userId, action: 'browser_navigate', category: 'browser', sessionId, outcome: 'succeeded', detail: decision.normalizedUrl });
     return result;
   }
 
-  async browserInspect(userId: string, sessionId: string, browserSessionId: string, selector?: string, limit?: number): Promise<any> {
-    await this.requireOwnedSession(userId, sessionId);
-    const svc = await this.services();
-    const record = await svc.store.getSession(sessionId, userId);
-    const restore = record?.metadata['browserSession_' + browserSessionId] as Record<string, unknown> | undefined;
-    await svc.provider.browserCreate(record?.providerSandboxId || '', browserSessionId, restore);
-    return svc.provider.browserInspect(record?.providerSandboxId || '', browserSessionId, selector, limit);
+  async browserInspect(userId: string, sessionId: string, browserSessionId: string, selector?: string, limit?: number): Promise<{ elements: Array<{ tag: string; id?: string; classes?: string; text?: string; href?: string; inputType?: string; name?: string }> }> {
+    const { svc, record } = await this.requireOwnedBrowserContext(userId, sessionId, browserSessionId);
+    if (selector !== undefined && (typeof selector !== 'string' || selector.length > 500)) {
+      throw Object.assign(new Error('A CSS selector up to 500 characters is required.'), { code: 'INVALID_SELECTOR', status: 400 });
+    }
+    return svc.provider.browserInspect(record.providerSandboxId as string, browserSessionId, selector, limit);
   }
 
-  async browserClick(userId: string, sessionId: string, browserSessionId: string, selector: string): Promise<any> {
-    await this.requireOwnedSession(userId, sessionId);
-    const svc = await this.services();
+  async browserClick(userId: string, sessionId: string, browserSessionId: string, selector: string): Promise<{ clicked: boolean; navigationTriggered: boolean; urlAfter: string }> {
+    const { svc, record } = await this.requireOwnedBrowserContext(userId, sessionId, browserSessionId);
     if (!selector || selector.length > 500) throw Object.assign(new Error('A CSS selector up to 500 characters is required.'), { code: 'INVALID_SELECTOR', status: 400 });
-    const result = await svc.provider.browserClick((await svc.store.getSession(sessionId, userId))?.providerSandboxId || '', browserSessionId, selector);
+    const result = await svc.provider.browserClick(record.providerSandboxId as string, browserSessionId, selector);
     svc.audit({ at: new Date().toISOString(), userId, action: 'browser_click', category: 'browser', sessionId, outcome: 'succeeded', detail: selector });
     return result;
   }
 
-  async browserFill(userId: string, sessionId: string, browserSessionId: string, fields: Array<{ selector: string; value: string; type?: string }>): Promise<any> {
-    await this.requireOwnedSession(userId, sessionId);
-    const svc = await this.services();
-    if (Array.isArray(fields)) {
-      for (const f of fields) {
-        if ((f?.type === 'password') && typeof f.value === 'string') f.value = f.value; // passwords are filled inside the sandbox only; never echoed back
-      }
+  async browserFill(userId: string, sessionId: string, browserSessionId: string, fields: Array<{ selector: string; value: string; type?: string }>): Promise<{ filled: number }> {
+    const { svc, record } = await this.requireOwnedBrowserContext(userId, sessionId, browserSessionId);
+    if (!Array.isArray(fields) || fields.length === 0 || fields.length > 25) {
+      throw Object.assign(new Error('Provide between 1 and 25 fields to fill.'), { code: 'INVALID_FIELDS', status: 400 });
     }
-    const result = await svc.provider.browserFill((await svc.store.getSession(sessionId, userId))?.providerSandboxId || '', browserSessionId, fields);
-    svc.audit({ at: new Date().toISOString(), userId, action: 'browser_fill', category: 'browser', sessionId, outcome: 'succeeded', detail: `${fields?.length || 0} fields` });
+    // Form values are entered only inside the isolated sandbox browser and are
+    // never echoed back to the client or the audit log (password safety).
+    const result = await svc.provider.browserFill(record.providerSandboxId as string, browserSessionId, fields);
+    svc.audit({ at: new Date().toISOString(), userId, action: 'browser_fill', category: 'browser', sessionId, outcome: 'succeeded', detail: fields.length + ' fields' });
     return result;
   }
 
   async browserScroll(userId: string, sessionId: string, browserSessionId: string, direction: 'up' | 'down', pixels: number): Promise<void> {
-    await this.requireOwnedSession(userId, sessionId);
-    const svc = await this.services();
-    return svc.provider.browserScroll((await svc.store.getSession(sessionId, userId))?.providerSandboxId || '', browserSessionId, direction, pixels);
+    const { svc, record } = await this.requireOwnedBrowserContext(userId, sessionId, browserSessionId);
+    if (!['up', 'down'].includes(direction)) throw Object.assign(new Error('Direction must be up or down.'), { code: 'INVALID_DIRECTION', status: 400 });
+    return svc.provider.browserScroll(record.providerSandboxId as string, browserSessionId, direction, pixels);
   }
 
   async browserWaitFor(userId: string, sessionId: string, browserSessionId: string, condition: 'navigation' | 'selector', value: string, timeoutMs: number): Promise<void> {
-    await this.requireOwnedSession(userId, sessionId);
-    const svc = await this.services();
-    return svc.provider.browserWaitFor((await svc.store.getSession(sessionId, userId))?.providerSandboxId || '', browserSessionId, condition, value, timeoutMs);
+    const { svc, record } = await this.requireOwnedBrowserContext(userId, sessionId, browserSessionId);
+    if (!['navigation', 'selector'].includes(condition)) throw Object.assign(new Error('Unsupported wait condition.'), { code: 'INVALID_CONDITION', status: 400 });
+    return svc.provider.browserWaitFor(record.providerSandboxId as string, browserSessionId, condition, value, timeoutMs);
   }
 
   async browserScreenshot(userId: string, sessionId: string, browserSessionId: string): Promise<{ dataUrl: string }> {
-    await this.requireOwnedSession(userId, sessionId);
-    const svc = await this.services();
-    const result = await svc.provider.browserScreenshot((await svc.store.getSession(sessionId, userId))?.providerSandboxId || '', browserSessionId);
+    const { svc, record } = await this.requireOwnedBrowserContext(userId, sessionId, browserSessionId);
+    const result = await svc.provider.browserScreenshot(record.providerSandboxId as string, browserSessionId);
     svc.audit({ at: new Date().toISOString(), userId, action: 'browser_screenshot', category: 'browser', sessionId, outcome: 'succeeded' });
     return result;
   }
 
   async browserClose(userId: string, sessionId: string, browserSessionId: string): Promise<void> {
-    await this.requireOwnedSession(userId, sessionId);
-    const svc = await this.services();
-    await svc.provider.browserClose((await svc.store.getSession(sessionId, userId))?.providerSandboxId || '', browserSessionId);
+    const { svc, record } = await this.requireOwnedBrowserContext(userId, sessionId, browserSessionId);
+    await svc.provider.browserClose(record.providerSandboxId as string, browserSessionId);
     await svc.store.deleteBrowserSession(browserSessionId, userId);
     svc.audit({ at: new Date().toISOString(), userId, action: 'browser_session_close', category: 'browser', sessionId, outcome: 'succeeded' });
   }

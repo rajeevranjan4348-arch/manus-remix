@@ -377,7 +377,7 @@ export class E2BProviderAdapter implements SandboxProvider {
         const list = targetId ? targets.filter((t) => t.id === targetId) : targets;
         const chosen = targetId ? list[0] : targets.find((t) => t.type === 'page') || targets[0];
         if (!chosen || !chosen.webSocketDebuggerUrl) throw new Error('No debuggable browser target found.');
-        return String(chosen.webSocketDebuggerUrl).replace('ws://', 'wss://').replace(base.replace('https://', 'wss://'), base.replace('https://', 'wss://'));
+        return String(chosen.webSocketDebuggerUrl).replace(/^ws:/, 'wss:');
       },
       async listTargets() { return targets; },
     };

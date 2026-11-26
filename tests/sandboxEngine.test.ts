@@ -231,7 +231,7 @@ describe('Feature 06: orchestrator isolation and ownership', () => {
     const allowAll: ApprovalEvaluator = () => ({ allowed: true, requiresApproval: false, riskLevel: 'read-only', reason: 'test allow' });
     const { orchestrator } = makeOrchestrator(allowAll);
     const session = await orchestrator.createSession('userA', { userId: 'userA' });
-    await expect(orchestrator.executeCommand('userA', session.sessionId, { command: '../escape' })).resolves.toMatchObject({ status: 'failed' });
+    await expect(orchestrator.executeCommand('userA', session.sessionId, { command: 'ls', cwd: '../escape' })).rejects.toMatchObject({ code: 'INVALID_PATH' });
     await expect(orchestrator.fsRead('userA', session.sessionId, '../etc/passwd')).rejects.toMatchObject({ code: 'INVALID_PATH' });
     await expect(orchestrator.fsDelete('userA', session.sessionId, '')).rejects.toMatchObject({ code: 'INVALID_PATH' });
     await expect(orchestrator.cleanup('userA', 'bad id!')).rejects.toMatchObject({ code: 'INVALID_SESSION_ID' });

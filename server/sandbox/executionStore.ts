@@ -137,15 +137,21 @@ class FirestoreExecutionStore implements ExecutionStore {
     return data && data.userId === userId ? data : null;
   }
   async findExecutionByIdempotencyKey(userId: string, key: string) {
-    const db = await this.db();
-    const snap = await db
-      .collection('sandboxExecutions')
-      .where('userId', '==', userId)
-      .where('idempotencyKey', '==', key)
-      .limit(1)
-      .get();
-    if (snap.empty) return null;
-    return snap.docs[0].data() as CommandExecutionRecord;
+    // A missing composite index or transient Firestore error must not turn an
+    // execution into a 500: degrade to non-idempotent execution instead.
+    try {
+      const db = await this.db();
+      const snap = await db
+        .collection('sandboxExecutions')
+        .where('userId', '==', userId)
+        .where('idempotencyKey', '==', key)
+        .limit(1)
+        .get();
+      if (snap.empty) return null;
+      return snap.docs[0].data() as CommandExecutionRecord;
+    } catch {
+      return null;
+    }
   }
   async putBrowserSession(record: BrowserSessionRecord) {
     const db = await this.db();

@@ -164,7 +164,8 @@ export interface SandboxProvider {
   statPath(providerSandboxId: string, virtualPath: string): Promise<FilesystemEntry | null>;
 
   // Browser sessions (isolated per browser session, inside the sandbox when supported)
-  browserCreate(providerSandboxId: string, browserSessionId: string): Promise<void>;
+  /** Create or re-attach an isolated browser session; returns provider metadata that MUST be persisted for restart recovery. */
+  browserCreate(providerSandboxId: string, browserSessionId: string, restore?: Record<string, unknown>): Promise<{ metadata: Record<string, unknown> }>;
   browserNavigate(providerSandboxId: string, browserSessionId: string, url: string, timeoutMs: number): Promise<{ url: string; title: string; textContent: string; consoleErrors: string[] }>;
   browserInspect(providerSandboxId: string, browserSessionId: string, selector?: string, limit?: number): Promise<{ elements: Array<{ tag: string; id?: string; classes?: string; text?: string; href?: string; inputType?: string; name?: string }> }>;
   browserClick(providerSandboxId: string, browserSessionId: string, selector: string): Promise<{ clicked: boolean; navigationTriggered: boolean; urlAfter: string }>;
