@@ -393,7 +393,7 @@ export function ConnectorConfigModal({
 
   if (!connectorId) return null;
 
-  const metadata = CONNECTOR_METADATA_MAP[connectorId] || {
+  const metadata: ConnectorMetadataDef = CONNECTOR_METADATA_MAP[connectorId] || {
     id: connectorId,
     tag: `@${connectorId}`,
     name: connectorId.charAt(0).toUpperCase() + connectorId.slice(1),
