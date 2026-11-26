@@ -301,3 +301,345 @@ body,
   opacity: 0.5;
   background-position: 0 0, 0 0;
 }
+
+/* =========================================================================
+   Special Effects & Tactile Micro-Animations (Additive, 120fps Compositor)
+   ========================================================================= */
+
+/* 1. Orbital conic light-arc halo behind the Home hero robot */
+.manus-hero-float::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  z-index: -1;
+  border-radius: 50%;
+  padding: 1.5px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    transparent 215deg,
+    rgba(0, 0, 0, 0.22) 285deg,
+    rgba(0, 0, 0, 0.06) 330deg,
+    transparent 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0.55;
+  pointer-events: none;
+  transition: opacity var(--manus-motion-standard) var(--manus-motion-ease), transform var(--manus-motion-standard) var(--manus-motion-ease);
+}
+
+.dark .manus-hero-float::after {
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    transparent 215deg,
+    rgba(255, 255, 255, 0.34) 285deg,
+    rgba(255, 255, 255, 0.08) 330deg,
+    transparent 360deg
+  );
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .manus-hero-float:hover::after {
+    opacity: 0.9;
+  }
+}
+
+/* 2. Specular light sweep & spring cascade on Action Chips and Work Mode cards */
+.manus-chip-stagger,
+.manus-hover-lift,
+.manus-pill {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.manus-chip-stagger::after,
+.manus-hover-lift::after,
+.manus-pill::after {
+  content: "";
+  position: absolute;
+  inset: -20% -60%;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    112deg,
+    transparent 36%,
+    rgba(0, 0, 0, 0.055) 48%,
+    rgba(0, 0, 0, 0.095) 50%,
+    rgba(0, 0, 0, 0.055) 52%,
+    transparent 64%
+  );
+  transform: translate3d(-115%, 0, 0);
+  opacity: 0;
+}
+
+.dark .manus-chip-stagger::after,
+.dark .manus-hover-lift::after,
+.dark .manus-pill::after {
+  background: linear-gradient(
+    112deg,
+    transparent 36%,
+    rgba(255, 255, 255, 0.06) 48%,
+    rgba(255, 255, 255, 0.14) 50%,
+    rgba(255, 255, 255, 0.06) 52%,
+    transparent 64%
+  );
+}
+
+/* 3. Sonar pulse ring when Send button enters ready state */
+.manus-send-btn-ready {
+  position: relative;
+  overflow: visible;
+}
+
+.manus-send-btn-ready::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 9999px;
+  border: 1.5px solid currentColor;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 4. Code block subtle spring entrance & top-edge specular gleam */
+.manus-codeblock-card {
+  position: relative;
+  transition:
+    border-color var(--manus-motion-standard) var(--manus-motion-ease),
+    box-shadow var(--manus-motion-standard) var(--manus-motion-ease),
+    transform var(--manus-motion-standard) var(--manus-motion-ease);
+}
+
+.manus-codeblock-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  pointer-events: none;
+  z-index: 2;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(0, 0, 0, 0.22) 50%,
+    transparent 100%
+  );
+  transform: translate3d(-100%, 0, 0);
+  opacity: 0;
+}
+
+.dark .manus-codeblock-card::before {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.35) 50%,
+    transparent 100%
+  );
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .manus-codeblock-card:hover {
+    box-shadow: 0 10px 26px -14px rgba(0, 0, 0, 0.16);
+  }
+  .dark .manus-codeblock-card:hover {
+    box-shadow: 0 12px 30px -14px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  }
+}
+
+/* 5. Sidebar item left-edge tactile accent pip */
+.manus-sidebar-item-slide {
+  position: relative;
+}
+
+.manus-sidebar-item-slide::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 24%;
+  bottom: 24%;
+  width: 2px;
+  border-radius: 9999px;
+  background: currentColor;
+  opacity: 0;
+  transform: scaleY(0.25);
+  pointer-events: none;
+  transition:
+    opacity var(--manus-motion-fast) var(--manus-motion-ease),
+    transform var(--manus-motion-standard) var(--manus-spring-bounce);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .manus-sidebar-item-slide:hover::before {
+    opacity: 0.45;
+    transform: scaleY(1);
+  }
+}
+
+/* 6. Composer active-generation conic border beam */
+.manus-input-container[data-generating="true"]::after {
+  opacity: 0.92;
+  animation: polish-ring-spin 2.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .manus-hero-float::after {
+    animation: manus-fx-orbit-spin 8.5s linear infinite;
+    will-change: transform;
+  }
+
+  .manus-chip-stagger {
+    animation: manus-fx-chip-spring 260ms var(--manus-spring-panel, cubic-bezier(0.22, 1.14, 0.36, 1)) both;
+  }
+
+  .manus-card-stagger {
+    animation: manus-fx-card-spring 320ms var(--manus-spring-panel, cubic-bezier(0.22, 1.14, 0.36, 1)) both;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .manus-chip-stagger:hover::after,
+    .manus-hover-lift:hover::after,
+    .manus-pill:hover::after {
+      animation: manus-fx-specular-sweep 620ms var(--manus-motion-ease) 1 both;
+    }
+  }
+
+  .manus-send-btn-ready::after {
+    animation: manus-fx-send-sonar 640ms var(--manus-motion-ease) 1 both;
+  }
+
+  .manus-codeblock-card {
+    animation: manus-fx-codeblock-enter 260ms var(--manus-spring-panel, cubic-bezier(0.22, 1.14, 0.36, 1)) both;
+  }
+
+  .manus-codeblock-card::before {
+    animation: manus-fx-edge-gleam 900ms var(--manus-motion-ease) 120ms 1 both;
+  }
+
+  @keyframes manus-fx-orbit-spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes manus-fx-specular-sweep {
+    0% {
+      opacity: 0;
+      transform: translate3d(-110%, 0, 0);
+    }
+    25% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: translate3d(115%, 0, 0);
+    }
+  }
+
+  @keyframes manus-fx-chip-spring {
+    0% {
+      opacity: 0;
+      transform: translate3d(0, 7px, 0) scale(0.95);
+    }
+    100% {
+      opacity: 1;
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+  }
+
+  @keyframes manus-fx-card-spring {
+    0% {
+      opacity: 0;
+      transform: translate3d(0, 12px, 0) scale(0.965);
+    }
+    100% {
+      opacity: 1;
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+  }
+
+  @keyframes manus-fx-send-sonar {
+    0% {
+      opacity: 0.42;
+      transform: scale(0.96);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(1.52);
+    }
+  }
+
+  @keyframes manus-fx-codeblock-enter {
+    0% {
+      opacity: 0;
+      transform: translate3d(0, 8px, 0) scale(0.988);
+    }
+    100% {
+      opacity: 1;
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+  }
+
+  @keyframes manus-fx-edge-gleam {
+    0% {
+      opacity: 0;
+      transform: translate3d(-100%, 0, 0);
+    }
+    30% {
+      opacity: 0.85;
+    }
+    100% {
+      opacity: 0;
+      transform: translate3d(100%, 0, 0);
+    }
+  }
+}
+
+/* Pause / disable decorative FX in reduced motion, ultra-lite, saver, and hidden tabs */
+html[data-page-hidden="true"] .manus-hero-float::after,
+html[data-page-hidden="true"] .manus-input-container[data-generating="true"]::after {
+  animation-play-state: paused !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .manus-hero-float::after,
+  .manus-chip-stagger::after,
+  .manus-hover-lift::after,
+  .manus-pill::after,
+  .manus-send-btn-ready::after,
+  .manus-codeblock-card,
+  .manus-codeblock-card::before,
+  .manus-input-container[data-generating="true"]::after {
+    animation: none !important;
+  }
+  .manus-sidebar-item-slide::before {
+    transition: none !important;
+  }
+}
+
+[data-perf-mode="ultra-lite"] .manus-codeblock-card {
+  animation: none !important;
+}
+
+[data-perf-mode="ultra-lite"] .manus-hero-float::after,
+[data-perf-mode="ultra-lite"] .manus-chip-stagger::after,
+[data-perf-mode="ultra-lite"] .manus-hover-lift::after,
+[data-perf-mode="ultra-lite"] .manus-pill::after,
+[data-perf-mode="ultra-lite"] .manus-send-btn-ready::after,
+[data-perf-mode="ultra-lite"] .manus-codeblock-card::before,
+[data-perf-mode="ultra-lite"] .manus-sidebar-item-slide::before,
+[data-perf-mode="ultra-lite"] .manus-input-container[data-generating="true"]::after,
+[data-perf-mode="saver"] .manus-hero-float::after,
+[data-perf-mode="saver"] .manus-input-container[data-generating="true"]::after {
+  animation: none !important;
+  opacity: 0 !important;
+}
+

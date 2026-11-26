@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Deku AI logo">
+  <title>Deku AI</title>
+  <g fill="none" stroke="#000000" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Modular workspace outer frame -->
+    <rect x="40" y="40" width="176" height="176" rx="16" />
+
+    <!-- Workspace structural grid lines -->
+    <line x1="84" y1="40" x2="84" y2="216" />
+    <line x1="128" y1="40" x2="128" y2="84" />
+    <line x1="128" y1="172" x2="128" y2="216" />
+    <line x1="172" y1="40" x2="172" y2="216" />
+
+    <line x1="40" y1="84" x2="216" y2="84" />
+    <line x1="40" y1="128" x2="84" y2="128" />
+    <line x1="172" y1="128" x2="216" y2="128" />
+    <line x1="40" y1="172" x2="216" y2="172" />
+
+    <!-- Concentric monogram D neural arcs -->
+    <path d="M 128 40 A 88 88 0 0 1 128 216" />
+    <path d="M 128 84 A 44 44 0 0 1 128 172" />
+
+    <!-- Synaptic diagonal connections -->
+    <line x1="128" y1="40" x2="216" y2="128" />
+    <line x1="128" y1="216" x2="216" y2="128" />
+  </g>
+
+  <!-- Neural network nodes -->
+  <g fill="#000000">
+    <circle cx="128" cy="40" r="10" />
+    <circle cx="84" cy="84" r="10" />
+    <circle cx="128" cy="84" r="10" />
+    <circle cx="172" cy="84" r="10" />
+    <circle cx="84" cy="128" r="10" />
+    <circle cx="172" cy="128" r="10" />
+    <circle cx="216" cy="128" r="10" />
+    <circle cx="84" cy="172" r="10" />
+    <circle cx="128" cy="172" r="10" />
+    <circle cx="172" cy="172" r="10" />
+    <circle cx="128" cy="216" r="10" />
+  </g>
+</svg>
