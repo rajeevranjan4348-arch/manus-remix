@@ -216,6 +216,27 @@ service cloud.firestore {
       allow delete: if isSignedIn() && isValidId(projectId) && existing().userId == request.auth.uid;
     }
 
+    // Features 01-06: system infrastructure collections. Written and read only
+    // through Firebase Admin on authenticated server paths (durable task queue,
+    // permission challenges/tokens/audit, agent runs, skills, schedules,
+    // sandbox registry). Clients are never allowed direct access so task
+    // state, approvals and audit data cannot be forged from the frontend.
+    match /system_agent_tasks/{docId} { allow read, write: if false; }
+    match /system_agent_task_events/{docId} { allow read, write: if false; }
+    match /system_agent_runs/{docId} { allow read, write: if false; }
+    match /system_permission_challenges/{docId} { allow read, write: if false; }
+    match /system_permission_tokens/{docId} { allow read, write: if false; }
+    match /system_permission_audit/{docId} { allow read, write: if false; }
+    match /system_permission_policies/{docId} { allow read, write: if false; }
+    match /system_permission_revocations/{docId} { allow read, write: if false; }
+    match /system_skills_installed/{docId} { allow read, write: if false; }
+    match /system_skill_versions/{docId} { allow read, write: if false; }
+    match /system_skill_executions/{docId} { allow read, write: if false; }
+    match /system_schedules/{docId} { allow read, write: if false; }
+    match /system_schedule_runs/{docId} { allow read, write: if false; }
+    match /system_notifications/{docId} { allow read, write: if false; }
+    match /system_sandbox_workspaces/{docId} { allow read, write: if false; }
+
     match /conversations/{conversationId} {
       allow get: if isSignedIn() && isValidId(conversationId) && existing().userId == request.auth.uid;
       allow list: if isSignedIn() && resource.data.userId == request.auth.uid;

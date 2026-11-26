@@ -67,8 +67,8 @@ describe('API authentication boundaries', () => {
 });
 
 describe('Permission challenge ownership', () => {
-  it('prevents another user from approving or consuming an approval challenge', () => {
-    const evaluation = permissionsGateway.evaluateAction({
+  it('prevents another user from approving or consuming an approval challenge', async () => {
+    const evaluation = await permissionsGateway.evaluateAction({
       toolName: 'delete_file',
       args: { path: 'private.txt' },
       userId: `owner_${Date.now()}`,
@@ -76,7 +76,7 @@ describe('Permission challenge ownership', () => {
     const challenge = evaluation.challenge!;
     const strangerId = `${challenge.userId}_stranger`;
 
-    const deniedApproval = permissionsGateway.resolveChallenge({
+    const deniedApproval = await permissionsGateway.resolveChallenge({
       challengeId: challenge.challengeId,
       confirmed: true,
       userId: strangerId,
@@ -84,14 +84,14 @@ describe('Permission challenge ownership', () => {
     expect(deniedApproval.success).toBe(false);
     expect(challenge.status).toBe('pending');
 
-    const ownerApproval = permissionsGateway.resolveChallenge({
+    const ownerApproval = await permissionsGateway.resolveChallenge({
       challengeId: challenge.challengeId,
       confirmed: true,
       userId: challenge.userId,
     });
     expect(ownerApproval.success).toBe(true);
 
-    const deniedExecution = permissionsGateway.verifyApprovalToken({
+    const deniedExecution = await permissionsGateway.verifyApprovalToken({
       approvalToken: ownerApproval.approvalToken!,
       toolName: 'delete_file',
       args: { path: 'private.txt' },
@@ -99,7 +99,7 @@ describe('Permission challenge ownership', () => {
     });
     expect(deniedExecution.valid).toBe(false);
 
-    const ownerExecution = permissionsGateway.verifyApprovalToken({
+    const ownerExecution = await permissionsGateway.verifyApprovalToken({
       approvalToken: ownerApproval.approvalToken!,
       toolName: 'delete_file',
       args: { path: 'private.txt' },
@@ -108,8 +108,8 @@ describe('Permission challenge ownership', () => {
     expect(ownerExecution.valid).toBe(true);
   });
 
-  it('does not create permission challenges without an authenticated user ID', () => {
-    const result = permissionsGateway.evaluateAction({ toolName: 'delete_file', args: { path: 'private.txt' } });
+  it('does not create permission challenges without an authenticated user ID', async () => {
+    const result = await permissionsGateway.evaluateAction({ toolName: 'delete_file', args: { path: 'private.txt' } });
     expect(result.allowed).toBe(false);
     expect(result.challenge).toBeUndefined();
   });

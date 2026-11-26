@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { permissionsGateway } from '../server/permissionsGateway';
+import { resolvePermissionStore } from '../server/security/permissionsStore';
 import { taskCheckpoint } from '../src/lib/taskCheckpoint';
 import { toolRegistry } from '../src/lib/toolFramework';
 import { settingsStore } from '../src/lib/settingsStore';
@@ -26,8 +27,8 @@ describe('Centralized Permission Gateway, Security Review & Durable Checkpoints'
       expect(privilegedPolicy.requiresConfirmation).toBe(true);
     });
 
-    it('automatically allows read-only operations without requiring user confirmation', () => {
-      const result = permissionsGateway.evaluateAction({
+    it('automatically allows read-only operations without requiring user confirmation', async () => {
+      const result = await permissionsGateway.evaluateAction({
         toolName: 'web_search',
         args: { query: 'latest typescript features 2026' },
         userId: 'usr_alice',
@@ -39,8 +40,8 @@ describe('Centralized Permission Gateway, Security Review & Durable Checkpoints'
       expect(result.challenge).toBeUndefined();
     });
 
-    it('blocks destructive operations and creates an explicit confirmation challenge', () => {
-      const result = permissionsGateway.evaluateAction({
+    it('blocks destructive operations and creates an explicit confirmation challenge', async () => {
+      const result = await permissionsGateway.evaluateAction({
         toolName: 'delete_file',
         args: { path: 'src/legacy/data.json' },
         userId: 'usr_alice',
@@ -55,8 +56,8 @@ describe('Centralized Permission Gateway, Security Review & Durable Checkpoints'
       expect(result.challenge?.parametersHash).toBeDefined();
     });
 
-    it('blocks privileged operations (such as git_push or run_command) pending explicit confirmation', () => {
-      const result = permissionsGateway.evaluateAction({
+    it('blocks privileged operations (such as git_push or run_command) pending explicit confirmation', async () => {
+      const result = await permissionsGateway.evaluateAction({
         toolName: 'git_push',
         args: { branch: 'main' },
         userId: 'usr_alice',
@@ -69,15 +70,15 @@ describe('Centralized Permission Gateway, Security Review & Durable Checkpoints'
       expect(result.challenge?.toolName).toBe('git_push');
     });
 
-    it('detects parameter tampering via cryptographic hash', () => {
-      const evaluation = permissionsGateway.evaluateAction({
+    it('detects parameter tampering via cryptographic hash', async () => {
+      const evaluation = await permissionsGateway.evaluateAction({
         toolName: 'delete_file',
         args: { path: 'test_temp.txt' },
         userId: 'usr_alice',
       });
 
       const challengeId = evaluation.challenge!.challengeId;
-      const approval = permissionsGateway.resolveChallenge({
+      const approval = await permissionsGateway.resolveChallenge({
         challengeId,
         confirmed: true,
         userId: 'usr_alice',
@@ -87,7 +88,7 @@ describe('Centralized Permission Gateway, Security Review & Durable Checkpoints'
       expect(approval.approvalToken).toBeDefined();
 
       // Attempt execution with TAMPERED args (trying to delete package.json instead of test_temp.txt)
-      const verification = permissionsGateway.verifyApprovalToken({
+      const verification = await permissionsGateway.verifyApprovalToken({
         approvalToken: approval.approvalToken!,
         toolName: 'delete_file',
         args: { path: 'package.json' }, // TAMPERED!
@@ -98,15 +99,15 @@ describe('Centralized Permission Gateway, Security Review & Durable Checkpoints'
       expect(verification.reason).toContain('Parameter hash mismatch');
     });
 
-    it('mints single-use approval token and prevents replay attacks by burning on execution', () => {
-      const evaluation = permissionsGateway.evaluateAction({
+    it('mints single-use approval token and prevents replay attacks by burning on execution', async () => {
+      const evaluation = await permissionsGateway.evaluateAction({
         toolName: 'run_command',
         args: { command: 'npm run test' },
         userId: 'usr_alice',
       });
 
       const challengeId = evaluation.challenge!.challengeId;
-      const approval = permissionsGateway.resolveChallenge({
+      const approval = await permissionsGateway.resolveChallenge({
         challengeId,
         confirmed: true,
         userId: 'usr_alice',
@@ -115,7 +116,7 @@ describe('Centralized Permission Gateway, Security Review & Durable Checkpoints'
       const token = approval.approvalToken!;
 
       // 1st Execution: valid
-      const firstExec = permissionsGateway.verifyApprovalToken({
+      const firstExec = await permissionsGateway.verifyApprovalToken({
         approvalToken: token,
         toolName: 'run_command',
         args: { command: 'npm run test' },
@@ -124,7 +125,7 @@ describe('Centralized Permission Gateway, Security Review & Durable Checkpoints'
       expect(firstExec.valid).toBe(true);
 
       // 2nd Execution attempt: REPLAY ATTACK BLOCKED
-      const secondExec = permissionsGateway.verifyApprovalToken({
+      const secondExec = await permissionsGateway.verifyApprovalToken({
         approvalToken: token,
         toolName: 'run_command',
         args: { command: 'npm run test' },
@@ -134,18 +135,19 @@ describe('Centralized Permission Gateway, Security Review & Durable Checkpoints'
       expect(secondExec.reason).toContain('replay attack');
     });
 
-    it('rejects expired challenges', () => {
-      const evaluation = permissionsGateway.evaluateAction({
+    it('rejects expired challenges', async () => {
+      const evaluation = await permissionsGateway.evaluateAction({
         toolName: 'purge_memories',
         args: { all: true },
         userId: 'usr_alice',
       });
 
       const challenge = evaluation.challenge!;
-      // Artificially expire the challenge
-      challenge.expiresAt = Date.now() - 5000;
+      const backend = await resolvePermissionStore();
+      const stored = await backend.getChallenge(challenge.challengeId, 'usr_alice');
+      await backend.putChallenge({ ...stored!, expiresAt: Date.now() - 5000 });
 
-      const resolution = permissionsGateway.resolveChallenge({
+      const resolution = await permissionsGateway.resolveChallenge({
         challengeId: challenge.challengeId,
         confirmed: true,
         userId: 'usr_alice',
@@ -176,15 +178,18 @@ describe('Centralized Permission Gateway, Security Review & Durable Checkpoints'
       expect(res.summary).toContain('requires explicit user confirmation');
     });
 
-    it('allows destructive tool execution when explicit approval is granted', async () => {
+    it('reports honest unavailability for approved destructive tools without a sandbox provider', async () => {
       const res = await toolRegistry.executeTool(
         'delete_file',
         { path: 'test.txt' },
         { userId: 'usr_test', isApprovalGranted: true }
       );
 
-      expect(res.success).toBe(true);
-      expect(res.data?.deleted).toBe(true);
+      // The durable execution path never fabricates a deletion: with no sandbox
+      // provider (or no sandboxId) the tool must fail with an explicit error.
+      expect(res.success).toBe(false);
+      expect(res.error).toBeTruthy();
+      expect(res.summary).not.toContain('successfully deleted');
     });
   });
 

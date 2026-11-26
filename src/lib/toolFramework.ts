@@ -6,6 +6,8 @@
  */
 
 import { observability } from './observability';
+import { callSandboxApi } from './sandboxClient';
+import { registerSandboxTools } from './sandboxTools';
 import { securityCenter } from './securityCenter';
 import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
 import {
@@ -61,6 +63,7 @@ class ToolRegistryService {
   private tools = new Map<string, ToolDefinition>();
 
   constructor() {
+    registerSandboxTools(this);
     this.registerCoreTools();
   }
 
@@ -399,13 +402,17 @@ class ToolRegistryService {
           required: true,
         },
       },
-      handler: async (args) => {
+      handler: async (args, context) => {
         const filePath = String(args.path || '').trim();
-        return {
-          success: true,
-          data: { path: filePath, deleted: true },
-          summary: `File '${filePath}' successfully deleted after authorization.`,
-        };
+        const sandboxId = String(args.sandboxId || '').trim();
+        if (!sandboxId) {
+          return {
+            success: false,
+            error: 'Deletion requires an isolated sandbox workspace. Create one with sandbox_create first.',
+            summary: 'File deletion unavailable without a sandbox workspace.',
+          };
+        }
+        return callSandboxApi('fs-delete', { sessionId: sandboxId, path: filePath }, context);
       },
     });
 
@@ -423,14 +430,12 @@ class ToolRegistryService {
           required: true,
         },
       },
-      handler: async (args) => {
-        const msg = String(args.message || '').trim();
-        return {
-          success: true,
-          data: { message: msg, commitSha: `sha_${Date.now().toString(16)}` },
-          summary: `Created verified commit with message: "${msg}"`,
-        };
-      },
+      handler: async (args) => ({
+        success: false,
+        error: 'GIT_WORKSPACE_UNAVAILABLE',
+        data: { message: String(args.message || '').trim(), committed: false },
+        summary: 'No local Git workspace is connected. No commit was created.',
+      }),
     });
 
     // 6. Push to GitHub (Privileged)
@@ -447,14 +452,12 @@ class ToolRegistryService {
           required: true,
         },
       },
-      handler: async (args) => {
-        const branch = String(args.branch || 'main').trim();
-        return {
-          success: true,
-          data: { branch, pushed: true },
-          summary: `Successfully pushed verified changes to origin/${branch}`,
-        };
-      },
+      handler: async (args) => ({
+        success: false,
+        error: 'GIT_PUSH_UNAVAILABLE',
+        data: { branch: String(args.branch || 'main').trim(), pushed: false },
+        summary: 'No authenticated remote Git workspace is connected. Nothing was pushed.',
+      }),
     });
 
     // 7. Run Shell Command (Privileged)
@@ -471,14 +474,12 @@ class ToolRegistryService {
           required: true,
         },
       },
-      handler: async (args) => {
-        const cmd = String(args.command || '').trim();
-        return {
-          success: true,
-          data: { command: cmd, exitCode: 0 },
-          summary: `Command "${cmd}" executed successfully after authorization.`,
-        };
-      },
+      handler: async (args) => ({
+        success: false,
+        error: 'WORKSPACE_RUNTIME_UNAVAILABLE',
+        data: { command: String(args.command || '').trim(), executed: false },
+        summary: 'Command was not executed: no isolated sandbox provider is configured. Use terminal_execute against an active sandbox session.',
+      }),
     });
 
     // 8. AI Image Generation & Editing (Gemini Nano Banana series)

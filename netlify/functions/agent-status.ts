@@ -33,7 +33,8 @@ export default async (req: Request) => {
     agentReachToken: configured('AGENT_REACH_BRIDGE_TOKEN'),
     database: configured('DATABASE_URL', 'POSTGRES_URL', 'FIREBASE_PROJECT_ID'),
     embeddings: configured('OPENAI_API_KEY', 'VOYAGE_API_KEY', 'GEMINI_API_KEY'),
-    browserRuntime: configured('BROWSERLESS_URL', 'PLAYWRIGHT_WS_ENDPOINT'),
+    browserRuntime: configured('BROWSERBASE_API_KEY', 'BROWSERLESS_URL', 'PLAYWRIGHT_WS_ENDPOINT'),
+    sandboxRuntime: configured('E2B_API_KEY'),
     scheduler: configured('SCHEDULER_ENDPOINT', 'QSTASH_TOKEN', 'UPSTASH_REDIS_REST_URL'),
     notifications: configured('FCM_SERVER_KEY', 'FIREBASE_SERVICE_ACCOUNT'),
     githubToken: configured('GITHUB_TOKEN', 'GH_TOKEN'),
@@ -65,6 +66,8 @@ export default async (req: Request) => {
     { id: 23, name: 'Observability and diagnostics', status: 'partial', note: 'Request IDs and redacted operational errors are available in the agent endpoint; metrics and health checks remain to be verified.' },
     { id: 24, name: 'Notifications and task updates', status: env.notifications ? 'configured_not_verified' : 'needs_configuration', note: 'Notification provider configuration is not proof of delivery or permission.' },
     { id: 25, name: 'Agent configuration and management', status: 'partial', note: 'Environment-based model configuration exists; authenticated capability management and audit are not verified.' },
+    { id: 26, name: 'Isolated coding sandbox', status: env.sandboxRuntime ? 'configured_not_verified' : 'blocked_missing_provider_credentials', note: 'Provider credential presence is not a runtime health check. No terminal or filesystem operation is reported as operational without a verified provider session.' },
+    { id: 27, name: 'Isolated interactive browser', status: env.browserRuntime ? 'configured_not_verified' : 'blocked_missing_provider_credentials', note: 'Browser provider configuration presence is not proof of a live isolated browser session or safe navigation policy.' },
   ];
 
   return new Response(JSON.stringify({
@@ -86,6 +89,7 @@ export default async (req: Request) => {
       databaseConfigured: env.database,
       embeddingsProviderConfigured: env.embeddings,
       browserRuntimeConfigured: env.browserRuntime,
+      sandboxRuntimeConfigured: env.sandboxRuntime,
       schedulerConfigured: env.scheduler,
       notificationProviderConfigured: env.notifications,
       githubTokenConfigured: env.githubToken,
