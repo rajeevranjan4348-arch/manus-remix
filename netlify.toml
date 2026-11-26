@@ -29,6 +29,41 @@
   status = 200
 
 [[redirects]]
+  from = "/api/agent/runtime"
+  to = "/.netlify/functions/agent-runtime"
+  status = 200
+
+[[redirects]]
+  from = "/api/tasks"
+  to = "/.netlify/functions/tasks"
+  status = 200
+
+[[redirects]]
+  from = "/api/tasks/worker"
+  to = "/.netlify/functions/tasks-worker"
+  status = 200
+
+[[redirects]]
+  from = "/api/skills"
+  to = "/.netlify/functions/skills"
+  status = 200
+
+[[redirects]]
+  from = "/api/schedules"
+  to = "/.netlify/functions/schedules"
+  status = 200
+
+[[redirects]]
+  from = "/api/scheduler/tick"
+  to = "/.netlify/functions/scheduler-tick"
+  status = 200
+
+[[redirects]]
+  from = "/api/sandbox"
+  to = "/.netlify/functions/sandbox"
+  status = 200
+
+[[redirects]]
   from = "/api/agent/status"
   to = "/.netlify/functions/agent-status"
   status = 200
