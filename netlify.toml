@@ -78,6 +78,17 @@
   to = "/.netlify/functions/geocode"
   status = 200
 
+
+# Feature 06: sandboxed coding & browser execution engine
+[[redirects]]
+  from = "/api/sandbox"
+  to = "/.netlify/functions/sandbox"
+  status = 200
+
+[[redirects]]
+  from = "/api/sandbox/*"
+  to = "/.netlify/functions/sandbox"
+  status = 200
 [[redirects]]
   from = "/*"
   to = "/index.html"
