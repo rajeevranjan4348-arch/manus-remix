@@ -3,6 +3,10 @@
   publish = "dist"
   functions = "netlify/functions"
 
+# Feature 05: durable scheduler — Netlify Scheduled Function tick every 5 minutes.
+[functions."scheduler"]
+  schedule = "*/5 * * * *"
+
 [[redirects]]
   from = "/api/auth/session"
   to = "/.netlify/functions/auth-session"
