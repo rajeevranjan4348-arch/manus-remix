@@ -8,6 +8,7 @@
 import { observability } from './observability';
 import { securityCenter } from './securityCenter';
 import { approvalManager } from './approvalManager';
+import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
 
 export interface PageSnapshot {
   url: string;
@@ -38,9 +39,46 @@ class BrowserAutomationService {
       if (!['http:', 'https:'].includes(parsed.protocol)) {
         return { valid: false, error: 'Only HTTP and HTTPS URLs are permitted.' };
       }
-      const host = parsed.hostname.toLowerCase();
-      if (['localhost', '127.0.0.1', '0.0.0.0', '169.254.169.254'].includes(host) || host.endsWith('.local') || host.endsWith('.internal')) {
-        return { valid: false, error: 'SSRF Protection: Access to private networks is forbidden.' };
+      if (parsed.username || parsed.password) {
+        return { valid: false, error: 'Embedded credentials in URLs are not permitted.' };
+      }
+      const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, '');
+      if (
+        !host ||
+        host === 'localhost' ||
+        host.endsWith('.localhost') ||
+        host.endsWith('.local') ||
+        host.endsWith('.internal') ||
+        host === 'metadata.google.internal' ||
+        host === 'metadata.goog' ||
+        /^(0x[0-9a-f]+|\d+)$/i.test(host) ||
+        /^0[0-7]+\.[0-7.]+$/.test(host) ||
+        host === '::1' ||
+        host === '::' ||
+        host.startsWith('::ffff:') ||
+        host.startsWith('fc') ||
+        host.startsWith('fd') ||
+        host.startsWith('fe8') ||
+        host.startsWith('fe9') ||
+        host.startsWith('fea') ||
+        host.startsWith('feb')
+      ) {
+        return { valid: false, error: 'SSRF Protection: Access to private, loopback, or metadata hosts is forbidden.' };
+      }
+      if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+        const [a, b] = host.split('.').map(Number);
+        if (
+          a === 0 ||
+          a === 10 ||
+          a === 127 ||
+          (a === 100 && b >= 64 && b <= 127) ||
+          (a === 169 && b === 254) ||
+          (a === 172 && b >= 16 && b <= 31) ||
+          (a === 192 && b === 168) ||
+          a >= 224
+        ) {
+          return { valid: false, error: 'SSRF Protection: Access to private or reserved IP ranges is forbidden.' };
+        }
       }
       return { valid: true };
     } catch {
@@ -217,6 +255,131 @@ class BrowserAutomationService {
         summary: 'Form submission failed.',
       };
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Real Isolated Browser Session Engine Client (/api/browser/*)
+  // -------------------------------------------------------------------------
+
+  private async browserRequest<T = any>(
+    endpoint: string,
+    method: 'GET' | 'POST' = 'POST',
+    body?: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<{ ok: boolean; status: number; data?: T; error?: string; code?: string; challenge?: any }> {
+    const authHeader = await getFirebaseAuthorizationHeader().catch(() => null);
+    try {
+      const res = await fetch(`/api/browser${endpoint}`, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authHeader ? { Authorization: authHeader } : {}),
+        },
+        body: method === 'POST' ? JSON.stringify(body || {}) : undefined,
+        signal,
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return {
+          ok: false,
+          status: res.status,
+          error: payload?.error || `Browser API error (HTTP ${res.status})`,
+          code: payload?.code,
+          challenge: payload?.challenge,
+          data: payload,
+        };
+      }
+      return { ok: true, status: res.status, data: payload as T };
+    } catch (err: any) {
+      return {
+        ok: false,
+        status: 0,
+        error: securityCenter.toSafeErrorMessage(err),
+        code: 'BROWSER_NETWORK_ERROR',
+      };
+    }
+  }
+
+  public async getBrowserHealth(live = false) {
+    return this.browserRequest(`/health${live ? '?live=true' : ''}`, 'GET');
+  }
+
+  public async createSession(params?: {
+    projectId?: string;
+    taskId?: string;
+    viewport?: { width?: number; height?: number };
+    timeoutSec?: number;
+    provider?: string;
+  }) {
+    return this.browserRequest('/session/create', 'POST', params || {});
+  }
+
+  public async navigate(params: {
+    sessionId: string;
+    url: string;
+    waitUntil?: 'load' | 'domcontentloaded' | 'networkidle';
+    timeoutMs?: number;
+    allowedHosts?: string[];
+  }) {
+    const validation = this.validateTargetUrl(params.url);
+    if (!validation.valid) {
+      return { ok: false, status: 403, code: 'BLOCKED_NAVIGATION_TARGET', error: validation.error };
+    }
+    return this.browserRequest('/navigate', 'POST', params);
+  }
+
+  public async inspect(sessionId: string, selector?: string) {
+    return this.browserRequest('/inspect', 'POST', { sessionId, selector });
+  }
+
+  public async click(params: {
+    sessionId: string;
+    selector: string;
+    label?: string;
+    timeoutMs?: number;
+    approvalToken?: string;
+  }) {
+    return this.browserRequest('/click', 'POST', params);
+  }
+
+  public async fill(params: {
+    sessionId: string;
+    selector: string;
+    value: string;
+    timeoutMs?: number;
+    approvalToken?: string;
+  }) {
+    return this.browserRequest('/fill', 'POST', params);
+  }
+
+  public async scroll(params: {
+    sessionId: string;
+    direction?: 'down' | 'up';
+    pixels?: number;
+    selector?: string;
+  }) {
+    return this.browserRequest('/scroll', 'POST', params);
+  }
+
+  public async waitFor(params: {
+    sessionId: string;
+    selector?: string;
+    urlIncludes?: string;
+    timeoutMs?: number;
+  }) {
+    return this.browserRequest('/wait', 'POST', params);
+  }
+
+  public async screenshot(params: {
+    sessionId: string;
+    fullPage?: boolean;
+    format?: 'png' | 'jpeg';
+  }) {
+    return this.browserRequest('/screenshot', 'POST', params);
+  }
+
+  public async closeSession(sessionId: string) {
+    return this.browserRequest('/session/close', 'POST', { sessionId });
   }
 }
 

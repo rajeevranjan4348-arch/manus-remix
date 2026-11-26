@@ -7,9 +7,11 @@ import {
   summarizeSessionHistory,
 } from './server/geminiService';
 import {
+  buildDekuIdentitySystemInstruction,
   buildUnavailableExecutionMetadata,
   buildVerifiedExecutionMetadata,
   sanitizeExecutionMetadata,
+  stripLeadingUnsolicitedIdentityIntro,
   VerifiedExecutionMetadata,
 } from './server/modelIdentity';
 import {
@@ -50,6 +52,13 @@ import { GoogleGenAI } from '@google/genai';
 import { agentActivityHub } from './server/agentActivityService';
 import { runTechnicalVerification } from './server/agentVerificationService';
 import { geocodeLocationServer } from './server/geocodingService';
+import sandboxFunctionHandler from './netlify/functions/sandbox';
+import browserFunctionHandler from './netlify/functions/browser';
+import permissionsFunctionHandler from './netlify/functions/permissions';
+import tasksFunctionHandler from './netlify/functions/tasks';
+import multiAgentFunctionHandler from './netlify/functions/multi-agent';
+import skillsFunctionHandler from './netlify/functions/skills';
+import schedulerFunctionHandler from './netlify/functions/scheduler';
 
 class StreamCircuitBreaker {
   private failureCount = 0;
@@ -162,6 +171,83 @@ function geminiApiPlugin(): Plugin {
               expiresAt: session.expiresAt,
             })
           );
+          return;
+        }
+
+        // Delegate /api/sandbox/*, /api/browser/*, /api/permissions/*, /api/tasks/*, /api/multi-agent/*, /api/skills/*, /api/scheduler/* directly to Netlify Function handlers
+        if (
+          url &&
+          (url.startsWith('/api/sandbox') ||
+            url.startsWith('/.netlify/functions/sandbox') ||
+            url.startsWith('/api/browser') ||
+            url.startsWith('/.netlify/functions/browser') ||
+            url.startsWith('/api/permissions') ||
+            url.startsWith('/.netlify/functions/permissions') ||
+            url.startsWith('/api/tasks') ||
+            url.startsWith('/.netlify/functions/tasks') ||
+            url.startsWith('/api/multi-agent') ||
+            url.startsWith('/.netlify/functions/multi-agent') ||
+            url.startsWith('/api/skills') ||
+            url.startsWith('/.netlify/functions/skills') ||
+            url.startsWith('/api/scheduler') ||
+            url.startsWith('/.netlify/functions/scheduler'))
+        ) {
+          const chunks: Buffer[] = [];
+          req.on('data', (c: any) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+          req.on('end', async () => {
+            try {
+              const host = req.headers.host || 'localhost:3000';
+              const fullUrl = `http://${host}${req.url || url}`;
+              const headers = new Headers();
+              for (const [k, v] of Object.entries(req.headers)) {
+                if (typeof v === 'string') headers.set(k, v);
+                else if (Array.isArray(v)) headers.set(k, v.join(', '));
+              }
+              const method = (req.method || 'GET').toUpperCase();
+              const bodyBuf = chunks.length > 0 ? Buffer.concat(chunks) : undefined;
+              const webReq = new Request(fullUrl, {
+                method,
+                headers,
+                body: method === 'GET' || method === 'HEAD' ? undefined : bodyBuf,
+              });
+
+              const handler =
+                url.startsWith('/api/sandbox') || url.startsWith('/.netlify/functions/sandbox')
+                  ? sandboxFunctionHandler
+                  : url.startsWith('/api/browser') || url.startsWith('/.netlify/functions/browser')
+                    ? browserFunctionHandler
+                    : url.startsWith('/api/tasks') || url.startsWith('/.netlify/functions/tasks')
+                      ? tasksFunctionHandler
+                      : url.startsWith('/api/multi-agent') || url.startsWith('/.netlify/functions/multi-agent')
+                        ? multiAgentFunctionHandler
+                        : url.startsWith('/api/skills') || url.startsWith('/.netlify/functions/skills')
+                          ? skillsFunctionHandler
+                          : url.startsWith('/api/scheduler') || url.startsWith('/.netlify/functions/scheduler')
+                            ? schedulerFunctionHandler
+                            : permissionsFunctionHandler;
+
+              const webRes = await handler(webReq);
+              res.statusCode = webRes.status;
+              webRes.headers.forEach((val, key) => {
+                res.setHeader(key, val);
+              });
+              if (webRes.body) {
+                const reader = webRes.body.getReader();
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  res.write(Buffer.from(value));
+                }
+                res.end();
+              } else {
+                res.end(await webRes.text());
+              }
+            } catch (err: any) {
+              res.statusCode = 500;
+              res.setHeader('Content-Type', 'application/json; charset=utf-8');
+              res.end(JSON.stringify({ ok: false, error: err?.message || 'Middleware delegation failed.' }));
+            }
+          });
           return;
         }
 
@@ -1200,6 +1286,8 @@ function geminiApiPlugin(): Plugin {
               const body = bodyStr ? JSON.parse(bodyStr) : {};
               const prompt = body.prompt || '';
               const messages = body.messages || (prompt ? [{ role: 'user', content: prompt }] : []);
+              const latestUserPrompt =
+                [...messages].reverse().find((m: any) => m?.role === 'user')?.content || prompt || '';
 
               if (process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY) {
                 try {
@@ -1217,11 +1305,12 @@ function geminiApiPlugin(): Plugin {
                   for await (const chunk of stream) {
                     accumulated += chunk;
                   }
-                  if (accumulated && accumulated.trim()) {
+                  const cleanedText = stripLeadingUnsolicitedIdentityIntro(accumulated, latestUserPrompt);
+                  if (cleanedText && cleanedText.trim()) {
                     res.setHeader('Content-Type', 'application/json');
                     res.end(
                       JSON.stringify({
-                        text: accumulated,
+                        text: cleanedText,
                         executionMetadata: sanitizeExecutionMetadata(capturedMeta),
                       })
                     );
@@ -1265,7 +1354,10 @@ function geminiApiPlugin(): Plugin {
                       body: JSON.stringify({
                         model: model,
                         messages: [
-                          { role: 'system', content: body.systemInstruction || 'You are Deku AI, an independent AI workspace assistant. Provide clear, accurate, and comprehensive responses.' },
+                          {
+                            role: 'system',
+                            content: `${body.systemInstruction || 'Answer the user directly and concisely from the first sentence without unsolicited greetings or self-introductions.'}\n\n${buildDekuIdentitySystemInstruction(null)}`,
+                          },
                           ...messages
                         ],
                         max_tokens: 4096,
@@ -1275,7 +1367,8 @@ function geminiApiPlugin(): Plugin {
 
                     if (response.ok) {
                       const data = await response.json();
-                      const text = data.choices?.[0]?.message?.content || '';
+                      const rawText = data.choices?.[0]?.message?.content || '';
+                      const text = stripLeadingUnsolicitedIdentityIntro(rawText, latestUserPrompt);
                       if (text) {
                         const actualModel = typeof data.model === 'string' && data.model.trim() ? data.model.trim() : model;
                         const requestedRaw = typeof body.model === 'string' ? body.model.trim() : null;

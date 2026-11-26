@@ -163,6 +163,210 @@ service cloud.firestore {
         (existing().status == 'in_progress');
     }
 
+    function isValidSandbox(data, ownerId, sandboxId) {
+      return data.keys().hasAll(['sandboxId', 'workspaceId', 'provider', 'providerSandboxId', 'userId', 'projectId', 'runtime', 'workspaceRoot', 'status', 'createdAt', 'updatedAt', 'expiresAt']) &&
+        data.keys().hasOnly(['sandboxId', 'workspaceId', 'provider', 'providerSandboxId', 'userId', 'projectId', 'taskId', 'runtime', 'image', 'workspaceRoot', 'status', 'limits', 'persistent', 'previewUrl', 'previewPort', 'previewStatus', 'previewCommandExecutionId', 'createdAt', 'updatedAt', 'lastActiveAt', 'expiresAt', 'cleanedUpAt', 'error']) &&
+        data.sandboxId is string && isValidId(data.sandboxId) && data.sandboxId == sandboxId &&
+        data.workspaceId is string && isValidId(data.workspaceId) &&
+        data.provider in ['e2b', 'daytona', 'http-runtime', 'unconfigured'] &&
+        data.providerSandboxId is string && data.providerSandboxId.size() <= 256 &&
+        data.userId is string && data.userId == ownerId &&
+        data.projectId is string && isValidId(data.projectId) &&
+        data.runtime in ['node', 'typescript', 'javascript', 'python', 'html', 'react', 'vite', 'nextjs', 'custom'] &&
+        data.workspaceRoot is string && data.workspaceRoot.size() <= 256 &&
+        data.status in ['creating', 'running', 'idle', 'stopping', 'stopped', 'expired', 'error'] &&
+        (!('limits' in data) || (data.limits is map && data.limits.keys().size() <= 20)) &&
+        (!('persistent' in data) || data.persistent is bool) &&
+        (!('previewUrl' in data) || (data.previewUrl is string && data.previewUrl.size() <= 1024)) &&
+        (!('previewPort' in data) || (data.previewPort is int && data.previewPort >= 0 && data.previewPort <= 65535)) &&
+        (!('previewStatus' in data) || data.previewStatus in ['stopped', 'starting', 'ready', 'failed']) &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64 &&
+        data.expiresAt is string && data.expiresAt.size() <= 64 &&
+        (!('error' in data) || (data.error is string && data.error.size() <= 2000));
+    }
+
+    function isValidExecution(data, ownerId, executionId) {
+      return data.keys().hasAll(['executionId', 'sandboxId', 'workspaceId', 'userId', 'provider', 'command', 'cwd', 'status', 'startedAt', 'timeoutMs', 'retryCount', 'untrustedData']) &&
+        data.keys().hasOnly(['executionId', 'sandboxId', 'workspaceId', 'userId', 'provider', 'providerExecutionId', 'command', 'cwd', 'status', 'stdout', 'stderr', 'exitCode', 'startedAt', 'completedAt', 'durationMs', 'timeoutMs', 'idempotencyKey', 'retryCount', 'cancelled', 'error', 'untrustedData']) &&
+        data.executionId is string && isValidId(data.executionId) && data.executionId == executionId &&
+        data.sandboxId is string && isValidId(data.sandboxId) &&
+        data.workspaceId is string && data.workspaceId.size() <= 128 &&
+        data.userId is string && data.userId == ownerId &&
+        data.provider in ['e2b', 'daytona', 'http-runtime', 'unconfigured'] &&
+        data.command is string && data.command.size() <= 4096 &&
+        data.cwd is string && data.cwd.size() <= 512 &&
+        data.status in ['queued', 'running', 'completed', 'failed', 'timed_out', 'cancelled'] &&
+        (!('stdout' in data) || (data.stdout is string && data.stdout.size() <= 250000)) &&
+        (!('stderr' in data) || (data.stderr is string && data.stderr.size() <= 250000)) &&
+        (!('exitCode' in data) || data.exitCode == null || data.exitCode is int) &&
+        data.startedAt is string && data.startedAt.size() <= 64 &&
+        data.timeoutMs is int && data.timeoutMs >= 0 && data.timeoutMs <= 600000 &&
+        data.retryCount is int && data.retryCount >= 0 && data.retryCount <= 10 &&
+        data.untrustedData == true;
+    }
+
+    function isValidBrowserSession(data, ownerId, sessionId) {
+      return data.keys().hasAll(['sessionId', 'provider', 'providerSessionId', 'userId', 'status', 'isolatedStorage', 'createdAt', 'updatedAt', 'expiresAt']) &&
+        data.keys().hasOnly(['sessionId', 'provider', 'providerSessionId', 'userId', 'projectId', 'taskId', 'status', 'currentUrl', 'currentTitle', 'viewport', 'isolatedStorage', 'createdAt', 'updatedAt', 'lastActiveAt', 'expiresAt', 'closedAt', 'error']) &&
+        data.sessionId is string && isValidId(data.sessionId) && data.sessionId == sessionId &&
+        data.provider in ['browserless', 'browserbase', 'http-browser', 'unconfigured'] &&
+        data.providerSessionId is string && data.providerSessionId.size() <= 256 &&
+        data.userId is string && data.userId == ownerId &&
+        data.status in ['creating', 'active', 'closed', 'expired', 'error'] &&
+        (!('currentUrl' in data) || (data.currentUrl is string && data.currentUrl.size() <= 2048)) &&
+        (!('currentTitle' in data) || (data.currentTitle is string && data.currentTitle.size() <= 300)) &&
+        (!('viewport' in data) || (data.viewport is map && data.viewport.keys().size() <= 5)) &&
+        data.isolatedStorage == true &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64 &&
+        data.expiresAt is string && data.expiresAt.size() <= 64;
+    }
+
+    function isValidApproval(data, ownerId, challengeId) {
+      return data.keys().hasAll(['challengeId', 'toolName', 'riskLevel', 'parametersHash', 'userId', 'createdAt', 'expiresAt', 'status']) &&
+        data.keys().hasOnly(['challengeId', 'toolName', 'displayName', 'riskLevel', 'target', 'parametersHash', 'parametersSummary', 'consequences', 'userId', 'createdAt', 'expiresAt', 'status', 'approvalToken', 'resolvedAt', 'revokedAt', 'revocationReason']) &&
+        data.challengeId is string && isValidId(data.challengeId) && data.challengeId == challengeId &&
+        data.toolName is string && data.toolName.size() <= 128 &&
+        data.riskLevel in ['read-only', 'destructive', 'privileged'] &&
+        data.parametersHash is string && data.parametersHash.size() <= 128 &&
+        data.userId is string && data.userId == ownerId &&
+        data.createdAt is int && data.expiresAt is int &&
+        data.status in ['pending', 'approved', 'rejected', 'expired', 'consumed', 'revoked'] &&
+        (!('parametersSummary' in data) || (data.parametersSummary is map && data.parametersSummary.keys().size() <= 30)) &&
+        (!('consequences' in data) || (data.consequences is list && data.consequences.size() <= 20)) &&
+        (!('revocationReason' in data) || (data.revocationReason is string && data.revocationReason.size() <= 300));
+    }
+
+    function isValidPermissionPolicy(data, ownerId, policyId) {
+      return data.keys().hasAll(['policyId', 'userId', 'toolName', 'mode', 'updatedAt', 'updatedBy']) &&
+        data.keys().hasOnly(['policyId', 'userId', 'toolName', 'mode', 'updatedAt', 'updatedBy', 'note']) &&
+        data.policyId is string && isValidId(data.policyId) && data.policyId == policyId &&
+        data.userId is string && data.userId == ownerId &&
+        data.toolName is string && data.toolName.size() <= 128 &&
+        data.mode in ['default', 'always_require_approval', 'auto_allow_non_destructive', 'deny'] &&
+        data.updatedAt is string && data.updatedAt.size() <= 64 &&
+        data.updatedBy is string && data.updatedBy == ownerId &&
+        (!('note' in data) || (data.note is string && data.note.size() <= 300));
+    }
+
+    function isValidBackgroundTask(data, ownerId, taskId) {
+      return data.keys().hasAll(['taskId', 'userId', 'type', 'title', 'prompt', 'status', 'phase', 'priority', 'attempt', 'maxAttempts', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['taskId', 'userId', 'type', 'title', 'prompt', 'payload', 'status', 'phase', 'priority', 'priorityScore', 'progress', 'idempotencyKey', 'scheduleId', 'attempt', 'maxAttempts', 'baseBackoffMs', 'timeoutMs', 'nextAttemptAt', 'leaseOwner', 'leaseExpiresAt', 'workerDispatchState', 'workerDispatchDetail', 'result', 'error', 'createdAt', 'updatedAt', 'startedAt', 'completedAt', 'cancelledAt', 'history']) &&
+        data.taskId is string && isValidId(data.taskId) && data.taskId == taskId &&
+        data.userId is string && data.userId == ownerId &&
+        data.type in ['research', 'coding', 'automation', 'multi_agent', 'scheduled', 'skill', 'general'] &&
+        data.title is string && data.title.size() <= 180 &&
+        data.prompt is string && data.prompt.size() <= 20000 &&
+        data.status in ['queued', 'claimed', 'running', 'completed', 'failed', 'cancelled', 'dead_letter'] &&
+        data.phase is string && data.phase.size() <= 64 &&
+        data.priority in ['low', 'normal', 'high', 'urgent'] &&
+        data.attempt is int && data.attempt >= 0 && data.attempt <= 20 &&
+        data.maxAttempts is int && data.maxAttempts >= 1 && data.maxAttempts <= 10 &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64 &&
+        (!('history' in data) || (data.history is list && data.history.size() <= 200));
+    }
+
+    function isValidMultiAgentRun(data, ownerId, runId) {
+      return data.keys().hasAll(['runId', 'userId', 'objective', 'status', 'provider', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['runId', 'userId', 'objective', 'status', 'provider', 'maxConcurrency', 'maxRecursionDepth', 'maxTotalTokens', 'maxCostUsd', 'timeoutMs', 'nodes', 'qaReview', 'consolidatedAnswer', 'totalUsage', 'error', 'createdAt', 'updatedAt', 'completedAt']) &&
+        data.runId is string && isValidId(data.runId) && data.runId == runId &&
+        data.userId is string && data.userId == ownerId &&
+        data.objective is string && data.objective.size() <= 4000 &&
+        data.status in ['running', 'completed', 'failed', 'cancelled'] &&
+        data.provider is string && data.provider.size() <= 64 &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64 &&
+        (!('nodes' in data) || (data.nodes is list && data.nodes.size() <= 30));
+    }
+
+    function isValidInstalledSkill(data, ownerId, skillId) {
+      return data.keys().hasAll(['skillId', 'userId', 'name', 'version', 'executionType', 'trustTier', 'integrityHash', 'enabled', 'installedAt', 'updatedAt']) &&
+        data.keys().hasOnly(['skillId', 'userId', 'name', 'description', 'version', 'instructions', 'supportedTools', 'dependencies', 'permissions', 'compatibility', 'executionType', 'sandboxScript', 'tags', 'trustTier', 'integrityHash', 'enabled', 'config', 'versions', 'installedAt', 'updatedAt']) &&
+        data.skillId is string && isValidId(data.skillId) && data.skillId == skillId &&
+        data.userId is string && data.userId == ownerId &&
+        data.name is string && data.name.size() <= 128 &&
+        data.version is string && data.version.size() <= 32 &&
+        data.executionType in ['declarative', 'tool_workflow', 'sandbox_code'] &&
+        data.trustTier in ['verified_builtin', 'third_party'] &&
+        data.integrityHash is string && data.integrityHash.size() <= 128 &&
+        data.enabled is bool &&
+        data.installedAt is string && data.installedAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64 &&
+        (!('versions' in data) || (data.versions is list && data.versions.size() <= 50));
+    }
+
+    function isValidSkillExecution(data, ownerId, executionId) {
+      return data.keys().hasAll(['executionId', 'userId', 'skillId', 'skillVersion', 'status', 'startedAt', 'completedAt']) &&
+        data.keys().hasOnly(['executionId', 'userId', 'skillId', 'skillVersion', 'executionType', 'status', 'inputSummary', 'output', 'sandboxId', 'error', 'startedAt', 'completedAt', 'durationMs']) &&
+        data.executionId is string && isValidId(data.executionId) && data.executionId == executionId &&
+        data.userId is string && data.userId == ownerId &&
+        data.skillId is string && data.skillId.size() <= 64 &&
+        data.skillVersion is string && data.skillVersion.size() <= 32 &&
+        data.status in ['succeeded', 'failed', 'denied'] &&
+        data.startedAt is string && data.startedAt.size() <= 64 &&
+        data.completedAt is string && data.completedAt.size() <= 64;
+    }
+
+    function isValidSchedule(data, ownerId, scheduleId) {
+      return data.keys().hasAll(['scheduleId', 'userId', 'name', 'kind', 'status', 'timeZone', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['scheduleId', 'userId', 'name', 'description', 'kind', 'status', 'timeZone', 'runAt', 'intervalMinutes', 'timeOfDay', 'dayOfWeek', 'dayOfMonth', 'cronExpression', 'missedJobPolicy', 'maxCatchUpRuns', 'condition', 'taskTemplate', 'notifyOnRun', 'nextRunAt', 'lastRunAt', 'lastRunStatus', 'runCount', 'createdAt', 'updatedAt']) &&
+        data.scheduleId is string && isValidId(data.scheduleId) && data.scheduleId == scheduleId &&
+        data.userId is string && data.userId == ownerId &&
+        data.name is string && data.name.size() <= 160 &&
+        data.kind in ['once', 'interval', 'daily', 'weekly', 'monthly', 'cron'] &&
+        data.status in ['active', 'paused', 'completed', 'cancelled'] &&
+        data.timeZone is string && data.timeZone.size() <= 64 &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidScheduleRun(data, ownerId, runId) {
+      return data.keys().hasAll(['runId', 'scheduleId', 'userId', 'scheduledFor', 'executedAt', 'status']) &&
+        data.keys().hasOnly(['runId', 'scheduleId', 'userId', 'scheduledFor', 'executedAt', 'status', 'taskId', 'deduplicated', 'reason']) &&
+        data.runId is string && isValidId(data.runId) && data.runId == runId &&
+        data.scheduleId is string && isValidId(data.scheduleId) &&
+        data.userId is string && data.userId == ownerId &&
+        data.scheduledFor is string && data.scheduledFor.size() <= 64 &&
+        data.executedAt is string && data.executedAt.size() <= 64 &&
+        data.status in ['dispatched', 'skipped_condition', 'failed'];
+    }
+
+    function isValidNotification(data, ownerId, notificationId) {
+      return data.keys().hasAll(['notificationId', 'userId', 'kind', 'title', 'body', 'read', 'createdAt']) &&
+        data.keys().hasOnly(['notificationId', 'userId', 'kind', 'title', 'body', 'taskId', 'scheduleId', 'read', 'createdAt', 'readAt', 'metadata']) &&
+        data.notificationId is string && isValidId(data.notificationId) && data.notificationId == notificationId &&
+        data.userId is string && data.userId == ownerId &&
+        data.kind in ['task_completed', 'task_failed', 'approval_required', 'schedule_reminder', 'schedule_executed', 'system'] &&
+        data.title is string && data.title.size() <= 160 &&
+        data.body is string && data.body.size() <= 1000 &&
+        data.read is bool &&
+        data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidAuditLog(data, ownerId, auditId) {
+      return data.keys().hasAll(['auditId', 'userId', 'action', 'resourceType', 'resourceId', 'status', 'timestamp']) &&
+        data.keys().hasOnly(['auditId', 'userId', 'action', 'resourceType', 'resourceId', 'status', 'details', 'timestamp']) &&
+        data.auditId is string && isValidId(data.auditId) && data.auditId == auditId &&
+        data.userId is string && data.userId == ownerId &&
+        data.action is string && data.action.size() <= 128 &&
+        data.resourceType in ['sandbox', 'terminal', 'filesystem', 'preview', 'browser', 'permission', 'webhook'] &&
+        data.resourceId is string && data.resourceId.size() <= 128 &&
+        data.status in ['allowed', 'denied', 'challenged', 'succeeded', 'failed'] &&
+        (!('details' in data) || (data.details is map && data.details.keys().size() <= 30)) &&
+        data.timestamp is string && data.timestamp.size() <= 64;
+    }
+
+    function isValidIdempotency(data, ownerId, keyId) {
+      return data.keys().hasAll(['key', 'userId', 'createdAt', 'expiresAt']) &&
+        data.keys().hasOnly(['key', 'userId', 'result', 'createdAt', 'expiresAt']) &&
+        data.key is string && isValidId(data.key) && data.key == keyId &&
+        data.userId is string && data.userId == ownerId &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.expiresAt is string && data.expiresAt.size() <= 64;
+    }
+
     match /test/connection {
       allow get: if isSignedIn() || request.time != null;
     }
@@ -203,6 +407,161 @@ service cloud.firestore {
           incoming().conversationId == existing().conversationId && incoming().userId == existing().userId &&
           isValidCheckpointTransition();
         allow delete: if isOwner(userId) && isValidId(checkpointId);
+      }
+
+      match /sandboxes/{sandboxId} {
+        allow get: if isOwner(userId) && isValidId(sandboxId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(sandboxId) && isValidSandbox(incoming(), userId, sandboxId);
+        allow update: if isOwner(userId) && isValidId(sandboxId) &&
+          isValidSandbox(incoming(), userId, sandboxId) &&
+          incoming().sandboxId == existing().sandboxId &&
+          incoming().workspaceId == existing().workspaceId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt &&
+          (!(existing().status in ['stopped', 'expired']) || incoming().status == existing().status);
+        allow delete: if isOwner(userId) && isValidId(sandboxId);
+      }
+
+      match /executions/{executionId} {
+        allow get: if isOwner(userId) && isValidId(executionId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(executionId) && isValidExecution(incoming(), userId, executionId);
+        allow update: if isOwner(userId) && isValidId(executionId) &&
+          isValidExecution(incoming(), userId, executionId) &&
+          incoming().executionId == existing().executionId &&
+          incoming().sandboxId == existing().sandboxId &&
+          incoming().userId == existing().userId &&
+          incoming().startedAt == existing().startedAt;
+        allow delete: if false;
+      }
+
+      match /browser_sessions/{sessionId} {
+        allow get: if isOwner(userId) && isValidId(sessionId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(sessionId) && isValidBrowserSession(incoming(), userId, sessionId);
+        allow update: if isOwner(userId) && isValidId(sessionId) &&
+          isValidBrowserSession(incoming(), userId, sessionId) &&
+          incoming().sessionId == existing().sessionId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt &&
+          (!(existing().status in ['closed', 'expired']) || incoming().status == existing().status);
+        allow delete: if isOwner(userId) && isValidId(sessionId);
+      }
+
+      match /approvals/{challengeId} {
+        allow get: if isOwner(userId) && isValidId(challengeId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(challengeId) && isValidApproval(incoming(), userId, challengeId);
+        allow update: if isOwner(userId) && isValidId(challengeId) &&
+          isValidApproval(incoming(), userId, challengeId) &&
+          incoming().challengeId == existing().challengeId &&
+          incoming().parametersHash == existing().parametersHash &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt &&
+          (!(existing().status in ['consumed', 'rejected', 'expired']) || incoming().status == existing().status);
+        allow delete: if false;
+      }
+
+      match /audit_logs/{auditId} {
+        allow get: if isOwner(userId) && isValidId(auditId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(auditId) && isValidAuditLog(incoming(), userId, auditId);
+        allow update, delete: if false;
+      }
+
+      match /idempotency/{keyId} {
+        allow get: if isOwner(userId) && isValidId(keyId);
+        allow list: if false;
+        allow create: if isOwner(userId) && isValidId(keyId) && isValidIdempotency(incoming(), userId, keyId);
+        allow update: if false;
+        allow delete: if isOwner(userId) && isValidId(keyId);
+      }
+
+      match /permission_policies/{policyId} {
+        allow get: if isOwner(userId) && isValidId(policyId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(policyId) && isValidPermissionPolicy(incoming(), userId, policyId);
+        allow update: if isOwner(userId) && isValidId(policyId) &&
+          isValidPermissionPolicy(incoming(), userId, policyId) &&
+          incoming().policyId == existing().policyId &&
+          incoming().userId == existing().userId;
+        allow delete: if isOwner(userId) && isValidId(policyId);
+      }
+
+      match /background_tasks/{taskId} {
+        allow get: if isOwner(userId) && isValidId(taskId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(taskId) && isValidBackgroundTask(incoming(), userId, taskId);
+        allow update: if isOwner(userId) && isValidId(taskId) &&
+          isValidBackgroundTask(incoming(), userId, taskId) &&
+          incoming().taskId == existing().taskId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt;
+        allow delete: if false;
+      }
+
+      match /multi_agent_runs/{runId} {
+        allow get: if isOwner(userId) && isValidId(runId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(runId) && isValidMultiAgentRun(incoming(), userId, runId);
+        allow update: if isOwner(userId) && isValidId(runId) &&
+          isValidMultiAgentRun(incoming(), userId, runId) &&
+          incoming().runId == existing().runId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt;
+        allow delete: if false;
+      }
+
+      match /skills/{skillId} {
+        allow get: if isOwner(userId) && isValidId(skillId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(skillId) && isValidInstalledSkill(incoming(), userId, skillId);
+        allow update: if isOwner(userId) && isValidId(skillId) &&
+          isValidInstalledSkill(incoming(), userId, skillId) &&
+          incoming().skillId == existing().skillId &&
+          incoming().userId == existing().userId &&
+          incoming().installedAt == existing().installedAt;
+        allow delete: if isOwner(userId) && isValidId(skillId);
+      }
+
+      match /skill_executions/{executionId} {
+        allow get: if isOwner(userId) && isValidId(executionId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(executionId) && isValidSkillExecution(incoming(), userId, executionId);
+        allow update, delete: if false;
+      }
+
+      match /schedules/{scheduleId} {
+        allow get: if isOwner(userId) && isValidId(scheduleId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(scheduleId) && isValidSchedule(incoming(), userId, scheduleId);
+        allow update: if isOwner(userId) && isValidId(scheduleId) &&
+          isValidSchedule(incoming(), userId, scheduleId) &&
+          incoming().scheduleId == existing().scheduleId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt &&
+          (existing().status != 'cancelled' || incoming().status == 'cancelled');
+        allow delete: if isOwner(userId) && isValidId(scheduleId);
+      }
+
+      match /schedule_runs/{runId} {
+        allow get: if isOwner(userId) && isValidId(runId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(runId) && isValidScheduleRun(incoming(), userId, runId);
+        allow update, delete: if false;
+      }
+
+      match /notifications/{notificationId} {
+        allow get: if isOwner(userId) && isValidId(notificationId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(notificationId) && isValidNotification(incoming(), userId, notificationId);
+        allow update: if isOwner(userId) && isValidId(notificationId) &&
+          isValidNotification(incoming(), userId, notificationId) &&
+          incoming().notificationId == existing().notificationId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt;
+        allow delete: if isOwner(userId) && isValidId(notificationId);
       }
     }
 

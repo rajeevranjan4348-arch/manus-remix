@@ -6,9 +6,9 @@ import type { Transition, Variants } from 'framer-motion';
  */
 export const WORKSPACE_PANEL_SPRING_OPEN: Transition = {
   type: 'spring',
-  stiffness: 680,
-  damping: 42,
-  mass: 0.52,
+  stiffness: 560,
+  damping: 29,
+  mass: 0.62,
 };
 
 export const WORKSPACE_PANEL_SPRING_CLOSE: Transition = {
@@ -20,9 +20,9 @@ export const WORKSPACE_PANEL_SPRING_CLOSE: Transition = {
 
 export const WORKSPACE_SHEET_SPRING_OPEN: Transition = {
   type: 'spring',
-  stiffness: 640,
-  damping: 42,
-  mass: 0.54,
+  stiffness: 520,
+  damping: 28,
+  mass: 0.65,
 };
 
 export const WORKSPACE_SHEET_SPRING_CLOSE: Transition = {

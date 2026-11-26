@@ -38,6 +38,7 @@ import {
   buildUnavailableExecutionMetadata,
   buildUnverifiedIdentityResponse,
   buildVerifiedExecutionMetadata,
+  createLeadingIntroStreamFilter,
   DEKU_PRODUCT_NAME,
   resolveRequestedModelRoute,
   sanitizeExecutionMetadata,
@@ -398,7 +399,7 @@ export default async (req: Request) => {
     const candidateModels = resolveCandidateModels(configuredModelId);
 
     let systemInstruction = body.systemInstruction ||
-      'You are Deku AI, an intelligent AI workspace agent. Provide direct, helpful, and high-quality responses. Answer factual questions directly. Do not generate fake reports or fake charts unless specifically asked for them. Never expose private internal chain-of-thought.';
+      'Answer the user\'s question directly from the first sentence with clear, helpful, high-quality responses. Never prepend unsolicited greetings, self-introductions, or product descriptions (such as "Hello! I am Deku AI, your independent workspace assistant.") to normal questions. Only greet when the user greets you. Do not generate fake reports or fake charts unless specifically asked for them. Never expose private internal chain-of-thought.';
 
     if (!systemInstruction.includes('[MEMORY USAGE POLICY]')) {
       systemInstruction +=
@@ -409,13 +410,6 @@ export default async (req: Request) => {
         '- Use relevant memory silently only when it directly answers the user\'s question or genuinely improves personalization.\n' +
         '- Avoid repetitive references to saved memories across turns.';
     }
-
-    systemInstruction +=
-      `\n\n[VERIFIED MODEL & APPLICATION IDENTITY]\n` +
-      `- Application / Workspace Agent Name: Deku AI\n` +
-      `- Active Underlying LLM Model ID: ${configuredModelId}\n` +
-      `- Model Provider: Google Gemini\n` +
-      `- Strict Rule: When asked "which model are you", "what LLM are you running on", "who built you", or about your model/architecture, clearly distinguish between the application/agent name (Deku AI) and the actual underlying LLM model (${configuredModelId} by Google Gemini). Never invent model names, providers, or architectures.`;
 
     if (realtimeSnapshot) {
       systemInstruction += realtimeSnapshot.systemContextBlock;
@@ -617,6 +611,7 @@ export default async (req: Request) => {
                   let charCount = 0;
                   let latestUsageMetadata: any = null;
                   let metadataEmitted = false;
+                  const introFilter = createLeadingIntroStreamFilter(latestUserText);
                   try {
                     const guardedStream = iterateStreamWithTimeouts(
                       () =>
@@ -646,14 +641,17 @@ export default async (req: Request) => {
                       }
                       const text = chunk.text;
                       if (text) {
-                        if (!metadataEmitted) {
-                          metadataEmitted = true;
-                          capturedExecutionMetadata = geminiExecutionMeta;
-                          safeEnqueue(`data: ${JSON.stringify({ type: 'execution-metadata', requestId, executionMetadata: geminiExecutionMeta })}\n\n`);
+                        const filteredText = introFilter.push(text);
+                        if (filteredText) {
+                          if (!metadataEmitted) {
+                            metadataEmitted = true;
+                            capturedExecutionMetadata = geminiExecutionMeta;
+                            safeEnqueue(`data: ${JSON.stringify({ type: 'execution-metadata', requestId, executionMetadata: geminiExecutionMeta })}\n\n`);
+                          }
+                          hasEmittedText = true;
+                          charCount += filteredText.length;
+                          safeEnqueue(`data: ${JSON.stringify({ type: 'text-delta', delta: filteredText, textDelta: filteredText, requestId })}\n\n`);
                         }
-                        hasEmittedText = true;
-                        charCount += text.length;
-                        safeEnqueue(`data: ${JSON.stringify({ type: 'text-delta', delta: text, textDelta: text, requestId })}\n\n`);
                       }
 
                       const groundingChunks = chunk?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
@@ -663,6 +661,18 @@ export default async (req: Request) => {
                           sources.set(web.uri, typeof web.title === 'string' && web.title.trim() ? web.title : web.uri);
                         }
                       }
+                    }
+
+                    const trailingFiltered = introFilter.flush();
+                    if (trailingFiltered) {
+                      if (!metadataEmitted) {
+                        metadataEmitted = true;
+                        capturedExecutionMetadata = geminiExecutionMeta;
+                        safeEnqueue(`data: ${JSON.stringify({ type: 'execution-metadata', requestId, executionMetadata: geminiExecutionMeta })}\n\n`);
+                      }
+                      hasEmittedText = true;
+                      charCount += trailingFiltered.length;
+                      safeEnqueue(`data: ${JSON.stringify({ type: 'text-delta', delta: trailingFiltered, textDelta: trailingFiltered, requestId })}\n\n`);
                     }
 
                     geminiCircuitBreaker.recordSuccess();
@@ -820,7 +830,7 @@ export default async (req: Request) => {
             body: JSON.stringify({
               model: orModel,
               messages: [
-                ...(systemInstruction ? [{ role: 'system', content: systemInstruction }] : []),
+                { role: 'system', content: `${systemInstruction}\n\n${buildDekuIdentitySystemInstruction(null)}` },
                 ...messages.map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })),
               ],
               stream: true,
@@ -853,6 +863,7 @@ export default async (req: Request) => {
             let hasEmittedText = false;
             let actualReturnedModel = orModel;
             let orExecutionMetadata: VerifiedExecutionMetadata | null = null;
+            const orIntroFilter = createLeadingIntroStreamFilter(latestUserText);
 
             const stream = new ReadableStream({
               async start(controller) {
@@ -867,6 +878,24 @@ export default async (req: Request) => {
                       const trimmed = line.trim();
                       if (!trimmed || trimmed.startsWith(':')) continue;
                       if (trimmed === 'data: [DONE]') {
+                        const trailingOr = orIntroFilter.flush();
+                        if (trailingOr) {
+                          if (!orExecutionMetadata) {
+                            const isFallback = !requestedRoute.requestedRaw || requestedRoute.requestedRaw !== actualReturnedModel;
+                            orExecutionMetadata = buildVerifiedExecutionMetadata({
+                              actualModel: actualReturnedModel,
+                              providerHint: 'openrouter',
+                              requestedModel: requestedRoute.requestedRaw,
+                              runtimeSource: 'openrouter-api',
+                              isFallback,
+                              fallbackFrom: isFallback ? requestedRoute.requestedRaw : null,
+                              fallbackReason: isFallback ? 'Executed via OpenRouter fallback' : null,
+                            });
+                            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'execution-metadata', requestId, executionMetadata: orExecutionMetadata })}\n\n`));
+                          }
+                          hasEmittedText = true;
+                          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: trailingOr, textDelta: trailingOr, requestId })}\n\n`));
+                        }
                         openRouterCircuitBreaker.recordSuccess();
                         recoveryTelemetry.record({ component: 'openrouter', action: 'provider_recovered', outcome: 'success', requestId });
                         if (!hasEmittedText) {
@@ -908,21 +937,24 @@ export default async (req: Request) => {
                           }
                           const delta = json.choices?.[0]?.delta?.content;
                           if (delta) {
-                            if (!orExecutionMetadata) {
-                              const isFallback = !requestedRoute.requestedRaw || requestedRoute.requestedRaw !== actualReturnedModel;
-                              orExecutionMetadata = buildVerifiedExecutionMetadata({
-                                actualModel: actualReturnedModel,
-                                providerHint: 'openrouter',
-                                requestedModel: requestedRoute.requestedRaw,
-                                runtimeSource: 'openrouter-api',
-                                isFallback,
-                                fallbackFrom: isFallback ? requestedRoute.requestedRaw : null,
-                                fallbackReason: isFallback ? 'Executed via OpenRouter fallback' : null,
-                              });
-                              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'execution-metadata', requestId, executionMetadata: orExecutionMetadata })}\n\n`));
+                            const filteredDelta = orIntroFilter.push(String(delta));
+                            if (filteredDelta) {
+                              if (!orExecutionMetadata) {
+                                const isFallback = !requestedRoute.requestedRaw || requestedRoute.requestedRaw !== actualReturnedModel;
+                                orExecutionMetadata = buildVerifiedExecutionMetadata({
+                                  actualModel: actualReturnedModel,
+                                  providerHint: 'openrouter',
+                                  requestedModel: requestedRoute.requestedRaw,
+                                  runtimeSource: 'openrouter-api',
+                                  isFallback,
+                                  fallbackFrom: isFallback ? requestedRoute.requestedRaw : null,
+                                  fallbackReason: isFallback ? 'Executed via OpenRouter fallback' : null,
+                                });
+                                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'execution-metadata', requestId, executionMetadata: orExecutionMetadata })}\n\n`));
+                              }
+                              hasEmittedText = true;
+                              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta: filteredDelta, textDelta: filteredDelta, requestId })}\n\n`));
                             }
-                            hasEmittedText = true;
-                            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text-delta', delta, textDelta: delta, requestId })}\n\n`));
                           }
                         } catch {}
                       }

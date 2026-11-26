@@ -79,6 +79,36 @@
   status = 200
 
 [[redirects]]
+  from = "/api/sandbox/*"
+  to = "/.netlify/functions/sandbox"
+  status = 200
+
+[[redirects]]
+  from = "/api/browser/*"
+  to = "/.netlify/functions/browser"
+  status = 200
+
+[[redirects]]
+  from = "/api/tasks/*"
+  to = "/.netlify/functions/tasks"
+  status = 200
+
+[[redirects]]
+  from = "/api/multi-agent/*"
+  to = "/.netlify/functions/multi-agent"
+  status = 200
+
+[[redirects]]
+  from = "/api/skills/*"
+  to = "/.netlify/functions/skills"
+  status = 200
+
+[[redirects]]
+  from = "/api/scheduler/*"
+  to = "/.netlify/functions/scheduler"
+  status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

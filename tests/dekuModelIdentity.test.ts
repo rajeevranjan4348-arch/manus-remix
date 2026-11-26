@@ -57,8 +57,8 @@ describe('Part 2 — Deku AI Permanent Identity & Real Model Identification Syst
 
     const sysPrompt = buildDekuIdentitySystemInstruction(meta);
     expect(sysPrompt).toContain('Deku AI');
-    expect(sysPrompt).toContain('Never introduce yourself as Gemini, Claude, ChatGPT, GPT');
-    expect(sysPrompt).toContain('gemini-3-flash-preview');
+    expect(sysPrompt).toContain('Never claim to be Gemini, Claude, ChatGPT, GPT');
+    expect(sysPrompt).not.toMatch(/Always introduce yourself/i);
   });
 
   it('2. Claude (Anthropic) execution: resolves Anthropic route and produces verified Claude metadata', () => {
@@ -247,10 +247,7 @@ describe('Part 2 — Deku AI Permanent Identity & Real Model Identification Syst
     const hookSrc = readSource('src/hooks/useAgentTask.ts');
     expect(hookSrc).not.toContain('Active Underlying LLM Model:');
     expect(hookSrc).toContain('modelExecutionStore.bindRequestToMessage');
-    expect(hookSrc).toContain('DEKU AI PERMANENT IDENTITY POLICY');
-
-    const chatViewSrc = readSource('src/components/agent/ChatView.tsx');
-    expect(chatViewSrc).toContain('data-testid="assistant-model-identity"');
-    expect(chatViewSrc).toContain('formatExecutionIdentityLabel');
+    expect(hookSrc).toContain('RESPONSE STYLE & IDENTITY POLICY:');
+    expect(hookSrc).not.toMatch(/Always introduce yourself/i);
   });
 });

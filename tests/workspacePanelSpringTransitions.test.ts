@@ -42,6 +42,14 @@ describe('Workspace Panel Spring-Based Open/Close Transitions', () => {
     expect((WORKSPACE_SHEET_SPRING_CLOSE as any).stiffness).toBeGreaterThan(
       (WORKSPACE_SHEET_SPRING_OPEN as any).stiffness
     );
+
+    // Entrance springs should be subtly underdamped (0.65 < zeta < 0.92) for a slight physical spring settle
+    for (const openPreset of [WORKSPACE_PANEL_SPRING_OPEN, WORKSPACE_SHEET_SPRING_OPEN] as Array<Record<string, any>>) {
+      const criticalDamping = 2 * Math.sqrt(openPreset.stiffness * openPreset.mass);
+      const dampingRatio = openPreset.damping / criticalDamping;
+      expect(dampingRatio).toBeGreaterThan(0.65);
+      expect(dampingRatio).toBeLessThan(0.92);
+    }
   });
 
   it('configures Framer Motion dialog, right-sheet, backdrop, and reduced-motion variants with exit states', () => {
@@ -113,6 +121,10 @@ describe('Workspace Panel Spring-Based Open/Close Transitions', () => {
     expect(sidebarSrc).toContain('data-spring-transition="true"');
 
     const cssSrc = readSource('src/index.css');
+    const motionSrc = readSource('src/manus-motion.css');
+    expect(cssSrc).toContain('--manus-spring-panel');
+    expect(cssSrc).toContain('--manus-sheet-enter-duration');
+    expect(motionSrc).toContain('--manus-spring-panel');
     expect(cssSrc).toContain('@keyframes workspace-panel-spring-in');
     expect(cssSrc).toContain('@keyframes workspace-panel-spring-out');
     expect(cssSrc).toContain('@keyframes workspace-sheet-spring-in-right');

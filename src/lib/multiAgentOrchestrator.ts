@@ -6,8 +6,22 @@
  */
 
 import { observability } from './observability';
+import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
 
-export type SubAgentRole = 'researcher' | 'coder' | 'analyst' | 'reviewer';
+export type SubAgentRole =
+  | 'researcher'
+  | 'coder'
+  | 'analyst'
+  | 'reviewer'
+  | 'research'
+  | 'coding'
+  | 'debugging'
+  | 'testing'
+  | 'analysis'
+  | 'browser'
+  | 'security_reviewer'
+  | 'qa'
+  | 'documentation';
 
 export interface SubAgentTask {
   id: string;
@@ -25,9 +39,58 @@ export interface MultiAgentResult {
   subTasks: SubAgentTask[];
   synthesizedReport: string;
   durationMs: number;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    costUsd: number;
+  };
 }
 
 class MultiAgentOrchestratorService {
+  /**
+   * Execute real provider-backed autonomous multi-agent DAG orchestration via Feature 03 (/api/multi-agent/run).
+   */
+  public async runAutonomousOrchestration(params: {
+    objective: string;
+    maxConcurrency?: number;
+    maxTotalTokens?: number;
+    maxCostUsd?: number;
+    timeoutMs?: number;
+    enableQaReview?: boolean;
+  }): Promise<{ ok: boolean; run?: any; error?: string; code?: string }> {
+    const authHeader = await getFirebaseAuthorizationHeader();
+    if (!authHeader) {
+      return { ok: false, code: 'UNAUTHENTICATED', error: 'Authentication required for multi-agent execution.' };
+    }
+    const res = await fetch('/api/multi-agent/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+      body: JSON.stringify(params),
+    });
+    return res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+  }
+
+  public async getAutonomousRunStatus(runId: string): Promise<{ ok: boolean; run?: any; error?: string }> {
+    const authHeader = await getFirebaseAuthorizationHeader();
+    if (!authHeader) return { ok: false, error: 'Authentication required.' };
+    const res = await fetch(`/api/multi-agent/status?runId=${encodeURIComponent(runId)}`, {
+      headers: { Accept: 'application/json', Authorization: authHeader },
+    });
+    return res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+  }
+
+  public async cancelAutonomousRun(runId: string): Promise<{ ok: boolean; run?: any; error?: string }> {
+    const authHeader = await getFirebaseAuthorizationHeader();
+    if (!authHeader) return { ok: false, error: 'Authentication required.' };
+    const res = await fetch('/api/multi-agent/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+      body: JSON.stringify({ runId }),
+    });
+    return res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+  }
+
   /**
    * Deconstructs a complex user objective into independent sub-agent assignments
    */
@@ -35,7 +98,6 @@ class MultiAgentOrchestratorService {
     const clean = objective.toLowerCase();
     const tasks: SubAgentTask[] = [];
 
-    // 1. Research agent for fact gathering
     tasks.push({
       id: `sub_${Date.now()}_research`,
       role: 'researcher',
@@ -44,7 +106,6 @@ class MultiAgentOrchestratorService {
       status: 'pending',
     });
 
-    // 2. Coder or Analyst based on prompt intent
     if (/code|build|script|app|function|bug|react|python|typescript|css|html/i.test(clean)) {
       tasks.push({
         id: `sub_${Date.now()}_coder`,
@@ -65,7 +126,6 @@ class MultiAgentOrchestratorService {
       });
     }
 
-    // 3. Reviewer/Critic to eliminate contradictions
     tasks.push({
       id: `sub_${Date.now()}_reviewer`,
       role: 'reviewer',
@@ -82,15 +142,13 @@ class MultiAgentOrchestratorService {
    */
   public async executeParallel(
     tasks: SubAgentTask[],
-    executorFn: (task: SubAgentTask) => Promise<{ result: string; citations?: any[] }>
+    executorFn: (task: SubAgentTask) => Promise<{ result: string; citations?: any[] }>,
   ): Promise<MultiAgentResult> {
     const orchestrationId = `orch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const traceId = observability.startTrace('multi_agent_execution', { orchestrationId, taskCount: tasks.length });
 
-    // Mark as running
-    tasks.forEach(t => (t.status = 'running'));
+    tasks.forEach((t) => (t.status = 'running'));
 
-    // Concurrently execute independent agents
     const promises = tasks.map(async (task) => {
       const taskStart = performance.now();
       try {
@@ -108,8 +166,7 @@ class MultiAgentOrchestratorService {
 
     await Promise.allSettled(promises);
 
-    // Synthesize outputs
-    const completedTasks = tasks.filter(t => t.status === 'completed');
+    const completedTasks = tasks.filter((t) => t.status === 'completed');
     const synthesized = this.synthesizeOutputs(completedTasks);
 
     const durationMs = observability.endTrace(traceId);
@@ -122,19 +179,14 @@ class MultiAgentOrchestratorService {
     };
   }
 
-  /**
-   * Merges sub-agent outputs and resolves contradictions
-   */
   private synthesizeOutputs(tasks: SubAgentTask[]): string {
     if (tasks.length === 0) {
       return 'Multi-agent execution concluded with no completed subtasks.';
     }
 
-    const sections = tasks
-      .map(t => `### 🤖 ${t.role.toUpperCase()} AGENT REPORT\n${t.result || 'No output.'}`)
+    return tasks
+      .map((t) => `### 🤖 ${t.role.toUpperCase()} AGENT REPORT\n${t.result || 'No output.'}`)
       .join('\n\n---\n\n');
-
-    return sections;
   }
 }
 

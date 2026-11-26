@@ -4,6 +4,9 @@
   --manus-motion-standard: 125ms;
   --manus-motion-ease: cubic-bezier(0.16, 1, 0.3, 1);
   --manus-spring-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --manus-spring-panel: cubic-bezier(0.22, 1.14, 0.36, 1);
+  --manus-panel-enter-duration: 240ms;
+  --manus-sheet-enter-duration: 260ms;
 }
 
 /* Native scrolling stays compositor-driven and works well on touch devices. */

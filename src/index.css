@@ -1411,6 +1411,9 @@
   --manus-motion-slow: 145ms;
   --manus-motion-ease: cubic-bezier(0.16, 1, 0.3, 1);
   --manus-spring-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --manus-spring-panel: cubic-bezier(0.22, 1.14, 0.36, 1);
+  --manus-panel-enter-duration: 240ms;
+  --manus-sheet-enter-duration: 260ms;
 }
 
 button,
@@ -1896,7 +1899,7 @@ html {
 
 /* Show Sources drawer & staggered citation item animations */
 .manus-sources-drawer-enter {
-  animation: manus-sources-drawer-unfold 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: manus-sources-drawer-unfold var(--manus-panel-enter-duration, 240ms) var(--manus-spring-panel, cubic-bezier(0.22, 1.14, 0.36, 1)) both;
   transform-origin: top center;
 }
 
@@ -2811,15 +2814,18 @@ select,
 @keyframes workspace-panel-spring-in {
   0% {
     opacity: 0;
-    transform: translate3d(0, 14px, 0) scale(0.94);
+    transform: translate3d(0, 18px, 0) scale(0.945);
+    animation-timing-function: var(--manus-motion-ease, cubic-bezier(0.16, 1, 0.3, 1));
   }
-  58% {
+  56% {
     opacity: 1;
-    transform: translate3d(0, -2px, 0) scale(1.012);
+    transform: translate3d(0, -3px, 0) scale(1.015);
+    animation-timing-function: ease-in-out;
   }
-  82% {
+  78% {
     opacity: 1;
-    transform: translate3d(0, 0.5px, 0) scale(0.998);
+    transform: translate3d(0, 1px, 0) scale(0.997);
+    animation-timing-function: ease-out;
   }
   100% {
     opacity: 1;
@@ -2846,14 +2852,17 @@ select,
   0% {
     opacity: 0.92;
     transform: translate3d(100%, 0, 0);
+    animation-timing-function: var(--manus-motion-ease, cubic-bezier(0.16, 1, 0.3, 1));
   }
-  65% {
+  62% {
     opacity: 1;
-    transform: translate3d(-1.2%, 0, 0);
+    transform: translate3d(-1.8%, 0, 0);
+    animation-timing-function: ease-in-out;
   }
-  86% {
+  82% {
     opacity: 1;
-    transform: translate3d(0.3%, 0, 0);
+    transform: translate3d(0.45%, 0, 0);
+    animation-timing-function: ease-out;
   }
   100% {
     opacity: 1;
@@ -2876,14 +2885,17 @@ select,
   0% {
     opacity: 0.92;
     transform: translate3d(-100%, 0, 0);
+    animation-timing-function: var(--manus-motion-ease, cubic-bezier(0.16, 1, 0.3, 1));
   }
-  65% {
+  62% {
     opacity: 1;
-    transform: translate3d(1.2%, 0, 0);
+    transform: translate3d(1.8%, 0, 0);
+    animation-timing-function: ease-in-out;
   }
-  86% {
+  82% {
     opacity: 1;
-    transform: translate3d(-0.3%, 0, 0);
+    transform: translate3d(-0.45%, 0, 0);
+    animation-timing-function: ease-out;
   }
   100% {
     opacity: 1;
@@ -2906,10 +2918,17 @@ select,
   0% {
     opacity: 0.92;
     transform: translate3d(0, -100%, 0);
+    animation-timing-function: var(--manus-motion-ease, cubic-bezier(0.16, 1, 0.3, 1));
   }
-  68% {
+  62% {
     opacity: 1;
-    transform: translate3d(0, 1.5%, 0);
+    transform: translate3d(0, 1.8%, 0);
+    animation-timing-function: ease-in-out;
+  }
+  82% {
+    opacity: 1;
+    transform: translate3d(0, -0.45%, 0);
+    animation-timing-function: ease-out;
   }
   100% {
     opacity: 1;
@@ -2932,10 +2951,17 @@ select,
   0% {
     opacity: 0.92;
     transform: translate3d(0, 100%, 0);
+    animation-timing-function: var(--manus-motion-ease, cubic-bezier(0.16, 1, 0.3, 1));
   }
-  68% {
+  62% {
     opacity: 1;
-    transform: translate3d(0, -1.5%, 0);
+    transform: translate3d(0, -1.8%, 0);
+    animation-timing-function: ease-in-out;
+  }
+  82% {
+    opacity: 1;
+    transform: translate3d(0, 0.45%, 0);
+    animation-timing-function: ease-out;
   }
   100% {
     opacity: 1;
@@ -2959,7 +2985,7 @@ select,
 }
 
 .workspace-panel-spring[data-state="open"] {
-  animation: workspace-panel-spring-in 165ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: workspace-panel-spring-in var(--manus-panel-enter-duration, 240ms) var(--manus-motion-ease, cubic-bezier(0.16, 1, 0.3, 1)) both;
 }
 
 .workspace-panel-spring[data-state="closed"] {
@@ -2967,7 +2993,7 @@ select,
 }
 
 .workspace-sheet-spring-right[data-state="open"] {
-  animation: workspace-sheet-spring-in-right 175ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: workspace-sheet-spring-in-right var(--manus-sheet-enter-duration, 260ms) var(--manus-motion-ease, cubic-bezier(0.16, 1, 0.3, 1)) both;
 }
 
 .workspace-sheet-spring-right[data-state="closed"] {
@@ -2976,7 +3002,7 @@ select,
 
 .workspace-sheet-spring-left[data-state="open"],
 .workspace-drawer-spring-left {
-  animation: workspace-sheet-spring-in-left 170ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: workspace-sheet-spring-in-left var(--manus-sheet-enter-duration, 260ms) var(--manus-motion-ease, cubic-bezier(0.16, 1, 0.3, 1)) both;
 }
 
 .workspace-sheet-spring-left[data-state="closed"] {
@@ -2984,7 +3010,7 @@ select,
 }
 
 .workspace-sheet-spring-top[data-state="open"] {
-  animation: workspace-sheet-spring-in-top 170ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: workspace-sheet-spring-in-top var(--manus-sheet-enter-duration, 260ms) var(--manus-motion-ease, cubic-bezier(0.16, 1, 0.3, 1)) both;
 }
 
 .workspace-sheet-spring-top[data-state="closed"] {
@@ -2992,7 +3018,7 @@ select,
 }
 
 .workspace-sheet-spring-bottom[data-state="open"] {
-  animation: workspace-sheet-spring-in-bottom 170ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: workspace-sheet-spring-in-bottom var(--manus-sheet-enter-duration, 260ms) var(--manus-motion-ease, cubic-bezier(0.16, 1, 0.3, 1)) both;
 }
 
 .workspace-sheet-spring-bottom[data-state="closed"] {

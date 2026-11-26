@@ -374,6 +374,274 @@
         "checksum",
         "timestamp"
       ]
+    },
+    "SandboxWorkspace": {
+      "title": "SandboxWorkspace",
+      "description": "Isolated per-user coding sandbox workspace metadata and lifecycle record",
+      "type": "object",
+      "properties": {
+        "sandboxId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "workspaceId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "provider": { "type": "string", "enum": ["e2b", "daytona", "http-runtime", "unconfigured"] },
+        "providerSandboxId": { "type": "string", "maxLength": 256 },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "projectId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "taskId": { "type": "string", "maxLength": 128 },
+        "runtime": { "type": "string", "enum": ["node", "typescript", "javascript", "python", "html", "react", "vite", "nextjs", "custom"] },
+        "image": { "type": "string", "maxLength": 256 },
+        "workspaceRoot": { "type": "string", "maxLength": 256 },
+        "status": { "type": "string", "enum": ["creating", "running", "idle", "stopping", "stopped", "expired", "error"] },
+        "limits": { "type": "object" },
+        "persistent": { "type": "boolean" },
+        "previewUrl": { "type": "string", "maxLength": 1024 },
+        "previewPort": { "type": "integer" },
+        "previewStatus": { "type": "string", "enum": ["stopped", "starting", "ready", "failed"] },
+        "previewCommandExecutionId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "lastActiveAt": { "type": "string", "maxLength": 64 },
+        "expiresAt": { "type": "string", "maxLength": 64 },
+        "cleanedUpAt": { "type": "string", "maxLength": 64 },
+        "error": { "type": "string", "maxLength": 2000 }
+      },
+      "required": ["sandboxId", "workspaceId", "provider", "providerSandboxId", "userId", "projectId", "runtime", "workspaceRoot", "status", "createdAt", "updatedAt", "expiresAt"]
+    },
+    "TerminalExecution": {
+      "title": "TerminalExecution",
+      "description": "Durable isolated terminal command execution record with separated stdout/stderr and exit code",
+      "type": "object",
+      "properties": {
+        "executionId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sandboxId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "workspaceId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "provider": { "type": "string", "enum": ["e2b", "daytona", "http-runtime", "unconfigured"] },
+        "providerExecutionId": { "type": "string", "maxLength": 256 },
+        "command": { "type": "string", "maxLength": 4096 },
+        "cwd": { "type": "string", "maxLength": 512 },
+        "status": { "type": "string", "enum": ["queued", "running", "completed", "failed", "timed_out", "cancelled"] },
+        "stdout": { "type": "string", "maxLength": 250000 },
+        "stderr": { "type": "string", "maxLength": 250000 },
+        "exitCode": { "type": "integer" },
+        "startedAt": { "type": "string", "maxLength": 64 },
+        "completedAt": { "type": "string", "maxLength": 64 },
+        "durationMs": { "type": "integer" },
+        "timeoutMs": { "type": "integer" },
+        "idempotencyKey": { "type": "string", "maxLength": 128 },
+        "retryCount": { "type": "integer" },
+        "cancelled": { "type": "boolean" },
+        "error": { "type": "string", "maxLength": 2000 },
+        "untrustedData": { "type": "boolean" }
+      },
+      "required": ["executionId", "sandboxId", "workspaceId", "userId", "provider", "command", "cwd", "status", "startedAt", "timeoutMs", "retryCount", "untrustedData"]
+    },
+    "BrowserSession": {
+      "title": "BrowserSession",
+      "description": "Isolated remote browser session state and lifecycle record",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "provider": { "type": "string", "enum": ["browserless", "browserbase", "http-browser", "unconfigured"] },
+        "providerSessionId": { "type": "string", "maxLength": 256 },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "projectId": { "type": "string", "maxLength": 128 },
+        "taskId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["creating", "active", "closed", "expired", "error"] },
+        "currentUrl": { "type": "string", "maxLength": 2048 },
+        "currentTitle": { "type": "string", "maxLength": 300 },
+        "viewport": { "type": "object" },
+        "isolatedStorage": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "lastActiveAt": { "type": "string", "maxLength": 64 },
+        "expiresAt": { "type": "string", "maxLength": 64 },
+        "closedAt": { "type": "string", "maxLength": 64 },
+        "error": { "type": "string", "maxLength": 2000 }
+      },
+      "required": ["sessionId", "provider", "providerSessionId", "userId", "status", "isolatedStorage", "createdAt", "updatedAt", "expiresAt"]
+    },
+    "PermissionApproval": {
+      "title": "PermissionApproval",
+      "description": "Durable single-use permission challenge and confirmation record",
+      "type": "object",
+      "properties": {
+        "challengeId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "toolName": { "type": "string", "maxLength": 128 },
+        "displayName": { "type": "string", "maxLength": 256 },
+        "riskLevel": { "type": "string", "enum": ["read-only", "destructive", "privileged"] },
+        "target": { "type": "string", "maxLength": 512 },
+        "parametersHash": { "type": "string", "maxLength": 128 },
+        "parametersSummary": { "type": "object" },
+        "consequences": { "type": "array" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "integer" },
+        "expiresAt": { "type": "integer" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected", "expired", "consumed", "revoked"] },
+        "approvalToken": { "type": "string", "maxLength": 128 },
+        "resolvedAt": { "type": "integer" },
+        "revokedAt": { "type": "integer" },
+        "revocationReason": { "type": "string", "maxLength": 300 }
+      },
+      "required": ["challengeId", "toolName", "riskLevel", "parametersHash", "userId", "createdAt", "expiresAt", "status"]
+    },
+    "PermissionPolicy": {
+      "title": "PermissionPolicy",
+      "description": "User-specific tool permission policy override",
+      "type": "object",
+      "properties": {
+        "policyId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "toolName": { "type": "string", "maxLength": 128 },
+        "mode": { "type": "string", "enum": ["default", "always_require_approval", "auto_allow_non_destructive", "deny"] },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "updatedBy": { "type": "string", "maxLength": 128 },
+        "note": { "type": "string", "maxLength": 300 }
+      },
+      "required": ["policyId", "userId", "toolName", "mode", "updatedAt", "updatedBy"]
+    },
+    "BackgroundTask": {
+      "title": "BackgroundTask",
+      "description": "Feature 01 durable cloud background task record with lease, retries, and execution history",
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "enum": ["research", "coding", "automation", "multi_agent", "scheduled", "skill", "general"] },
+        "title": { "type": "string", "maxLength": 180 },
+        "prompt": { "type": "string", "maxLength": 20000 },
+        "status": { "type": "string", "enum": ["queued", "claimed", "running", "completed", "failed", "cancelled", "dead_letter"] },
+        "phase": { "type": "string", "maxLength": 64 },
+        "priority": { "type": "string", "enum": ["low", "normal", "high", "urgent"] },
+        "priorityScore": { "type": "integer" },
+        "progress": { "type": "integer" },
+        "attempt": { "type": "integer" },
+        "maxAttempts": { "type": "integer" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["taskId", "userId", "type", "title", "prompt", "status", "phase", "priority", "attempt", "maxAttempts", "createdAt", "updatedAt"]
+    },
+    "MultiAgentRun": {
+      "title": "MultiAgentRun",
+      "description": "Feature 03 durable multi-agent DAG execution run record",
+      "type": "object",
+      "properties": {
+        "runId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "objective": { "type": "string", "maxLength": 4000 },
+        "status": { "type": "string", "enum": ["running", "completed", "failed", "cancelled"] },
+        "provider": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["runId", "userId", "objective", "status", "provider", "createdAt", "updatedAt"]
+    },
+    "InstalledSkill": {
+      "title": "InstalledSkill",
+      "description": "Feature 04 server-backed installed skill manifest and version history",
+      "type": "object",
+      "properties": {
+        "skillId": { "type": "string", "maxLength": 64, "pattern": "^[a-z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 128 },
+        "version": { "type": "string", "maxLength": 32 },
+        "executionType": { "type": "string", "enum": ["declarative", "tool_workflow", "sandbox_code"] },
+        "trustTier": { "type": "string", "enum": ["verified_builtin", "third_party"] },
+        "integrityHash": { "type": "string", "maxLength": 128 },
+        "enabled": { "type": "boolean" },
+        "installedAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["skillId", "userId", "name", "version", "executionType", "trustTier", "integrityHash", "enabled", "installedAt", "updatedAt"]
+    },
+    "SkillExecution": {
+      "title": "SkillExecution",
+      "description": "Feature 04 append-only skill execution history record",
+      "type": "object",
+      "properties": {
+        "executionId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "skillId": { "type": "string", "maxLength": 64 },
+        "skillVersion": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "enum": ["succeeded", "failed", "denied"] },
+        "startedAt": { "type": "string", "maxLength": 64 },
+        "completedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["executionId", "userId", "skillId", "skillVersion", "status", "startedAt", "completedAt"]
+    },
+    "Schedule": {
+      "title": "Schedule",
+      "description": "Feature 05 persistent cron/timezone automation schedule",
+      "type": "object",
+      "properties": {
+        "scheduleId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 160 },
+        "kind": { "type": "string", "enum": ["once", "interval", "daily", "weekly", "monthly", "cron"] },
+        "status": { "type": "string", "enum": ["active", "paused", "completed", "cancelled"] },
+        "timeZone": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["scheduleId", "userId", "name", "kind", "status", "timeZone", "createdAt", "updatedAt"]
+    },
+    "ScheduleRun": {
+      "title": "ScheduleRun",
+      "description": "Feature 05 append-only schedule execution history record",
+      "type": "object",
+      "properties": {
+        "runId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "scheduleId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "scheduledFor": { "type": "string", "maxLength": 64 },
+        "executedAt": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["dispatched", "skipped_condition", "failed"] }
+      },
+      "required": ["runId", "scheduleId", "userId", "scheduledFor", "executedAt", "status"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Durable user notification for task completions, approvals, and scheduled runs",
+      "type": "object",
+      "properties": {
+        "notificationId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "kind": { "type": "string", "enum": ["task_completed", "task_failed", "approval_required", "schedule_reminder", "schedule_executed", "system"] },
+        "title": { "type": "string", "maxLength": 160 },
+        "body": { "type": "string", "maxLength": 1000 },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["notificationId", "userId", "kind", "title", "body", "read", "createdAt"]
+    },
+    "ExecutionAuditLog": {
+      "title": "ExecutionAuditLog",
+      "description": "Immutable append-only audit trail for sandbox, terminal, filesystem, browser, and permission actions",
+      "type": "object",
+      "properties": {
+        "auditId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "action": { "type": "string", "maxLength": 128 },
+        "resourceType": { "type": "string", "enum": ["sandbox", "terminal", "filesystem", "preview", "browser", "permission", "webhook"] },
+        "resourceId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["allowed", "denied", "challenged", "succeeded", "failed"] },
+        "details": { "type": "object" },
+        "timestamp": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["auditId", "userId", "action", "resourceType", "resourceId", "status", "timestamp"]
+    },
+    "IdempotencyRecord": {
+      "title": "IdempotencyRecord",
+      "description": "Per-user idempotent execution cache record",
+      "type": "object",
+      "properties": {
+        "key": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "result": { "type": "object" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "expiresAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["key", "userId", "createdAt", "expiresAt"]
     }
   },
   "firestore": {
@@ -388,6 +656,62 @@
     "/users/{userId}/checkpoints/{checkpointId}": {
       "schema": "TaskCheckpoint",
       "description": "Stores periodically auto-saved active task checkpoints for crash and tab-close recovery"
+    },
+    "/users/{userId}/sandboxes/{sandboxId}": {
+      "schema": "SandboxWorkspace",
+      "description": "Stores isolated coding sandbox workspace state per user"
+    },
+    "/users/{userId}/executions/{executionId}": {
+      "schema": "TerminalExecution",
+      "description": "Stores isolated terminal command execution records per user"
+    },
+    "/users/{userId}/browser_sessions/{sessionId}": {
+      "schema": "BrowserSession",
+      "description": "Stores isolated remote browser session records per user"
+    },
+    "/users/{userId}/approvals/{challengeId}": {
+      "schema": "PermissionApproval",
+      "description": "Stores durable single-use permission challenges and confirmation tokens per user"
+    },
+    "/users/{userId}/permission_policies/{policyId}": {
+      "schema": "PermissionPolicy",
+      "description": "Stores user-specific per-tool permission policies"
+    },
+    "/users/{userId}/background_tasks/{taskId}": {
+      "schema": "BackgroundTask",
+      "description": "Stores Feature 01 durable cloud background tasks per user"
+    },
+    "/users/{userId}/multi_agent_runs/{runId}": {
+      "schema": "MultiAgentRun",
+      "description": "Stores Feature 03 autonomous multi-agent execution runs per user"
+    },
+    "/users/{userId}/skills/{skillId}": {
+      "schema": "InstalledSkill",
+      "description": "Stores Feature 04 installed server-backed skills and version history per user"
+    },
+    "/users/{userId}/skill_executions/{executionId}": {
+      "schema": "SkillExecution",
+      "description": "Stores Feature 04 append-only skill execution history per user"
+    },
+    "/users/{userId}/schedules/{scheduleId}": {
+      "schema": "Schedule",
+      "description": "Stores Feature 05 persistent schedules per user"
+    },
+    "/users/{userId}/schedule_runs/{runId}": {
+      "schema": "ScheduleRun",
+      "description": "Stores Feature 05 append-only schedule run history per user"
+    },
+    "/users/{userId}/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Stores durable user notifications for tasks and schedules"
+    },
+    "/users/{userId}/audit_logs/{auditId}": {
+      "schema": "ExecutionAuditLog",
+      "description": "Stores immutable append-only security and execution audit logs per user"
+    },
+    "/users/{userId}/idempotency/{keyId}": {
+      "schema": "IdempotencyRecord",
+      "description": "Stores per-user idempotent execution results"
     },
     "/projects/{projectId}": {
       "schema": "Project",

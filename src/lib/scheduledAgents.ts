@@ -6,7 +6,8 @@
  */
 
 import { auth, db } from './firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, setDoc } from 'firebase/firestore';
+import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
 import { observability } from './observability';
 
 export type ScheduleFrequency = 'hourly' | 'daily' | 'weekly' | 'custom_minutes';
@@ -17,7 +18,7 @@ export interface ScheduledAgentTask {
   title: string;
   prompt: string;
   frequency: ScheduleFrequency;
-  intervalMinutes?: number; // for custom_minutes
+  intervalMinutes?: number;
   timezone: string;
   status: 'active' | 'paused' | 'executing' | 'error';
   lastRunAt?: string;
@@ -25,6 +26,7 @@ export interface ScheduledAgentTask {
   executionCount: number;
   lastResultSummary?: string;
   createdAt: string;
+  serverScheduleId?: string;
 }
 
 const STORAGE_KEY = 'manus_scheduled_agents_v1';
@@ -41,14 +43,14 @@ class ScheduledAgentsService {
   public getSchedules(userId?: string): ScheduledAgentTask[] {
     const list = Array.from(this.schedules.values());
     if (userId) {
-      return list.filter(s => s.userId === userId || s.userId === 'usr_manus_default');
+      return list.filter((s) => s.userId === userId || s.userId === 'usr_manus_default');
     }
     return list;
   }
 
   public calculateNextRun(frequency: ScheduleFrequency, intervalMinutes = 60): string {
     const now = Date.now();
-    let addMs = 60 * 60 * 1000; // default 1 hour
+    let addMs = 60 * 60 * 1000;
 
     switch (frequency) {
       case 'hourly':
@@ -68,6 +70,15 @@ class ScheduledAgentsService {
     return new Date(now + addMs).toISOString();
   }
 
+  public async fetchServerSchedules(): Promise<{ ok: boolean; schedules?: any[]; error?: string }> {
+    const authHeader = await getFirebaseAuthorizationHeader();
+    if (!authHeader) return { ok: false, error: 'Authentication required.' };
+    const res = await fetch('/api/scheduler/list', {
+      headers: { Accept: 'application/json', Authorization: authHeader },
+    });
+    return res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+  }
+
   public async createSchedule(params: {
     userId: string;
     title: string;
@@ -75,7 +86,9 @@ class ScheduledAgentsService {
     frequency: ScheduleFrequency;
     intervalMinutes?: number;
     timezone?: string;
+    cronExpression?: string;
   }): Promise<ScheduledAgentTask> {
+    const tz = params.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
     const id = `sched_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date().toISOString();
     const nextRun = this.calculateNextRun(params.frequency, params.intervalMinutes);
@@ -87,12 +100,48 @@ class ScheduledAgentsService {
       prompt: params.prompt,
       frequency: params.frequency,
       intervalMinutes: params.intervalMinutes || 60,
-      timezone: params.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+      timezone: tz,
       status: 'active',
       nextRunAt: nextRun,
       executionCount: 0,
       createdAt: now,
     };
+
+    // Persist to Feature 05 durable server scheduler when authenticated
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      try {
+        const authHeader = await getFirebaseAuthorizationHeader();
+        if (authHeader) {
+          const kind = params.cronExpression
+            ? 'cron'
+            : params.frequency === 'daily'
+              ? 'daily'
+              : params.frequency === 'weekly'
+                ? 'weekly'
+                : 'interval';
+          const res = await fetch('/api/scheduler/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+            body: JSON.stringify({
+              name: params.title,
+              kind,
+              timeZone: tz,
+              intervalMinutes: params.frequency === 'hourly' ? 60 : params.intervalMinutes || 60,
+              cronExpression: params.cronExpression,
+              taskTitle: params.title,
+              taskPrompt: params.prompt,
+            }),
+          });
+          if (res.ok) {
+            const payload = await res.json().catch(() => ({}));
+            if (payload.schedule?.scheduleId) {
+              schedule.serverScheduleId = payload.schedule.scheduleId;
+              if (payload.schedule.nextRunAt) schedule.nextRunAt = payload.schedule.nextRunAt;
+            }
+          }
+        }
+      } catch {}
+    }
 
     this.schedules.set(id, schedule);
     await this.persist();
@@ -103,12 +152,33 @@ class ScheduledAgentsService {
     const sched = this.schedules.get(id);
     if (!sched) return false;
     sched.status = status;
+    if (sched.serverScheduleId && typeof window !== 'undefined' && typeof fetch === 'function') {
+      const authHeader = await getFirebaseAuthorizationHeader();
+      if (authHeader) {
+        await fetch(`/api/scheduler/${status === 'paused' ? 'pause' : 'resume'}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+          body: JSON.stringify({ scheduleId: sched.serverScheduleId }),
+        }).catch(() => {});
+      }
+    }
     await this.persist();
     return true;
   }
 
   public async deleteSchedule(id: string): Promise<boolean> {
+    const sched = this.schedules.get(id);
     const deleted = this.schedules.delete(id);
+    if (sched?.serverScheduleId && typeof window !== 'undefined' && typeof fetch === 'function') {
+      const authHeader = await getFirebaseAuthorizationHeader();
+      if (authHeader) {
+        await fetch('/api/scheduler/cancel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+          body: JSON.stringify({ scheduleId: sched.serverScheduleId }),
+        }).catch(() => {});
+      }
+    }
     if (deleted) {
       await this.persist();
     }
@@ -120,23 +190,42 @@ class ScheduledAgentsService {
     if (!sched) return { success: false, summary: 'Schedule not found' };
 
     sched.status = 'executing';
-    this.persist();
+    await this.persist();
 
     const traceId = observability.startTrace(`scheduled_run_${id}`);
     try {
-      // Simulate task kick-off or trigger task event
-      window.dispatchEvent(
-        new CustomEvent('manus_scheduled_task_triggered', {
-          detail: { scheduleId: id, prompt: sched.prompt, title: sched.title },
-        })
-      );
+      let dispatchedTaskId: string | undefined;
+      if (sched.serverScheduleId && typeof window !== 'undefined' && typeof fetch === 'function') {
+        const authHeader = await getFirebaseAuthorizationHeader();
+        if (authHeader) {
+          const res = await fetch('/api/scheduler/run-now', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+            body: JSON.stringify({ scheduleId: sched.serverScheduleId }),
+          });
+          if (res.ok) {
+            const payload = await res.json().catch(() => ({}));
+            dispatchedTaskId = payload.dispatched?.[0]?.taskId;
+          }
+        }
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('manus_scheduled_task_triggered', {
+            detail: { scheduleId: id, taskId: dispatchedTaskId, prompt: sched.prompt, title: sched.title },
+          }),
+        );
+      }
 
       const now = new Date().toISOString();
       sched.lastRunAt = now;
       sched.nextRunAt = this.calculateNextRun(sched.frequency, sched.intervalMinutes);
       sched.executionCount += 1;
       sched.status = 'active';
-      sched.lastResultSummary = `Successfully triggered automated agent execution at ${new Date().toLocaleTimeString()}`;
+      sched.lastResultSummary = dispatchedTaskId
+        ? `Dispatched durable background task ${dispatchedTaskId} at ${new Date().toLocaleTimeString()}`
+        : `Triggered scheduled run at ${new Date().toLocaleTimeString()}`;
 
       observability.endTrace(traceId);
       await this.persist();
@@ -154,14 +243,13 @@ class ScheduledAgentsService {
     if (typeof window === 'undefined') return;
     if (this.timer) clearInterval(this.timer);
 
-    // Check every 30 seconds
     this.timer = setInterval(() => {
       const now = Date.now();
       for (const [id, sched] of this.schedules) {
-        if (sched.status === 'active' && sched.nextRunAt) {
+        if (sched.status === 'active' && !sched.serverScheduleId && sched.nextRunAt) {
           const runTime = new Date(sched.nextRunAt).getTime();
           if (now >= runTime) {
-            this.executeScheduleNow(id);
+            void this.executeScheduleNow(id);
           }
         }
       }
@@ -182,7 +270,7 @@ class ScheduledAgentsService {
         await setDoc(
           doc(db, 'users', currentUser.uid, 'settings', 'schedules'),
           { schedules: array, updatedAt: new Date().toISOString() },
-          { merge: true }
+          { merge: true },
         );
       } catch {}
     }

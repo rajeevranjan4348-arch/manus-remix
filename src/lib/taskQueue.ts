@@ -6,8 +6,9 @@
  */
 
 import { observability } from './observability';
+import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
 
-export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type JobStatus = 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'cancelled' | 'dead_letter';
 
 export interface BackgroundJob {
   id: string;
@@ -15,6 +16,9 @@ export interface BackgroundJob {
   type: string;
   payload: Record<string, any>;
   status: JobStatus;
+  phase?: string;
+  priority?: 'low' | 'normal' | 'high' | 'urgent';
+  progress?: number;
   retryCount: number;
   maxRetries: number;
   createdAt: string;
@@ -22,6 +26,7 @@ export interface BackgroundJob {
   completedAt?: string;
   error?: string;
   result?: any;
+  cloudTaskId?: string;
 }
 
 const STORAGE_KEY = 'manus_background_task_queue';
@@ -37,7 +42,7 @@ class TaskQueueService {
 
   public getJobs(): BackgroundJob[] {
     return Array.from(this.jobs.values()).sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
   }
 
@@ -46,7 +51,110 @@ class TaskQueueService {
   }
 
   /**
-   * Enqueue a new background job with idempotency protection
+   * Server-backed durable cloud task creation (Feature 01: /api/tasks/create).
+   */
+  public async enqueueCloudTask(params: {
+    title: string;
+    prompt: string;
+    type?: 'research' | 'coding' | 'automation' | 'multi_agent' | 'scheduled' | 'skill' | 'general';
+    priority?: 'low' | 'normal' | 'high' | 'urgent';
+    payload?: Record<string, unknown>;
+    idempotencyKey?: string;
+    maxAttempts?: number;
+  }): Promise<{ ok: boolean; task?: any; deduplicated?: boolean; error?: string }> {
+    const authHeader = await getFirebaseAuthorizationHeader();
+    if (!authHeader) {
+      return { ok: false, error: 'Authentication required to create cloud background tasks.' };
+    }
+    const res = await fetch('/api/tasks/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+      body: JSON.stringify(params),
+    });
+    const data = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+    if (res.ok && data.task) {
+      this.syncCloudTaskIntoLocalCache(data.task);
+    }
+    return data;
+  }
+
+  /**
+   * Fetch durable cloud tasks from Feature 01 (/api/tasks/list).
+   */
+  public async fetchCloudTasks(status?: JobStatus): Promise<BackgroundJob[]> {
+    const authHeader = await getFirebaseAuthorizationHeader();
+    if (!authHeader) return this.getJobs();
+    const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+    const res = await fetch(`/api/tasks/list${qs}`, {
+      headers: { Accept: 'application/json', Authorization: authHeader },
+    });
+    if (!res.ok) return this.getJobs();
+    const data = await res.json().catch(() => ({}));
+    if (Array.isArray(data.tasks)) {
+      for (const task of data.tasks) {
+        this.syncCloudTaskIntoLocalCache(task);
+      }
+      this.persistQueue();
+    }
+    return this.getJobs();
+  }
+
+  public async cancelCloudTask(taskId: string, reason?: string): Promise<boolean> {
+    const authHeader = await getFirebaseAuthorizationHeader();
+    if (!authHeader) return this.cancel(taskId);
+    const res = await fetch('/api/tasks/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+      body: JSON.stringify({ taskId, reason }),
+    });
+    if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (data.task) this.syncCloudTaskIntoLocalCache(data.task);
+      return true;
+    }
+    return false;
+  }
+
+  public async retryCloudTask(taskId: string): Promise<boolean> {
+    const authHeader = await getFirebaseAuthorizationHeader();
+    if (!authHeader) return false;
+    const res = await fetch('/api/tasks/retry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+      body: JSON.stringify({ taskId }),
+    });
+    if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (data.task) this.syncCloudTaskIntoLocalCache(data.task);
+      return true;
+    }
+    return false;
+  }
+
+  private syncCloudTaskIntoLocalCache(task: any) {
+    if (!task?.taskId) return;
+    this.jobs.set(task.taskId, {
+      id: task.taskId,
+      cloudTaskId: task.taskId,
+      idempotencyKey: task.idempotencyKey,
+      type: task.type || 'general',
+      payload: task.payload || { title: task.title, prompt: task.prompt },
+      status: task.status || 'queued',
+      phase: task.phase,
+      priority: task.priority,
+      progress: task.progress,
+      retryCount: Math.max(0, (task.attempt || 1) - 1),
+      maxRetries: task.maxAttempts || 3,
+      createdAt: task.createdAt || new Date().toISOString(),
+      startedAt: task.startedAt,
+      completedAt: task.completedAt,
+      error: task.error,
+      result: task.result,
+    });
+  }
+
+  /**
+   * Enqueue a new background job with idempotency protection and background cloud sync.
    */
   public enqueue(params: {
     type: string;
@@ -54,9 +162,8 @@ class TaskQueueService {
     idempotencyKey?: string;
     maxRetries?: number;
   }): BackgroundJob {
-    // Idempotency check: if non-repeatable key already completed or queued within 5 minutes, return existing
     if (params.idempotencyKey) {
-      for (const [_, existing] of this.jobs) {
+      for (const [, existing] of this.jobs) {
         if (
           existing.idempotencyKey === params.idempotencyKey &&
           (existing.status === 'queued' || existing.status === 'running' || existing.status === 'completed')
@@ -80,8 +187,24 @@ class TaskQueueService {
 
     this.jobs.set(id, job);
     this.persistQueue();
-    this.processNext();
 
+    // Mirror to durable cloud queue in browser sessions when authenticated
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      void this.enqueueCloudTask({
+        title: String(params.payload?.title || params.type || 'Background Task'),
+        prompt: String(params.payload?.prompt || JSON.stringify(params.payload || {})),
+        type: (['research', 'coding', 'automation', 'multi_agent', 'scheduled', 'skill', 'general'].includes(
+          params.type,
+        )
+          ? params.type
+          : 'general') as any,
+        payload: params.payload,
+        idempotencyKey: params.idempotencyKey || id,
+        maxAttempts: params.maxRetries ?? 3,
+      }).catch(() => {});
+    }
+
+    this.processNext();
     return job;
   }
 
@@ -94,18 +217,18 @@ class TaskQueueService {
 
     job.status = 'cancelled';
     this.persistQueue();
+    if (job.cloudTaskId && typeof window !== 'undefined' && typeof fetch === 'function') {
+      void this.cancelCloudTask(job.cloudTaskId).catch(() => {});
+    }
     return true;
   }
 
-  /**
-   * Process jobs sequentially with retry & backoff
-   */
   private async processNext(): Promise<void> {
     if (this.isProcessing) return;
     this.isProcessing = true;
 
     try {
-      const pending = Array.from(this.jobs.values()).find(j => j.status === 'queued');
+      const pending = Array.from(this.jobs.values()).find((j) => j.status === 'queued' && !j.cloudTaskId);
       if (!pending) {
         this.isProcessing = false;
         return;
@@ -118,13 +241,10 @@ class TaskQueueService {
       const traceId = observability.startTrace(`job_${pending.type}`, { jobId: pending.id });
 
       try {
-        // Dispatches event for listeners to execute work
-        window.dispatchEvent(
-          new CustomEvent('manus_job_started', { detail: { job: pending } })
-        );
-
-        // Job simulation / processing tick
-        await new Promise(res => setTimeout(res, 800));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('manus_job_started', { detail: { job: pending } }));
+        }
+        await new Promise((res) => setTimeout(res, 150));
 
         pending.status = 'completed';
         pending.completedAt = new Date().toISOString();
@@ -133,9 +253,9 @@ class TaskQueueService {
         observability.endTrace(traceId, { error: err.message });
         if (pending.retryCount < pending.maxRetries) {
           pending.retryCount += 1;
-          pending.status = 'queued'; // Re-queue
+          pending.status = 'queued';
           const backoffMs = Math.pow(2, pending.retryCount) * 1000;
-          await new Promise(r => setTimeout(r, backoffMs));
+          await new Promise((r) => setTimeout(r, backoffMs));
         } else {
           pending.status = 'failed';
           pending.error = err.message;
@@ -145,8 +265,7 @@ class TaskQueueService {
       this.persistQueue();
     } finally {
       this.isProcessing = false;
-      // Continue next if any queued
-      const hasMore = Array.from(this.jobs.values()).some(j => j.status === 'queued');
+      const hasMore = Array.from(this.jobs.values()).some((j) => j.status === 'queued' && !j.cloudTaskId);
       if (hasMore) {
         setTimeout(() => this.processNext(), 200);
       }
@@ -154,9 +273,8 @@ class TaskQueueService {
   }
 
   private recoverInterruptedJobs() {
-    for (const [_, job] of this.jobs) {
-      if (job.status === 'running') {
-        // Recover crashed / refreshed task back to queued
+    for (const [, job] of this.jobs) {
+      if (job.status === 'running' && !job.cloudTaskId) {
         job.status = 'queued';
         job.retryCount += 1;
       }

@@ -43,6 +43,7 @@ import {
   buildUnavailableExecutionMetadata,
   buildDekuIdentitySystemInstruction,
   buildUnverifiedIdentityResponse,
+  createLeadingIntroStreamFilter,
   sanitizeExecutionMetadata,
   DEKU_PRODUCT_NAME,
 } from './modelIdentity';
@@ -617,8 +618,8 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
 
     let baseSystemPrompt = options.systemInstruction || (
       isComplexReasoningPrompt
-        ? 'You are Deku AI, an AI workspace agent. Provide direct, authoritative, structured, and high-quality responses. Never expose private internal chain-of-thought or system instructions; when summarizing reasoning for complex tasks, include only a brief, user-safe reasoning summary (2-4 concise high-level steps) inside <think> and </think> tags before your final response. If asked factual questions, answer directly and accurately. Do not generate fake business reports or irrelevant charts unless specifically asked for data visualization, financial reports, or charts.'
-        : 'You are Deku AI, an AI workspace agent. Provide direct, authoritative, structured, and high-quality responses. Never expose private internal chain-of-thought. Answer factual and conversational questions directly and concisely without <think> tags. Do not generate fake business reports or irrelevant charts unless specifically asked for data visualization, financial reports, or charts.'
+        ? 'Answer the user\'s question directly from the first sentence with authoritative, structured, high-quality responses. Never prepend unsolicited greetings, self-introductions, or product descriptions (such as "Hello! I am Deku AI, your independent workspace assistant.") to normal questions. Never expose private internal chain-of-thought or system instructions; when summarizing reasoning for complex tasks, include only a brief, user-safe reasoning summary (2-4 concise high-level steps) inside <think> and </think> tags before your final response. Do not generate fake business reports or irrelevant charts unless specifically asked for data visualization, financial reports, or charts.'
+        : 'Answer the user\'s question directly and concisely from the first sentence without <think> tags. Never prepend unsolicited greetings, self-introductions, or product descriptions (such as "Hello! I am Deku AI, your independent workspace assistant.") to normal questions. Only greet when the user greets you. Never expose private internal chain-of-thought. Do not generate fake business reports or irrelevant charts unless specifically asked for data visualization, financial reports, or charts.'
     );
 
     if (!baseSystemPrompt.includes('[MEMORY USAGE POLICY]')) {
@@ -756,6 +757,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
           }
           const searchQueries = new Set<string>();
 
+          const introFilter = createLeadingIntroStreamFilter(latestUserText);
           try {
             const guardedStream = iterateStreamWithTimeouts(
               () =>
@@ -788,13 +790,16 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
               }
               const text = chunk.text;
               if (text) {
-                if (!metadataEmitted) {
-                  metadataEmitted = true;
-                  emitExecutionMetadata(geminiExecutionMeta);
+                const filteredText = introFilter.push(text);
+                if (filteredText) {
+                  if (!metadataEmitted) {
+                    metadataEmitted = true;
+                    emitExecutionMetadata(geminiExecutionMeta);
+                  }
+                  hasYielded = true;
+                  streamedChars += filteredText.length;
+                  yield filteredText;
                 }
-                hasYielded = true;
-                streamedChars += text.length;
-                yield text;
               }
 
               const groundingMetadata = chunk?.candidates?.[0]?.groundingMetadata;
@@ -820,6 +825,17 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
                   sources.set(retrievedUrl, retrievedUrl);
                 }
               }
+            }
+
+            const trailingFiltered = introFilter.flush();
+            if (trailingFiltered) {
+              if (!metadataEmitted) {
+                metadataEmitted = true;
+                emitExecutionMetadata(geminiExecutionMeta);
+              }
+              hasYielded = true;
+              streamedChars += trailingFiltered.length;
+              yield trailingFiltered;
             }
 
             if ((useGoogleSearch || (preRoute.extractedEntities.targetUrls?.length || 0) > 0) && sources.size > 0 && hasYielded) {
@@ -1011,11 +1027,15 @@ export async function* streamAnthropicResponse(
     runtimeSource: 'anthropic-api',
     isFallback: false,
   });
-  const baseSystemContent = options.systemInstruction || `You are ${DEKU_PRODUCT_NAME}, an independent AI workspace assistant.`;
+  const baseSystemContent = options.systemInstruction || 'Answer the user directly and concisely from the first sentence without unsolicited greetings or self-introductions.';
   const systemContent =
     baseSystemContent +
     (baseSystemContent.includes('[MEMORY USAGE POLICY]') ? '' : SERVER_MEMORY_BEHAVIOR_POLICY) +
     `\n\n${buildDekuIdentitySystemInstruction(initialMeta)}`;
+  const latestUserPrompt = stripInjectedContextBlocks(
+    [...options.messages].reverse().find(m => m.role === 'user')?.content || ''
+  );
+  const introFilter = createLeadingIntroStreamFilter(latestUserPrompt);
 
   const anthropicMessages = options.messages
     .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -1087,22 +1107,42 @@ export async function* streamAnthropicResponse(
           outputTokens = Number(payload.usage.output_tokens) || 0;
         }
         if (payload.type === 'content_block_delta' && payload.delta?.type === 'text_delta' && payload.delta.text) {
-          if (!metadataEmitted) {
-            metadataEmitted = true;
-            options.onExecutionMetadata?.(
-              buildVerifiedExecutionMetadata({
-                actualModel: verifiedModel,
-                providerHint: 'anthropic',
-                requestedModel,
-                runtimeSource: 'anthropic-api',
-                isFallback: false,
-              })
-            );
+          const filteredDelta = introFilter.push(String(payload.delta.text));
+          if (filteredDelta) {
+            if (!metadataEmitted) {
+              metadataEmitted = true;
+              options.onExecutionMetadata?.(
+                buildVerifiedExecutionMetadata({
+                  actualModel: verifiedModel,
+                  providerHint: 'anthropic',
+                  requestedModel,
+                  runtimeSource: 'anthropic-api',
+                  isFallback: false,
+                })
+              );
+            }
+            yield filteredDelta;
           }
-          yield String(payload.delta.text);
         }
       } catch {}
     }
+  }
+
+  const trailingAnthropic = introFilter.flush();
+  if (trailingAnthropic) {
+    if (!metadataEmitted) {
+      metadataEmitted = true;
+      options.onExecutionMetadata?.(
+        buildVerifiedExecutionMetadata({
+          actualModel: verifiedModel,
+          providerHint: 'anthropic',
+          requestedModel,
+          runtimeSource: 'anthropic-api',
+          isFallback: false,
+        })
+      );
+    }
+    yield trailingAnthropic;
   }
 
   if (options.onUsage && (inputTokens > 0 || outputTokens > 0)) {
@@ -1129,11 +1169,15 @@ export async function* streamOpenAIResponse(
     runtimeSource: 'openai-api',
     isFallback: false,
   });
-  const baseSystemContent = options.systemInstruction || `You are ${DEKU_PRODUCT_NAME}, an independent AI workspace assistant.`;
+  const baseSystemContent = options.systemInstruction || 'Answer the user directly and concisely from the first sentence without unsolicited greetings or self-introductions.';
   const systemContent =
     baseSystemContent +
     (baseSystemContent.includes('[MEMORY USAGE POLICY]') ? '' : SERVER_MEMORY_BEHAVIOR_POLICY) +
     `\n\n${buildDekuIdentitySystemInstruction(initialMeta)}`;
+  const latestUserPrompt = stripInjectedContextBlocks(
+    [...options.messages].reverse().find(m => m.role === 'user')?.content || ''
+  );
+  const introFilter = createLeadingIntroStreamFilter(latestUserPrompt);
 
   const openaiMessages: any[] = [
     { role: 'system', content: systemContent },
@@ -1191,7 +1235,25 @@ export async function* streamOpenAIResponse(
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith(':')) continue;
-      if (trimmed === 'data: [DONE]') return;
+      if (trimmed === 'data: [DONE]') {
+        const trailingOpenAI = introFilter.flush();
+        if (trailingOpenAI) {
+          if (!metadataEmitted) {
+            metadataEmitted = true;
+            options.onExecutionMetadata?.(
+              buildVerifiedExecutionMetadata({
+                actualModel: verifiedModel,
+                providerHint: 'openai',
+                requestedModel,
+                runtimeSource: 'openai-api',
+                isFallback: false,
+              })
+            );
+          }
+          yield trailingOpenAI;
+        }
+        return;
+      }
       if (trimmed.startsWith('data: ')) {
         try {
           const json = JSON.parse(trimmed.slice(6));
@@ -1214,23 +1276,43 @@ export async function* streamOpenAIResponse(
           }
           const delta = json.choices?.[0]?.delta?.content;
           if (delta) {
-            if (!metadataEmitted) {
-              metadataEmitted = true;
-              options.onExecutionMetadata?.(
-                buildVerifiedExecutionMetadata({
-                  actualModel: verifiedModel,
-                  providerHint: 'openai',
-                  requestedModel,
-                  runtimeSource: 'openai-api',
-                  isFallback: false,
-                })
-              );
+            const filteredDelta = introFilter.push(String(delta));
+            if (filteredDelta) {
+              if (!metadataEmitted) {
+                metadataEmitted = true;
+                options.onExecutionMetadata?.(
+                  buildVerifiedExecutionMetadata({
+                    actualModel: verifiedModel,
+                    providerHint: 'openai',
+                    requestedModel,
+                    runtimeSource: 'openai-api',
+                    isFallback: false,
+                  })
+                );
+              }
+              yield filteredDelta;
             }
-            yield String(delta);
           }
         } catch {}
       }
     }
+  }
+
+  const trailingOpenAIEof = introFilter.flush();
+  if (trailingOpenAIEof) {
+    if (!metadataEmitted) {
+      metadataEmitted = true;
+      options.onExecutionMetadata?.(
+        buildVerifiedExecutionMetadata({
+          actualModel: verifiedModel,
+          providerHint: 'openai',
+          requestedModel,
+          runtimeSource: 'openai-api',
+          isFallback: false,
+        })
+      );
+    }
+    yield trailingOpenAIEof;
   }
 }
 
@@ -1260,11 +1342,15 @@ export async function* streamOpenRouterResponse(
         fallbackReason: requestedRaw && requestedRaw !== model ? 'Routed via OpenRouter fallback gateway' : null,
       });
       const modelIdentity = buildModelIdentityInstruction(model, 'OpenRouter', preMeta);
-      const baseSystemContent = options.systemInstruction || `You are ${DEKU_PRODUCT_NAME}, an independent AI workspace assistant. Never expose private internal chain-of-thought.`;
+      const baseSystemContent = options.systemInstruction || 'Answer the user directly and concisely from the first sentence without unsolicited greetings or self-introductions. Never expose private internal chain-of-thought.';
       const systemContent =
         baseSystemContent +
         (baseSystemContent.includes('[MEMORY USAGE POLICY]') ? '' : SERVER_MEMORY_BEHAVIOR_POLICY) +
         modelIdentity;
+      const latestUserPrompt = stripInjectedContextBlocks(
+        [...options.messages].reverse().find(m => m.role === 'user')?.content || ''
+      );
+      const introFilter = createLeadingIntroStreamFilter(latestUserPrompt);
       const messages: any[] = [
         { role: 'system', content: systemContent },
         ...options.messages.map(m => ({
@@ -1325,7 +1411,29 @@ export async function* streamOpenRouterResponse(
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed || trimmed.startsWith(':')) continue;
-          if (trimmed === 'data: [DONE]') return;
+          if (trimmed === 'data: [DONE]') {
+            const trailingOr = introFilter.flush();
+            if (trailingOr) {
+              if (!metadataEmitted) {
+                metadataEmitted = true;
+                const isFallback = !requestedRaw || requestedRaw !== actualReturnedModel;
+                options.onExecutionMetadata?.(
+                  buildVerifiedExecutionMetadata({
+                    actualModel: actualReturnedModel,
+                    providerHint: 'openrouter',
+                    requestedModel: requestedRaw,
+                    runtimeSource: 'openrouter-api',
+                    isFallback,
+                    fallbackFrom: isFallback ? requestedRaw : null,
+                    fallbackReason: isFallback ? 'Primary provider unavailable; executed via OpenRouter fallback' : null,
+                  })
+                );
+              }
+              hasYielded = true;
+              yield trailingOr;
+            }
+            return;
+          }
           if (trimmed.startsWith('data: ')) {
             try {
               const json = JSON.parse(trimmed.slice(6));
@@ -1349,27 +1457,51 @@ export async function* streamOpenRouterResponse(
               }
               const delta = json.choices?.[0]?.delta?.content;
               if (delta) {
-                if (!metadataEmitted) {
-                  metadataEmitted = true;
-                  const isFallback = !requestedRaw || requestedRaw !== actualReturnedModel;
-                  options.onExecutionMetadata?.(
-                    buildVerifiedExecutionMetadata({
-                      actualModel: actualReturnedModel,
-                      providerHint: 'openrouter',
-                      requestedModel: requestedRaw,
-                      runtimeSource: 'openrouter-api',
-                      isFallback,
-                      fallbackFrom: isFallback ? requestedRaw : null,
-                      fallbackReason: isFallback ? 'Primary provider unavailable; executed via OpenRouter fallback' : null,
-                    })
-                  );
+                const filteredDelta = introFilter.push(String(delta));
+                if (filteredDelta) {
+                  if (!metadataEmitted) {
+                    metadataEmitted = true;
+                    const isFallback = !requestedRaw || requestedRaw !== actualReturnedModel;
+                    options.onExecutionMetadata?.(
+                      buildVerifiedExecutionMetadata({
+                        actualModel: actualReturnedModel,
+                        providerHint: 'openrouter',
+                        requestedModel: requestedRaw,
+                        runtimeSource: 'openrouter-api',
+                        isFallback,
+                        fallbackFrom: isFallback ? requestedRaw : null,
+                        fallbackReason: isFallback ? 'Primary provider unavailable; executed via OpenRouter fallback' : null,
+                      })
+                    );
+                  }
+                  hasYielded = true;
+                  yield filteredDelta;
                 }
-                hasYielded = true;
-                yield delta;
               }
             } catch {}
           }
         }
+      }
+
+      const trailingOrEof = introFilter.flush();
+      if (trailingOrEof) {
+        if (!metadataEmitted) {
+          metadataEmitted = true;
+          const isFallback = !requestedRaw || requestedRaw !== actualReturnedModel;
+          options.onExecutionMetadata?.(
+            buildVerifiedExecutionMetadata({
+              actualModel: actualReturnedModel,
+              providerHint: 'openrouter',
+              requestedModel: requestedRaw,
+              runtimeSource: 'openrouter-api',
+              isFallback,
+              fallbackFrom: isFallback ? requestedRaw : null,
+              fallbackReason: isFallback ? 'Primary provider unavailable; executed via OpenRouter fallback' : null,
+            })
+          );
+        }
+        hasYielded = true;
+        yield trailingOrEof;
       }
 
       if (hasYielded) {

@@ -459,6 +459,62 @@ class SkillsRegistryService {
 
     return null;
   }
+
+  // ---------------------------------------------------------------------------
+  // Feature 04 Server-Backed Skills Ecosystem Client Methods (/api/skills/*)
+  // ---------------------------------------------------------------------------
+
+  public async fetchServerCatalog(query = ''): Promise<{ ok: boolean; catalog?: any[]; error?: string }> {
+    const authHeader = await getFirebaseAuthorizationHeader();
+    if (!authHeader) return { ok: false, error: 'Authentication required.' };
+    const qs = query ? `?q=${encodeURIComponent(query)}` : '';
+    const res = await fetch(`/api/skills/catalog${qs}`, {
+      headers: { Accept: 'application/json', Authorization: authHeader },
+    });
+    return res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+  }
+
+  public async fetchInstalledServerSkills(): Promise<{ ok: boolean; skills?: any[]; error?: string }> {
+    const authHeader = await getFirebaseAuthorizationHeader();
+    if (!authHeader) return { ok: false, error: 'Authentication required.' };
+    const res = await fetch('/api/skills/installed', {
+      headers: { Accept: 'application/json', Authorization: authHeader },
+    });
+    return res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+  }
+
+  public async installServerSkill(params: {
+    catalogId?: string;
+    manifest?: Record<string, unknown>;
+    config?: Record<string, unknown>;
+    approvalToken?: string;
+  }): Promise<{ ok: boolean; skill?: any; requiresApproval?: boolean; challenge?: any; error?: string }> {
+    const authHeader = await getFirebaseAuthorizationHeader();
+    if (!authHeader) return { ok: false, error: 'Authentication required.' };
+    const res = await fetch('/api/skills/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+      body: JSON.stringify(params),
+    });
+    return res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+  }
+
+  public async executeServerSkill(params: {
+    skillId: string;
+    taskInput: string;
+    approvalToken?: string;
+    sandboxApprovalToken?: string;
+    projectId?: string;
+  }): Promise<{ ok: boolean; execution?: any; requiresApproval?: boolean; challenge?: any; error?: string }> {
+    const authHeader = await getFirebaseAuthorizationHeader();
+    if (!authHeader) return { ok: false, error: 'Authentication required.' };
+    const res = await fetch('/api/skills/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+      body: JSON.stringify(params),
+    });
+    return res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+  }
 }
 
 export const skillsRegistry = new SkillsRegistryService();

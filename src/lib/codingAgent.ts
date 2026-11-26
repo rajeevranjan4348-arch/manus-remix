@@ -8,6 +8,7 @@
 import { observability } from './observability';
 import { securityCenter } from './securityCenter';
 import { approvalManager } from './approvalManager';
+import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
 
 export interface GitHubFileEntry {
   name: string;
@@ -251,6 +252,222 @@ class CodingAgentService {
         error: securityCenter.toSafeErrorMessage(err),
       };
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Sandboxed Coding Execution Engine Client (/api/sandbox/*)
+  // -------------------------------------------------------------------------
+
+  private async sandboxRequest<T = any>(
+    endpoint: string,
+    method: 'GET' | 'POST' = 'POST',
+    body?: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<{ ok: boolean; status: number; data?: T; error?: string; code?: string; challenge?: any }> {
+    const authHeader = await getFirebaseAuthorizationHeader().catch(() => null);
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(authHeader ? { Authorization: authHeader } : {}),
+    };
+
+    try {
+      const res = await fetch(`/api/sandbox${endpoint}`, {
+        method,
+        headers,
+        body: method === 'POST' ? JSON.stringify(body || {}) : undefined,
+        signal,
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return {
+          ok: false,
+          status: res.status,
+          error: payload?.error || `Sandbox API error (HTTP ${res.status})`,
+          code: payload?.code,
+          challenge: payload?.challenge,
+          data: payload,
+        };
+      }
+      return { ok: true, status: res.status, data: payload as T };
+    } catch (err: any) {
+      return {
+        ok: false,
+        status: 0,
+        error: securityCenter.toSafeErrorMessage(err),
+        code: 'SANDBOX_NETWORK_ERROR',
+      };
+    }
+  }
+
+  public async getSandboxHealth(live = false) {
+    return this.sandboxRequest(`/health${live ? '?live=true' : ''}`, 'GET');
+  }
+
+  public async createSandbox(params: {
+    projectId: string;
+    taskId?: string;
+    runtime?: string;
+    image?: string;
+    limits?: Record<string, unknown>;
+    env?: Record<string, unknown>;
+    persistent?: boolean;
+    provider?: string;
+    idempotencyKey?: string;
+  }) {
+    return this.sandboxRequest('/create', 'POST', params);
+  }
+
+  public async getSandboxStatus(sandboxId: string, refresh = true) {
+    return this.sandboxRequest('/status', 'POST', { sandboxId, refresh });
+  }
+
+  public async cleanupSandbox(sandboxId: string) {
+    return this.sandboxRequest('/cleanup', 'POST', { sandboxId });
+  }
+
+  public async executeTerminal(params: {
+    sandboxId: string;
+    command: string;
+    cwd?: string;
+    env?: Record<string, unknown>;
+    timeoutMs?: number;
+    approvalToken?: string;
+    idempotencyKey?: string;
+  }, signal?: AbortSignal) {
+    return this.sandboxRequest('/terminal/execute', 'POST', params, signal);
+  }
+
+  public async streamTerminal(
+    params: {
+      sandboxId: string;
+      command: string;
+      cwd?: string;
+      env?: Record<string, unknown>;
+      timeoutMs?: number;
+      approvalToken?: string;
+      idempotencyKey?: string;
+    },
+    onEvent?: (event: { type: string; data: any }) => void,
+    signal?: AbortSignal,
+  ): Promise<{ ok: boolean; execution?: any; events: Array<{ type: string; data: any }>; error?: string; code?: string; challenge?: any }> {
+    const authHeader = await getFirebaseAuthorizationHeader().catch(() => null);
+    const events: Array<{ type: string; data: any }> = [];
+    try {
+      const res = await fetch('/api/sandbox/terminal/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authHeader ? { Authorization: authHeader } : {}),
+        },
+        body: JSON.stringify(params),
+        signal,
+      });
+
+      if (!res.ok) {
+        const errPayload = await res.json().catch(() => ({}));
+        return {
+          ok: false,
+          events,
+          error: errPayload?.error || `Stream failed (HTTP ${res.status})`,
+          code: errPayload?.code,
+          challenge: errPayload?.challenge,
+        };
+      }
+
+      const text = await res.text();
+      let finalExecution: any;
+      let streamError: string | undefined;
+      let streamCode: string | undefined;
+      let challenge: any;
+
+      const blocks = text.split('\n\n').filter(Boolean);
+      for (const block of blocks) {
+        const lines = block.split('\n');
+        let evType = 'message';
+        let dataStr = '';
+        for (const line of lines) {
+          if (line.startsWith('event:')) evType = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
+        }
+        if (!dataStr) continue;
+        try {
+          const parsed = JSON.parse(dataStr);
+          const item = { type: evType, data: parsed };
+          events.push(item);
+          onEvent?.(item);
+          if (evType === 'complete' && parsed?.execution) finalExecution = parsed.execution;
+          if (evType === 'error') {
+            streamError = parsed?.error || 'Terminal stream error';
+            streamCode = parsed?.code;
+            challenge = parsed?.challenge;
+          }
+        } catch {
+          // Skip malformed SSE block
+        }
+      }
+
+      if (streamError) {
+        return { ok: false, events, error: streamError, code: streamCode, challenge };
+      }
+      return { ok: true, execution: finalExecution, events };
+    } catch (err: any) {
+      return { ok: false, events, error: securityCenter.toSafeErrorMessage(err), code: 'STREAM_NETWORK_ERROR' };
+    }
+  }
+
+  public async cancelTerminal(sandboxId: string, executionId: string) {
+    return this.sandboxRequest('/terminal/cancel', 'POST', { sandboxId, executionId });
+  }
+
+  public async listWorkspaceFiles(sandboxId: string, path = '.') {
+    return this.sandboxRequest('/files/list', 'POST', { sandboxId, path });
+  }
+
+  public async readWorkspaceFile(sandboxId: string, path: string) {
+    return this.sandboxRequest('/files/read', 'POST', { sandboxId, path });
+  }
+
+  public async writeWorkspaceFile(sandboxId: string, path: string, content: string) {
+    return this.sandboxRequest('/files/write', 'POST', { sandboxId, path, content });
+  }
+
+  public async deleteWorkspaceFile(sandboxId: string, path: string, approvalToken?: string) {
+    return this.sandboxRequest('/files/delete', 'POST', { sandboxId, path, approvalToken });
+  }
+
+  public async makeWorkspaceDirectory(sandboxId: string, path: string) {
+    return this.sandboxRequest('/files/mkdir', 'POST', { sandboxId, path });
+  }
+
+  public async renameWorkspacePath(sandboxId: string, fromPath: string, toPath: string) {
+    return this.sandboxRequest('/files/rename', 'POST', { sandboxId, fromPath, toPath });
+  }
+
+  public async searchWorkspaceFiles(sandboxId: string, query: string, path = '.') {
+    return this.sandboxRequest('/files/search', 'POST', { sandboxId, query, path });
+  }
+
+  public async inspectWorkspaceStructure(sandboxId: string, maxDepth = 3) {
+    return this.sandboxRequest('/files/structure', 'POST', { sandboxId, maxDepth });
+  }
+
+  public async createWorkspaceArtifact(sandboxId: string, path = '.') {
+    return this.sandboxRequest('/files/artifact', 'POST', { sandboxId, path });
+  }
+
+  public async startPreview(params: {
+    sandboxId: string;
+    command: string;
+    port: number;
+    cwd?: string;
+    readinessTimeoutMs?: number;
+    approvalToken?: string;
+  }) {
+    return this.sandboxRequest('/preview/start', 'POST', params);
+  }
+
+  public async getPreviewStatus(sandboxId: string) {
+    return this.sandboxRequest('/preview/status', 'POST', { sandboxId });
   }
 }
 

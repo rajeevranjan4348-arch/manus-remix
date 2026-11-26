@@ -7,6 +7,7 @@
 
 import { playNotificationSound } from './settingsStore';
 import { observability } from './observability';
+import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
 
 export type NotificationChannel = 'task_completed' | 'task_failed' | 'approval_needed' | 'schedule_triggered';
 
@@ -20,6 +21,29 @@ export interface NotificationPayload {
 
 class NotificationDispatcherService {
   private lastDispatched = new Map<string, number>();
+
+  public async fetchDurableNotifications(unreadOnly = false): Promise<any[]> {
+    const authHeader = await getFirebaseAuthorizationHeader();
+    if (!authHeader) return [];
+    const qs = unreadOnly ? '?unreadOnly=true' : '';
+    const res = await fetch(`/api/tasks/notifications${qs}`, {
+      headers: { Accept: 'application/json', Authorization: authHeader },
+    });
+    if (!res.ok) return [];
+    const data = await res.json().catch(() => ({}));
+    return Array.isArray(data.notifications) ? data.notifications : [];
+  }
+
+  public async markDurableNotificationRead(notificationId: string): Promise<boolean> {
+    const authHeader = await getFirebaseAuthorizationHeader();
+    if (!authHeader) return false;
+    const res = await fetch('/api/tasks/notifications/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+      body: JSON.stringify({ notificationId }),
+    });
+    return res.ok;
+  }
 
   /**
    * Check if current time falls into quiet hours
@@ -40,20 +64,17 @@ class NotificationDispatcherService {
     const now = Date.now();
     const lastTime = this.lastDispatched.get(dedupeKey) || 0;
 
-    // Throttle duplicates within 5 seconds
     if (now - lastTime < 5000) {
       return false;
     }
     this.lastDispatched.set(dedupeKey, now);
 
-    // Play chime sound if enabled and not during quiet hours
     if (payload.sound !== false && !this.isQuietHours()) {
       try {
         playNotificationSound();
       } catch {}
     }
 
-    // Native / Web Notification API
     if (typeof window !== 'undefined' && 'Notification' in window) {
       if (Notification.permission === 'granted') {
         try {

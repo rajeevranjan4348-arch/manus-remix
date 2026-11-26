@@ -84,4 +84,51 @@ describe('Firestore security rules contract', () => {
     expect(rules).not.toContain('projectOwnerId === requestingUserId');
     expect(rules).not.toContain('allowedStatuses.includes(tamperedStatus)');
   });
+
+  it('enforces strict user ownership, immutability, and append-only audit logs for sandbox and browser subcollections', () => {
+    const sandboxes = ruleBlock('match /sandboxes/{sandboxId}', 'match /executions/{executionId}');
+    const executions = ruleBlock('match /executions/{executionId}', 'match /browser_sessions/{sessionId}');
+    const browserSessions = ruleBlock('match /browser_sessions/{sessionId}', 'match /approvals/{challengeId}');
+    const approvals = ruleBlock('match /approvals/{challengeId}', 'match /audit_logs/{auditId}');
+    const auditLogs = ruleBlock('match /audit_logs/{auditId}', 'match /idempotency/{keyId}');
+
+    expect(sandboxes).toContain('isOwner(userId)');
+    expect(sandboxes).toContain('isValidSandbox(incoming(), userId, sandboxId)');
+    expect(sandboxes).toContain("!(existing().status in ['stopped', 'expired'])");
+
+    expect(executions).toContain('isValidExecution(incoming(), userId, executionId)');
+    expect(executions).toContain('allow delete: if false;');
+
+    expect(browserSessions).toContain('isValidBrowserSession(incoming(), userId, sessionId)');
+    expect(browserSessions).toContain("!(existing().status in ['closed', 'expired'])");
+
+    expect(approvals).toContain('isValidApproval(incoming(), userId, challengeId)');
+    expect(approvals).toContain('incoming().parametersHash == existing().parametersHash');
+    expect(approvals).toContain("!(existing().status in ['consumed', 'rejected', 'expired'])");
+
+    expect(auditLogs).toContain('isValidAuditLog(incoming(), userId, auditId)');
+    expect(auditLogs).toContain('allow update, delete: if false;');
+  });
+
+  it('enforces ownership, immutability, and append-only run histories for Features 01-05 subcollections', () => {
+    const policies = ruleBlock('match /permission_policies/{policyId}', 'match /background_tasks/{taskId}');
+    const tasks = ruleBlock('match /background_tasks/{taskId}', 'match /multi_agent_runs/{runId}');
+    const multiAgent = ruleBlock('match /multi_agent_runs/{runId}', 'match /skills/{skillId}');
+    const skills = ruleBlock('match /skills/{skillId}', 'match /skill_executions/{executionId}');
+    const skillExecs = ruleBlock('match /skill_executions/{executionId}', 'match /schedules/{scheduleId}');
+    const schedules = ruleBlock('match /schedules/{scheduleId}', 'match /schedule_runs/{runId}');
+    const scheduleRuns = ruleBlock('match /schedule_runs/{runId}', 'match /notifications/{notificationId}');
+    const notifications = ruleBlock('match /notifications/{notificationId}', 'match /projects/{projectId}');
+
+    expect(policies).toContain('isValidPermissionPolicy(incoming(), userId, policyId)');
+    expect(tasks).toContain('isValidBackgroundTask(incoming(), userId, taskId)');
+    expect(tasks).toContain('allow delete: if false;');
+    expect(multiAgent).toContain('isValidMultiAgentRun(incoming(), userId, runId)');
+    expect(multiAgent).toContain('allow delete: if false;');
+    expect(skills).toContain('isValidInstalledSkill(incoming(), userId, skillId)');
+    expect(skillExecs).toContain('allow update, delete: if false;');
+    expect(schedules).toContain("existing().status != 'cancelled' || incoming().status == 'cancelled'");
+    expect(scheduleRuns).toContain('allow update, delete: if false;');
+    expect(notifications).toContain('isValidNotification(incoming(), userId, notificationId)');
+  });
 });

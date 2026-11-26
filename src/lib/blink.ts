@@ -1202,11 +1202,29 @@ const localProjectsDb = {
 };
 
 const localSandbox = {
-  create: async ({ template }: { template?: string } = {}) => ({
-    id: 'sb_' + Math.random().toString(36).substring(2, 8),
-    getHost: (port: number) => `localhost:${port}`,
-    template: template || 'devtools-base',
-  }),
+  create: async ({ template, projectId, runtime }: { template?: string; projectId?: string; runtime?: string } = {}) => {
+    const { codingAgent } = await import('./codingAgent');
+    const res = await codingAgent.createSandbox({
+      projectId: projectId || 'default-project',
+      runtime: runtime || 'vite',
+      image: template,
+    });
+    if (!res.ok || !res.data?.sandbox) {
+      throw new Error(
+        res.error ||
+          'No isolated sandbox provider is currently configured. Set E2B_API_KEY, DAYTONA_API_KEY, or SANDBOX_RUNTIME_URL in server environment variables.',
+      );
+    }
+    const sb = res.data.sandbox;
+    return {
+      id: sb.sandboxId,
+      workspaceId: sb.workspaceId,
+      provider: sb.provider,
+      getHost: (_port: number) => sb.previewUrl || '',
+      template: sb.image || template || 'vite',
+      cleanup: () => codingAgent.cleanupSandbox(sb.sandboxId),
+    };
+  },
 };
 
 const localData = {

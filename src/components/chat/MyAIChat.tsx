@@ -434,7 +434,7 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
         ? formatRelevantMemoryBlock(memoryContext, isExplicitMemoryRecallQuery(query))
         : '';
       const systemInstruction = [
-        'You are Deku AI, an intelligent, natural, and helpful conversational assistant. Respond directly and warmly to the user.',
+        'Answer the user directly and naturally from the first sentence. Never prepend unsolicited greetings, self-introductions, or product descriptions (such as "Hello! I am Deku AI, your independent workspace assistant.") to normal questions. Only greet when the user greets you, and only mention your name (Deku AI) if the user explicitly asks who you are.',
         MEMORY_BEHAVIOR_POLICY,
         formattedMemory,
       ]
