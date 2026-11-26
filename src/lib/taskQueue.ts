@@ -6,6 +6,7 @@
  */
 
 import { observability } from './observability';
+import { createDurableTaskMirror } from './durableTaskMirror';
 
 export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
@@ -29,6 +30,7 @@ const STORAGE_KEY = 'manus_background_task_queue';
 class TaskQueueService {
   private jobs = new Map<string, BackgroundJob>();
   private isProcessing = false;
+  private readonly durableMirror = createDurableTaskMirror();
 
   constructor() {
     this.loadQueue();
@@ -80,6 +82,12 @@ class TaskQueueService {
 
     this.jobs.set(id, job);
     this.persistQueue();
+
+    // Mirror to the durable cloud queue (Feature 01) so supported jobs survive
+    // page reloads and continue on the external worker. Local timing is only a
+    // UI mirror; the durable record is authoritative for execution state.
+    void this.durableMirror.mirrorEnqueue(job);
+
     this.processNext();
 
     return job;

@@ -6,6 +6,7 @@
  */
 
 import { observability } from './observability';
+import { callSandboxApi } from './sandboxClient';
 import { securityCenter } from './securityCenter';
 import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
 import {
@@ -399,13 +400,17 @@ class ToolRegistryService {
           required: true,
         },
       },
-      handler: async (args) => {
+      handler: async (args, context) => {
         const filePath = String(args.path || '').trim();
-        return {
-          success: true,
-          data: { path: filePath, deleted: true },
-          summary: `File '${filePath}' successfully deleted after authorization.`,
-        };
+        const sandboxId = String(args.sandboxId || '').trim();
+        if (!sandboxId) {
+          return {
+            success: false,
+            error: 'Deletion requires an isolated sandbox workspace. Create one with sandbox_create first.',
+            summary: 'File deletion unavailable without a sandbox workspace.',
+          };
+        }
+        return callSandboxApi('filesystem_delete', { ...args, path: filePath, sandboxId }, context);
       },
     });
 
@@ -601,3 +606,10 @@ class ToolRegistryService {
 }
 
 export const toolRegistry = new ToolRegistryService();
+
+// Register Feature 06 execution tools (sandbox, terminal, filesystem, browser,
+// preview) and Feature 01 durable background task tools. Dynamic import keeps
+// module initialization cycle-safe.
+void import('./executionTools')
+  .then((m) => m.registerExecutionTools())
+  .catch(() => undefined);
