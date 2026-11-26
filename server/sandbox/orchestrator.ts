@@ -38,13 +38,20 @@ export interface ApprovalDecisionContext {
  * Server-side permission hook. The Netlify function injects
  * server/permissionsGateway.evaluateAction here, keeping wiring testable.
  */
-export type ApprovalEvaluator = (ctx: ApprovalDecisionContext) => {
+export type ApprovalDecision = {
   allowed: boolean;
   requiresApproval: boolean;
   riskLevel: string;
   reason: string;
   challenge?: unknown;
 };
+
+/**
+ * Server-side permission hook. The Netlify function injects
+ * server/permissionsGateway.evaluateAction here, keeping wiring testable.
+ * May return a decision directly (tests) or a Promise (durable gateway).
+ */
+export type ApprovalEvaluator = (ctx: ApprovalDecisionContext) => ApprovalDecision | Promise<ApprovalDecision>;
 
 export interface OrchestrationServices {
   store: ExecutionStore;
@@ -71,7 +78,7 @@ export class SandboxOrchestratorService {
 
   async ensureAllowed(toolName: string, args: Record<string, unknown>, userId: string, approvalToken?: string): Promise<{ ok: true } | { ok: false; status: number; code: string; reason: string; challenge?: unknown }> {
     const svc = await this.services();
-    const decision = svc.evaluateApproval({ toolName, args, userId, approvalToken });
+    const decision = await svc.evaluateApproval({ toolName, args, userId, approvalToken });
     if (decision.allowed) return { ok: true };
     svc.audit({
       at: new Date().toISOString(),

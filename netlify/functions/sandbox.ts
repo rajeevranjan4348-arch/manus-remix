@@ -22,6 +22,23 @@ import {
 import { boundsCheckLimits, resolveExecutionStore, type ExecutionStore } from '../../server/sandbox/executionStore';
 import type { RuntimeId } from '../../server/sandbox/types';
 
+/* Audit sink: bounded in-process ring plus the durable audit log behind the gateway. */
+function durableAudit(event: SandboxAuditEvent): void {
+  recordAuditEvent(event);
+  const category = event.category === 'terminal' ? 'terminal_execution'
+    : event.category === 'filesystem' ? 'filesystem_change'
+    : event.category === 'browser' ? 'browser_interaction'
+    : 'tool_execution';
+  void permissionsGateway.recordAuditEvent({
+    userId: event.userId,
+    category,
+    toolName: event.action,
+    status: event.outcome === 'denied' ? 'denied' : 'allowed',
+    reason: event.detail || event.action,
+    target: event.sessionId,
+  }).catch(() => { /* audit must never break the request path */ });
+}
+
 /* Server-side approvals for sandbox tools, integrated with the existing gateway. */
 const SANDBOX_POLICIES = [
   { toolName: 'sandbox_create', displayName: 'Create Isolated Sandbox', category: 'coding' as const, description: 'Creates a new isolated cloud sandbox with CPU, memory and lifetime limits.', consequences: ['Provisions billable compute resources for the user.', 'Runs code in an isolated cloud VM.'] },
@@ -88,8 +105,8 @@ async function buildOrchestrator(): Promise<{ orchestrator: SandboxOrchestratorS
     cachedStore = await resolveExecutionStore();
   }
   if (!orchestratorSingleton) {
-    const evaluator: ApprovalEvaluator = (ctx) => {
-      const decision = permissionsGateway.evaluateAction({
+    const evaluator: ApprovalEvaluator = async (ctx) => {
+      const decision = await permissionsGateway.evaluateAction({
         toolName: ctx.toolName,
         args: ctx.args,
         userId: ctx.userId,
@@ -108,7 +125,7 @@ async function buildOrchestrator(): Promise<{ orchestrator: SandboxOrchestratorS
       return {
         store: cachedStore as ExecutionStore,
         provider: resolved.provider,
-        audit: recordAuditEvent,
+        audit: durableAudit,
         evaluateApproval: evaluator,
       };
     });
