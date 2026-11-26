@@ -104,7 +104,73 @@ class KnowledgeBaseService {
   }
 
   /**
-   * Retrieve relevant passages matching query, strictly bounded by userId
+   * Index a verified real-time research summary and its sources into the semantic RAG store
+   */
+  public indexVerifiedResearch(params: {
+    id?: string;
+    query: string;
+    summary: string;
+    sources?: Array<{ title: string; url: string }>;
+    userId: string;
+  }): number {
+    const cleanQuery = String(params.query || '').trim();
+    const cleanSummary = String(params.summary || '').trim();
+    if (!cleanQuery || !cleanSummary) return 0;
+
+    const normalizedSlug = cleanQuery
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 48);
+    const documentId = params.id || `research_${params.userId}_${normalizedSlug || 'entry'}`;
+    const sourceLines = (params.sources || [])
+      .slice(0, 6)
+      .map((s) => `- ${s.title}: ${s.url}`)
+      .join('\n');
+    const content = [
+      `Verified Research Query: ${cleanQuery}`,
+      cleanSummary,
+      sourceLines ? `Verified Sources:\n${sourceLines}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    return this.indexDocument({
+      documentId,
+      documentTitle: `Verified Research: ${cleanQuery.slice(0, 90)}`,
+      content,
+      userId: params.userId,
+    });
+  }
+
+  /**
+   * List indexed documents for a user (deduplicated by documentId)
+   */
+  public listDocuments(userId: string): Array<{ documentId: string; documentTitle: string; chunkCount: number }> {
+    const map = new Map<string, { documentId: string; documentTitle: string; chunkCount: number }>();
+    for (const chunk of this.chunks) {
+      if (chunk.userId !== userId && chunk.userId !== 'usr_manus_default') continue;
+      const existing = map.get(chunk.documentId);
+      if (existing) {
+        existing.chunkCount += 1;
+      } else {
+        map.set(chunk.documentId, {
+          documentId: chunk.documentId,
+          documentTitle: chunk.documentTitle,
+          chunkCount: 1,
+        });
+      }
+    }
+    return Array.from(map.values());
+  }
+
+  public getDocumentCount(userId: string): number {
+    return this.listDocuments(userId).length;
+  }
+
+  /**
+   * Retrieve relevant passages matching query using BM25-style length normalization + bigram boost,
+   * strictly bounded by userId
    */
   public retrieve(query: string, userId: string, limit = 4): RetrievalResult[] {
     const traceId = observability.startTrace('rag_retrieve', { query, userId });
@@ -115,34 +181,80 @@ class KnowledgeBaseService {
       return [];
     }
 
-    const queryTerms = query
+    const stopWords = new Set([
+      'the', 'and', 'for', 'with', 'that', 'this', 'from', 'have', 'what', 'when',
+      'where', 'which', 'about', 'into', 'your', 'will', 'would', 'could', 'should',
+      'there', 'their', 'they', 'them', 'been', 'being', 'more', 'most', 'some',
+    ]);
+
+    const rawTerms = query
       .toLowerCase()
-      .replace(/[^a-zA-Z0-9_\s]/g, '')
+      .replace(/[^a-zA-Z0-9_\s]/g, ' ')
       .split(/\s+/)
-      .filter(t => t.length > 2);
+      .filter(t => t.length > 2 && !stopWords.has(t));
+
+    const queryTerms = Array.from(new Set(rawTerms));
 
     if (queryTerms.length === 0) {
       observability.endTrace(traceId);
       return [];
     }
 
+    const bigrams: string[] = [];
+    for (let i = 0; i < rawTerms.length - 1; i++) {
+      bigrams.push(`${rawTerms[i]} ${rawTerms[i + 1]}`);
+    }
+
+    const avgChunkLen = Math.max(
+      120,
+      userChunks.reduce((sum, c) => sum + c.content.length, 0) / userChunks.length
+    );
+    const k1 = 1.5;
+    const b = 0.75;
+
+    // Document frequency per term for IDF weighting
+    const dfMap = new Map<string, number>();
+    for (const term of queryTerms) {
+      let df = 0;
+      for (const chunk of userChunks) {
+        if (chunk.content.toLowerCase().includes(term) || chunk.documentTitle.toLowerCase().includes(term)) {
+          df += 1;
+        }
+      }
+      dfMap.set(term, df);
+    }
+
+    const totalDocs = userChunks.length;
     const scored: RetrievalResult[] = [];
 
     for (const chunk of userChunks) {
       const lowerText = chunk.content.toLowerCase();
       const lowerTitle = chunk.documentTitle.toLowerCase();
+      const lenNorm = 1 - b + b * (chunk.content.length / avgChunkLen);
       let score = 0;
 
       for (const term of queryTerms) {
+        const df = dfMap.get(term) || 0;
+        const idf = Math.log(1 + (totalDocs - df + 0.5) / (df + 0.5));
+
         // Title match receives 3x weight boost
         if (lowerTitle.includes(term)) {
-          score += 3.0;
+          score += 3.0 * Math.max(1, idf);
         }
 
-        // Term frequency match
-        const occurrences = lowerText.split(term).length - 1;
-        if (occurrences > 0) {
-          score += 1.0 + Math.log(occurrences);
+        // BM25-style TF saturation with length damping
+        const tf = lowerText.split(term).length - 1;
+        if (tf > 0) {
+          score += ((tf * (k1 + 1)) / (tf + k1 * lenNorm)) * Math.max(0.75, idf);
+        }
+      }
+
+      // Phrase / bigram proximity boost
+      for (const bigram of bigrams) {
+        if (lowerTitle.includes(bigram)) {
+          score += 4.0;
+        } else if (lowerText.includes(bigram)) {
+          score += 2.2;
         }
       }
 

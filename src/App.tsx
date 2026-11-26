@@ -27,41 +27,43 @@ import {
   resolveConnectorsSection,
 } from './lib/panelNavigation';
 
-const Home = lazy(() =>
-  import('./pages/Home').then((m) => ({ default: m.Home }))
-);
-const ChatView = lazy(() =>
-  import('./components/agent/ChatView').then((m) => ({ default: m.ChatView }))
-);
-// Lazy-load Work Mode, E2B sandbox preview, editors, and heavy secondary panels
-const WebsiteBuilderView = lazy(() =>
-  import('./components/agent/WebsiteBuilderView').then((m) => ({ default: m.WebsiteBuilderView }))
-);
-const HistoryPanel = lazy(() =>
-  import('./components/history/HistoryPanel').then((m) => ({ default: m.HistoryPanel }))
-);
-const SettingsModal = lazy(() =>
-  import('./components/settings/SettingsModal').then((m) => ({ default: m.SettingsModal }))
-);
-const ConnectorsStorePanel = lazy(() =>
-  import('./components/connectors/ConnectorsStorePanel').then((m) => ({ default: m.ConnectorsStorePanel }))
-);
-const TagAnalyticsModal = lazy(() =>
-  import('./components/analytics/TagAnalyticsModal').then((m) => ({ default: m.TagAnalyticsModal }))
-);
-const AndroidVoiceSettings = lazy(() =>
-  import('./components/settings/AndroidVoiceSettings').then((m) => ({ default: m.AndroidVoiceSettings }))
-);
-const AndroidConnectorsSettings = lazy(() =>
-  import('./components/settings/AndroidConnectorsSettings').then((m) => ({ default: m.AndroidConnectorsSettings }))
-);
-const MyAIChat = lazy(() =>
-  import('./components/chat/MyAIChat').then((m) => ({ default: m.MyAIChat }))
-);
+import { Home } from './pages/Home';
+import {
+  dismissBootLoader,
+  loadAndroidConnectorsSettings,
+  loadAndroidVoiceSettings,
+  loadChatView,
+  loadConnectorsStorePanel,
+  loadHistoryPanel,
+  loadMyAIChat,
+  loadSettingsModal,
+  loadTagAnalyticsModal,
+  loadWebsiteBuilderView,
+  preloadChatView,
+  scheduleWorkspaceWarmup,
+} from './lib/instantPreload';
+
+const ChatView = lazy(loadChatView);
+// Lazy-load Work Mode, E2B sandbox preview, editors, and heavy secondary panels (cached & pre-warmed)
+const WebsiteBuilderView = lazy(loadWebsiteBuilderView);
+const HistoryPanel = lazy(loadHistoryPanel);
+const SettingsModal = lazy(loadSettingsModal);
+const ConnectorsStorePanel = lazy(loadConnectorsStorePanel);
+const TagAnalyticsModal = lazy(loadTagAnalyticsModal);
+const AndroidVoiceSettings = lazy(loadAndroidVoiceSettings);
+const AndroidConnectorsSettings = lazy(loadAndroidConnectorsSettings);
+const MyAIChat = lazy(loadMyAIChat);
+
 function RouteLoadingFallback() {
   return (
-    <div className="flex h-full min-h-24 w-full items-center justify-center" role="status" aria-label="Loading view">
-      <span className="h-1.5 w-12 rounded-full bg-muted" />
+    <div
+      className="relative h-full w-full overflow-hidden"
+      role="status"
+      aria-label="Loading view"
+    >
+      <div className="deku-route-progress-track">
+        <div className="deku-route-progress-bar" />
+      </div>
     </div>
   );
 }
@@ -215,6 +217,15 @@ function AppContent() {
   const agentTask = useAgentTask();
   const { startTask, resetTask } = agentTask;
 
+  // Dismiss instant boot loading screen on first painted frame & pre-warm workspace chunks
+  React.useLayoutEffect(() => {
+    const rafId = window.requestAnimationFrame(() => {
+      dismissBootLoader();
+      scheduleWorkspaceWarmup();
+    });
+    return () => window.cancelAnimationFrame(rafId);
+  }, []);
+
   // Non-blocking initialization of Web Speech API & audio pipeline
   React.useEffect(() => {
     if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
@@ -367,6 +378,7 @@ function AppContent() {
       const websiteName = options.websiteName || prompt.split(' ').slice(0, 3).join(' ') + ' Website';
       startBuilding(prompt, websiteName);
     } else {
+      preloadChatView();
       let navigated = false;
       const newTaskId = await startTask(prompt, {
         ...options,
@@ -482,7 +494,7 @@ function AppContent() {
             showNewTask={hasSentMessage}
           />
         )}
-        <main className="flex-1 overflow-hidden relative transition-all duration-300 ease-out">
+        <main className="flex-1 overflow-hidden relative transition-colors duration-150 ease-out">
           {isWebsiteActive ? (
             <div className="w-full h-full manus-transition-enter gpu-accelerated">
               <Suspense fallback={<RouteLoadingFallback />}>
@@ -497,7 +509,10 @@ function AppContent() {
               </Suspense>
             </div>
           ) : (
-            <div key={location.pathname} className="w-full h-full manus-transition-enter gpu-accelerated">
+            <div
+              key={location.pathname.startsWith('/task/') ? '/task' : location.pathname}
+              className="w-full h-full manus-transition-enter gpu-accelerated"
+            >
               <ErrorBoundary>
                 <Suspense fallback={<RouteLoadingFallback />}>
                   <Routes>

@@ -18,7 +18,7 @@ import {
 import { ConversationActionBar } from '../agent/ConversationActionBar';
 import { MemoryUpdatedIndicator } from '../agent/MemoryUpdatedIndicator';
 import { MarkdownRenderer } from '../agent/MarkdownRenderer';
-import { formatResponseModelMetadata, normalizeResponseModelMetadata } from '@/lib/responseModelMetadata';
+import { normalizeResponseModelMetadata } from '@/lib/responseModelMetadata';
 import type { ResponseModelMetadata } from '@/lib/responseModelMetadata';
 import { MessageContextMenu, SelectTextModal, ContextMenuAnchor, useMessageLongPressController } from '../agent/MessageContextMenu';
 import { MessageEditController } from '../agent/MessageEditController';
@@ -769,17 +769,12 @@ export function MyAIChat({ onBack }: MyAIChatProps) {
                         </span>
                       )}
                       {msg.role === 'assistant' && msg.content && (
-                        <>
-                          <div className="pl-3 text-[10px] text-muted-foreground/80" data-testid="response-model-metadata">
-                            {formatResponseModelMetadata(msg.responseModel)}
-                          </div>
-                          <div className="pl-3 flex items-center gap-1">
+                        <div className="pl-3 flex items-center gap-1">
                           <ConversationActionBar
                             messageId={`myai-msg-${index}`}
                             content={msg.content}
                           />
-                          </div>
-                        </>
+                        </div>
                       )}
                     </div>
                   </div>

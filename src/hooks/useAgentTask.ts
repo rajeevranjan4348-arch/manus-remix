@@ -22,6 +22,15 @@ import { auth } from '@/lib/firebase';
 import { knowledgeBase } from '@/lib/knowledgeBase';
 import { persistentKnowledgeStore } from '@/lib/persistentKnowledgeStore';
 import { taskCheckpoint } from '@/lib/taskCheckpoint';
+import {
+  ActiveTaskAutoSaveController,
+  extractRecoveredTaskState,
+  type ActiveTaskAutoSaveSnapshot,
+} from '@/lib/taskAutoSave';
+import {
+  getConversationFromFirestore,
+  getMessagesFromFirestore,
+} from '@/lib/firestoreService';
 import { notificationDispatcher } from '@/lib/notificationDispatcher';
 import { securityCenter } from '@/lib/securityCenter';
 import { modelRouter } from '@/lib/modelRouter';
@@ -37,7 +46,7 @@ import {
   StoredMessage,
 } from '@/lib/chatDatabase';
 import { applyUserMessageEditBranch } from '@/lib/messageBranching';
-import { modelExecutionStore, MODEL_UNAVAILABLE_TEXT } from '@/lib/modelIdentity';
+import { modelExecutionStore } from '@/lib/modelIdentity';
 import { tagTaskAfterCompletion } from '@/lib/taskTaggingService';
 import { taskTagger } from '@/services/taskTagger';
 import { exportChatSession, ChatExportFormat } from '@/lib/chatExport';
@@ -255,8 +264,12 @@ export function useAgentTask() {
   }
   const stepsRef = useRef<Step[]>([]);
   stepsRef.current = steps;
+  const phaseRef = useRef<AgentTaskPhase>('idle');
+  phaseRef.current = phase;
   const taskStatusRef = useRef<'idle' | 'running' | 'completed' | 'error'>('idle');
   taskStatusRef.current = taskStatus;
+  const taskCreatedAtRef = useRef<string>('');
+  const autoSaveControllerRef = useRef<ActiveTaskAutoSaveController | null>(null);
   const activeRequestIdRef = useRef<number>(0);
   const activeStreamRequestIdRef = useRef<string>('');
   const activeUserMsgIdRef = useRef<string>('');
@@ -286,6 +299,84 @@ export function useAgentTask() {
       }
     }
   }, []);
+
+  const buildActiveTaskAutoSaveSnapshot = useCallback((): ActiveTaskAutoSaveSnapshot | null => {
+    const activeId = currentTaskIdRef.current || taskId;
+    if (!activeId) return null;
+    const taskMeta = currentTaskRef.current;
+    const promptText =
+      taskMeta?.prompt ||
+      [...persistentMessagesRef.current].reverse().find((m) => m?.role === 'user')?.content ||
+      '';
+    const currentStreamText = liveStreamTextRef.current || '';
+    const completedToolCalls = stepsRef.current
+      .filter((s) => s.status === 'completed')
+      .map((s) => ({
+        toolName: s.label || 'step',
+        args: { stepId: s.id },
+        outputSummary: (s.trace || []).slice(-3).join(' | ') || s.label || 'completed',
+        executedAt: new Date().toISOString(),
+      }));
+
+    return {
+      taskId: activeId,
+      conversationId: activeId,
+      userId: auth?.currentUser?.uid || user?.id || 'usr_manus_default',
+      title: cleanChatTitle(promptText || 'Active Task'),
+      prompt: promptText,
+      mode: taskMeta?.options?.mode === 'work' || taskMeta?.options?.format === 'website' ? 'work' : 'chat',
+      outputFormat: taskMeta?.options?.format,
+      chartType: taskMeta?.options?.chartType,
+      projectId: taskMeta?.options?.projectId ?? null,
+      phase: phaseRef.current,
+      steps: stepsRef.current,
+      accumulatedResult: currentStreamText,
+      completedToolCalls,
+      assistantMessageId: activeAssistantMsgIdRef.current || undefined,
+      userMessageId: activeUserMsgIdRef.current || undefined,
+      messageCount: persistentMessagesRef.current.length,
+      createdAt: taskCreatedAtRef.current || undefined,
+    };
+  }, [taskId, user]);
+
+  // Periodic Firestore auto-save while a task is actively running (prevents data loss on unexpected tab close)
+  useEffect(() => {
+    const activeId = taskId || currentTaskIdRef.current;
+    if (taskStatus !== 'running' || !activeId) {
+      if (autoSaveControllerRef.current) {
+        autoSaveControllerRef.current.stop();
+        autoSaveControllerRef.current = null;
+      }
+      return;
+    }
+
+    if (!taskCreatedAtRef.current) {
+      taskCreatedAtRef.current = new Date().toISOString();
+    }
+
+    const controller = new ActiveTaskAutoSaveController({
+      intervalMs: 8_000,
+      milestoneThrottleMs: 1_500,
+      getSnapshot: buildActiveTaskAutoSaveSnapshot,
+    });
+    autoSaveControllerRef.current = controller;
+    controller.start({ immediate: true });
+
+    return () => {
+      const stillRunningOnTeardown = taskStatusRef.current === 'running';
+      controller.stop({ flushInterrupted: stillRunningOnTeardown });
+      if (autoSaveControllerRef.current === controller) {
+        autoSaveControllerRef.current = null;
+      }
+    };
+  }, [taskStatus, taskId, buildActiveTaskAutoSaveSnapshot]);
+
+  // Trigger a throttled milestone auto-save whenever steps or execution phase advance mid-task
+  useEffect(() => {
+    if (taskStatus === 'running' && autoSaveControllerRef.current?.active) {
+      autoSaveControllerRef.current.triggerMilestoneSave();
+    }
+  }, [taskStatus, phase, steps]);
 
   // Listen to real-time SSE stream deltas from blink.ts and coalesce React state updates
   // using the Ultra-Lite Adaptive Stream Batcher so rapid token bursts never block the main thread.
@@ -541,7 +632,7 @@ export function useAgentTask() {
     - Your product name is permanently "Deku AI" (an independent AI workspace assistant).
     - Always introduce yourself as Deku AI. Never introduce yourself as Gemini, Claude, ChatGPT, GPT, or any other provider persona.
     - Never falsely claim to be a proprietary foundation model trained from scratch.
-    - Never guess or claim an underlying model name from client assumptions; rely strictly on the verified backend execution metadata injected by the server, or state "${MODEL_UNAVAILABLE_TEXT}" if unavailable.
+    - Never guess or claim an underlying model name from client assumptions; rely strictly on the verified backend execution metadata injected by the server, or state that you cannot verify the exact model if unavailable.
     
     Guidelines:
     1. When given file content or CSV data, ALWAYS parse it, analyze the context, compute statistics if numeric, and identify insights.
@@ -769,6 +860,10 @@ export function useAgentTask() {
       messages: nextMessages,
     };
 
+    if (autoSaveControllerRef.current) {
+      autoSaveControllerRef.current.stop();
+      autoSaveControllerRef.current = null;
+    }
     liveStreamTextRef.current = '';
     setLiveStreamText('');
     setResult(finalResult);
@@ -829,15 +924,25 @@ export function useAgentTask() {
             activeTask?.prompt ||
             '';
           if (lastUserPrompt) {
+            const activeUserId = user?.id || 'usr_manus_default';
+            const cleanSummary = cleanedText.split('**Sources**')[0].trim().slice(0, 2000);
             persistentKnowledgeStore
               .saveKnowledgeRecord({
-                userId: user?.id || 'usr_manus_default',
+                userId: activeUserId,
                 query: lastUserPrompt,
                 category: 'verified_research',
-                summary: cleanedText.split('**Sources**')[0].trim().slice(0, 2000),
+                summary: cleanSummary,
                 sources: sourceLinks,
               })
               .catch(() => {});
+            try {
+              knowledgeBase.indexVerifiedResearch({
+                query: lastUserPrompt,
+                summary: cleanSummary,
+                sources: sourceLinks.map((s) => ({ title: s.title, url: s.url })),
+                userId: activeUserId,
+              });
+            } catch {}
           }
         }
       }
@@ -1087,6 +1192,10 @@ export function useAgentTask() {
     if (typeof stop === 'function') {
       try { void stop(); } catch (error) { console.warn('[Agent] Stop request failed:', error); }
     }
+    if (autoSaveControllerRef.current) {
+      autoSaveControllerRef.current.stop({ flushInterrupted: !partialText });
+      autoSaveControllerRef.current = null;
+    }
     isSubmittingRef.current = false;
     liveStreamTextRef.current = '';
     setLiveStreamText('');
@@ -1260,7 +1369,7 @@ export function useAgentTask() {
 
       // 2. Inject Workspace Knowledge Base RAG (local & synchronous-fast)
       try {
-        const ragPassages = knowledgeBase.retrieve(prompt, activeUserId, 3);
+        const ragPassages = knowledgeBase.retrieve(prompt, activeUserId, 4);
         if (ragPassages.length > 0) {
           if (activeActivityTaskId) {
             agentActivityTracker.ingestEvent({
@@ -1280,27 +1389,43 @@ export function useAgentTask() {
         }
       } catch {}
 
-      // 2b. Check Persistent Knowledge Store for fresh verified research records
+      // 2b. Check Persistent Knowledge Store for exact + semantically related fresh verified research
       if (!simplePrompt) {
         try {
-          const cachedResearch = await persistentKnowledgeStore.findFreshRecord(activeUserId, prompt);
-          if (cachedResearch && cachedResearch.sources.length > 0) {
+          const [exactResearch, relatedResearch] = await Promise.all([
+            persistentKnowledgeStore.findFreshRecord(activeUserId, prompt),
+            persistentKnowledgeStore.searchRelevantRecords(activeUserId, prompt, 3),
+          ]);
+          const combinedRecords = [
+            ...(exactResearch ? [exactResearch] : []),
+            ...relatedResearch.filter((rec) => !exactResearch || rec.id !== exactResearch.id),
+          ]
+            .filter((rec) => rec.sources.length > 0)
+            .slice(0, 3);
+
+          if (combinedRecords.length > 0) {
+            const totalSources = combinedRecords.reduce((acc, rec) => acc + rec.sources.length, 0);
             if (activeActivityTaskId) {
               agentActivityTracker.ingestEvent({
                 taskId: activeActivityTaskId,
-                title: 'Loaded verified research cache record',
-                description: `Found ${cachedResearch.sources.length} previously verified source(s)`,
+                title: `Loaded ${combinedRecords.length} verified research knowledge record(s)`,
+                description: `Found ${totalSources} previously verified source(s) across persistent knowledge cache`,
                 toolName: 'knowledge_cache',
                 status: 'COMPLETED',
                 category: 'database',
-                resultSummary: `Verified at ${cachedResearch.lastVerifiedAt}`,
+                resultSummary: `Latest verified at ${combinedRecords[0].lastVerifiedAt}`,
               }, false);
             }
-            const srcList = cachedResearch.sources
-              .slice(0, 5)
-              .map(s => `- [${s.title}](${s.url})`)
-              .join('\n');
-            enriched += `\n\n[FRESH VERIFIED KNOWLEDGE CACHE (Verified at ${cachedResearch.lastVerifiedAt})]:\n${cachedResearch.summary.slice(0, 1200)}\nSources:\n${srcList}`;
+            const formattedBlocks = combinedRecords
+              .map((rec) => {
+                const srcList = rec.sources
+                  .slice(0, 4)
+                  .map(s => `- [${s.title}](${s.url})`)
+                  .join('\n');
+                return `Topic: ${rec.query}\nVerified At: ${rec.lastVerifiedAt}\nSummary:\n${rec.summary.slice(0, 900)}\nSources:\n${srcList}`;
+              })
+              .join('\n\n---\n\n');
+            enriched += `\n\n[VERIFIED RESEARCH CACHE]:\n${formattedBlocks}`;
           }
         } catch {}
       }
@@ -1968,6 +2093,7 @@ export function useAgentTask() {
 
     const generatedId = 'task_' + now + '_' + Math.random().toString(36).substring(2, 8);
     newTaskId = generatedId;
+    taskCreatedAtRef.current = new Date(now).toISOString();
     setTaskId(newTaskId);
     currentTaskIdRef.current = newTaskId;
 
@@ -2085,6 +2211,16 @@ export function useAgentTask() {
           enhancedPrompt = `${prompt}\n\n[Attached Image: ${options.fileName || 'image.jpg'}]`;
         } else {
           const isCSV = options.fileName?.toLowerCase().endsWith('.csv');
+          try {
+            if (typeof options.fileData === 'string' && options.fileData.trim().length > 20) {
+              knowledgeBase.indexDocument({
+                documentId: `upload_${newTaskId}_${(options.fileName || 'file').replace(/[^a-zA-Z0-9._-]/g, '_')}`,
+                documentTitle: options.fileName || 'Uploaded Workspace Document',
+                content: options.fileData.slice(0, 40000),
+                userId: user?.id || 'usr_manus_default',
+              });
+            }
+          } catch {}
           initialSteps.push(
             { id: '2', label: isCSV ? 'Parsing CSV Data' : 'Parsing File Content', status: 'pending', trace: [] },
             { id: '3', label: 'Profiling Data', status: 'pending', trace: [] },
@@ -2281,9 +2417,19 @@ export function useAgentTask() {
         return;
       }
 
+      let resolvedStoredMsgs = storedMsgs;
+      if (!resolvedStoredMsgs || resolvedStoredMsgs.length === 0) {
+        try {
+          const remoteMsgs = await getMessagesFromFirestore(id);
+          if (remoteMsgs && remoteMsgs.length > 0) {
+            resolvedStoredMsgs = remoteMsgs;
+          }
+        } catch {}
+      }
+
       let initialMsgs: any[] = [];
-      if (storedMsgs && storedMsgs.length > 0) {
-        initialMsgs = storedMsgs.map(m => ({
+      if (resolvedStoredMsgs && resolvedStoredMsgs.length > 0) {
+        initialMsgs = resolvedStoredMsgs.map(m => ({
           id: m.id,
           role: m.role,
           content: m.content,
@@ -2298,11 +2444,29 @@ export function useAgentTask() {
         setPersistentMessages(initialMsgs);
       }
 
-      const task = await (blink.db as any).tasks.get(id);
+      let task = await (blink.db as any).tasks.get(id);
+      if (!task) {
+        try {
+          const remoteConv = await getConversationFromFirestore(id);
+          if (remoteConv) {
+            task = {
+              ...remoteConv,
+              prompt: (remoteConv as any).prompt || remoteConv.title,
+              steps: Array.isArray(remoteConv.steps) ? JSON.stringify(remoteConv.steps) : remoteConv.steps,
+              result: typeof remoteConv.result === 'string'
+                ? remoteConv.result
+                : remoteConv.result
+                  ? JSON.stringify(remoteConv.result)
+                  : undefined,
+            };
+          }
+        } catch {}
+      }
       if (isSubmittingRef.current) {
         return;
       }
       if (task) {
+        taskCreatedAtRef.current = task.createdAt || task.created_at || new Date().toISOString();
         const loadedTaskObj = { 
           prompt: task.prompt || task.title || '', 
           options: { 
@@ -2322,7 +2486,7 @@ export function useAgentTask() {
         
         if (task.steps) {
           try {
-            const parsedSteps = JSON.parse(task.steps);
+            const parsedSteps = typeof task.steps === 'string' ? JSON.parse(task.steps) : task.steps;
             setSteps(Array.isArray(parsedSteps)
               ? parsedSteps.map((s: Step) => (!isSubmittingRef.current && s.status === 'running') ? { ...s, status: 'completed' as const } : s)
               : []);
@@ -2333,10 +2497,11 @@ export function useAgentTask() {
         
         if (task.result) {
           try {
-            const parsedResult = JSON.parse(task.result);
+            const parsedResult = typeof task.result === 'string' ? JSON.parse(task.result) : task.result;
             setResult(parsedResult);
             setChartData(parsedResult.chartData || null);
             if (initialMsgs.length === 0 && parsedResult.messages && parsedResult.messages.length > 0) {
+              initialMsgs = parsedResult.messages;
               persistentMessagesRef.current = parsedResult.messages;
               setPersistentMessages(parsedResult.messages);
             }
@@ -2345,12 +2510,102 @@ export function useAgentTask() {
           }
         }
       }
+
+      // Recover any auto-saved in-progress or interrupted checkpoint from Firestore/local storage
+      // if the browser tab closed unexpectedly mid-task.
+      try {
+        const durableCp = await taskCheckpoint.fetchDurableCheckpoint(id, { preferLatest: true });
+        if (isSubmittingRef.current || currentTaskIdRef.current !== id) {
+          return;
+        }
+        const recovered = extractRecoveredTaskState(durableCp);
+        if (recovered) {
+          if (!currentTaskRef.current && (recovered.prompt || recovered.title)) {
+            const recoveredTaskObj = {
+              prompt: recovered.prompt || recovered.title || '',
+              options: {
+                format: recovered.outputFormat,
+                chartType: recovered.chartType,
+                mode: recovered.mode,
+              },
+            };
+            currentTaskRef.current = recoveredTaskObj;
+            setCurrentTask(recoveredTaskObj);
+          }
+
+          if (recovered.steps.length > 0) {
+            setSteps(recovered.steps);
+          }
+
+          if (recovered.partialContent) {
+            const currentMsgs = persistentMessagesRef.current;
+            const lastMsg = currentMsgs[currentMsgs.length - 1];
+            const alreadyCaptured = Boolean(
+              lastMsg &&
+              lastMsg.role === 'assistant' &&
+              typeof lastMsg.content === 'string' &&
+              lastMsg.content.trim().length >= recovered.partialContent.length
+            );
+
+            if (!alreadyCaptured) {
+              const recoveredMsgId = recovered.assistantMessageId || `msg_recovered_${id}`;
+              const recoveredAssistantMsg = {
+                id: recoveredMsgId,
+                role: 'assistant' as const,
+                content: recovered.partialContent,
+                timestamp: recovered.savedAt,
+                status: 'success' as const,
+                metadata: { recoveredFromAutoSave: true, savedAt: recovered.savedAt },
+              };
+              const mergedMsgs = (() => {
+                const idx = currentMsgs.findIndex((m) => m?.id === recoveredMsgId);
+                if (idx !== -1) {
+                  const copy = [...currentMsgs];
+                  copy[idx] = recoveredAssistantMsg;
+                  return copy;
+                }
+                return [...currentMsgs, recoveredAssistantMsg];
+              })();
+
+              persistentMessagesRef.current = mergedMsgs;
+              setPersistentMessages(mergedMsgs);
+              setResult({
+                type: recovered.outputFormat || 'chat',
+                content: recovered.partialContent,
+                messages: mergedMsgs,
+                recoveredFromAutoSave: true,
+              });
+              setTaskStatus('completed');
+              setPhase('completed');
+
+              // Persist recovered message locally so subsequent reloads preserve it too
+              saveMessage({
+                id: recoveredMsgId,
+                conversationId: id,
+                userId: auth?.currentUser?.uid || user?.id || 'usr_manus_default',
+                role: 'assistant',
+                content: recovered.partialContent,
+                timestamp: recovered.savedAt,
+                status: 'success',
+                metadata: { recoveredFromAutoSave: true, savedAt: recovered.savedAt },
+              }).catch(() => {});
+            }
+          }
+        }
+      } catch (recoveryErr) {
+        console.warn('[TaskAutoSave] Checkpoint recovery notice:', recoveryErr);
+      }
     } catch (e) {
       console.error('Failed to load task:', e);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, user]);
 
   const resetTask = useCallback(() => {
+    if (autoSaveControllerRef.current) {
+      autoSaveControllerRef.current.stop();
+      autoSaveControllerRef.current = null;
+    }
+    taskCreatedAtRef.current = '';
     activeRequestIdRef.current += 1;
     activeStreamRequestIdRef.current = '';
     setActiveStreamContext(null);

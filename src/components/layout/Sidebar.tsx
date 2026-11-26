@@ -68,21 +68,25 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
-const ConnectorsStorePanel = React.lazy(() =>
-  import('../connectors/ConnectorsStorePanel').then((m) => ({ default: m.ConnectorsStorePanel }))
-);
-const ProjectModal = React.lazy(() =>
-  import('@/components/projects/ProjectModal').then((m) => ({ default: m.ProjectModal }))
-);
-const ProjectViewModal = React.lazy(() =>
-  import('@/components/projects/ProjectViewModal').then((m) => ({ default: m.ProjectViewModal }))
-);
-const SettingsModal = React.lazy(() =>
-  import('@/components/settings/SettingsModal').then((m) => ({ default: m.SettingsModal }))
-);
-const TagAnalyticsModal = React.lazy(() =>
-  import('@/components/analytics/TagAnalyticsModal').then((m) => ({ default: m.TagAnalyticsModal }))
-);
+import {
+  loadConnectorsStorePanel,
+  loadProjectModal,
+  loadProjectViewModal,
+  loadSettingsModal,
+  loadTagAnalyticsModal,
+  preloadChatView,
+  preloadConnectorsPanel,
+  preloadHistoryPanel,
+  preloadProjectModals,
+  preloadSettingsModal,
+  preloadTagAnalyticsModal,
+} from '@/lib/instantPreload';
+
+const ConnectorsStorePanel = React.lazy(loadConnectorsStorePanel);
+const ProjectModal = React.lazy(loadProjectModal);
+const ProjectViewModal = React.lazy(loadProjectViewModal);
+const SettingsModal = React.lazy(loadSettingsModal);
+const TagAnalyticsModal = React.lazy(loadTagAnalyticsModal);
 
 import type { ActiveWorkspacePanel } from '@/lib/panelNavigation';
 
@@ -489,6 +493,12 @@ export const Sidebar = React.memo(function Sidebar({
     }
   };
 
+  const preloadNavItem = (itemId: string) => {
+    if (itemId === 'connectors') preloadConnectorsPanel();
+    else if (itemId === 'library') preloadHistoryPanel();
+    else if (itemId === 'analytics') preloadTagAnalyticsModal();
+  };
+
   const navItems = [
     { id: 'new', label: 'New Chat', icon: MessageSquarePlus, action: onNewTask },
     { 
@@ -573,10 +583,13 @@ export const Sidebar = React.memo(function Sidebar({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
+                    onPointerEnter={() => preloadNavItem(item.id)}
+                    onFocus={() => preloadNavItem(item.id)}
+                    onTouchStart={() => preloadNavItem(item.id)}
                     onClick={() => item.action ? item.action() : setActiveTab(item.id)}
                     aria-current={itemActive ? 'page' : undefined}
                     className={cn(
-                      "manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-2.5 rounded-xl transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 flex items-center justify-center",
+                      "manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-2.5 rounded-xl transition-[transform,background-color,color,box-shadow] duration-100 ease-out cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 flex items-center justify-center",
                       item.id === 'new'
                         ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] shadow-sm"
                         : itemActive || (activeTab === item.id && !item.action)
@@ -636,9 +649,12 @@ export const Sidebar = React.memo(function Sidebar({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      onPointerEnter={preloadChatView}
+                      onFocus={preloadChatView}
+                      onTouchStart={preloadChatView}
                       onClick={() => navigate(`/task/${task.id}`)}
                       className={cn(
-                        "manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-2.5 rounded-xl transition-all relative group cursor-pointer flex items-center justify-center",
+                        "manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-2.5 rounded-xl transition-[transform,background-color,color] duration-100 relative group cursor-pointer flex items-center justify-center",
                         isActive
                           ? "bg-primary text-primary-foreground shadow-sm"
                           : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
@@ -670,11 +686,14 @@ export const Sidebar = React.memo(function Sidebar({
                 <button
                   type="button"
                   data-testid="sidebar-collapsed-settings-button"
+                  onPointerEnter={preloadSettingsModal}
+                  onFocus={preloadSettingsModal}
+                  onTouchStart={preloadSettingsModal}
                   onClick={handleOpenSettingsNavigation}
                   aria-label="Settings"
                   aria-current={isSettingsRouteActive ? 'page' : undefined}
                   className={cn(
-                    "manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-2.5 rounded-xl transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 flex items-center justify-center",
+                    "manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-2.5 rounded-xl transition-[transform,background-color,color,box-shadow] duration-100 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 flex items-center justify-center",
                     isSettingsRouteActive
                       ? "bg-[#F2F2F2] dark:bg-[#171717] border border-[#E0E0E0] dark:border-[#333333] text-[#000000] dark:text-[#FFFFFF] shadow-sm"
                       : "text-[#777777] dark:text-[#AAAAAA] hover:bg-[#F2F2F2] dark:hover:bg-[#171717] hover:text-[#000000] dark:hover:text-[#FFFFFF]"
@@ -711,16 +730,16 @@ export const Sidebar = React.memo(function Sidebar({
       {/* Mobile Backdrop */}
       <div 
         onClick={onCloseSidebar || onToggle}
-        className="fixed inset-0 bg-black/50 z-40 lg:hidden backdrop-blur-xs transition-opacity duration-250 ease-out animate-in fade-in"
+        className="fixed inset-0 bg-black/50 z-40 lg:hidden backdrop-blur-xs transition-opacity duration-100 ease-out animate-in fade-in"
       />
 
-      <aside data-spring-transition="true" className="w-[82vw] max-w-[280px] sm:w-64 h-screen border-r border-[#E0E0E0] dark:border-[#333333] bg-[#FFFFFF] dark:bg-[#111111] flex flex-col fixed inset-y-0 left-0 lg:static z-50 shrink-0 transition-[transform,width,colors] duration-250 ease-[cubic-bezier(0.16,1,0.3,1)] shadow-2xl lg:shadow-none workspace-drawer-spring-left lg:animate-none gpu-accelerated">
+      <aside data-spring-transition="true" className="w-[82vw] max-w-[280px] sm:w-64 h-screen border-r border-[#E0E0E0] dark:border-[#333333] bg-[#FFFFFF] dark:bg-[#111111] flex flex-col fixed inset-y-0 left-0 lg:static z-50 shrink-0 transition-[transform,width,colors] duration-150 ease-out shadow-2xl lg:shadow-none workspace-drawer-spring-left lg:animate-none gpu-accelerated">
         {/* Header with Logo and Close Toggle */}
         <div className="p-4 sm:p-5 flex items-center justify-between">
           <ManusLogo showBadge={true} />
           <button 
             onClick={onToggle}
-            className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-2 text-[#777777] dark:text-[#AAAAAA] hover:text-[#000000] dark:hover:text-[#FFFFFF] hover:bg-[#F2F2F2] dark:hover:bg-[#171717] rounded-lg transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 smooth-press inline-flex items-center justify-center"
+            className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-2 text-[#777777] dark:text-[#AAAAAA] hover:text-[#000000] dark:hover:text-[#FFFFFF] hover:bg-[#F2F2F2] dark:hover:bg-[#171717] rounded-lg transition-[transform,background-color,color] duration-100 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95 smooth-press inline-flex items-center justify-center"
             title="Collapse sidebar"
             aria-label="Collapse sidebar"
           >
@@ -737,6 +756,9 @@ export const Sidebar = React.memo(function Sidebar({
               key={item.id}
               data-testid={`sidebar-nav-${item.id}`}
               aria-current={itemActive ? 'page' : undefined}
+              onPointerEnter={() => preloadNavItem(item.id)}
+              onFocus={() => preloadNavItem(item.id)}
+              onTouchStart={() => preloadNavItem(item.id)}
               onClick={() => handleMobileSelect(() => item.action ? item.action() : setActiveTab(item.id))}
               className={cn(
                 "manus-sidebar-item-slide group w-full flex items-center gap-3 px-3 py-2 rounded-xl font-medium text-sm cursor-pointer",
@@ -775,17 +797,19 @@ export const Sidebar = React.memo(function Sidebar({
               aria-label={showAllProjects ? "Show less projects" : "Show all projects"}
               className="manus-touch-target min-h-[44px] sm:min-h-0 flex items-center gap-2 text-left rounded-md text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
             >
-              <Folder size={20} strokeWidth={2.4} />
-              <h3 className="text-sm font-semibold tracking-wide">Projects</h3>
-              <ChevronRight size={16} strokeWidth={2.4} className={cn("transition-transform", showAllProjects && "rotate-90")} />
+              <Folder size={19} strokeWidth={2.3} />
+              <h3 className="text-xs font-semibold uppercase tracking-wider">Projects</h3>
+              <ChevronRight size={15} strokeWidth={2.4} className={cn("transition-transform duration-200 ease-out", showAllProjects && "rotate-90")} />
             </button>
             <button 
               type="button"
+              onPointerEnter={preloadProjectModals}
+              onTouchStart={preloadProjectModals}
               onClick={() => {
                 setProjectToEdit(null);
                 setIsProjectModalOpen(true);
               }}
-              className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent transition-all duration-200 cursor-pointer hover:scale-110 hover:shadow-2xs active:scale-95 inline-flex items-center justify-center"
+              className="manus-touch-target min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-manus-cream dark:hover:bg-accent transition-[transform,background-color,color] duration-100 ease-out cursor-pointer hover:scale-105 active:scale-95 inline-flex items-center justify-center"
               title="Create new project"
               aria-label="Create new project"
             >
@@ -793,43 +817,49 @@ export const Sidebar = React.memo(function Sidebar({
             </button>
           </div>
 
-          {showAllProjects && (
-          <div className="space-y-1 overflow-y-auto pr-1 custom-scrollbar max-h-72">
-            {projects.map((proj) => {
-              const IconComp = PROJECT_ICON_MAP[proj.icon] || Folder;
-              const colorTheme = PROJECT_COLOR_MAP[proj.color] || PROJECT_COLOR_MAP.indigo;
-              const isFiltered = activeProjectId === proj.id;
-              const projTaskCount = tasks.filter(t => (t as any).projectId === proj.id || (proj.taskIds && proj.taskIds.includes(t.id))).length;
+          <div
+            className="manus-collapsible-grid"
+            data-expanded={showAllProjects ? 'true' : 'false'}
+            aria-hidden={!showAllProjects}
+          >
+            <div className="manus-collapsible-inner">
+              <div className="space-y-1 overflow-y-auto pr-1 custom-scrollbar max-h-72 pt-0.5">
+                {projects.map((proj) => {
+                  const IconComp = PROJECT_ICON_MAP[proj.icon] || Folder;
+                  const colorTheme = PROJECT_COLOR_MAP[proj.color] || PROJECT_COLOR_MAP.indigo;
+                  const isFiltered = activeProjectId === proj.id;
+                  const projTaskCount = tasks.filter(t => (t as any).projectId === proj.id || (proj.taskIds && proj.taskIds.includes(t.id))).length;
 
-              return (
-                <div key={proj.id} className="relative group">
-                  <button
-                    onClick={() => {
-                      if (activeProjectId === proj.id) {
-                        setActiveProjectId(null);
-                      } else {
-                        setActiveProjectId(proj.id);
-                      }
-                    }}
-                    className={cn(
-                      "w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl transition-all duration-150 text-left text-xs font-medium cursor-pointer hover:scale-[1.01] hover:shadow-2xs active:scale-[0.99]",
-                      isFiltered
-                        ? "bg-primary/10 text-primary font-semibold border border-primary/30"
-                        : "text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
-                    )}
-                  >
-                    <div className={cn("w-6 h-6 rounded-lg flex items-center justify-center shrink-0 font-semibold shadow-2xs", colorTheme.bg)}>
-                      <IconComp size={15} strokeWidth={2.4} />
-                    </div>
+                  return (
+                    <div key={proj.id} className="relative group">
+                      <button
+                        tabIndex={showAllProjects ? 0 : -1}
+                        onClick={() => {
+                          if (activeProjectId === proj.id) {
+                            setActiveProjectId(null);
+                          } else {
+                            setActiveProjectId(proj.id);
+                          }
+                        }}
+                        className={cn(
+                          "w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl transition-[transform,background-color,border-color,color] duration-150 ease-out text-left text-xs font-medium cursor-pointer active:scale-[0.99]",
+                          isFiltered
+                            ? "bg-primary/10 text-primary font-semibold border border-primary/30"
+                            : "border border-transparent text-muted-foreground hover:bg-manus-cream dark:hover:bg-accent hover:text-foreground"
+                        )}
+                      >
+                        <div className={cn("w-6 h-6 rounded-lg flex items-center justify-center shrink-0 font-semibold shadow-2xs", colorTheme.bg)}>
+                          <IconComp size={15} strokeWidth={2.4} />
+                        </div>
 
-                    <span className="truncate flex-1 pr-5">{proj.name}</span>
+                        <span className="truncate flex-1 pr-5">{proj.name}</span>
 
-                    {projTaskCount > 0 && (
-                      <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-border/60 text-muted-foreground font-mono shrink-0">
-                        {projTaskCount}
-                      </span>
-                    )}
-                  </button>
+                        {projTaskCount > 0 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-border/60 text-muted-foreground font-mono tabular-nums shrink-0">
+                            {projTaskCount}
+                          </span>
+                        )}
+                      </button>
 
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -878,27 +908,30 @@ export const Sidebar = React.memo(function Sidebar({
               );
             })}
 
-            <button
-              onClick={() => {
-                setProjectToEdit(null);
-                setIsProjectModalOpen(true);
-              }}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded-xl hover:bg-manus-cream dark:hover:bg-accent font-medium"
-            >
-              <Plus size={16} strokeWidth={2.4} className="text-primary" />
-              <span>New project</span>
-            </button>
+                <button
+                  tabIndex={showAllProjects ? 0 : -1}
+                  onClick={() => {
+                    setProjectToEdit(null);
+                    setIsProjectModalOpen(true);
+                  }}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded-xl hover:bg-manus-cream dark:hover:bg-accent font-medium"
+                >
+                  <Plus size={16} strokeWidth={2.4} className="text-primary" />
+                  <span>New project</span>
+                </button>
 
-            <button
-              type="button"
-              onClick={() => setShowAllProjects(false)}
-              className="w-full flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded-xl hover:bg-manus-cream dark:hover:bg-accent font-medium"
-            >
-              <span>Show less</span>
-              <ChevronRight size={15} strokeWidth={2.4} className="-rotate-90" />
-            </button>
+                <button
+                  type="button"
+                  tabIndex={showAllProjects ? 0 : -1}
+                  onClick={() => setShowAllProjects(false)}
+                  className="w-full flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer rounded-xl hover:bg-manus-cream dark:hover:bg-accent font-medium"
+                >
+                  <span>Show less</span>
+                  <ChevronRight size={15} strokeWidth={2.4} className="-rotate-90" />
+                </button>
+              </div>
+            </div>
           </div>
-          )}
         </div>
 
         {/* All Tasks Section (Previous Sessions) */}
@@ -909,7 +942,7 @@ export const Sidebar = React.memo(function Sidebar({
                 Previous Tasks
               </h3>
               {filteredTasks.length > 0 && (
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-border text-muted-foreground font-mono">
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-border/80 text-muted-foreground font-mono tabular-nums">
                   {filteredTasks.length}
                 </span>
               )}
@@ -961,7 +994,7 @@ export const Sidebar = React.memo(function Sidebar({
 
           {/* Search Filter Input */}
           {isSearchOpen && (
-            <div className="px-2 mb-2 animate-in fade-in slide-in-from-top-1 duration-200">
+            <div className="px-2 mb-2 animate-in fade-in slide-in-from-top-1 duration-100">
               <div className="flex items-center gap-2 px-2.5 py-1.5 bg-white dark:bg-card border border-border rounded-xl text-xs shadow-xs">
                 <Search size={15} strokeWidth={2.4} className="text-muted-foreground shrink-0" />
                 <input
@@ -1004,6 +1037,9 @@ export const Sidebar = React.memo(function Sidebar({
                   return (
                     <div key={task.id} className="relative group">
                       <button
+                        onPointerEnter={preloadChatView}
+                        onFocus={preloadChatView}
+                        onTouchStart={preloadChatView}
                         onClick={() => {
                           handleMobileSelect(() => navigate(`/task/${task.id}`));
                         }}
@@ -1221,7 +1257,7 @@ export const Sidebar = React.memo(function Sidebar({
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-semibold text-foreground truncate">{fbUser.displayName || 'Firebase User'}</p>
                   <div className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
-                    <Cloud size={11} className="shrink-0 animate-pulse" />
+                    <Cloud size={11} className="shrink-0" />
                     <span className="truncate">Cloud Synced</span>
                   </div>
                 </div>
@@ -1229,6 +1265,9 @@ export const Sidebar = React.memo(function Sidebar({
               <button
                 type="button"
                 data-testid="sidebar-settings-button"
+                onPointerEnter={preloadSettingsModal}
+                onFocus={preloadSettingsModal}
+                onTouchStart={preloadSettingsModal}
                 onClick={() => handleMobileSelect(handleOpenSettingsNavigation)}
                 aria-label="Settings"
                 aria-current={isSettingsRouteActive ? 'page' : undefined}
@@ -1256,7 +1295,7 @@ export const Sidebar = React.memo(function Sidebar({
             <div className="flex items-center gap-2">
               <button
                 onClick={() => signInWithGoogle()}
-                className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-foreground text-background font-medium text-xs shadow-xs hover:opacity-90 transition-all cursor-pointer"
+                className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-foreground text-background font-medium text-xs shadow-xs hover:opacity-90 transition-opacity duration-100 cursor-pointer"
               >
                 <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
                   <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -1269,6 +1308,9 @@ export const Sidebar = React.memo(function Sidebar({
               <button
                 type="button"
                 data-testid="sidebar-settings-button"
+                onPointerEnter={preloadSettingsModal}
+                onFocus={preloadSettingsModal}
+                onTouchStart={preloadSettingsModal}
                 onClick={() => handleMobileSelect(handleOpenSettingsNavigation)}
                 aria-label="Settings"
                 aria-current={isSettingsRouteActive ? 'page' : undefined}

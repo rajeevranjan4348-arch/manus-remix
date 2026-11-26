@@ -1546,6 +1546,32 @@ export default defineConfig({
   },
   build: {
     target: 'esnext',
+    cssCodeSplit: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (id.includes('react-dom') || id.includes('react-router') || id.includes('/react/')) {
+            return 'vendor-react';
+          }
+          if (id.includes('framer-motion') || id.includes('gsap')) {
+            return 'vendor-motion';
+          }
+          if (id.includes('@radix-ui')) {
+            return 'vendor-radix';
+          }
+          if (id.includes('firebase')) {
+            return 'vendor-firebase';
+          }
+          if (id.includes('recharts') || id.includes('d3-')) {
+            return 'vendor-charts';
+          }
+          if (id.includes('shiki') || id.includes('prism') || id.includes('katex')) {
+            return 'vendor-syntax';
+          }
+        },
+      },
+    },
   },
   server: {
     port: 3000,

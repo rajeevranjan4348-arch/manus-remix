@@ -285,6 +285,95 @@
         }
       },
       "required": ["id", "conversationId", "userId", "role", "content", "timestamp", "status"]
+    },
+    "TaskCheckpoint": {
+      "title": "TaskCheckpoint",
+      "description": "Periodic auto-saved execution checkpoint for active tasks to prevent data loss on unexpected browser tab close",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable checkpoint identifier (chk_<taskId>)",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "taskId": {
+          "type": "string",
+          "description": "Active task identifier matching the checkpoint document ID",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "conversationId": {
+          "type": "string",
+          "description": "Associated conversation identifier",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "stepIndex": {
+          "type": "integer",
+          "description": "Zero-based index of the active or most recently completed step"
+        },
+        "totalSteps": {
+          "type": "integer",
+          "description": "Total number of planned workflow steps"
+        },
+        "stepLabel": {
+          "type": "string",
+          "description": "Human-readable label for the current execution step",
+          "maxLength": 256
+        },
+        "status": {
+          "type": "string",
+          "description": "Execution checkpoint lifecycle status",
+          "enum": ["in_progress", "completed", "interrupted", "failed"]
+        },
+        "completedToolCalls": {
+          "type": "array",
+          "description": "Bounded list (max 100) of completed tool or step execution summaries"
+        },
+        "accumulatedResult": {
+          "type": "string",
+          "description": "Accumulated partial or final streamed task response text",
+          "maxLength": 500000
+        },
+        "stateSnapshot": {
+          "type": "object",
+          "description": "Compact key-value map (max 100 keys) of active task metadata, steps, and auto-save sequence"
+        },
+        "checksum": {
+          "type": "string",
+          "description": "Deterministic integrity checksum for recovery validation",
+          "maxLength": 128
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "ISO timestamp of the last auto-save write",
+          "maxLength": 64
+        },
+        "resumedAt": {
+          "type": "string",
+          "description": "Optional ISO timestamp when checkpoint was resumed",
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "id",
+        "taskId",
+        "conversationId",
+        "userId",
+        "stepIndex",
+        "stepLabel",
+        "completedToolCalls",
+        "accumulatedResult",
+        "checksum",
+        "timestamp"
+      ]
     }
   },
   "firestore": {
@@ -295,6 +384,10 @@
     "/users/{userId}/settings/{settingsId}": {
       "schema": "UserSettings",
       "description": "Stores user settings and preferences"
+    },
+    "/users/{userId}/checkpoints/{checkpointId}": {
+      "schema": "TaskCheckpoint",
+      "description": "Stores periodically auto-saved active task checkpoints for crash and tab-close recovery"
     },
     "/projects/{projectId}": {
       "schema": "Project",

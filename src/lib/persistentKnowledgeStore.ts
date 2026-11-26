@@ -58,6 +58,13 @@ const LOCAL_HISTORY_PREFIX = 'manus_rtie_research_history_';
 const MAX_STORED_RECORDS = 50;
 const MAX_HISTORY_ENTRIES = 60;
 
+const STOP_WORDS = new Set([
+  'the', 'and', 'for', 'with', 'that', 'this', 'from', 'have', 'what', 'when',
+  'where', 'which', 'about', 'into', 'your', 'will', 'would', 'could', 'should',
+  'there', 'their', 'they', 'them', 'been', 'being', 'more', 'most', 'some',
+  'than', 'then', 'also', 'just', 'like', 'make', 'tell', 'show', 'give', 'does',
+]);
+
 function computeFastHash(input: string): string {
   const s = String(input || '').toLowerCase().trim();
   let h = 2166136261;
@@ -66,6 +73,38 @@ function computeFastHash(input: string): string {
     h = Math.imul(h, 16777619);
   }
   return (h >>> 0).toString(16).padStart(8, '0');
+}
+
+function tokenizeKnowledgeQuery(input: string): string[] {
+  return String(input || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .split(/\s+/)
+    .filter((token) => token.length > 2 && !STOP_WORDS.has(token));
+}
+
+function stripUndefinedDeep<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefinedDeep(item)) as unknown as T;
+  }
+  if (value && typeof value === 'object') {
+    const cleaned: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      if (val !== undefined) {
+        cleaned[key] = stripUndefinedDeep(val);
+      }
+    }
+    return cleaned as T;
+  }
+  return value;
+}
+
+function isAuthenticatedFirestoreUser(userId: string): boolean {
+  if (!userId || userId === 'usr_manus_default' || userId.startsWith('guest-')) {
+    return false;
+  }
+  const currentUser = auth?.currentUser;
+  return Boolean(currentUser && !currentUser.isAnonymous && currentUser.uid === userId);
 }
 
 class PersistentKnowledgeStoreService {
@@ -113,8 +152,7 @@ class PersistentKnowledgeStoreService {
 
     if (!records) {
       records = [];
-      const currentUser = auth.currentUser;
-      if (currentUser && currentUser.uid === userId) {
+      if (isAuthenticatedFirestoreUser(userId)) {
         try {
           const snap = await Promise.race([
             getDoc(doc(db, 'users', userId, 'settings', 'knowledge_cache')),
@@ -171,6 +209,78 @@ class PersistentKnowledgeStoreService {
       }
     }
     return null;
+  }
+
+  /**
+   * Semantic keyword + bigram retrieval across fresh verified research records
+   * so rephrased follow-ups and related queries reuse verified knowledge cleanly.
+   */
+  public async searchRelevantRecords(
+    userId: string,
+    query: string,
+    limit = 3,
+    nowMs = Date.now()
+  ): Promise<PersistentKnowledgeRecord[]> {
+    if (!userId || !query.trim() || limit <= 0) return [];
+    const terms = tokenizeKnowledgeQuery(query);
+    if (terms.length === 0) return [];
+
+    const uniqueTerms = Array.from(new Set(terms));
+    const bigrams: string[] = [];
+    for (let i = 0; i < terms.length - 1; i++) {
+      bigrams.push(`${terms[i]} ${terms[i + 1]}`);
+    }
+
+    const records = await this.getKnowledgeRecords(userId, nowMs);
+    if (records.length === 0) return [];
+
+    const scored: Array<{ record: PersistentKnowledgeRecord; score: number }> = [];
+
+    for (const rec of records) {
+      if (!this.isRecordFresh(rec, nowMs)) continue;
+      const lowerQuery = rec.query.toLowerCase();
+      const lowerSummary = rec.summary.toLowerCase();
+      const sourceText = rec.sources.map((s) => `${s.title} ${s.domain || ''}`).join(' ').toLowerCase();
+
+      let matchedTerms = 0;
+      let score = 0;
+
+      for (const term of uniqueTerms) {
+        let matched = false;
+        if (lowerQuery.includes(term)) {
+          score += 3.0;
+          matched = true;
+        }
+        if (lowerSummary.includes(term)) {
+          score += 1.5;
+          matched = true;
+        }
+        if (sourceText.includes(term)) {
+          score += 0.8;
+          matched = true;
+        }
+        if (matched) matchedTerms += 1;
+      }
+
+      for (const bigram of bigrams) {
+        if (lowerQuery.includes(bigram)) score += 3.5;
+        else if (lowerSummary.includes(bigram)) score += 2.0;
+      }
+
+      const coverage = matchedTerms / uniqueTerms.length;
+      if (matchedTerms === 0 || (uniqueTerms.length >= 2 && coverage < 0.34)) {
+        continue;
+      }
+
+      const confidenceBoost = 1 + Math.min(0.25, Math.max(0, (rec.sourceConfidence || 0.8) - 0.5));
+      const finalScore = (score + coverage * 2.5) * confidenceBoost;
+      if (finalScore >= 2.0) {
+        scored.push({ record: rec, score: finalScore });
+      }
+    }
+
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, limit).map((item) => item.record);
   }
 
   /**
@@ -275,16 +385,16 @@ class PersistentKnowledgeStoreService {
   ): Promise<void> {
     this.saveLocally(userId, entries, history);
 
-    const currentUser = auth.currentUser;
-    if (currentUser && currentUser.uid === userId) {
+    if (isAuthenticatedFirestoreUser(userId)) {
       try {
+        const sanitizedPayload = stripUndefinedDeep({
+          entries: entries.slice(0, 35),
+          history: history.slice(0, 40),
+          updatedAt: new Date().toISOString(),
+        });
         await setDoc(
           doc(db, 'users', userId, 'settings', 'knowledge_cache'),
-          {
-            entries: entries.slice(0, 35),
-            history: history.slice(0, 40),
-            updatedAt: new Date().toISOString(),
-          },
+          sanitizedPayload,
           { merge: true }
         );
       } catch (err) {

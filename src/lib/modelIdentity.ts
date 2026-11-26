@@ -1,5 +1,5 @@
 export const DEKU_PRODUCT_NAME = 'Deku AI' as const;
-export const MODEL_UNAVAILABLE_TEXT = 'Model information unavailable' as const;
+export const MODEL_UNAVAILABLE_TEXT = '' as const;
 
 export type CanonicalProviderId =
   | 'google'
@@ -195,7 +195,7 @@ export function formatExecutionTooltip(
   meta?: VerifiedExecutionMetadata | null,
 ): string {
   if (!meta || !meta.verified || !meta.model) {
-    return `${DEKU_PRODUCT_NAME} — ${MODEL_UNAVAILABLE_TEXT}`;
+    return DEKU_PRODUCT_NAME;
   }
 
   const lines = [

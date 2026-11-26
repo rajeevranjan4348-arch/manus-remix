@@ -208,7 +208,7 @@ export const SERVER_MEMORY_BEHAVIOR_POLICY =
 
 export function stripInjectedContextBlocks(text: string): string {
   return String(text || '')
-    .replace(/\n*\[(?:SILENT USER MEMORY CONTEXT|USER SAVED MEMORIES|USER SAVED PREFERENCES & FACTUAL MEMORY|WORKSPACE KNOWLEDGE BASE PASSAGES|VERIFIED RESEARCH CACHE|CONNECTED WORKSPACE CONTEXT)[^\]]*\][\s\S]*$/i, '')
+    .replace(/\n*\[(?:SILENT USER MEMORY CONTEXT|USER SAVED MEMORIES|USER SAVED PREFERENCES & FACTUAL MEMORY|WORKSPACE KNOWLEDGE BASE PASSAGES|VERIFIED RESEARCH CACHE|FRESH VERIFIED KNOWLEDGE CACHE|REAL-TIME KNOWLEDGE CONTEXT|CONNECTED WORKSPACE CONTEXT)[^\]]*\][\s\S]*$/i, '')
     .trim();
 }
 
@@ -633,9 +633,12 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
 
     if (useGoogleSearch) {
       baseSystemPrompt +=
-        '\n\nLIVE WEB SEARCH & REAL-TIME DATA ARE ENABLED. Use Google Search grounding and the verified real-time data snapshot above for current-events, weather, exchange rates, crypto prices, news, and other changing-fact questions. ' +
-        'Prioritize recent, reliable sources. Clearly distinguish confirmed information from uncertainty. Include useful source links and publication dates when available. ' +
+        '\n\nLIVE WEB SEARCH, REAL-TIME DATA & KNOWLEDGE INTEGRATION ARE ENABLED. Fuse Google Search grounding, URL context, the verified real-time data snapshot above, Workspace Knowledge Base passages, and Verified Research Cache records to answer current-events, live market/weather/crypto/sports, URL inspection, and factual questions with precision. ' +
+        'Prioritize recent, authoritative sources and workspace documents. Clearly distinguish confirmed facts from uncertainty. Include useful source links and publication dates when available. ' +
         'Never invent sources, URLs, dates, headlines, or live facts. If search results are insufficient, say so.';
+    } else {
+      baseSystemPrompt +=
+        '\n\n[KNOWLEDGE INTEGRATION]\nWhen Workspace Knowledge Base passages or Verified Research Cache records are provided in the conversation context, ground your answer in those authoritative sources and cite them naturally when relevant.';
     }
 
     baseSystemPrompt +=
@@ -680,9 +683,17 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
         break modelLoop;
       }
 
-      // Only attempt Google Search grounding on the primary fast model if RTIE did not already gather rich live sources
-      const needsModelSearchGrounding = useGoogleSearch && !realtimeSnapshot.hasLiveDomainData;
-      const toolConfigs = needsModelSearchGrounding ? [{ tools: [{ googleSearch: {} }] }, {}] : [{}];
+      // Enable Gemini built-in real-time tools (Google Search + URL Context when URLs are present)
+      // Always retain `{}` as a graceful fallback in case a specific model/tier rejects built-in tools.
+      const hasTargetUrls = Boolean(preRoute.extractedEntities.targetUrls && preRoute.extractedEntities.targetUrls.length > 0);
+      const realtimeTools: Array<Record<string, Record<string, never>>> = [];
+      if (useGoogleSearch) {
+        realtimeTools.push({ googleSearch: {} });
+      }
+      if (hasTargetUrls) {
+        realtimeTools.push({ urlContext: {} });
+      }
+      const toolConfigs = realtimeTools.length > 0 ? [{ tools: realtimeTools }, {}] : [{}];
       const supportsThinkingBudget = model.includes('gemini-2.5');
       const isGeminiFallback =
         requestedRoute.targetProvider !== 'google' ||
@@ -801,9 +812,17 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
                   sources.set(web.uri, typeof web.title === 'string' && web.title.trim() ? web.title : web.uri);
                 }
               }
+
+              const urlMetadataList = (chunk?.candidates?.[0] as any)?.urlContextMetadata?.urlMetadata || [];
+              for (const urlItem of urlMetadataList) {
+                const retrievedUrl = urlItem?.retrievedUrl;
+                if (typeof retrievedUrl === 'string' && /^https?:\/\//i.test(retrievedUrl) && !sources.has(retrievedUrl)) {
+                  sources.set(retrievedUrl, retrievedUrl);
+                }
+              }
             }
 
-            if (useGoogleSearch && sources.size > 0 && hasYielded) {
+            if ((useGoogleSearch || (preRoute.extractedEntities.targetUrls?.length || 0) > 0) && sources.size > 0 && hasYielded) {
               if (searchQueries.size === 0 && latestUserText) {
                 searchQueries.add(latestUserText);
               }

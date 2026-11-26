@@ -265,7 +265,7 @@ export function routeQueryIntent(rawQuery: string): QueryRouteDecision {
     weatherInfo.wantsWeather ||
     currencyInfo.wantsCurrency ||
     wantsCrypto ||
-    /\b(stock\s+price|share\s+price|market\s+cap|exchange\s+rate|forex|gold\s+price|silver\s+price|oil\s+price|cpi|inflation\s+rate|gdp\s+growth|unemployment\s+rate|interest\s+rate|earthquake\s+magnitude|aqi|air\s+quality)\b/i.test(
+    /\b(stock\s+price|share\s+price|market\s+cap|exchange\s+rate|forex|gold\s+price|silver\s+price|oil\s+price|nifty|sensex|nasdaq|s&p\s*500|dow\s+jones|live\s+score|cricket\s+score|match\s+score|football\s+score|cpi|inflation\s+rate|gdp\s+growth|unemployment\s+rate|interest\s+rate|earthquake\s+magnitude|aqi|air\s+quality)\b/i.test(
       clean
     )
   ) {
@@ -289,7 +289,7 @@ export function routeQueryIntent(rawQuery: string): QueryRouteDecision {
 
   // 3. Check D. ai_models (Latest Gemini model, OpenAI, Claude, Llama, AI model announcements/docs)
   if (
-    /\b(latest\s+gemini|newest\s+gemini|gemini\s+model|gemini\s+2\.5|gemini\s+3|claude\s+3|claude\s+4|gpt-?4|gpt-?5|o1|o3|llama\s+3|llama\s+4|deepseek\s+r1|deepseek\s+v3|mistral|qwen|latest\s+llm|latest\s+ai\s+model|ai\s+model\s+release|model\s+benchmark|context\s+window\s+of|google\s+ai\s+announcement|anthropic\s+announcement|openai\s+announcement)\b/i.test(
+    /\b(latest\s+gemini|newest\s+gemini|gemini\s+model|gemini\s+2\.5|gemini\s+3(?:\.1)?|gemini\s+4|gemini-4-(?:hydrogen|neon|carbon|argon)|claude\s+3|claude\s+4|gpt-?4|gpt-?5|o1|o3|llama\s+3|llama\s+4|deepseek\s+r1|deepseek\s+v3|mistral|qwen|latest\s+llm|latest\s+ai\s+model|ai\s+model\s+release|model\s+benchmark|context\s+window\s+of|google\s+ai\s+announcement|anthropic\s+announcement|openai\s+announcement)\b/i.test(
       clean
     )
   ) {

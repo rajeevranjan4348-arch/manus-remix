@@ -16,6 +16,8 @@ export interface CodeBlockProps {
   filename?: string | null;
   /** When true, skips async Shiki re-tokenization per typing frame and uses instant semantic highlighting */
   isStreaming?: boolean;
+  /** When true, this specific code block is actively receiving streamed code tokens */
+  isGenerating?: boolean;
 }
 
 const INITIAL_MAX_RENDER_LINES = 320;
@@ -47,12 +49,14 @@ export const CodeBlock = memo(function CodeBlock({
   meta,
   filename: explicitFilename,
   isStreaming = false,
+  isGenerating = false,
 }: CodeBlockProps) {
   const { resolvedTheme } = useTheme();
   const [copied, setCopied] = useState(false);
   const [shikiHtml, setShikiHtml] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollViewportRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     return () => {
@@ -101,10 +105,19 @@ export const CodeBlock = memo(function CodeBlock({
     [visibleCode, language.id]
   );
 
+  // Keep scroll viewport pinned to latest streamed line while this code block is actively generating
+  useEffect(() => {
+    if (!isGenerating || !scrollViewportRef.current) return;
+    const el = scrollViewportRef.current;
+    if (el.scrollHeight > el.clientHeight) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [isGenerating, visibleCode]);
+
   // Lazy Shiki dual-theme enrichment once streaming settles
   useEffect(() => {
     let cancelled = false;
-    if (isStreaming || !visibleCode || language.shikiLang === 'text') {
+    if (isStreaming || isGenerating || !visibleCode || language.shikiLang === 'text') {
       setShikiHtml(null);
       return;
     }
@@ -121,7 +134,7 @@ export const CodeBlock = memo(function CodeBlock({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [visibleCode, language.shikiLang, isStreaming]);
+  }, [visibleCode, language.shikiLang, isStreaming, isGenerating]);
 
   const handleCopyCode = async (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
@@ -144,7 +157,11 @@ export const CodeBlock = memo(function CodeBlock({
       data-testid="chatgpt-code-block"
       data-theme={resolvedTheme}
       data-language={language.id}
-      className="manus-codeblock-wrapper w-full max-w-full min-w-0 my-4 select-text"
+      data-code-generating={isGenerating ? 'true' : 'false'}
+      className={cn(
+        'manus-codeblock-wrapper w-full max-w-full min-w-0 my-4 select-text',
+        isGenerating && 'manus-markdown-typing'
+      )}
     >
       {/* Standalone Filename Pill Above the Code Container (when filename is attached to fence/comment) */}
       {displayFilename && (
@@ -160,14 +177,32 @@ export const CodeBlock = memo(function CodeBlock({
 
       {/* Full-Width Rounded Code Container Automatically Following Application Theme */}
       <div className="manus-codeblock-card w-full max-w-full min-w-0 rounded-[22px] sm:rounded-[24px] border overflow-hidden transition-colors duration-150">
-        {/* Top Bar: Language Label on Left, Copy Action on Right */}
+        {/* Top Bar: Language Label (+ Live Generation Indicator) on Left, Copy Action on Right */}
         <div className="manus-codeblock-header flex items-center justify-between gap-3 px-4 sm:px-5 pt-3.5 pb-2 select-none">
-          <span
-            data-testid="code-block-language"
-            className="manus-codeblock-lang text-[13px] sm:text-[14px] font-medium tracking-tight truncate"
-          >
-            {language.displayLabel}
-          </span>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span
+              data-testid="code-block-language"
+              className="manus-codeblock-lang text-[13px] sm:text-[14px] font-medium tracking-tight truncate"
+            >
+              {language.displayLabel}
+            </span>
+
+            {isGenerating && (
+              <span
+                data-testid="code-block-streaming-indicator"
+                role="status"
+                aria-live="polite"
+                className="manus-markdown-typing inline-flex items-center gap-1.5 text-[11.5px] font-medium text-muted-foreground shrink-0"
+              >
+                <span className="manus-typing-dots-wave" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+                <span>Generating code</span>
+              </span>
+            )}
+          </div>
 
           <button
             type="button"
@@ -196,8 +231,12 @@ export const CodeBlock = memo(function CodeBlock({
 
         {/* Scrollable Code Viewport (Horizontal for long lines, Vertical for large files) */}
         <div
+          ref={scrollViewportRef}
           data-testid="code-block-scroll-viewport"
-          className="manus-codeblock-scroll w-full max-w-full min-w-0 overflow-x-auto overflow-y-auto max-h-[540px] px-4 sm:px-5 pb-4 sm:pb-5 pt-1.5 custom-scrollbar"
+          className={cn(
+            'manus-codeblock-scroll w-full max-w-full min-w-0 overflow-x-auto overflow-y-auto max-h-[540px] px-4 sm:px-5 pb-4 sm:pb-5 pt-1.5 custom-scrollbar',
+            isGenerating && 'manus-markdown-typing'
+          )}
         >
           {shikiHtml ? (
             <div
@@ -209,9 +248,16 @@ export const CodeBlock = memo(function CodeBlock({
             <pre className="manus-instant-pre m-0 p-0 bg-transparent font-mono text-[13.5px] sm:text-[14.5px] leading-[1.65] whitespace-pre select-text">
               <code
                 data-testid="code-block-instant"
-                className="manus-instant-code block font-mono"
+                className="manus-instant-code inline font-mono"
                 dangerouslySetInnerHTML={{ __html: instantHtml }}
               />
+              {isGenerating && (
+                <span
+                  data-testid="code-block-streaming-caret"
+                  className="ultra-smooth-caret ml-0.5 align-text-bottom"
+                  aria-hidden="true"
+                />
+              )}
             </pre>
           )}
         </div>

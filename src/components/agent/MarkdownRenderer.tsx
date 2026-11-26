@@ -8,7 +8,105 @@ import { CodeBlock } from './CodeBlock';
 import { ThreeSceneViewer } from '@/components/three/ThreeSceneViewer';
 import { parseProcedural3DSceneCodeFence } from '@/lib/threeSceneSpec';
 
-const MarkdownStreamingContext = createContext<boolean>(false);
+interface MarkdownStreamingContextValue {
+  isStreaming: boolean;
+  isGeneratingCodeBlock: boolean;
+  activeCodeText: string | null;
+}
+
+const MarkdownStreamingContext = createContext<MarkdownStreamingContextValue>({
+  isStreaming: false,
+  isGeneratingCodeBlock: false,
+  activeCodeText: null,
+});
+
+function normalizeCodeTail(code: string): string {
+  return String(code || '').replace(/\r\n/g, '\n').replace(/\n+$/, '');
+}
+
+export interface StreamingCodeBlockState {
+  isGeneratingCodeBlock: boolean;
+  language: string | null;
+  lineCount: number;
+  openFenceIndex: number;
+  openFenceCode: string;
+}
+
+/**
+ * Detects whether the visible/streamed markdown currently ends inside an unclosed fenced code block
+ * (e.g., ```tsx ... while tokens are still streaming), identifying the exact active block.
+ */
+export function detectStreamingCodeBlockState(
+  markdown: string,
+  isActiveStream: boolean
+): StreamingCodeBlockState {
+  if (!isActiveStream || !markdown) {
+    return {
+      isGeneratingCodeBlock: false,
+      language: null,
+      lineCount: 0,
+      openFenceIndex: -1,
+      openFenceCode: '',
+    };
+  }
+
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n');
+  let insideFence = false;
+  let fenceChar: '`' | '~' = '`';
+  let fenceLength = 3;
+  let fenceCount = 0;
+  let openFenceIndex = -1;
+  let openLanguage: string | null = null;
+  let openLines: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (!insideFence) {
+      const openMatch = trimmed.match(/^(`{3,}|~{3,})(.*)$/);
+      if (openMatch) {
+        insideFence = true;
+        fenceChar = openMatch[1][0] as '`' | '~';
+        fenceLength = openMatch[1].length;
+        openFenceIndex = fenceCount;
+        fenceCount += 1;
+        const info = openMatch[2].trim();
+        const langMatch = info.match(/^([a-zA-Z0-9_+#.-]+)/);
+        openLanguage = langMatch ? langMatch[1].split(':')[0] : null;
+        openLines = [];
+      }
+    } else {
+      const closePattern = new RegExp(`^${fenceChar}{${fenceLength},}\\s*$`);
+      if (closePattern.test(trimmed)) {
+        insideFence = false;
+        openFenceIndex = -1;
+        openLanguage = null;
+        openLines = [];
+      } else {
+        openLines.push(line);
+      }
+    }
+  }
+
+  if (!insideFence) {
+    return {
+      isGeneratingCodeBlock: false,
+      language: null,
+      lineCount: 0,
+      openFenceIndex: -1,
+      openFenceCode: '',
+    };
+  }
+
+  return {
+    isGeneratingCodeBlock: true,
+    language: openLanguage,
+    lineCount: openLines.length,
+    openFenceIndex,
+    openFenceCode: openLines.join('\n'),
+  };
+}
 
 const UltraLiteMarkdownImage = memo(function UltraLiteMarkdownImage(
   props: React.ImgHTMLAttributes<HTMLImageElement>
@@ -69,7 +167,7 @@ const UltraLiteMarkdownImage = memo(function UltraLiteMarkdownImage(
  * the full-width ChatGPT-style `<CodeBlock>` with automatic theme detection.
  */
 function MarkdownPreBlock({ children }: React.HTMLAttributes<HTMLPreElement>) {
-  const isStreaming = useContext(MarkdownStreamingContext);
+  const streamingCtx = useContext(MarkdownStreamingContext);
   const childArray = React.Children.toArray(children);
   const firstChild = childArray[0] as React.ReactElement<any> | undefined;
 
@@ -94,20 +192,33 @@ function MarkdownPreBlock({ children }: React.HTMLAttributes<HTMLPreElement>) {
       return <ThreeSceneViewer initialSpec={sceneSpec} />;
     }
 
+    const isThisBlockGenerating =
+      streamingCtx.isGeneratingCodeBlock &&
+      streamingCtx.activeCodeText !== null &&
+      normalizeCodeTail(rawText) === normalizeCodeTail(streamingCtx.activeCodeText);
+
     return (
       <CodeBlock
         code={rawText}
         className={className}
         meta={meta}
-        isStreaming={isStreaming}
+        isStreaming={streamingCtx.isStreaming}
+        isGenerating={isThisBlockGenerating}
       />
     );
   }
 
+  const fallbackText = typeof children === 'string' ? children : String(children ?? '');
+  const isFallbackGenerating =
+    streamingCtx.isGeneratingCodeBlock &&
+    streamingCtx.activeCodeText !== null &&
+    normalizeCodeTail(fallbackText) === normalizeCodeTail(streamingCtx.activeCodeText);
+
   return (
     <CodeBlock
-      code={typeof children === 'string' ? children : String(children ?? '')}
-      isStreaming={isStreaming}
+      code={fallbackText}
+      isStreaming={streamingCtx.isStreaming}
+      isGenerating={isFallbackGenerating}
     />
   );
 }
@@ -121,7 +232,7 @@ function MarkdownCodeElement(
   props: React.HTMLAttributes<HTMLElement> & { node?: any }
 ) {
   const { className, children, node, ...rest } = props;
-  const isStreaming = useContext(MarkdownStreamingContext);
+  const streamingCtx = useContext(MarkdownStreamingContext);
   const text = Array.isArray(children) ? children.join('') : String(children ?? '');
   const isBlockCode =
     Boolean(className && /language-/i.test(className)) || text.includes('\n');
@@ -135,12 +246,17 @@ function MarkdownCodeElement(
       return <ThreeSceneViewer initialSpec={sceneSpec} />;
     }
     const meta = typeof node?.data?.meta === 'string' ? node.data.meta : undefined;
+    const isThisBlockGenerating =
+      streamingCtx.isGeneratingCodeBlock &&
+      streamingCtx.activeCodeText !== null &&
+      normalizeCodeTail(text) === normalizeCodeTail(streamingCtx.activeCodeText);
     return (
       <CodeBlock
         code={text}
         className={className}
         meta={meta}
-        isStreaming={isStreaming}
+        isStreaming={streamingCtx.isStreaming}
+        isGenerating={isThisBlockGenerating}
       />
     );
   }
@@ -354,6 +470,8 @@ interface MarkdownRendererProps {
   content: string;
   className?: string;
   animateTypewriter?: boolean;
+  /** True while the assistant message is actively streaming tokens from the server */
+  isStreaming?: boolean;
   onTypewriterComplete?: () => void;
   onTypewriterTick?: () => void;
 }
@@ -362,6 +480,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   content, 
   className, 
   animateTypewriter = false,
+  isStreaming = false,
   onTypewriterComplete,
   onTypewriterTick
 }: MarkdownRendererProps) {
@@ -557,13 +676,30 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     ? processedContent.slice(0, snappedVisibleLength)
     : processedContent;
 
+  const isActivelyStreaming = isTyping || Boolean(isStreaming);
+  const codeStreamState = useMemo(
+    () => detectStreamingCodeBlockState(visibleContent, isActivelyStreaming),
+    [visibleContent, isActivelyStreaming]
+  );
+
+  const streamingContextValue = useMemo<MarkdownStreamingContextValue>(
+    () => ({
+      isStreaming: isActivelyStreaming,
+      isGeneratingCodeBlock: codeStreamState.isGeneratingCodeBlock,
+      activeCodeText: codeStreamState.isGeneratingCodeBlock ? codeStreamState.openFenceCode : null,
+    }),
+    [isActivelyStreaming, codeStreamState.isGeneratingCodeBlock, codeStreamState.openFenceCode]
+  );
+
   return (
-    <MarkdownStreamingContext.Provider value={isTyping}>
+    <MarkdownStreamingContext.Provider value={streamingContextValue}>
       <div 
-        data-typing-phase={sequenceState.phase}
+        data-typing-phase={isActivelyStreaming && sequenceState.phase === 'settled' ? 'typing' : sequenceState.phase}
+        data-code-streaming={codeStreamState.isGeneratingCodeBlock ? 'true' : 'false'}
         className={cn(
           "manus-markdown relative select-text w-full min-w-0",
-          isTyping ? "manus-markdown-typing cursor-pointer" : "manus-markdown-settled",
+          isActivelyStreaming ? "manus-markdown-typing" : "manus-markdown-settled",
+          isTyping && "cursor-pointer",
           className
         )}
         onClick={handleSkip}
@@ -590,7 +726,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         >
           {visibleContent}
         </ReactMarkdown>
-        {isTyping && (
+        {isActivelyStreaming && !codeStreamState.isGeneratingCodeBlock && (
           <span className="inline-flex items-center gap-1.5 align-baseline ml-1" aria-hidden="true">
             <span className="ultra-smooth-caret" />
             <span className="manus-typing-dots-wave opacity-75">

@@ -6,10 +6,19 @@ import { RobotHead } from 'robot-heads';
 import { toast } from 'sonner';
 import { getSettings } from '@/lib/settingsStore';
 import { ChatExportFormat } from '@/lib/chatExport';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
   AMBIENT_ROBOT_EXPRESSION_SEQUENCE,
   RobotHeadState,
 } from '@/lib/robotAnimationEngine';
+import {
+  WORKSPACE_DROPDOWN_SPRING_VARIANTS,
+  WORKSPACE_REDUCED_MOTION_VARIANTS,
+} from '@/lib/panelMotion';
+import {
+  preloadHistoryPanel,
+  preloadSettingsModal,
+} from '@/lib/instantPreload';
 
 interface TopbarProps {
   onToggleSidebar?: () => void;
@@ -29,6 +38,7 @@ const MODELS = [
 
 export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistory, onNewTask, onOpenSettings, onExport, showNewTask }: TopbarProps) {
   const location = useLocation();
+  const prefersReducedMotion = useReducedMotion();
   const isAtHome = location.pathname === '/';
   const shouldShowNewTask = showNewTask !== undefined ? showNewTask : !isAtHome;
   const isChatPage = !isAtHome || location.pathname.startsWith('/task');
@@ -170,14 +180,19 @@ export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistor
     toast.success(`Switched to ${mode === 'chat' ? 'Chat Mode 💬' : 'Work Mode 💼'}`);
   };
 
+  const ActiveModelIcon = currentModel.icon;
+  const dropdownVariants = prefersReducedMotion
+    ? WORKSPACE_REDUCED_MOTION_VARIANTS
+    : WORKSPACE_DROPDOWN_SPRING_VARIANTS;
+
   return (
-    <header className="h-16 bg-manus-cream/90 dark:bg-background/90 backdrop-blur-md px-4 sm:px-6 flex items-center justify-between relative transition-colors z-30 border-b border-border/30">
+    <header className="h-16 bg-manus-cream/90 dark:bg-background/90 backdrop-blur-md px-4 sm:px-6 flex items-center justify-between relative transition-colors z-30 border-b border-border/40">
       {/* Left section: Sidebar toggle */}
       <div className="flex items-center gap-3 z-10">
         {onToggleSidebar && (
           <button
             onClick={onToggleSidebar}
-            className="p-2 -ml-1 rounded-xl text-muted-foreground hover:text-foreground hover:bg-manus-soft dark:hover:bg-accent lg:hidden transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-xs active:scale-95"
+            className="p-2 -ml-1 rounded-xl text-muted-foreground hover:text-foreground hover:bg-manus-soft dark:hover:bg-accent lg:hidden transition-[transform,background-color,color,box-shadow] duration-150 ease-out cursor-pointer hover:scale-[1.03] active:scale-95"
             title="Open sidebar"
             aria-label="Open sidebar"
           >
@@ -190,13 +205,16 @@ export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistor
       {isAtHome ? (
         <div className="absolute left-1/2 -translate-x-1/2 z-20 flex items-center gap-2.5" ref={dropdownRef}>
           <button
+            type="button"
             onClick={() => setIsOpen(!isOpen)}
-            className="flex items-center gap-2 bg-[#FFFFFF] dark:bg-[#171717] backdrop-blur-md border border-[#E0E0E0] dark:border-[#333333] hover:border-[#000000] dark:hover:border-[#FFFFFF] px-3.5 py-1.5 rounded-full shadow-xs hover:shadow-md hover:scale-[1.03] active:scale-[0.98] transition-all duration-200 cursor-pointer text-[#000000] dark:text-[#FFFFFF] group"
+            aria-expanded={isOpen}
+            aria-haspopup="menu"
+            className="flex items-center gap-2 bg-[#FFFFFF] dark:bg-[#141414] backdrop-blur-md border border-[#E0E0E0] dark:border-[#2E2E2E] hover:border-[#000000]/60 dark:hover:border-[#FFFFFF]/60 px-3.5 py-1.5 rounded-full shadow-xs hover:shadow-md hover:-translate-y-[0.5px] active:scale-[0.98] transition-[transform,background-color,border-color,color,box-shadow] duration-150 ease-out cursor-pointer text-[#000000] dark:text-[#FFFFFF] group whitespace-nowrap"
             title="Select AI Model"
           >
-            <span className="w-2 h-2 rounded-full bg-[#000000] dark:bg-[#FFFFFF] animate-pulse shrink-0" />
+            <ActiveModelIcon size={14} strokeWidth={2.3} className="shrink-0 text-foreground/80 transition-transform duration-150 group-hover:scale-105" />
             <span className="text-sm font-semibold tracking-tight">{currentModel.name}</span>
-            <ChevronDown size={16} strokeWidth={2.4} className={`text-[#777777] dark:text-[#AAAAAA] transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+            <ChevronDown size={15} strokeWidth={2.4} className={`text-[#777777] dark:text-[#AAAAAA] transition-transform duration-200 ease-out ${isOpen ? 'rotate-180' : ''}`} />
           </button>
 
           {/* Subtle Typing Indicator Chip */}
@@ -214,48 +232,58 @@ export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistor
           )}
 
           {/* Dropdown Menu */}
-          {isOpen && (
-            <div className="manus-dropdown-spring absolute top-full left-1/2 -translate-x-1/2 mt-2 w-72 sm:w-80 bg-white dark:bg-[#18191c] border border-border rounded-2xl shadow-2xl p-2 z-50">
-              <div className="px-3 py-2 border-b border-border/60 mb-1">
-                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Select Intelligence Model</p>
-              </div>
+          <AnimatePresence>
+            {isOpen && (
+              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-72 sm:w-80 z-50">
+                <motion.div
+                  variants={dropdownVariants}
+                  initial="hidden"
+                  animate="visible"
+                  exit="exit"
+                  className="bg-white/95 dark:bg-[#151517]/95 backdrop-blur-xl border border-border/80 rounded-2xl shadow-2xl p-2 origin-top will-change-transform"
+                >
+                  <div className="px-3 py-2 border-b border-border/60 mb-1.5">
+                    <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Select Intelligence Model</p>
+                  </div>
 
-              <div className="space-y-1">
-                {MODELS.map((model, modelIdx) => {
-                  const Icon = model.icon;
-                  const isSelected = model.id === selectedModel;
-                  return (
-                    <button
-                      key={model.id}
-                      style={{ animationDelay: `${modelIdx * 35}ms` }}
-                      onClick={() => handleSelectModel(model.id, model.name)}
-                      className={`manus-source-item-enter group w-full flex items-start gap-3 p-2.5 rounded-xl transition-all cursor-pointer text-left ${
-                        isSelected 
-                          ? 'bg-primary/10 border border-primary/20 text-foreground' 
-                          : 'hover:bg-manus-soft dark:hover:bg-accent/60 text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      <div className={`p-2 rounded-lg shrink-0 ${isSelected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
-                        <Icon size={18} strokeWidth={2.3} className="manus-icon-spring" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-xs font-semibold text-foreground truncate">{model.name}</span>
-                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
-                            {model.badge}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">{model.desc}</p>
-                      </div>
-                      {isSelected && (
-                        <Check size={18} strokeWidth={2.5} className="manus-tag-pop text-primary shrink-0 self-center ml-1" />
-                      )}
-                    </button>
-                  );
-                })}
+                  <div className="space-y-1">
+                    {MODELS.map((model) => {
+                      const Icon = model.icon;
+                      const isSelected = model.id === selectedModel;
+                      return (
+                        <button
+                          key={model.id}
+                          type="button"
+                          onClick={() => handleSelectModel(model.id, model.name)}
+                          className={`group w-full flex items-start gap-3 p-2.5 rounded-xl transition-[transform,background-color,border-color,color] duration-150 ease-out cursor-pointer text-left active:scale-[0.985] ${
+                            isSelected 
+                              ? 'bg-primary/10 dark:bg-white/10 border border-primary/20 dark:border-white/15 text-foreground' 
+                              : 'border border-transparent hover:bg-manus-soft dark:hover:bg-accent/70 text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          <div className={`p-2 rounded-lg shrink-0 transition-colors duration-150 ${isSelected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground group-hover:text-foreground'}`}>
+                            <Icon size={17} strokeWidth={2.3} className="manus-icon-spring" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-1.5">
+                              <span className="text-xs font-semibold text-foreground truncate">{model.name}</span>
+                              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground whitespace-nowrap">
+                                {model.badge}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">{model.desc}</p>
+                          </div>
+                          {isSelected && (
+                            <Check size={16} strokeWidth={2.5} className="manus-tag-pop text-primary shrink-0 self-center ml-1" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </motion.div>
               </div>
-            </div>
-          )}
+            )}
+          </AnimatePresence>
         </div>
       ) : (
         <div className="absolute left-1/2 -translate-x-1/2 z-20 flex items-center justify-center gap-2.5">
@@ -305,123 +333,139 @@ export const Topbar = React.memo(function Topbar({ onToggleSidebar, onOpenHistor
                 window.location.href = '/';
               }
             }}
-            className="h-10 w-10 sm:h-11 sm:w-11 rounded-full flex items-center justify-center bg-white/90 dark:bg-[#292929]/95 backdrop-blur-sm text-foreground border border-border/50 shadow-xs hover:shadow-md hover:bg-slate-100 dark:hover:bg-white/10 hover:scale-[1.03] transition-all duration-150 cursor-pointer active:scale-95"
+            className="h-10 w-10 sm:h-10 sm:w-10 rounded-full flex items-center justify-center bg-white/90 dark:bg-[#1a1a1c]/95 backdrop-blur-sm text-foreground border border-border/60 shadow-xs hover:shadow-md hover:bg-manus-soft dark:hover:bg-white/10 hover:-translate-y-[0.5px] transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out cursor-pointer active:scale-95"
             title="New chat"
             aria-label="New chat"
           >
-            <SquarePen size={20} strokeWidth={2.2} />
+            <SquarePen size={19} strokeWidth={2.2} />
           </button>
 
           <div className="relative" ref={menuRef}>
             <button
               type="button"
+              onPointerEnter={() => {
+                preloadHistoryPanel();
+                preloadSettingsModal();
+              }}
+              onTouchStart={() => {
+                preloadHistoryPanel();
+                preloadSettingsModal();
+              }}
               onClick={() => setShowOverflowMenu(prev => !prev)}
-              className="h-10 w-10 sm:h-11 sm:w-11 rounded-full flex items-center justify-center bg-white/90 dark:bg-[#292929]/95 backdrop-blur-sm text-foreground border border-border/50 shadow-xs hover:shadow-md hover:bg-slate-100 dark:hover:bg-white/10 hover:scale-[1.03] transition-all duration-150 cursor-pointer active:scale-95"
+              className="h-10 w-10 sm:h-10 sm:w-10 rounded-full flex items-center justify-center bg-white/90 dark:bg-[#1a1a1c]/95 backdrop-blur-sm text-foreground border border-border/60 shadow-xs hover:shadow-md hover:bg-manus-soft dark:hover:bg-white/10 hover:-translate-y-[0.5px] transition-[transform,background-color,border-color,box-shadow] duration-100 ease-out cursor-pointer active:scale-95"
               title="Chat options"
               aria-label="Chat options"
               aria-expanded={showOverflowMenu}
             >
-              <MoreVertical size={20} strokeWidth={2.2} />
+              <MoreVertical size={19} strokeWidth={2.2} />
             </button>
 
-            {showOverflowMenu && (
-              <div className="manus-dropdown-spring absolute right-0 top-12 min-w-52 rounded-2xl border border-border/80 bg-white/95 dark:bg-[#242424]/95 backdrop-blur-md p-1.5 shadow-2xl z-50">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowOverflowMenu(false);
-                    if (onNewTask) {
-                      onNewTask();
-                      toast.success('Started new chat session');
-                    } else {
-                      window.location.href = '/';
-                    }
-                  }}
-                  className="w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-foreground cursor-pointer"
+            <AnimatePresence>
+              {showOverflowMenu && (
+                <motion.div
+                  variants={dropdownVariants}
+                  initial="hidden"
+                  animate="visible"
+                  exit="exit"
+                  className="absolute right-0 top-12 min-w-52 rounded-2xl border border-border/80 bg-white/95 dark:bg-[#151517]/95 backdrop-blur-xl p-1.5 shadow-2xl z-50 origin-top-right will-change-transform"
                 >
-                  <SquarePen size={16} />
-                  <span>New chat</span>
-                </button>
-
-                {onExport && (
-                  <div className="my-1 pt-1 border-t border-border/50">
-                    <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      Export Conversation
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowOverflowMenu(false);
-                        onExport('pdf');
-                      }}
-                      className="w-full flex items-center justify-between gap-2.5 rounded-lg px-3 py-1.5 text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-foreground cursor-pointer"
-                    >
-                      <span className="flex items-center gap-2.5">
-                        <FileText size={15} />
-                        <span>Export as PDF</span>
-                      </span>
-                      <span className="text-[10px] font-mono text-muted-foreground">.pdf</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowOverflowMenu(false);
-                        onExport('markdown');
-                      }}
-                      className="w-full flex items-center justify-between gap-2.5 rounded-lg px-3 py-1.5 text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-foreground cursor-pointer"
-                    >
-                      <span className="flex items-center gap-2.5">
-                        <FileCode size={15} />
-                        <span>Export as Markdown</span>
-                      </span>
-                      <span className="text-[10px] font-mono text-muted-foreground">.md</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowOverflowMenu(false);
-                        onExport('json');
-                      }}
-                      className="w-full flex items-center justify-between gap-2.5 rounded-lg px-3 py-1.5 text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-foreground cursor-pointer"
-                    >
-                      <span className="flex items-center gap-2.5">
-                        <Braces size={15} />
-                        <span>Export as JSON</span>
-                      </span>
-                      <span className="text-[10px] font-mono text-muted-foreground">.json</span>
-                    </button>
-                  </div>
-                )}
-
-                {onOpenHistory && (
                   <button
                     type="button"
                     onClick={() => {
                       setShowOverflowMenu(false);
-                      onOpenHistory();
+                      if (onNewTask) {
+                        onNewTask();
+                        toast.success('Started new chat session');
+                      } else {
+                        window.location.href = '/';
+                      }
                     }}
-                    className="w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-foreground cursor-pointer"
+                    className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm text-left hover:bg-manus-soft dark:hover:bg-white/10 transition-colors text-foreground cursor-pointer"
                   >
-                    <History size={16} />
-                    <span>Chat history</span>
+                    <SquarePen size={16} />
+                    <span>New chat</span>
                   </button>
-                )}
 
-                {onOpenSettings && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowOverflowMenu(false);
-                      onOpenSettings();
-                    }}
-                    className="w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-left hover:bg-slate-100 dark:hover:bg-white/10 transition-colors text-foreground cursor-pointer"
-                  >
-                    <Settings2 size={16} />
-                    <span>Settings</span>
-                  </button>
-                )}
-              </div>
-            )}
+                  {onExport && (
+                    <div className="my-1 pt-1 border-t border-border/50">
+                      <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Export Conversation
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowOverflowMenu(false);
+                          onExport('pdf');
+                        }}
+                        className="w-full flex items-center justify-between gap-2.5 rounded-xl px-3 py-1.5 text-sm text-left hover:bg-manus-soft dark:hover:bg-white/10 transition-colors text-foreground cursor-pointer"
+                      >
+                        <span className="flex items-center gap-2.5">
+                          <FileText size={15} />
+                          <span>Export as PDF</span>
+                        </span>
+                        <span className="text-[10px] font-mono text-muted-foreground">.pdf</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowOverflowMenu(false);
+                          onExport('markdown');
+                        }}
+                        className="w-full flex items-center justify-between gap-2.5 rounded-xl px-3 py-1.5 text-sm text-left hover:bg-manus-soft dark:hover:bg-white/10 transition-colors text-foreground cursor-pointer"
+                      >
+                        <span className="flex items-center gap-2.5">
+                          <FileCode size={15} />
+                          <span>Export as Markdown</span>
+                        </span>
+                        <span className="text-[10px] font-mono text-muted-foreground">.md</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowOverflowMenu(false);
+                          onExport('json');
+                        }}
+                        className="w-full flex items-center justify-between gap-2.5 rounded-xl px-3 py-1.5 text-sm text-left hover:bg-manus-soft dark:hover:bg-white/10 transition-colors text-foreground cursor-pointer"
+                      >
+                        <span className="flex items-center gap-2.5">
+                          <Braces size={15} />
+                          <span>Export as JSON</span>
+                        </span>
+                        <span className="text-[10px] font-mono text-muted-foreground">.json</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {onOpenHistory && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowOverflowMenu(false);
+                        onOpenHistory();
+                      }}
+                      className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm text-left hover:bg-manus-soft dark:hover:bg-white/10 transition-colors text-foreground cursor-pointer"
+                    >
+                      <History size={16} />
+                      <span>Chat history</span>
+                    </button>
+                  )}
+
+                  {onOpenSettings && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowOverflowMenu(false);
+                        onOpenSettings();
+                      }}
+                      className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm text-left hover:bg-manus-soft dark:hover:bg-white/10 transition-colors text-foreground cursor-pointer"
+                    >
+                      <Settings2 size={16} />
+                      <span>Settings</span>
+                    </button>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
           </>
         )}

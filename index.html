@@ -5,7 +5,18 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=IBM+Plex+Mono:ital,wght@0,100..700;1,100..700&display=swap" />
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=IBM+Plex+Mono:ital,wght@0,100..700;1,100..700&display=swap"
+      onload="this.onload=null;this.rel='stylesheet'"
+    />
+    <noscript>
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=IBM+Plex+Mono:ital,wght@0,100..700;1,100..700&display=swap"
+      />
+    </noscript>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Deku AI</title>
     <meta name="description" content="Autonomous AI agent workspace with multi-step reasoning, research, data analysis, and live preview." />
@@ -23,6 +34,99 @@
     <meta name="twitter:title" content="Deku AI" />
     <meta name="twitter:description" content="Autonomous AI agent workspace with multi-step reasoning, research, data analysis, and live preview." />
     <link rel="manifest" href="/manifest.json" />
+    <style>
+      /* Instant zero-blank-frame boot loading shell (renders before JS parses) */
+      html { background-color: #FFFFFF; color: #000000; }
+      html.dark { background-color: #000000; color: #FFFFFF; }
+      #deku-boot-loader {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        background-color: #FFFFFF;
+        color: #000000;
+        font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        opacity: 1;
+        transform: scale(1);
+        transition: opacity 120ms cubic-bezier(0.16, 1, 0.3, 1), transform 120ms cubic-bezier(0.16, 1, 0.3, 1);
+        will-change: opacity, transform;
+      }
+      html.dark #deku-boot-loader {
+        background-color: #000000;
+        color: #FFFFFF;
+      }
+      #deku-boot-loader[data-dismissed="true"] {
+        opacity: 0;
+        transform: scale(1.012);
+        pointer-events: none;
+      }
+      .deku-boot-mark {
+        width: 40px;
+        height: 40px;
+        border-radius: 12px;
+        background: #000000;
+        color: #FFFFFF;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.24);
+      }
+      html.dark .deku-boot-mark {
+        background: #FFFFFF;
+        color: #000000;
+        box-shadow: 0 8px 24px -10px rgba(255, 255, 255, 0.22);
+      }
+      .deku-boot-title {
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: -0.015em;
+        line-height: 1;
+      }
+      .deku-boot-track {
+        width: 132px;
+        height: 2.5px;
+        border-radius: 9999px;
+        background: rgba(0, 0, 0, 0.09);
+        overflow: hidden;
+        position: relative;
+      }
+      html.dark .deku-boot-track {
+        background: rgba(255, 255, 255, 0.14);
+      }
+      .deku-boot-bar {
+        position: absolute;
+        inset: 0;
+        width: 55%;
+        border-radius: 9999px;
+        background: currentColor;
+        transform: translate3d(-100%, 0, 0);
+        animation: deku-boot-sweep 0.55s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+        will-change: transform;
+      }
+      #deku-boot-loader[data-dismissed="true"] .deku-boot-bar {
+        animation: none;
+        width: 100%;
+        transform: translate3d(0, 0, 0);
+      }
+      @keyframes deku-boot-sweep {
+        0% { transform: translate3d(-110%, 0, 0); }
+        100% { transform: translate3d(210%, 0, 0); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .deku-boot-bar {
+          animation: none;
+          width: 65%;
+          transform: translate3d(25%, 0, 0);
+        }
+        #deku-boot-loader {
+          transition-duration: 1ms;
+        }
+      }
+    </style>
     <script>
       // Defensive fallback for localStorage & sessionStorage in restricted cross-origin iframes
       (function () {
@@ -80,6 +184,47 @@
         }
       })();
 
+      // Apply saved theme synchronously before first paint (eliminates white/dark flash on boot)
+      (function () {
+        try {
+          var theme = window.localStorage.getItem('theme');
+          if (!theme) {
+            var settingsRaw = window.localStorage.getItem('manus_user_settings');
+            if (settingsRaw) {
+              var parsed = JSON.parse(settingsRaw);
+              if (parsed && parsed.theme) theme = parsed.theme;
+            }
+          }
+          var isDark = theme === 'dark' || (theme === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (isDark) {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+        } catch (_) {}
+      })();
+
+      // Ultra-fast boot loader dismiss controller
+      (function () {
+        var dismissed = false;
+        window.__dekuDismissBootLoader = function () {
+          if (dismissed) return;
+          dismissed = true;
+          var el = document.getElementById('deku-boot-loader');
+          if (!el) return;
+          el.setAttribute('data-dismissed', 'true');
+          window.setTimeout(function () {
+            if (el && el.parentNode) el.parentNode.removeChild(el);
+          }, 140);
+        };
+        // Safety fallback so the splash can never linger
+        window.setTimeout(function () {
+          if (typeof window.__dekuDismissBootLoader === 'function') {
+            window.__dekuDismissBootLoader();
+          }
+        }, 2000);
+      })();
+
       // Defensive fallback to ensure window.fetch can be modified without getter-only errors
       try {
         const _origFetch = window.fetch ? window.fetch.bind(window) : undefined;
@@ -115,6 +260,20 @@
     </script>
   </head>
   <body>
+    <div id="deku-boot-loader" role="status" aria-live="polite" aria-label="Loading Deku AI">
+      <div class="deku-boot-mark" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4" y="6" width="16" height="12" rx="3.5" />
+          <circle cx="9.5" cy="12" r="1.25" fill="currentColor" stroke="none" />
+          <circle cx="14.5" cy="12" r="1.25" fill="currentColor" stroke="none" />
+          <path d="M12 6V3.5" />
+        </svg>
+      </div>
+      <span class="deku-boot-title">Deku AI</span>
+      <div class="deku-boot-track" aria-hidden="true">
+        <div class="deku-boot-bar"></div>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

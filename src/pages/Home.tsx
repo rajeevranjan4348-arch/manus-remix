@@ -28,7 +28,13 @@ import {
 import { Plus, ArrowUp } from 'pulsoicon-react';
 import { cn } from '@/lib/utils';
 import { gsap } from 'gsap';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { toast } from 'sonner';
+import {
+  WORKSPACE_MODE_PILL_SPRING,
+  WORKSPACE_SECTION_REVEAL_VARIANTS,
+  WORKSPACE_REDUCED_MOTION_VARIANTS,
+} from '@/lib/panelMotion';
 import { AttachmentMenu } from '@/components/chat/AttachmentMenu';
 import { VoiceInputButton, formatSpeechAutoFill } from '@/components/voice/VoiceInputButton';
 import { VoiceTranscriptionIndicator } from '@/components/voice/VoiceTranscriptionIndicator';
@@ -47,15 +53,18 @@ import {
   resolveContextualRobotState,
 } from '@/lib/robotAnimationEngine';
 import { buildWritingAssistantPrompt } from '@/lib/writingAssistant';
-const ConnectorsStorePanel = React.lazy(() =>
-  import('@/components/connectors/ConnectorsStorePanel').then((m) => ({ default: m.ConnectorsStorePanel }))
-);
-const ConnectorConfigModal = React.lazy(() =>
-  import('@/components/connectors/ConnectorConfigModal').then((m) => ({ default: m.ConnectorConfigModal }))
-);
-const GoogleDrivePickerModal = React.lazy(() =>
-  import('@/components/workspace/GoogleDrivePickerModal').then((m) => ({ default: m.GoogleDrivePickerModal }))
-);
+import {
+  loadConnectorConfigModal,
+  loadConnectorsStorePanel,
+  loadGoogleDrivePickerModal,
+  preloadChatView,
+} from '@/lib/instantPreload';
+
+const ConnectorsStorePanel = React.lazy(loadConnectorsStorePanel);
+const ConnectorConfigModal = React.lazy(loadConnectorConfigModal);
+const GoogleDrivePickerModal = React.lazy(loadGoogleDrivePickerModal);
+
+let hasPlayedHomeEntrance = false;
 
 export type PersonalityMode = 'chat' | 'work';
 
@@ -130,6 +139,7 @@ interface HomeProps {
 }
 
 export function Home({ onStartTask, personality, onPersonalityChange }: HomeProps) {
+  const prefersReducedMotion = useReducedMotion();
   const initialSettings = getSettings();
   const [prompt, setPrompt] = useState<string>(() => getDraftPrompt());
   const [robotState, setRobotState] = useState<RobotHeadState>(() => (initialSettings.robotState as RobotHeadState) || 'idle');
@@ -342,6 +352,9 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
 
   const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
+    if (val.length === 1) {
+      preloadChatView();
+    }
     setPrompt(val);
 
     const lastAt = val.lastIndexOf('@');
@@ -448,26 +461,29 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
   };
 
   React.useEffect(() => {
-    if (getActivePerformanceProfile() === 'ultra-lite') {
+    if (hasPlayedHomeEntrance || getActivePerformanceProfile() === 'ultra-lite' || prefersReducedMotion) {
+      hasPlayedHomeEntrance = true;
       return;
     }
     if (containerRef.current) {
+      hasPlayedHomeEntrance = true;
       const ctx = gsap.context(() => {
         gsap.fromTo(
           '.animate-on-load',
-          { y: 10 },
+          { opacity: 0, y: 6 },
           {
+            opacity: 1,
             y: 0,
-            stagger: 0.06,
-            duration: 0.35,
-            ease: 'power2.out',
-            clearProps: 'transform'
+            stagger: 0.018,
+            duration: 0.14,
+            ease: 'power3.out',
+            clearProps: 'transform,opacity',
           }
         );
       }, containerRef);
       return () => ctx.revert();
     }
-  }, []);
+  }, [prefersReducedMotion]);
 
   const handleProcessFile = async (file: File) => {
     const val = validateFile(file);
@@ -965,7 +981,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
 
                 {isThinkHarder && (
                   <div className="manus-tag-pop inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] border border-[#000000] dark:border-[#FFFFFF] rounded-full text-xs font-semibold shrink-0 max-w-full select-none whitespace-nowrap">
-                    <Brain size={14} strokeWidth={2.4} className="text-current animate-pulse shrink-0" />
+                    <Brain size={14} strokeWidth={2.4} className="text-current shrink-0" />
                     <span className="shrink-0">Deep reasoning</span>
                     <button 
                       type="button"
@@ -1024,25 +1040,25 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                   type="button"
                   onClick={handleStart}
                   className={cn(
-                    "manus-touch-target group w-11 h-11 sm:w-9 sm:h-9 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 rounded-full flex items-center justify-center transition-all duration-150 cursor-pointer shadow-md shrink-0",
+                    "manus-touch-target group w-11 h-11 sm:w-9 sm:h-9 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 rounded-full flex items-center justify-center transition-[transform,opacity,box-shadow,background-color] duration-150 ease-out cursor-pointer shadow-md shrink-0",
                     (prompt.trim() || uploadedFile || activeConnectorTags.length > 0)
                       ? "manus-send-btn-ready bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] hover:scale-105 active:scale-95 shadow-lg opacity-100"
-                      : "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] opacity-90 hover:opacity-100"
+                      : "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] opacity-85 hover:opacity-100"
                   )}
                   title="Send message"
                   aria-label="Send message"
                 >
-                  <ArrowUp size={18} strokeWidth={2.6} className="font-bold shrink-0 transition-transform duration-150 group-hover:-translate-y-0.5" />
+                  <ArrowUp size={18} strokeWidth={2.6} className="font-bold shrink-0 transition-transform duration-150 ease-out group-hover:-translate-y-0.5" />
                 </button>
               </div>
             </div>
           </div>
 
           <div className="flex flex-col items-center justify-center gap-3.5 sm:gap-4 w-full">
-            {/* Chat / Work mode switch centered in the middle */}
+            {/* Chat / Work mode switch centered in the middle with spring-gliding active pill */}
             <div className="flex justify-center w-full px-2">
               <div 
-                className="relative inline-flex items-center p-1 rounded-full border border-[#E0E0E0] dark:border-[#333333] bg-[#FFFFFF] dark:bg-[#171717] shadow-xs backdrop-blur-md overflow-hidden select-none max-w-full"
+                className="relative inline-flex items-center p-1 rounded-full border border-[#E0E0E0] dark:border-[#2E2E2E] bg-[#FFFFFF] dark:bg-[#141414] shadow-xs backdrop-blur-md select-none max-w-full"
                 role="radiogroup"
                 aria-label="Agent personality mode"
               >
@@ -1058,20 +1074,22 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                       title={mode.desc}
                       aria-checked={active}
                       className={cn(
-                        "group relative z-10 inline-flex items-center justify-center gap-2 px-4 py-2 sm:px-5 sm:py-2 rounded-full text-xs sm:text-sm font-semibold transition-all duration-200 cursor-pointer whitespace-nowrap shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-[#000000]",
+                        "group relative z-10 inline-flex items-center justify-center gap-2 px-4 py-2 sm:px-5 sm:py-2 rounded-full text-xs sm:text-sm font-semibold transition-colors duration-150 cursor-pointer whitespace-nowrap shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-[#000000] dark:focus-visible:ring-[#FFFFFF]",
                         active
-                          ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] shadow-sm"
-                          : "bg-transparent text-[#000000] dark:text-[#FFFFFF] hover:bg-[#F2F2F2] dark:hover:bg-[#111111]"
+                          ? "text-[#FFFFFF] dark:text-[#000000]"
+                          : "text-[#000000]/80 dark:text-[#FFFFFF]/80 hover:text-[#000000] dark:hover:text-[#FFFFFF]"
                       )}
                     >
-                      <Icon size={16} strokeWidth={2.2} className="manus-icon-spring shrink-0" />
-                      <span className="shrink-0 leading-none">{mode.label}</span>
                       {active && (
-                        <span 
-                          className="manus-tag-pop w-1.5 h-1.5 rounded-full bg-[#FFFFFF] dark:bg-[#000000] shrink-0 ml-0.5" 
-                          aria-hidden="true" 
+                        <motion.span
+                          layoutId="home-mode-active-pill"
+                          transition={prefersReducedMotion ? { duration: 0.01 } : WORKSPACE_MODE_PILL_SPRING}
+                          className="absolute inset-0 -z-10 rounded-full bg-[#000000] dark:bg-[#FFFFFF] shadow-sm"
+                          aria-hidden="true"
                         />
                       )}
+                      <Icon size={15} strokeWidth={2.2} className="manus-icon-spring shrink-0" />
+                      <span className="shrink-0 leading-none">{mode.label}</span>
                     </button>
                   );
                 })}
@@ -1084,7 +1102,7 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                 {ACTION_CHIPS.filter((chip) => chatWorkMode === 'work' || chip.label === 'Write for me').map((chip, chipIdx) => (
                   <button
                     key={chip.label}
-                    style={{ animationDelay: `${chipIdx * 45}ms` }}
+                    style={{ animationDelay: `${chipIdx * 40}ms` }}
                     onClick={() => {
                       const defaults = getHomeActionDefaults(chip.label);
                       setSelectedFormat(defaults.format);
@@ -1127,105 +1145,125 @@ export function Home({ onStartTask, personality, onPersonalityChange }: HomeProp
                         setPrompt('');
                       }
                     }}
-                    className="manus-chip-stagger group shrink-0 inline-flex items-center justify-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-full text-xs sm:text-sm font-medium border border-border bg-white dark:bg-card text-muted-foreground hover:text-foreground hover:border-primary/30 hover:bg-slate-50 dark:hover:bg-accent/80 hover:-translate-y-0.5 transition-all duration-150 cursor-pointer whitespace-nowrap shadow-xs active:scale-95 select-none"
+                    className="manus-chip-stagger group shrink-0 inline-flex items-center justify-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-full text-xs sm:text-sm font-medium border border-border bg-white dark:bg-card text-muted-foreground hover:text-foreground hover:border-foreground/30 hover:bg-manus-soft dark:hover:bg-accent/80 hover:-translate-y-0.5 transition-[transform,background-color,border-color,color,box-shadow] duration-150 ease-out cursor-pointer whitespace-nowrap shadow-xs hover:shadow-sm active:scale-95 select-none"
                   >
-                    <chip.icon size={16} strokeWidth={2.2} className="shrink-0 w-4 h-4 text-primary/80 transition-transform duration-200 group-hover:scale-110" />
+                    <chip.icon size={15} strokeWidth={2.2} className="shrink-0 w-4 h-4 text-primary/80 transition-transform duration-150 ease-out group-hover:scale-105" />
                     <span className="shrink-0 leading-none">{chip.label}</span>
                   </button>
                 ))}
               </div>
-              {activeIntent?.label === 'Writing assistant' && (
-                <div className="flex min-w-0 w-full items-center justify-center gap-2 overflow-x-auto overscroll-x-contain no-scrollbar px-2 py-1" role="group" aria-label="Writing starters">
-                  {WRITING_STARTERS.map((starter) => (
-                    <button
-                      key={starter.label}
-                      type="button"
-                      onClick={() => {
-                        setPrompt(starter.prompt);
-                        window.requestAnimationFrame(() => {
-                          textareaRef.current?.focus();
-                          const cursor = starter.prompt.length;
-                          textareaRef.current?.setSelectionRange(cursor, cursor);
-                        });
-                      }}
-                      className="shrink-0 rounded-full border border-border bg-white px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/30 hover:bg-slate-50 hover:text-foreground dark:bg-card dark:hover:bg-accent"
-                    >
-                      {starter.label}
-                    </button>
-                  ))}
-                </div>
-              )}
+              <AnimatePresence initial={false}>
+                {activeIntent?.label === 'Writing assistant' && (
+                  <motion.div
+                    key="writing-starters-bar"
+                    variants={prefersReducedMotion ? WORKSPACE_REDUCED_MOTION_VARIANTS : WORKSPACE_SECTION_REVEAL_VARIANTS}
+                    initial="hidden"
+                    animate="visible"
+                    exit="exit"
+                    className="flex min-w-0 w-full items-center justify-center gap-2 overflow-x-auto overscroll-x-contain no-scrollbar px-2 py-1"
+                    role="group"
+                    aria-label="Writing starters"
+                  >
+                    {WRITING_STARTERS.map((starter) => (
+                      <button
+                        key={starter.label}
+                        type="button"
+                        onClick={() => {
+                          setPrompt(starter.prompt);
+                          window.requestAnimationFrame(() => {
+                            textareaRef.current?.focus();
+                            const cursor = starter.prompt.length;
+                            textareaRef.current?.setSelectionRange(cursor, cursor);
+                          });
+                        }}
+                        className="shrink-0 rounded-full border border-border bg-white px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-[transform,background-color,border-color,color] duration-150 hover:border-foreground/30 hover:bg-manus-soft hover:text-foreground hover:-translate-y-0.5 active:scale-95 dark:bg-card dark:hover:bg-accent cursor-pointer"
+                      >
+                        {starter.label}
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </>
           </div>
         </div>
 
         {/* Building agent features (Output formats and Chart gallery) shown ONLY in Work mode */}
-        {chatWorkMode === 'work' && activeIntent?.label !== 'Writing assistant' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 animate-on-load animate-in fade-in slide-in-from-bottom-4 duration-300">
-            <div className="space-y-4">
-              <h3 className="font-sans text-xs font-bold text-slate-500 dark:text-muted-foreground uppercase tracking-widest px-1">Choose output format</h3>
-              <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-2 sm:gap-3">
-                {OUTPUT_FORMATS.map((format, formatIdx) => (
-                  <button
-                    key={format.id}
-                    style={{ animationDelay: `${formatIdx * 55}ms` }}
-                    onClick={() => setSelectedFormat(format.id)}
-                    aria-pressed={selectedFormat === format.id}
-                    className={cn(
-                      "manus-card-stagger manus-hover-lift flex min-w-0 items-start gap-2.5 sm:gap-4 p-3 sm:p-4 rounded-2xl border text-left group cursor-pointer",
-                      selectedFormat === format.id 
-                        ? "bg-white dark:bg-card border-primary shadow-md ring-1 ring-primary/10 -translate-y-0.5" 
-                        : "bg-white dark:bg-card border-slate-200 dark:border-border hover:border-primary/40 dark:hover:border-primary/50 shadow-xs"
-                    )}
-                  >
-                    <div className={cn(
-                      "shrink-0 p-2 sm:p-2.5 rounded-xl transition-colors",
-                      selectedFormat === format.id 
-                        ? "bg-primary text-primary-foreground" 
-                        : "bg-slate-100 dark:bg-muted text-slate-700 dark:text-foreground group-hover:bg-slate-200 dark:group-hover:bg-accent"
-                    )}>
-                      <format.icon size={23} strokeWidth={2.4} className="manus-icon-spring" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="font-bold text-sm tracking-tight text-foreground break-words">{format.label}</div>
-                      <div className="text-xs text-muted-foreground leading-relaxed mt-0.5">{format.desc}</div>
-                    </div>
-                  </button>
-                ))}
+        <AnimatePresence initial={false}>
+          {chatWorkMode === 'work' && activeIntent?.label !== 'Writing assistant' && (
+            <motion.div
+              key="work-mode-gallery"
+              variants={prefersReducedMotion ? WORKSPACE_REDUCED_MOTION_VARIANTS : WORKSPACE_SECTION_REVEAL_VARIANTS}
+              initial="hidden"
+              animate="visible"
+              exit="exit"
+              className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 will-change-transform"
+            >
+              <div className="space-y-3.5">
+                <h3 className="font-sans text-xs font-bold text-muted-foreground uppercase tracking-widest px-1">Choose output format</h3>
+                <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-2.5 sm:gap-3">
+                  {OUTPUT_FORMATS.map((format, formatIdx) => (
+                    <button
+                      key={format.id}
+                      style={{ animationDelay: `${formatIdx * 45}ms` }}
+                      onClick={() => setSelectedFormat(format.id)}
+                      aria-pressed={selectedFormat === format.id}
+                      className={cn(
+                        "manus-card-stagger manus-hover-lift flex min-w-0 items-start gap-2.5 sm:gap-3.5 p-3 sm:p-4 rounded-2xl border text-left group cursor-pointer",
+                        selectedFormat === format.id 
+                          ? "bg-white dark:bg-card border-primary shadow-md ring-1 ring-primary/15 -translate-y-0.5" 
+                          : "bg-white dark:bg-card border-border hover:border-foreground/35 shadow-xs"
+                      )}
+                    >
+                      <div className={cn(
+                        "shrink-0 p-2 sm:p-2.5 rounded-xl transition-colors duration-150",
+                        selectedFormat === format.id 
+                          ? "bg-primary text-primary-foreground" 
+                          : "bg-muted text-foreground/80 group-hover:bg-accent"
+                      )}>
+                        <format.icon size={22} strokeWidth={2.3} className="manus-icon-spring" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-bold text-sm tracking-tight text-foreground break-words">{format.label}</div>
+                        <div className="text-xs text-muted-foreground leading-relaxed mt-0.5">{format.desc}</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
 
-            <div className="space-y-4">
-              <h3 className="font-sans text-xs font-bold text-slate-500 dark:text-muted-foreground uppercase tracking-widest px-1">Preferred charts gallery</h3>
-              <div className="grid grid-cols-3 gap-3">
-                {CHART_TYPES.map((chart, chartIdx) => (
-                  <button
-                    key={chart.id}
-                    style={{ animationDelay: `${chartIdx * 45}ms` }}
-                    onClick={() => setSelectedChart(chart.id)}
-                    aria-pressed={selectedChart === chart.id}
-                    className={cn(
-                      "manus-card-stagger manus-hover-lift flex min-w-0 flex-col items-center justify-center gap-2 p-2 sm:p-4 rounded-2xl border bg-white dark:bg-card group cursor-pointer",
-                      selectedChart === chart.id 
-                        ? "border-primary shadow-md ring-1 ring-primary/10 -translate-y-0.5" 
-                        : "border-slate-200 dark:border-border hover:border-primary/40 dark:hover:border-primary/50 shadow-xs"
-                    )}
-                  >
-                    <div className={cn(
-                      "p-2 rounded-lg transition-colors",
-                      selectedChart === chart.id 
-                        ? "bg-primary/10 text-primary" 
-                        : "text-slate-700 dark:text-muted-foreground group-hover:text-foreground"
-                    )}>
-                      <chart.icon size={25} strokeWidth={2.4} className="manus-icon-spring" />
-                    </div>
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-muted-foreground group-hover:text-foreground">{chart.label}</span>
-                  </button>
-                ))}
+              <div className="space-y-3.5">
+                <h3 className="font-sans text-xs font-bold text-muted-foreground uppercase tracking-widest px-1">Preferred charts gallery</h3>
+                <div className="grid grid-cols-3 gap-2.5 sm:gap-3">
+                  {CHART_TYPES.map((chart, chartIdx) => (
+                    <button
+                      key={chart.id}
+                      style={{ animationDelay: `${chartIdx * 40}ms` }}
+                      onClick={() => setSelectedChart(chart.id)}
+                      aria-pressed={selectedChart === chart.id}
+                      className={cn(
+                        "manus-card-stagger manus-hover-lift flex min-w-0 flex-col items-center justify-center gap-2 p-2.5 sm:p-4 rounded-2xl border bg-white dark:bg-card group cursor-pointer",
+                        selectedChart === chart.id 
+                          ? "border-primary shadow-md ring-1 ring-primary/15 -translate-y-0.5" 
+                          : "border-border hover:border-foreground/35 shadow-xs"
+                      )}
+                    >
+                      <div className={cn(
+                        "p-2 rounded-lg transition-colors duration-150",
+                        selectedChart === chart.id 
+                          ? "bg-primary/10 text-primary" 
+                          : "text-muted-foreground group-hover:text-foreground"
+                      )}>
+                        <chart.icon size={24} strokeWidth={2.3} className="manus-icon-spring" />
+                      </div>
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground group-hover:text-foreground">{chart.label}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          </div>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Google Drive Picker Modal */}

@@ -32,7 +32,6 @@ import { cn } from '@/lib/utils';
 import { hasActiveTextSelection } from '@/lib/clipboard';
 import { ManusLogo } from '../layout/Logo';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { formatResponseModelMetadata } from '@/lib/responseModelMetadata';
 import { FileAttachments } from './FileAttachments';
 import { AttachmentMenu } from '../chat/AttachmentMenu';
 import { ConversationActionBar } from './ConversationActionBar';
@@ -43,8 +42,6 @@ import { detectWritingBlock } from '@/lib/writingDetector';
 import { VoiceInputButton, formatSpeechAutoFill } from '../voice/VoiceInputButton';
 import { VoiceTranscriptionIndicator } from '../voice/VoiceTranscriptionIndicator';
 import { SourceCitations, parseSourcesFromMarkdown, resolveMessageSourcesAndQueries } from './SourceCitations';
-import { VisualAnswerGallery } from './VisualAnswerGallery';
-import { detectVisualSubjectQuery } from '@/lib/visualAnswerEngine';
 import { WeatherWidgetCard } from './WeatherWidgetCard';
 import { ToolApprovalCard } from './ToolApprovalCard';
 import { extractWeatherQuery, fetchWeatherByCity, WeatherData } from '@/lib/weatherService';
@@ -60,7 +57,12 @@ import { Step } from '@/hooks/useAgentTask';
 import { AgentActivityEvent } from '@/lib/agentActivityTracker';
 import { MemoryUpdatedIndicator } from './MemoryUpdatedIndicator';
 import { gsap } from 'gsap';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { toast } from 'sonner';
+import {
+  WORKSPACE_FLOATING_BUTTON_SPRING_VARIANTS,
+  WORKSPACE_REDUCED_MOTION_VARIANTS,
+} from '@/lib/panelMotion';
 import { getChatViewDraft, saveChatViewDraft, clearChatViewDraft } from '@/lib/draftStorage';
 import { ChatExportFormat } from '@/lib/chatExport';
 import {
@@ -77,13 +79,6 @@ import {
   deduplicateDisplayMessages,
   groupConsecutiveMessages,
 } from '@/lib/messageGrouping';
-import { SseDiagnosticConsole } from './SseDiagnosticConsole';
-import {
-  formatExecutionIdentityLabel,
-  formatExecutionTooltip,
-  modelExecutionStore,
-  parseBackendExecutionMetadata,
-} from '@/lib/modelIdentity';
 
 // Lazy-load heavy chart, map, Drive picker, and connector store modals
 const ChartResult = React.lazy(() =>
@@ -502,20 +497,14 @@ export function ChatView({
   activities = [],
   onVoiceExchangeComplete,
 }: ChatViewProps) {
+  const prefersReducedMotion = useReducedMotion();
   const [input, setInput] = React.useState<string>(() => getChatViewDraft());
   const [perfProfile, setPerfProfile] = React.useState(() => getActivePerformanceProfile());
-  const [, setModelIdentityTick] = React.useState(0);
 
   React.useEffect(() => {
     const onPerfChange = () => setPerfProfile(getActivePerformanceProfile());
     window.addEventListener('manus_performance_profile_changed', onPerfChange);
     return () => window.removeEventListener('manus_performance_profile_changed', onPerfChange);
-  }, []);
-
-  React.useEffect(() => {
-    return modelExecutionStore.subscribe(() => {
-      setModelIdentityTick((t) => t + 1);
-    });
   }, []);
 
   const virtualizationBudget = React.useMemo(
@@ -1171,20 +1160,20 @@ export function ChatView({
     };
   }, [messages, steps, result, isStreamingResponse]);
 
-  // Initial animation on outer wrapper (skipped in ultra-lite mode to save CPU/GPU on 2GB RAM Android)
+  // Initial animation on outer wrapper (skipped in ultra-lite or reduced-motion mode)
   useEffect(() => {
-    if (getActivePerformanceProfile() === 'ultra-lite') return;
+    if (getActivePerformanceProfile() === 'ultra-lite' || prefersReducedMotion) return;
     if (chatWrapperRef.current) {
       const ctx = gsap.context(() => {
         gsap.fromTo(
           chatWrapperRef.current,
           { opacity: 0, y: 10 },
-          { opacity: 1, y: 0, duration: 0.32, ease: 'expo.out', clearProps: 'transform,opacity' }
+          { opacity: 1, y: 0, duration: 0.3, ease: 'expo.out', clearProps: 'transform,opacity' }
         );
       }, chatWrapperRef);
       return () => ctx.revert();
     }
-  }, []);
+  }, [prefersReducedMotion]);
 
   // Toggle step expansion
   const toggleStep = (id: string) => {
@@ -1226,6 +1215,12 @@ export function ChatView({
         }
         return match;
       });
+    }
+    if (/powered by/i.test(text) && /deku ai/i.test(text)) {
+      text = text.replace(
+        /(?:\n|^)\s*(?:---+\s*\n\s*)?[*_~]*Note:\s*As\s+Deku\s+AI,\s*I\s+am\s+powered\s+by[^\n]*[*_~]*\s*$/gim,
+        ''
+      );
     }
     return text.trim();
   };
@@ -1394,12 +1389,6 @@ export function ChatView({
 
       const prevUserMsg = displayMessages.slice(0, index).reverse().find((m: any) => m?.role === 'user');
       const prevUserPromptText = prevUserMsg ? cleanUserMessage(prevUserMsg.content) : cleanUserMessage(prompt);
-      const priorUserMessages = displayMessages
-        .slice(0, index)
-        .filter((m: any) => m?.role === 'user' && m !== prevUserMsg);
-      const previousTurnSubjects = priorUserMessages.flatMap((m: any) =>
-        detectVisualSubjectQuery(cleanUserMessage(m.content || '')).subjects
-      );
 
       const writingDetection = detectWritingBlock(parsedSources.cleanedContent, prevUserPromptText);
 
@@ -1422,36 +1411,14 @@ export function ChatView({
           )}
         >
           <div className="chat-bubble-hover-assistant flex-1 space-y-3 min-w-0 -mx-2.5 px-2.5 py-1.5 -my-1.5 rounded-2xl">
-            {!isGroupedWithPrev && (() => {
-              const resolvedExecMeta =
-                parseBackendExecutionMetadata((msg as any).executionMetadata) ||
-                modelExecutionStore.getForMessage(msg.id) ||
-                (isLatestAssistant ? modelExecutionStore.getLatestForTask(taskId) : null);
-              const modelIdentityLabel = formatExecutionIdentityLabel(resolvedExecMeta);
-              const modelIdentityTooltip = formatExecutionTooltip(resolvedExecMeta);
-              return (
-                <div className="flex items-center justify-between gap-3">
-                  <ManusLogo showBadge={true} />
-                  <span
-                    data-testid="assistant-model-identity"
-                    data-model-verified={resolvedExecMeta?.verified ? 'true' : 'false'}
-                    data-model-fallback={resolvedExecMeta?.is_fallback ? 'true' : 'false'}
-                    title={modelIdentityTooltip}
-                    className="text-[11px] text-muted-foreground truncate max-w-[220px] sm:max-w-xs"
-                  >
-                    {modelIdentityLabel}
-                  </span>
-                </div>
-              );
-            })()}
+            {!isGroupedWithPrev && (
+              <div className="flex items-center justify-between gap-3">
+                <ManusLogo showBadge={true} />
+              </div>
+            )}
 
             {cleanedContent ? (
               <>
-                <VisualAnswerGallery
-                  prompt={prevUserPromptText}
-                  assistantContent={parsedSources.cleanedContent}
-                  previousTurnSubjects={previousTurnSubjects}
-                />
                 {writingDetection.isWritingBlock ? (
                   <div className="space-y-2.5 min-w-0">
                     {writingDetection.introText && (
@@ -1477,6 +1444,7 @@ export function ChatView({
                     <MarkdownRenderer 
                       content={parsedSources.cleanedContent} 
                       animateTypewriter={shouldAnimate}
+                      isStreaming={isStreamingResponse && isLatestAssistant}
                       onTypewriterComplete={() => handleTypewriterComplete(msgKey)}
                       onTypewriterTick={() => {}}
                     />
@@ -1655,12 +1623,6 @@ export function ChatView({
                     if (promptToReRun) onSubmit(promptToReRun);
                   }}
                 />
-                <div
-                  className="mt-1 text-[10px] text-muted-foreground/80"
-                  data-testid="response-model-metadata"
-                >
-                  {formatResponseModelMetadata(msg.metadata?.responseModel)}
-                </div>
               </div>
             ) : null}
           </div>
@@ -1848,7 +1810,7 @@ export function ChatView({
       : false;
 
     return (
-      <div className="px-4 sm:px-20 space-y-3 pb-28 pt-2">
+      <div className="px-4 sm:px-20 space-y-3 pb-36 pt-2">
         {shouldShowThinkingIndicator && (
           <div
             data-testid="chat-thinking-indicator"
@@ -1873,21 +1835,6 @@ export function ChatView({
           </div>
         )}
 
-        <SseDiagnosticConsole
-          isStreamingResponse={isStreamingResponse}
-          status={status}
-          taskId={taskId}
-          lastUserPrompt={latestUserPromptText}
-          onStop={onStop}
-          onRestartStream={(promptToRestart) => {
-            const targetPrompt = (promptToRestart || latestUserPromptText || '').trim();
-            if (targetPrompt) {
-              toast.info('Restarting SSE stream...');
-              onSubmit(targetPrompt);
-            }
-          }}
-        />
-
       {/* Final Result */}
       {(() => {
         const hasChart = Boolean(
@@ -1899,7 +1846,7 @@ export function ChatView({
         if (!result || (!hasChart && !hasFiles)) return null;
 
         return (
-          <div className="flex gap-4 max-w-3xl mx-auto my-4 animate-in fade-in slide-in-from-bottom-3 duration-500">
+          <div className="flex gap-4 max-w-3xl mx-auto my-4 animate-in fade-in slide-in-from-bottom-3 duration-300">
             <div className="w-8 shrink-0" />
             <div className="flex-1 min-w-0">
               <div className="border border-border/60 rounded-2xl bg-white dark:bg-card overflow-hidden shadow-sm hover:shadow-md transition-shadow p-5">
@@ -1907,7 +1854,7 @@ export function ChatView({
                   <div className="space-y-3">
                     <div className="flex items-center justify-between border-b border-border/40 pb-2">
                       <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-black dark:bg-white inline-block animate-pulse" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-foreground/70 inline-block" />
                         {result.detectedChartType ? `${result.detectedChartType.toUpperCase()} CHART` : 'DATA VISUALIZATION'}
                       </span>
                     </div>
@@ -2081,33 +2028,40 @@ export function ChatView({
         </div>
       </div>
 
-      {/* Floating Scroll-to-bottom button when user scrolled up */}
-      {showScrollToBottom && (
-        <button
-          type="button"
-          onClick={() => scrollToBottom('smooth')}
-          className="absolute bottom-40 right-4 sm:right-10 z-30 flex items-center gap-2 px-4 py-2.5 rounded-full bg-foreground text-background shadow-2xl hover:scale-105 active:scale-95 transition-all text-xs font-semibold cursor-pointer animate-in fade-in slide-in-from-bottom-3 duration-200 border border-border/40 backdrop-blur-md"
-          title="Scroll to latest message"
-          aria-label="Scroll to latest message"
-        >
-          <ArrowDown size={14} className="animate-bounce" />
-          <span>{isStreamingResponse ? 'New response streaming...' : 'Scroll to bottom'}</span>
-          {isStreamingResponse && (
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping ml-0.5" />
-          )}
-        </button>
-      )}
+      {/* Floating Scroll-to-bottom button with spring entrance/exit */}
+      <AnimatePresence>
+        {showScrollToBottom && (
+          <motion.button
+            key="scroll-to-bottom-fab"
+            type="button"
+            variants={prefersReducedMotion ? WORKSPACE_REDUCED_MOTION_VARIANTS : WORKSPACE_FLOATING_BUTTON_SPRING_VARIANTS}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            onClick={() => scrollToBottom('smooth')}
+            className="absolute bottom-28 sm:bottom-32 right-4 sm:right-8 z-30 flex items-center gap-2 px-3.5 py-2 rounded-full bg-foreground text-background shadow-xl hover:shadow-2xl hover:-translate-y-0.5 active:scale-95 transition-[transform,box-shadow,background-color] duration-150 ease-out text-xs font-semibold cursor-pointer border border-border/30 backdrop-blur-md will-change-transform"
+            title="Scroll to latest message"
+            aria-label="Scroll to latest message"
+          >
+            <ArrowDown size={14} strokeWidth={2.4} className="shrink-0" />
+            <span className="whitespace-nowrap">{isStreamingResponse ? 'Jump to live response' : 'Scroll to bottom'}</span>
+            {isStreamingResponse && (
+              <span className="w-1.5 h-1.5 rounded-full bg-background/85 ml-0.5 shrink-0" aria-hidden="true" />
+            )}
+          </motion.button>
+        )}
+      </AnimatePresence>
 
-      {/* Input Area - Floating Bottom */}
+      {/* Input Area — cleanly anchored within ChatView column with soft fade scrim */}
       <div 
-        className="fixed bottom-0 left-0 right-0 px-4 pb-3 pt-2 flex flex-col items-center gap-2 z-50 bg-manus-cream/80 dark:bg-background/80 backdrop-blur-md"
+        className="absolute bottom-0 inset-x-0 px-4 pb-3 pt-7 flex flex-col items-center gap-2 z-30 bg-gradient-to-t from-manus-cream via-manus-cream/95 to-transparent dark:from-background dark:via-background/95 dark:to-transparent pointer-events-none"
         style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}
       >
         {(attachedFile || isThinkHarder) && (
-          <div className="flex items-center gap-2 flex-wrap max-w-3xl w-full px-2">
+          <div className="pointer-events-auto flex items-center gap-2 flex-wrap max-w-3xl w-full px-2">
             {isThinkHarder && (
               <div className="manus-tag-pop inline-flex items-center gap-1.5 px-3 py-1 bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] rounded-full text-xs font-semibold shadow-md">
-                <Brain size={14} className="animate-pulse" />
+                <Brain size={14} />
                 <span>Deep reasoning</span>
                 <button
                   type="button"
@@ -2146,7 +2100,7 @@ export function ChatView({
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           className={cn(
-            "manus-input-container w-full max-w-3xl bg-[#FFFFFF] dark:bg-[#111111] rounded-[1.75rem] sm:rounded-[2rem] shadow-xl border border-[#E0E0E0] dark:border-[#333333] px-3.5 py-2.5 sm:px-4.5 sm:py-3 flex flex-col gap-1.5 sm:gap-2 transition-[box-shadow,border-color,background-color,transform] duration-200 ease-out focus-within:ring-2 focus-within:ring-[#000000]/15 dark:focus-within:ring-[#FFFFFF]/15 relative gpu-accelerated ultra-smooth-composer",
+            "pointer-events-auto manus-input-container w-full max-w-3xl bg-[#FFFFFF] dark:bg-[#111111] rounded-[1.75rem] sm:rounded-[2rem] border border-[#E0E0E0] dark:border-[#2E2E2E] px-3.5 py-2.5 sm:px-4.5 sm:py-3 flex flex-col gap-1.5 sm:gap-2 transition-[box-shadow,border-color,background-color,transform] duration-200 ease-out focus-within:ring-2 focus-within:ring-[#000000]/15 dark:focus-within:ring-[#FFFFFF]/15 relative gpu-accelerated ultra-smooth-composer",
             isDragging && "ring-2 ring-foreground border-foreground bg-[#FAFAFA] dark:bg-[#171717]",
             isListening && "ring-2 ring-[#000000]/30 dark:ring-[#FFFFFF]/30 border-[#000000] dark:border-[#FFFFFF] shadow-lg"
           )}
@@ -2419,7 +2373,7 @@ export function ChatView({
                 }}
                 disabled={!isAssistantWorking && (!input.trim() && !attachedFile && activeConnectorTags.length === 0)}
                 className={cn(
-                  "manus-touch-target group w-11 h-11 sm:w-9 sm:h-9 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 rounded-full flex items-center justify-center transition-all duration-150 shadow-2xs shrink-0 cursor-pointer",
+                  "manus-touch-target group w-11 h-11 sm:w-9 sm:h-9 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 rounded-full flex items-center justify-center transition-[transform,opacity,background-color,color,box-shadow] duration-150 ease-out shadow-2xs shrink-0 cursor-pointer",
                   isAssistantWorking
                     ? "bg-[#000000] text-[#FFFFFF] dark:bg-[#FFFFFF] dark:text-[#000000] hover:scale-105 active:scale-95 shadow-md"
                     : (input.trim() || attachedFile || activeConnectorTags.length > 0)
@@ -2431,7 +2385,7 @@ export function ChatView({
               >
                 {isAssistantWorking
                   ? <Square size={13} fill="currentColor" strokeWidth={2.5} className="shrink-0" />
-                  : <ArrowUp size={18} strokeWidth={2.6} className="font-bold shrink-0 transition-transform duration-150 group-hover:-translate-y-0.5" />}
+                  : <ArrowUp size={18} strokeWidth={2.6} className="font-bold shrink-0 transition-transform duration-150 ease-out group-hover:-translate-y-0.5" />}
               </button>
             </div>
           </div>

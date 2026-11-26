@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import {
   Library, 
   Clock, 
   ExternalLink, 
@@ -46,8 +47,12 @@ import { generateSessionSummary, getStoredSessionSummaries, removeSessionSummary
 import { TaskQuickPreviewCard } from './TaskQuickPreviewCard';
 import { SwipeableHistoryItem } from './SwipeableHistoryItem';
 import { useUltraLiteImage } from '@/hooks/useUltraLiteImage';
-import { motion, useReducedMotion, type PanInfo, type Variants } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion, type PanInfo, type Variants } from 'framer-motion';
 import { shouldDismissRightDrawerOnSwipe } from '@/lib/swipeToDismiss';
+import {
+  WORKSPACE_RIGHT_SHEET_SPRING_VARIANTS,
+  WORKSPACE_REDUCED_MOTION_VARIANTS,
+} from '@/lib/panelMotion';
 
 const TagAnalyticsModal = React.lazy(() =>
   import('@/components/analytics/TagAnalyticsModal').then((m) => ({ default: m.TagAnalyticsModal }))
@@ -147,22 +152,7 @@ interface HistoryPanelProps {
   initialTab?: 'sessions' | 'all' | 'photos' | 'videos' | 'docs';
 }
 
-export const HISTORY_PANEL_SLIDE_VARIANTS: Variants = {
-  hidden: {
-    x: '100%',
-    opacity: 0.92,
-  },
-  visible: {
-    x: 0,
-    opacity: 1,
-    transition: {
-      type: 'spring',
-      stiffness: 340,
-      damping: 34,
-      mass: 0.85,
-    },
-  },
-};
+export const HISTORY_PANEL_SLIDE_VARIANTS: Variants = WORKSPACE_RIGHT_SHEET_SPRING_VARIANTS;
 
 export function getHistoryItemStaggerDelay(
   index: number,
@@ -1195,26 +1185,31 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
 
   return (
     <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent 
-        side="right" 
-        hideCloseButton
-        className="w-full max-w-[100vw] sm:max-w-xl p-0 flex flex-col h-full h-[100dvh] max-h-[100dvh] bg-transparent border-0 shadow-none data-[state=open]:animate-none data-[state=closed]:animate-none z-50 overflow-visible"
-      >
-        <motion.div
-          key={isOpen ? 'history-panel-open' : 'history-panel-closed'}
-          data-testid="history-panel-swipe-container"
-          data-animation="slide-in"
-          variants={prefersReducedMotion ? undefined : HISTORY_PANEL_SLIDE_VARIANTS}
-          initial={prefersReducedMotion ? false : 'hidden'}
-          animate="visible"
-          className="flex flex-col flex-1 min-h-0 w-full h-full overflow-hidden bg-[#FFFFFF] dark:bg-[#000000] text-[#000000] dark:text-[#FFFFFF] border-l border-[#E0E0E0] dark:border-[#262626] shadow-2xl will-change-transform"
-          drag="x"
-          dragDirectionLock
-          dragConstraints={{ left: 0, right: 0 }}
-          dragElastic={{ left: 0, right: 0.45 }}
-          dragMomentum={false}
-          onDragEnd={handleHistorySwipeEnd}
-        >
+      <AnimatePresence>
+        {isOpen && (
+          <SheetContent 
+            side="right" 
+            forceMount
+            hideCloseButton
+            className="w-full max-w-[100vw] sm:max-w-xl p-0 flex flex-col h-full h-[100dvh] max-h-[100dvh] bg-transparent border-0 shadow-none data-[state=open]:animate-none data-[state=closed]:animate-none z-50 overflow-visible"
+          >
+            <motion.div
+              key="history-panel-spring-sheet"
+              data-testid="history-panel-swipe-container"
+              data-animation="slide-in"
+              data-spring-transition="true"
+              variants={prefersReducedMotion ? WORKSPACE_REDUCED_MOTION_VARIANTS : HISTORY_PANEL_SLIDE_VARIANTS}
+              initial="hidden"
+              animate="visible"
+              exit="exit"
+              className="flex flex-col flex-1 min-h-0 w-full h-full overflow-hidden bg-[#FFFFFF] dark:bg-[#000000] text-[#000000] dark:text-[#FFFFFF] border-l border-[#E0E0E0] dark:border-[#262626] shadow-2xl will-change-transform"
+              drag="x"
+              dragDirectionLock
+              dragConstraints={{ left: 0, right: 0 }}
+              dragElastic={{ left: 0, right: 0.45 }}
+              dragMomentum={false}
+              onDragEnd={handleHistorySwipeEnd}
+            >
         {/* Minimal Fixed Header */}
         <div className="px-4 py-3 border-b border-[#E0E0E0] dark:border-[#262626] bg-[#FFFFFF] dark:bg-[#000000] shrink-0">
           <SheetHeader className="text-left space-y-0">
@@ -1281,13 +1276,13 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
                   data-size="icon"
                   onClick={() => setActiveTab(stat.id as any)}
                   className={cn(
-                    "rounded-xl px-2.5 py-2 text-left border transition-all cursor-pointer",
+                    "rounded-xl px-2.5 py-2 text-left border transition-[transform,background-color,border-color,color,box-shadow] duration-150 ease-out cursor-pointer active:scale-[0.98]",
                     isSelected
-                      ? "bg-[#000000] dark:bg-[#FFFFFF] text-[#FFFFFF] dark:text-[#000000] border-[#000000] dark:border-[#FFFFFF]"
+                      ? "bg-[#000000] dark:bg-[#FFFFFF] text-[#FFFFFF] dark:text-[#000000] border-[#000000] dark:border-[#FFFFFF] shadow-xs"
                       : "bg-[#FAFAFA] dark:bg-[#111111] text-[#000000] dark:text-[#FFFFFF] border-[#E0E0E0] dark:border-[#262626] hover:border-[#777777]"
                   )}
                 >
-                  <span className="text-sm font-bold leading-tight block">{stat.count}</span>
+                  <span className="text-sm font-bold leading-tight block tabular-nums">{stat.count}</span>
                   <span className={cn(
                     "text-[11px] leading-tight block mt-0.5 truncate",
                     isSelected ? "text-[#E0E0E0] dark:text-[#333333] font-medium" : "text-[#777777] dark:text-[#888888]"
@@ -2395,8 +2390,10 @@ export function HistoryPanel({ isOpen, onClose, onSelectTask, initialTab }: Hist
             />
           </React.Suspense>
         )}
-        </motion.div>
-      </SheetContent>
+            </motion.div>
+          </SheetContent>
+        )}
+      </AnimatePresence>
     </Sheet>
   );
 }

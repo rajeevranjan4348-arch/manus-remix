@@ -1,8 +1,8 @@
 /* Deku AI motion polish — additive only; does not alter layout, colors, or typography. */
 :root {
-  --manus-motion-fast: 150ms;
-  --manus-motion-standard: 240ms;
-  --manus-motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --manus-motion-fast: 85ms;
+  --manus-motion-standard: 125ms;
+  --manus-motion-ease: cubic-bezier(0.16, 1, 0.3, 1);
   --manus-spring-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
@@ -41,7 +41,7 @@ body,
 
 :where(button:not(:disabled), a, [role="button"]):active {
   transform: translate3d(0, 0, 0) scale(0.98);
-  transition-duration: 75ms;
+  transition-duration: 50ms;
 }
 
 /* Animate message-like containers and cards smoothly when they enter the DOM. */
@@ -55,7 +55,7 @@ body,
   @keyframes manus-message-enter {
     from {
       opacity: 0;
-      transform: translate3d(0, 8px, 0) scale(0.994);
+      transform: translate3d(0, 5px, 0) scale(0.996);
     }
     to {
       opacity: 1;

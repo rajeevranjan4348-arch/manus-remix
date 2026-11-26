@@ -58,14 +58,14 @@ describe('Response UI & Functionality Fixes (Global Audit)', () => {
   });
 
   describe('2. Backend-confirmed response model metadata', () => {
-    it('formats only confirmed metadata and falls back when model identity is missing', () => {
+    it('formats only confirmed metadata and omits unavailable placeholder text when model identity is missing', () => {
       expect(normalizeResponseModelMetadata({ modelId: '  runtime-model-7  ', provider: ' Provider A ' }))
         .toEqual({ modelId: 'runtime-model-7', provider: 'Provider A' });
       expect(formatResponseModelMetadata({ modelId: 'runtime-model-7', provider: 'Provider A' }))
         .toBe('Model: runtime-model-7 · Provider: Provider A');
       expect(formatResponseModelMetadata({ provider: 'Provider A' }))
-        .toBe('Model information unavailable · Provider: Provider A');
-      expect(formatResponseModelMetadata(undefined)).toBe('Model information unavailable');
+        .toBe('Provider: Provider A');
+      expect(formatResponseModelMetadata(undefined)).toBe('');
       expect(normalizeResponseModelMetadata({ modelId: '  ', provider: 17 })).toBeNull();
       expect(mergeResponseModelMetadata({ provider: 'Provider A' }, { modelId: 'runtime-model-7' }))
         .toEqual({ modelId: 'runtime-model-7', provider: 'Provider A' });

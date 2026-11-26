@@ -3,6 +3,9 @@ import { useAgent, Agent, sandboxTools, webSearch, useBlinkAuth } from '@blinkdo
 import type { Sandbox } from '@blinkdotnew/react';
 import { blink } from '@/lib/blink';
 import { createManagedObjectUrl, revokeManagedObjectUrl } from '@/lib/performanceEngine';
+import { ActiveTaskAutoSaveController } from '@/lib/taskAutoSave';
+import { taskCheckpoint } from '@/lib/taskCheckpoint';
+import { auth } from '@/lib/firebase';
 
 export interface WebsiteStep {
   id: string;
@@ -33,6 +36,13 @@ export function useWebsiteBuilder() {
   const [sandboxError, setSandboxError] = useState<string | null>(null);
   const completedStepsRef = useRef<Set<string>>(new Set());
   const hasVerifiedRef = useRef(false);
+  const stepsRef = useRef<WebsiteStep[]>([]);
+  stepsRef.current = steps;
+  const currentTaskRef = useRef<{ prompt: string; websiteName: string } | null>(null);
+  currentTaskRef.current = currentTask;
+  const taskStatusRef = useRef<'idle' | 'running' | 'completed' | 'error'>('idle');
+  taskStatusRef.current = taskStatus;
+  const autoSaveControllerRef = useRef<ActiveTaskAutoSaveController | null>(null);
 
   // Define the website builder agent
   const agent = useMemo(() => new Agent({
@@ -159,10 +169,17 @@ Be efficient, create clean code, and ensure the preview works perfectly.`,
         if (prev) revokeManagedObjectUrl(prev);
         return blobUrl;
       });
+      if (autoSaveControllerRef.current) {
+        autoSaveControllerRef.current.stop();
+        autoSaveControllerRef.current = null;
+      }
       setTaskStatus('completed');
       setSteps(prev => prev.map(s => ({ ...s, status: 'completed' as const })));
       const activeId = workTaskIdRef.current;
-      if (activeId) (blink.db as any).tasks.update(activeId, { status: 'completed', result: JSON.stringify({ type: 'website', websiteName: title, prompt: promptText, html: mockHtml }), steps: JSON.stringify(STEP_ORDER.map((label, index) => ({ id: String(index + 1), label, status: 'completed' }))) }).catch((err: unknown) => console.warn('Failed to persist website work history:', err));
+      if (activeId) {
+        taskCheckpoint.clearCheckpoint(activeId);
+        (blink.db as any).tasks.update(activeId, { status: 'completed', result: JSON.stringify({ type: 'website', websiteName: title, prompt: promptText, html: mockHtml }), steps: JSON.stringify(STEP_ORDER.map((label, index) => ({ id: String(index + 1), label, status: 'completed' }))) }).catch((err: unknown) => console.warn('Failed to persist website work history:', err));
+      }
     },
     onError: (err) => {
       console.warn('[AI Studio] Website builder agent notice:', err);
@@ -227,11 +244,18 @@ Be efficient, create clean code, and ensure the preview works perfectly.`,
         if (prev) revokeManagedObjectUrl(prev);
         return blobUrl;
       });
+      if (autoSaveControllerRef.current) {
+        autoSaveControllerRef.current.stop();
+        autoSaveControllerRef.current = null;
+      }
       setTaskStatus('completed');
       const errorSteps = STEP_ORDER.map((label, idx) => ({ id: String(idx + 1), label, status: 'completed' as const, trace: [`Verified: ${label}`] }));
       setSteps(errorSteps);
       const activeId = workTaskIdRef.current;
-      if (activeId) (blink.db as any).tasks.update(activeId, { status: 'completed', result: JSON.stringify({ type: 'website', websiteName: title, prompt: promptText, html: mockHtml, fallback: true }), steps: JSON.stringify(errorSteps) }).catch(() => {});
+      if (activeId) {
+        taskCheckpoint.clearCheckpoint(activeId);
+        (blink.db as any).tasks.update(activeId, { status: 'completed', result: JSON.stringify({ type: 'website', websiteName: title, prompt: promptText, html: mockHtml, fallback: true }), steps: JSON.stringify(errorSteps) }).catch(() => {});
+      }
     }
   });
 
@@ -314,6 +338,63 @@ Be efficient, create clean code, and ensure the preview works perfectly.`,
     });
   }, [messages, taskStatus, completeStep]);
 
+  // Periodic Firestore auto-save for active website builder tasks
+  useEffect(() => {
+    if (taskStatus !== 'running') {
+      if (autoSaveControllerRef.current) {
+        autoSaveControllerRef.current.stop();
+        autoSaveControllerRef.current = null;
+      }
+      return;
+    }
+
+    const controller = new ActiveTaskAutoSaveController({
+      intervalMs: 8_000,
+      milestoneThrottleMs: 1_500,
+      getSnapshot: () => {
+        const activeId = workTaskIdRef.current;
+        if (!activeId) return null;
+        const activeTask = currentTaskRef.current;
+        return {
+          taskId: activeId,
+          conversationId: activeId,
+          userId: auth?.currentUser?.uid || user?.id || 'usr_manus_default',
+          title: activeTask?.websiteName || 'Website Builder Task',
+          prompt: activeTask?.prompt || '',
+          mode: 'work',
+          outputFormat: 'website',
+          phase: 'tool-calling',
+          steps: stepsRef.current,
+          accumulatedResult: '',
+          completedToolCalls: stepsRef.current
+            .filter((s) => s.status === 'completed')
+            .map((s) => ({
+              toolName: s.label,
+              args: { stepId: s.id },
+              outputSummary: (s.trace || []).slice(-2).join(' | ') || s.label,
+              executedAt: new Date().toISOString(),
+            })),
+        };
+      },
+    });
+    autoSaveControllerRef.current = controller;
+    controller.start({ immediate: true });
+
+    return () => {
+      const stillRunning = taskStatusRef.current === 'running';
+      controller.stop({ flushInterrupted: stillRunning });
+      if (autoSaveControllerRef.current === controller) {
+        autoSaveControllerRef.current = null;
+      }
+    };
+  }, [taskStatus, user]);
+
+  useEffect(() => {
+    if (taskStatus === 'running' && autoSaveControllerRef.current?.active) {
+      autoSaveControllerRef.current.triggerMilestoneSave();
+    }
+  }, [taskStatus, steps]);
+
   const startBuilding = useCallback(async (prompt: string, websiteName: string) => {
     // Reset refs
     completedStepsRef.current = new Set();
@@ -395,6 +476,10 @@ The website should be production-ready, responsive, and beautiful. Use Tailwind 
   }, [isAuthenticated, sandbox, sendMessage, createSandbox]);
 
   const resetBuilder = useCallback(() => {
+    if (autoSaveControllerRef.current) {
+      autoSaveControllerRef.current.stop();
+      autoSaveControllerRef.current = null;
+    }
     setCurrentTask(null);
     workTaskIdRef.current = null;
     setTaskStatus('idle');

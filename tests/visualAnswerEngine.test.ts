@@ -224,15 +224,15 @@ describe('Visual Answer Engine — Auto Image Display & Google AI Overview Style
       expect(response).toContain('- **Nationality:** Indian');
     });
 
-    it('renders VisualAnswerGallery at the top of the AI response before MarkdownRenderer in ChatView.tsx', () => {
+    it('keeps VisualAnswerGallery and SseDiagnosticConsole removed from ChatView.tsx while retaining MarkdownRenderer', () => {
       const chatViewPath = path.resolve(__dirname, '../src/components/agent/ChatView.tsx');
       const chatViewCode = fs.readFileSync(chatViewPath, 'utf-8');
 
-      const galleryIndex = chatViewCode.indexOf('<VisualAnswerGallery');
-      const markdownIndex = chatViewCode.indexOf('<MarkdownRenderer');
-      expect(galleryIndex).toBeGreaterThan(-1);
-      expect(markdownIndex).toBeGreaterThan(-1);
-      expect(galleryIndex).toBeLessThan(markdownIndex);
+      expect(chatViewCode).not.toContain('VisualAnswerGallery');
+      expect(chatViewCode).not.toContain('SseDiagnosticConsole');
+      expect(chatViewCode).toContain('<MarkdownRenderer');
+      expect(fs.existsSync(path.resolve(__dirname, '../src/components/agent/VisualAnswerGallery.tsx'))).toBe(false);
+      expect(fs.existsSync(path.resolve(__dirname, '../src/components/agent/SseDiagnosticConsole.tsx'))).toBe(false);
     });
   });
 });

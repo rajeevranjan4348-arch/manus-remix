@@ -170,9 +170,10 @@ describe('Part 2 — Deku AI Permanent Identity & Real Model Identification Syst
     expect(tooltip).toContain('Fallback from: anthropic/claude-3.5-sonnet');
   });
 
-  it('6. Missing / unverified model metadata: never fabricates model name and displays "Model information unavailable"', () => {
-    expect(formatExecutionIdentityLabel(null)).toBe(MODEL_UNAVAILABLE_TEXT);
-    expect(formatExecutionIdentityLabel(undefined)).toBe(MODEL_UNAVAILABLE_TEXT);
+  it('6. Missing / unverified model metadata: never fabricates model name and hides unavailable placeholder text', () => {
+    expect(MODEL_UNAVAILABLE_TEXT).toBe('');
+    expect(formatExecutionIdentityLabel(null)).toBe('');
+    expect(formatExecutionIdentityLabel(undefined)).toBe('');
 
     const unavailable = buildUnavailableExecutionMetadata({
       requestedModel: 'gemini-3-flash-preview',
@@ -182,7 +183,7 @@ describe('Part 2 — Deku AI Permanent Identity & Real Model Identification Syst
     });
     expect(unavailable.verified).toBe(false);
     expect(unavailable.model).toBeNull();
-    expect(formatExecutionIdentityLabel(parseBackendExecutionMetadata(unavailable))).toBe(MODEL_UNAVAILABLE_TEXT);
+    expect(formatExecutionIdentityLabel(parseBackendExecutionMetadata(unavailable))).toBe('');
 
     // Reject spoofed/unverified metadata attempting to claim verified=true on local-fallback or missing model
     const spoofed = parseBackendExecutionMetadata({
@@ -195,19 +196,20 @@ describe('Part 2 — Deku AI Permanent Identity & Real Model Identification Syst
       verified: true,
     });
     expect(spoofed?.verified).toBe(false);
-    expect(formatExecutionIdentityLabel(spoofed)).toBe(MODEL_UNAVAILABLE_TEXT);
+    expect(formatExecutionIdentityLabel(spoofed)).toBe('');
 
     // Local resilient synthesizer MUST NOT claim a Gemini model when running locally
     const localReply = generateResilientResponse('Which model are you running on?', [], 'gemini-3-flash-preview');
     expect(localReply).toContain('Deku AI');
-    expect(localReply).toContain(MODEL_UNAVAILABLE_TEXT);
+    expect(localReply).not.toContain('Model information unavailable');
     expect(localReply).not.toContain('gemini-3-flash-preview');
-    expect(buildUnverifiedIdentityResponse()).toContain(MODEL_UNAVAILABLE_TEXT);
+    expect(buildUnverifiedIdentityResponse()).not.toContain('Model information unavailable');
+    expect(buildUnverifiedIdentityResponse()).toContain('Deku AI');
 
-    // Unbound request in client store safely resolves to unavailable
+    // Unbound request in client store safely resolves to empty label
     const unbound = modelExecutionStore.bindRequestToMessage('req_unknown', 'msg_unknown', 'task_unknown');
     expect(unbound.verified).toBe(false);
-    expect(formatExecutionIdentityLabel(unbound)).toBe(MODEL_UNAVAILABLE_TEXT);
+    expect(formatExecutionIdentityLabel(unbound)).toBe('');
     expect(createUnavailableMetadata().verified).toBe(false);
   });
 

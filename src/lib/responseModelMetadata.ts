@@ -47,13 +47,10 @@ export function createResponseModelMetadataTracker() {
 
 export function formatResponseModelMetadata(metadata: unknown): string {
   const normalized = normalizeResponseModelMetadata(metadata);
-  if (!normalized) return 'Model information unavailable';
-  if (!normalized.modelId) {
-    return `Model information unavailable${normalized.provider ? ` · Provider: ${normalized.provider}` : ''}`;
-  }
+  if (!normalized) return '';
   const parts = [
     normalized.modelId ? `Model: ${normalized.modelId}` : null,
     normalized.provider ? `Provider: ${normalized.provider}` : null,
   ].filter((part): part is string => Boolean(part));
-  return parts.join(' · ') || 'Model information unavailable';
+  return parts.join(' · ');
 }

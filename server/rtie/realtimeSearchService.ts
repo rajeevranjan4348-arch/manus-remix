@@ -201,7 +201,7 @@ export function getOfficialAiModelDocsSnapshot(query: string): RawSearchResult[]
       title: 'Gemini Models Official Documentation — Google AI for Developers',
       url: 'https://ai.google.dev/gemini-api/docs/models',
       snippet:
-        'Official Google Gemini model lineup includes the Gemini 3 series (gemini-3-flash-preview, gemini-3.1-pro-preview, gemini-3.1-flash-lite-preview, gemini-3-pro-image-preview) and Gemini 2.5 series (gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-lite) supporting multimodal reasoning, native tool calling, and Google Search grounding via @google/genai.',
+        'Official Google Gemini model lineup includes the Gemini 4 series (gemini-4-hydrogen, gemini-4-neon, gemini-4-carbon, gemini-4-argon), Gemini 3 series (gemini-3-flash-preview, gemini-3.1-pro-preview, gemini-3.1-flash-lite-preview, gemini-3-pro-image-preview), and Gemini 2.5 series (gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-lite) supporting multimodal reasoning, URL context, native tool calling, and Google Search grounding via @google/genai.',
       provider: 'official-ai-docs',
       publishedAt: new Date().toISOString().slice(0, 10) + 'T00:00:00.000Z',
       retrievedAt,
@@ -369,30 +369,40 @@ export async function fetchGoogleSearchGroundingAdapter(
       apiKey,
       httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
     });
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `Retrieve current, verified facts and sources for: ${query}`,
-      config: {
-        tools: [{ googleSearch: {} }],
-      },
-    });
-    const summaryText = response.text?.trim() || '';
-    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-    const results: RawSearchResult[] = [];
-
-    for (const chunk of chunks.slice(0, limit)) {
-      const web = chunk?.web;
-      if (typeof web?.uri === 'string' && /^https?:\/\//i.test(web.uri)) {
-        results.push({
-          title: String(web.title || web.uri).slice(0, 260),
-          url: web.uri,
-          snippet: summaryText.slice(0, 700),
-          provider: 'google-search-grounding',
-          retrievedAt,
+    const candidateGroundingModels = ['gemini-4-hydrogen', 'gemini-3-flash-preview'];
+    for (const model of candidateGroundingModels) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: `Retrieve current, verified facts and sources for: ${query}`,
+          config: {
+            tools: [{ googleSearch: {} }],
+          },
         });
+        const summaryText = response.text?.trim() || '';
+        const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+        const results: RawSearchResult[] = [];
+
+        for (const chunk of chunks.slice(0, limit)) {
+          const web = chunk?.web;
+          if (typeof web?.uri === 'string' && /^https?:\/\//i.test(web.uri)) {
+            results.push({
+              title: String(web.title || web.uri).slice(0, 260),
+              url: web.uri,
+              snippet: summaryText.slice(0, 700),
+              provider: 'google-search-grounding',
+              retrievedAt,
+            });
+          }
+        }
+        if (results.length > 0) {
+          return results;
+        }
+      } catch {
+        // Fall back to next grounding-capable Gemini model
       }
     }
-    return results;
+    return [];
   } catch {
     return [];
   }

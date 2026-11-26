@@ -347,8 +347,8 @@
 /* Global Transition Utility Defaults */
 .smooth-transition {
   transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter;
-  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
-  transition-duration: 240ms;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  transition-duration: 120ms;
 }
 
 /* GPU Acceleration & Performance Isolation (preserve existing CSS/Tailwind transforms) */
@@ -360,7 +360,7 @@
 
 /* Smooth chat message entrance compatible with virtualized lists and Android WebView text selection */
 .chat-message-enter {
-  animation: chat-message-slide-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: chat-message-slide-in 145ms cubic-bezier(0.16, 1, 0.3, 1) both;
   animation-delay: var(--chat-stagger-delay, 0ms);
 }
 
@@ -397,7 +397,21 @@
 }
 
 .manus-input-container {
-  @apply relative flex w-full rounded-[1.75rem] border border-[#E0E0E0] dark:border-[#333333] bg-[#FFFFFF] dark:bg-[#111111] shadow-lg transition-[transform,box-shadow,border-color,background-color] duration-200 ease-out hover:border-primary/30 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20;
+  @apply relative flex w-full rounded-[1.75rem] border border-[#E0E0E0] dark:border-[#2E2E2E] bg-[#FFFFFF] dark:bg-[#111111] transition-[transform,box-shadow,border-color,background-color] duration-200 hover:border-foreground/30 focus-within:border-foreground/50 focus-within:ring-2 focus-within:ring-foreground/10;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 8px 28px -10px rgba(0, 0, 0, 0.08), 0 2px 6px -2px rgba(0, 0, 0, 0.04);
+}
+
+.dark .manus-input-container {
+  box-shadow: 0 12px 32px -10px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.manus-input-container:focus-within {
+  box-shadow: 0 14px 36px -12px rgba(0, 0, 0, 0.14), 0 3px 10px -3px rgba(0, 0, 0, 0.06);
+}
+
+.dark .manus-input-container:focus-within {
+  box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.82), inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
 .manus-input-container[data-listening="true"] {
@@ -405,15 +419,16 @@
 }
 
 .manus-card {
-  @apply rounded-2xl border border-border bg-white p-6 shadow-sm hover:shadow-md transition-[transform,box-shadow,border-color,background-color] duration-200 ease-out hover:-translate-y-0.5;
+  @apply rounded-2xl border border-border bg-white p-6 shadow-sm hover:shadow-md transition-[transform,box-shadow,border-color,background-color] duration-200 hover:-translate-y-0.5;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .animate-fade-in {
-  animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: fadeIn 0.14s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .animate-pop-in {
-  animation: popIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: popIn 0.12s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 @keyframes fadeIn {
@@ -439,6 +454,31 @@
 }
 
 /* Markdown & Table Styles */
+.manus-markdown {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.manus-markdown-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.manus-markdown-table-scroll table {
+  width: max-content;
+  min-width: 100%;
+}
+
+.manus-markdown hr {
+  @apply my-6 border-0 border-t border-border/70;
+}
+
 .manus-markdown table {
   @apply w-full border-collapse text-sm text-left mb-6;
 }
@@ -472,15 +512,16 @@
 .manus-markdown h2, 
 .manus-markdown h3 {
   @apply font-serif text-foreground tracking-tight;
+  text-wrap: balance;
 }
 
-.manus-markdown h1 { @apply text-4xl mb-8 mt-4; }
-.manus-markdown h2 { @apply text-3xl mb-6 mt-12; }
-.manus-markdown h3 { @apply text-2xl mb-4 mt-8; }
-.manus-markdown h4 { @apply text-lg font-bold mb-3 mt-6; }
+.manus-markdown h1 { @apply text-3xl sm:text-4xl mb-6 mt-4 leading-tight; }
+.manus-markdown h2 { @apply text-2xl sm:text-3xl mb-5 mt-10 leading-snug; }
+.manus-markdown h3 { @apply text-xl sm:text-2xl mb-3.5 mt-7 leading-snug; }
+.manus-markdown h4 { @apply text-base sm:text-lg font-bold mb-2.5 mt-5; }
 
 .manus-markdown p {
-  @apply mb-4 leading-relaxed;
+  @apply mb-4 leading-[1.68];
 }
 
 .manus-markdown strong {
@@ -1318,7 +1359,7 @@
 
 /* Smooth entrance for newly added conversation messages */
 .chat-message-enter {
-  animation: chat-message-slide-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: chat-message-slide-in 145ms cubic-bezier(0.16, 1, 0.3, 1) both;
   animation-delay: var(--chat-stagger-delay, 0ms);
   transform-origin: center bottom;
 }
@@ -1363,12 +1404,12 @@
 }
 
 
-/* Deku AI: Ultra-Smooth 120fps Spring Physics & GPU Motion System */
+/* Deku AI: Ultra-Fast 120fps Spring Physics & GPU Motion System */
 :root {
-  --manus-motion-fast: 160ms;
-  --manus-motion-normal: 240ms;
-  --manus-motion-slow: 360ms;
-  --manus-motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --manus-motion-fast: 85ms;
+  --manus-motion-normal: 120ms;
+  --manus-motion-slow: 145ms;
+  --manus-motion-ease: cubic-bezier(0.16, 1, 0.3, 1);
   --manus-spring-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
@@ -1566,8 +1607,34 @@ html {
 }
 
 @keyframes manus-transition-enter {
-  from { opacity: 0; transform: translate3d(0, 8px, 0) scale(0.996); }
+  from { opacity: 0; transform: translate3d(0, 4px, 0) scale(0.998); }
   to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+/* Ultra-fast top hairline progress bar for secondary route fallback */
+.deku-route-progress-track {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  overflow: hidden;
+  background: hsl(var(--border) / 0.35);
+}
+
+.deku-route-progress-bar {
+  position: absolute;
+  inset: 0;
+  width: 45%;
+  background: hsl(var(--foreground));
+  transform: translate3d(-100%, 0, 0);
+  animation: deku-route-progress-sweep 0.5s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  will-change: transform;
+}
+
+@keyframes deku-route-progress-sweep {
+  0% { transform: translate3d(-105%, 0, 0); }
+  100% { transform: translate3d(240%, 0, 0); }
 }
 
 /* Active SpeechRecognition aura & voice equalizer inside .manus-input-container */
@@ -1710,8 +1777,7 @@ html {
 
 /* Ambient floating animation for Home hero robot */
 .manus-hero-float {
-  animation: manus-hero-float- loop 4.6s ease-in-out infinite;
-  animation-name: manus-hero-float-loop;
+  animation: manus-hero-float-loop 4.8s cubic-bezier(0.37, 0, 0.63, 1) infinite;
   will-change: transform;
 }
 
@@ -1726,13 +1792,13 @@ html {
 
 /* Staggered spring entrance for Home action chips & quick pills */
 .manus-chip-stagger {
-  animation: manus-chip-spring-in 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: manus-chip-spring-in 140ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @keyframes manus-chip-spring-in {
   from {
     opacity: 0;
-    transform: translate3d(0, 8px, 0) scale(0.95);
+    transform: translate3d(0, 4px, 0) scale(0.98);
   }
   to {
     opacity: 1;
@@ -1742,13 +1808,13 @@ html {
 
 /* Directional spring entrances for user vs assistant chat bubbles */
 .chat-message-user-enter {
-  animation: chat-user-bubble-in 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: chat-user-bubble-in 135ms cubic-bezier(0.16, 1, 0.3, 1) both;
   animation-delay: var(--chat-stagger-delay, 0ms);
   transform-origin: right bottom;
 }
 
 .chat-message-assistant-enter {
-  animation: chat-assistant-bubble-in 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: chat-assistant-bubble-in 150ms cubic-bezier(0.16, 1, 0.3, 1) both;
   animation-delay: var(--chat-stagger-delay, 0ms);
   transform-origin: left bottom;
 }
@@ -1756,7 +1822,7 @@ html {
 @keyframes chat-user-bubble-in {
   from {
     opacity: 0;
-    transform: translate3d(8px, 10px, 0) scale(0.975);
+    transform: translate3d(6px, 8px, 0) scale(0.98);
   }
   to {
     opacity: 1;
@@ -1767,7 +1833,7 @@ html {
 @keyframes chat-assistant-bubble-in {
   from {
     opacity: 0;
-    transform: translate3d(-4px, 10px, 0) scale(0.99);
+    transform: translate3d(-3px, 8px, 0) scale(0.992);
   }
   to {
     opacity: 1;
@@ -2678,7 +2744,7 @@ select,
   z-index: 2147483640 !important;
   isolation: isolate;
   background-color: rgba(0, 0, 0, 0.24);
-  animation: manus-context-backdrop-fade 140ms ease-out both;
+  animation: manus-context-backdrop-fade 80ms ease-out both;
 }
 
 .dark .manus-context-menu-backdrop {
@@ -2695,7 +2761,7 @@ select,
   box-shadow:
     0 20px 50px -12px rgba(0, 0, 0, 0.28),
     0 6px 18px -4px rgba(0, 0, 0, 0.12);
-  animation: manus-context-menu-pop 150ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: manus-context-menu-pop 90ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .dark .manus-context-menu-card {
@@ -2713,7 +2779,7 @@ select,
   z-index: 2147483645 !important;
   isolation: isolate;
   background-color: rgba(0, 0, 0, 0.56);
-  animation: manus-context-backdrop-fade 150ms ease-out both;
+  animation: manus-context-backdrop-fade 85ms ease-out both;
 }
 
 .manus-select-text-card {
@@ -2721,7 +2787,7 @@ select,
   background-color: #FFFFFF !important;
   color: #111111 !important;
   border-color: rgba(0, 0, 0, 0.09);
-  animation: manus-context-menu-pop 150ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: manus-context-menu-pop 90ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .dark .manus-select-text-card {
@@ -2893,44 +2959,44 @@ select,
 }
 
 .workspace-panel-spring[data-state="open"] {
-  animation: workspace-panel-spring-in 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: workspace-panel-spring-in 165ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .workspace-panel-spring[data-state="closed"] {
-  animation: workspace-panel-spring-out 240ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  animation: workspace-panel-spring-out 110ms cubic-bezier(0.32, 0.72, 0, 1) both;
 }
 
 .workspace-sheet-spring-right[data-state="open"] {
-  animation: workspace-sheet-spring-in-right 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: workspace-sheet-spring-in-right 175ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .workspace-sheet-spring-right[data-state="closed"] {
-  animation: workspace-sheet-spring-out-right 260ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  animation: workspace-sheet-spring-out-right 115ms cubic-bezier(0.32, 0.72, 0, 1) both;
 }
 
 .workspace-sheet-spring-left[data-state="open"],
 .workspace-drawer-spring-left {
-  animation: workspace-sheet-spring-in-left 400ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: workspace-sheet-spring-in-left 170ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .workspace-sheet-spring-left[data-state="closed"] {
-  animation: workspace-sheet-spring-out-left 260ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  animation: workspace-sheet-spring-out-left 115ms cubic-bezier(0.32, 0.72, 0, 1) both;
 }
 
 .workspace-sheet-spring-top[data-state="open"] {
-  animation: workspace-sheet-spring-in-top 400ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: workspace-sheet-spring-in-top 170ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .workspace-sheet-spring-top[data-state="closed"] {
-  animation: workspace-sheet-spring-out-top 240ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  animation: workspace-sheet-spring-out-top 110ms cubic-bezier(0.32, 0.72, 0, 1) both;
 }
 
 .workspace-sheet-spring-bottom[data-state="open"] {
-  animation: workspace-sheet-spring-in-bottom 400ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: workspace-sheet-spring-in-bottom 170ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .workspace-sheet-spring-bottom[data-state="closed"] {
-  animation: workspace-sheet-spring-out-bottom 240ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  animation: workspace-sheet-spring-out-bottom 110ms cubic-bezier(0.32, 0.72, 0, 1) both;
 }
 
 [data-perf-mode="ultra-lite"] .workspace-panel-spring[data-state="open"],
