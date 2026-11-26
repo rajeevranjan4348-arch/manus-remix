@@ -87,8 +87,6 @@ export default async (req: Request) => {
         return jsonResponse({ ok: true, ...(await service.search(userId, url.searchParams.get('query') || '')) }, 200, requestId);
       }
       if (action === 'list') {
-        const installed = await service.listExecutions ? null : null;
-        const skills = await (service as unknown as { storeGet?: unknown }) && null;
         const listRes = await service.search(userId, '');
         return jsonResponse({ ok: true, installed: listRes.installed }, 200, requestId);
       }
