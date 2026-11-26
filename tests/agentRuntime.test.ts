@@ -1,290 +1,229 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import {
-  AgentRuntimeService,
-  AGENT_ROLE_DEFINITIONS,
-  DEFAULT_BUDGET,
-  validateSubAgentOutput,
-  createGeminiModelClient,
-  isGeminiModelClientConfigured,
-  getGeminiApiKey,
-  type AgentModelClient,
-  type AgentModelClientRequest,
-  type AgentModelClientResponse,
-  type SubTaskSpec,
-} from '../server/agentRuntime/agentRuntime';
-import { InMemoryDurableStore } from '../server/durable/store';
+import { describe, expect, it } from 'vitest';
 
-const ALL_ROLES = Object.keys(AGENT_ROLE_DEFINITIONS) as Array<keyof typeof AGENT_ROLE_DEFINITIONS>;
+import { MemoryAgentStore } from '../server/agents/agentStore';
+import { AgentRuntimeService, validatePlan } from '../server/agents/agentRuntime';
+import { resolveModelProvider, type ModelCallResult, type ModelMessage, type ModelCallOptions } from '../server/agents/modelProvider';
+import type { AgentRunRecord, SubtaskSpec } from '../server/agents/types';
 
-function fakeClient(
-  respond: (req: AgentModelClientRequest) => string,
-  opts: { delayMs?: number; usage?: { promptTokens: number; completionTokens: number } } = {},
-): AgentModelClient & { calls: AgentModelClientRequest[] } {
-  const calls: AgentModelClientRequest[] = [];
-  const client = (async (req: AgentModelClientRequest) => {
-    calls.push(req);
-    if (opts.delayMs) {
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(resolve, opts.delayMs!);
-        req.signal.addEventListener('abort', () => {
-          clearTimeout(timer);
-          reject(new Error('aborted'));
-        });
-      });
-    }
-    const text = respond(req);
-    const usage = opts.usage ?? { promptTokens: 100, completionTokens: 50 };
-    const response: AgentModelClientResponse = {
-      text,
-      model: req.model,
-      provider: 'fake',
-      usage: { ...usage, totalTokens: usage.promptTokens + usage.completionTokens, source: 'provider' },
-    };
-    return response;
-  }) as AgentModelClient & { calls: AgentModelClientRequest[] };
-  (client as any).calls = calls;
-  return client;
+function usage(total: number) {
+  return { promptTokens: total, completionTokens: 0, totalTokens: total, costUsd: 0 };
 }
 
-const VALID_OUTPUT = 'This deliverable is complete: analysis summary with concrete findings and a final recommendation.';
+interface ScriptConf { text?: string; fail?: string; delayMs?: number; tokens?: number; }
+type ScriptFn = (messages: ModelMessage[], callIndex: number, opts?: ModelCallOptions) => ScriptConf;
 
-describe('Feature 03: True autonomous multi-agent runtime', () => {
-  let runtime: AgentRuntimeService;
+function isReviewerCall(messages: ModelMessage[]): boolean {
+  return String(messages[0]?.content || '').includes('final reviewer');
+}
 
-  beforeEach(() => {
-    runtime = new AgentRuntimeService(new InMemoryDurableStore());
-  });
-
-  it('defines all nine required agent roles with scoped instructions', () => {
-    expect(ALL_ROLES.sort()).toEqual(
-      [
-        'browser',
-        'coding',
-        'debugging',
-        'documentation',
-        'qa',
-        'research',
-        'security_review',
-        'testing',
-        'analysis',
-      ].sort(),
-    );
-    for (const role of ALL_ROLES) {
-      const def = AGENT_ROLE_DEFINITIONS[role];
-      expect(def.systemInstruction.length).toBeGreaterThan(20);
-      expect(def.defaultModel).toBeTruthy();
-      expect(Array.isArray(def.allowedTools)).toBe(true);
-    }
-  });
-
-  it('executes a real provider-backed run and aggregates provider usage', async () => {
-    const client = fakeClient(() => VALID_OUTPUT, { usage: { promptTokens: 120, completionTokens: 80 } });
-    const result = await runtime.execute(
-      {
-        userId: 'usr_a',
-        objective: 'Analyze the repository layout',
-        subTaskPlan: [
-          { id: 's1', role: 'research', goal: 'Map the repository' },
-          { id: 's2', role: 'analysis', goal: 'Analyze structure' },
-        ],
-      },
-      client,
-    );
-    expect(result.status).toBe('completed');
-    expect(client.calls).toHaveLength(3);
-    expect(result.totals.totalTokens).toBe(600);
-    expect(result.totals.usageSource).toBe('provider');
-    expect(result.evidence).toHaveLength(2);
-    expect(result.reviewerOutput).toBeTruthy();
-    expect(result.reviewerRun!.role).toBe('qa');
-  });
-
-  it('gives each agent a separate context: role system instruction and dependent handoff', async () => {
-    const client = fakeClient(() => VALID_OUTPUT);
-    await runtime.execute(
-      {
-        userId: 'usr_a',
-        objective: 'Build feature',
-        subTaskPlan: [
-          { id: 's1', role: 'research', goal: 'Research approach' },
-          { id: 's2', role: 'coding', goal: 'Implement it', dependsOn: ['s1'] },
-        ],
-      },
-      client,
-    );
-    const researchCall = client.calls.find((c) => c.role === 'research')!;
-    const codingCall = client.calls.find((c) => c.role === 'coding')!;
-    expect(researchCall.systemInstruction).toBe(AGENT_ROLE_DEFINITIONS.research.systemInstruction);
-    expect(codingCall.systemInstruction).toBe(AGENT_ROLE_DEFINITIONS.coding.systemInstruction);
-    expect(codingCall.prompt).not.toBe(researchCall.prompt);
-    expect(codingCall.prompt).toContain('Result from s1 (research)');
-  });
-
-  it('runs independent tasks in parallel and sequential tasks after dependencies', async () => {
-    const client = fakeClient(() => VALID_OUTPUT, { delayMs: 60 });
-    const seq: string[] = [];
-    const parallel = fakeClient((req) => {
-      return VALID_OUTPUT;
-    }, { delayMs: 50 });
-    const result = await runtime.execute(
-      {
-        userId: 'usr_a',
-        objective: 'Parallel research',
-        subTaskPlan: [
-          { id: 'p1', role: 'research', goal: 'Parallel A' },
-          { id: 'p2', role: 'research', goal: 'Parallel B' },
-          { id: 'seq1', role: 'analysis', goal: 'Sequential after', dependsOn: ['p1', 'p2'] },
-        ],
-      },
-      parallel,
-    );
-    expect(result.status).toBe('completed');
-    const p1At = parallel.calls.findIndex((c) => c.prompt.includes('Parallel A'));
-    const p2At = parallel.calls.findIndex((c) => c.prompt.includes('Parallel B'));
-    const seqAt = parallel.calls.findIndex((c) => c.prompt.includes('Sequential after'));
-    expect(p1At).toBeGreaterThanOrEqual(0);
-    expect(p2At).toBeGreaterThanOrEqual(0);
-    expect(Math.abs(p1At - p2At)).toBeLessThanOrEqual(1);
-    expect(seqAt).toBe(parallel.calls.length - 2);
-  });
-
-  it('enforces the agent-count budget', async () => {
-    const client = fakeClient(() => VALID_OUTPUT);
-    await expect(
-      runtime.execute(
-        {
-          userId: 'usr_a',
-          objective: 'Too many agents',
-          subTaskPlan: Array.from({ length: DEFAULT_BUDGET.maxAgents + 1 }, (_, i) => ({
-            id: `t${i}`,
-            role: 'research' as const,
-            goal: `Task ${i}`,
-          })),
-          budget: { maxAgents: 3 },
-        },
-        client,
-      ),
-    ).rejects.toThrow(/budget caps at 3/);
-    expect(client.calls).toHaveLength(0);
-  });
-
-  it('blocks remaining work with blocked_budget when the token budget is exhausted', async () => {
-    const client = fakeClient(() => VALID_OUTPUT, { usage: { promptTokens: 500, completionTokens: 500 } });
-    const result = await runtime.execute(
-      {
-        userId: 'usr_a',
-        objective: 'Budget-limited mission',
-        subTaskPlan: [
-          { id: 'a', role: 'research', goal: 'First task' },
-          { id: 'b', role: 'research', goal: 'Second task' },
-        ],
-        budget: { maxTotalTokens: 1000, maxAgents: 4, maxConcurrency: 1 },
-      },
-      client,
-    );
-    const statuses = result.subTaskResults.map((r) => r.status);
-    expect(statuses).toContain('completed');
-    expect(statuses).toContain('blocked_budget');
-    expect(result.status).toBe('partial');
-  });
-
-  it('marks an agent as failed when the per-agent timeout aborts the model call', async () => {
-    const never = (async (req: AgentModelClientRequest) => {
-      return new Promise<AgentModelClientResponse>((resolve, reject) => {
-        req.signal.addEventListener('abort', () => reject(new Error(`aborted: ${req.role}`)));
+/** Fake model caller: deterministic, records call order/concurrency, honors abort signals. */
+function makeRuntime(script?: ScriptFn) {
+  const store = new MemoryAgentStore();
+  const calls: Array<{ messages: ModelMessage[]; startOrder: number; doneOrder: number }> = [];
+  let started = 0;
+  let finished = 0;
+  let inFlight = 0;
+  let maxConcurrent = 0;
+  const caller = async (messages: ModelMessage[], opts?: ModelCallOptions): Promise<ModelCallResult> => {
+    const startOrder = ++started;
+    inFlight += 1;
+    maxConcurrent = Math.max(maxConcurrent, inFlight);
+    const idx = calls.length;
+    calls.push({ messages, startOrder, doneOrder: -1 });
+    const conf = script ? script(messages, idx, opts) : { text: 'SCRIPTED OUTPUT ' + idx };
+    if (conf.delayMs) {
+      await new Promise<void>((resolve, rejectAbort) => {
+        const t = setTimeout(() => resolve(), conf.delayMs as number);
+        opts?.signal?.addEventListener('abort', () => {
+          clearTimeout(t);
+          rejectAbort();
+        }, { once: true });
+      }).catch(() => {
+        // Aborted mid-call (timeout or external cancellation).
+        inFlight -= 1;
+        calls[idx].doneOrder = ++finished;
+        throw Object.assign(new Error('ABORTED'), { code: 'ABORTED' });
       });
-    }) as unknown as AgentModelClient;
-    const result = await runtime.execute(
-      {
-        userId: 'usr_a',
-        objective: 'Hangs forever',
-        subTaskPlan: [{ id: 's1', role: 'research', goal: 'Research something' }],
-        budget: { perAgentTimeoutMs: 60 },
-      },
-      never,
-    );
-    expect(result.status).toBe('failed');
-    expect(result.subTaskResults[0].status).toBe('failed');
-    expect(result.subTaskResults[0].runRecord.error).toBeTruthy();
-  }, 10_000);
+    }
+    inFlight -= 1;
+    calls[idx].doneOrder = ++finished;
+    if (conf.fail) throw Object.assign(new Error(conf.fail), { code: conf.fail });
+    return { content: conf.text ?? 'SCRIPTED OUTPUT ' + idx, usage: usage(conf.tokens ?? 10), modelId: 'fake-model' };
+  };
+  return { service: new AgentRuntimeService(store, caller), store, calls, maxConcurrent: () => maxConcurrent };
+}
 
-  it('returns dependency failures instead of executing work downstream of a failed task', async () => {
-    let researchCalls = 0;
-    const client = fakeClient((req) => {
-      if (req.role === 'research') {
-        researchCalls += 1;
-        return '';
-      }
-      return VALID_OUTPUT;
+const sub = (id: string, role: SubtaskSpec['role'], instructions: string, dependsOn: string[] = []): SubtaskSpec =>
+  ({ id, role, title: id, instructions, dependsOn });
+
+describe('Feature 03: plan validation', () => {
+  it('rejects duplicate ids, unknown roles, and dependency cycles', () => {
+    expect(validatePlan([sub('a', 'research', 'x'), sub('a', 'coding', 'y')]).valid).toBe(false);
+    expect(validatePlan([sub('a', 'chief officer' as SubtaskSpec['role'], 'x')]).valid).toBe(false);
+    expect(validatePlan([sub('a', 'research', 'x', ['b']), sub('b', 'coding', 'y', ['a'])]).valid).toBe(false);
+    expect(validatePlan([sub('a', 'research', 'x', ['a'])]).valid).toBe(false);
+    expect(validatePlan([]).valid).toBe(false);
+  });
+
+  it('accepts a well-formed dependency plan', () => {
+    expect(validatePlan([sub('a', 'research', 'r'), sub('b', 'coding', 'c', ['a'])]).valid).toBe(true);
+  });
+});
+
+describe('Feature 03: fail-closed execution', () => {
+  it('reports model provider as unavailable without credentials', () => {
+    delete process.env.AGENT_MODEL_API_KEY;
+    delete process.env.AGENT_MODEL_BASE_URL;
+    delete process.env.AGENT_MODEL_ID;
+    const resolved = resolveModelProvider();
+    expect(resolved.available).toBe(false);
+    expect(resolved.reason).toContain('not configured');
+  });
+
+  it('refuses to fabricate a plan when no provider is configured', async () => {
+    delete process.env.AGENT_MODEL_API_KEY;
+    delete process.env.AGENT_MODEL_BASE_URL;
+    delete process.env.AGENT_MODEL_ID;
+    const { service } = makeRuntime();
+    await expect(service.createRun('userA', 'Do a thing')).rejects.toMatchObject({ code: 'MODEL_PROVIDER_UNAVAILABLE' });
+  });
+
+  it('executes agent runs only for their owner', async () => {
+    const { service } = makeRuntime();
+    const run = await service.createRun('userA', 'Obj', [sub('a', 'research', 'x')]);
+    await expect(service.executeRun('userB', run.runId)).rejects.toMatchObject({ code: 'RUN_NOT_FOUND' });
+    await expect(service.executeRun('userA', 'run_missing')).rejects.toMatchObject({ code: 'RUN_NOT_FOUND' });
+  });
+});
+
+describe('Feature 03: dependency and parallel execution', () => {
+  it('passes dependency output to the dependent agent and preserves order', async () => {
+    const { service, calls } = makeRuntime((messages, idx) => {
+      if (isReviewerCall(messages)) return { text: 'PASS verified', tokens: 0 };
+      return { text: 'OUTPUT-' + idx, tokens: 5 };
     });
-    const result = await runtime.execute(
-      {
-        userId: 'usr_a',
-        objective: 'Chain with failure',
-        subTaskPlan: [
-          { id: 'root', role: 'research', goal: 'Root research' },
-          { id: 'leaf', role: 'coding', goal: 'Downstream implementation', dependsOn: ['root'] },
-        ],
-        budget: { maxCorrectionRounds: 1 },
-      },
-      client,
-    );
-    const root = result.subTaskResults.find((r) => r.subTaskId === 'root')!;
-    expect(root.status).toBe('failed');
-    const leaf = result.subTaskResults.find((r) => r.subTaskId === 'leaf')!;
-    expect(leaf.status).toBe('failed');
-    expect(leaf.runRecord.error).toContain('Dependency failure');
-    expect(client.calls.some((c) => c.role === 'coding')).toBe(false);
-    expect(researchCalls).toBe(2);
+    const run = await service.createRun('userA', 'Build demo', [
+      sub('research', 'research', 'find facts'),
+      sub('code', 'coding', 'write code', ['research']),
+    ]);
+    await service.executeRun('userA', run.runId);
+    expect(calls[0].startOrder).toBeLessThan(calls[1].startOrder);
+    expect(calls[0].doneOrder).toBeLessThan(calls[1].startOrder); // dependency respected
+    const codeInput = calls[1].messages[1].content;
+    expect(codeInput).toContain('OUTPUT-0'); // A's real output was passed to B
+    expect(codeInput).toContain('write code'); // B's own instructions included
   });
 
-  it('never fabricates results: unavailable provider usage is reported honestly', async () => {
-    expect(() => createGeminiModelClient('')).not.toThrow();
-
-    const client = fakeClient(() => VALID_OUTPUT);
-    const hardcoded = (client as unknown as { calls: AgentModelClientRequest[] }).calls;
-    expect(hardcoded).toHaveLength(0);
-    const result = await runtime.execute(
-      {
-        userId: 'usr_honest',
-        objective: 'Unknown usage',
-        subTaskPlan: [{ id: 's1', role: 'research', goal: 'Research something' }],
-      },
-      (async (req: AgentModelClientRequest) => ({
-        text: VALID_OUTPUT,
-        model: req.model,
-        provider: 'google',
-        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, source: 'unavailable' as const },
-      })) as AgentModelClient,
-    );
-    expect(result.totals.usageSource).toBe('unavailable');
-    expect(result.totals.totalTokens).toBe(0);
+  it('executes independent subtasks in parallel', async () => {
+    const { service, maxConcurrent } = makeRuntime((messages) => ({
+      text: 'out',
+      tokens: 5,
+      delayMs: 40,
+      ...(isReviewerCall(messages) ? { text: 'PASS ok', tokens: 0, delayMs: 0 } : {}),
+    }));
+    const run = await service.createRun('userA', 'Two probes', [
+      sub('p1', 'analysis', 'a'), sub('p2', 'testing', 'b'),
+    ]);
+    await service.executeRun('userA', run.runId);
+    expect(maxConcurrent()).toBeGreaterThanOrEqual(2);
   });
 
-  it('rejects placeholder or empty outputs through validation', () => {
-    const spec: SubTaskSpec = { id: 'x', role: 'coding', goal: 'Write a full module with real implementation code' };
-    expect(validateSubAgentOutput(spec, '').passed).toBe(false);
-    expect(validateSubAgentOutput(spec, 'lorem ipsum').passed).toBe(false);
-    expect(validateSubAgentOutput(spec, 'const x = { a: 1 }; // real code artifact').passed).toBe(true);
+  it('marks dependents as skipped when a dependency fails', async () => {
+    const { service } = makeRuntime((messages, idx) => {
+      if (isReviewerCall(messages)) return { text: 'FAIL incomplete', tokens: 0 };
+      return idx === 0 ? { fail: 'BOOM_TOKENS' } : { text: 'should not be needed' };
+    });
+    const run = await service.createRun('userA', 'Failing chain', [
+      sub('a', 'research', 'x'), sub('b', 'coding', 'y', ['a']),
+    ]);
+    const result = await service.executeRun('userA', run.runId);
+    expect(result.status).toBe('failed');
+    const bResult = result.results.find((r) => r.subtaskId === 'b');
+    expect(bResult?.status).toBe('skipped');
+    expect(bResult?.error).toContain('SKIPPED');
+    const aResult = result.results.find((r) => r.subtaskId === 'a');
+    expect(aResult?.status).toBe('failed');
+    expect(aResult?.error).toBe('BOOM_TOKENS');
+  });
+});
+
+describe('Feature 03: budgets, timeout, cancellation', () => {
+  it('stops spending once the token budget is exhausted and skips the rest', async () => {
+    const { service } = makeRuntime((messages, idx) => {
+      if (isReviewerCall(messages)) return { text: 'PASS ok', tokens: 0 };
+      return { text: 'out ' + idx, tokens: 60 };
+    });
+    const run = await service.createRun('userA', 'Budget test', [
+      sub('a', 'research', 'x'), sub('b', 'coding', 'y', ['a']), sub('c', 'analysis', 'z', ['b']),
+    ], { budgets: { maxTokens: 100 } });
+    const result = await service.executeRun('userA', run.runId);
+    const cResult = result.results.find((r) => r.subtaskId === 'c');
+    expect(cResult?.status).toBe('skipped');
+    expect(cResult?.error).toBe('SKIPPED_BUDGET_EXCEEDED');
+    expect(result.results.find((r) => r.subtaskId === 'a')?.status).toBe('completed');
+    expect(result.results.find((r) => r.subtaskId === 'b')?.status).toBe('completed');
+    expect(result.totalUsage.totalTokens).toBe(120); // a + b ran; c skipped
   });
 
-  it('records run data in the durable store (no fabricated token counts)', async () => {
-    const store = new InMemoryDurableStore();
-    const rt = new AgentRuntimeService(store);
-    const client = fakeClient(() => VALID_OUTPUT);
-    await rt.execute(
-      {
-        userId: 'usr_runs',
-        objective: 'Persist runs',
-        subTaskPlan: [{ id: 's1', role: 'documentation', goal: 'Write docs' }],
-      },
-      client,
-    );
-    const runs = await store.query('system_agent_runs', {});
-    expect(runs.length).toBeGreaterThanOrEqual(1);
-    const run = runs.find((r) => (r as any).role === 'documentation') as any;
-    expect(run.status).toBe('completed');
-    expect(run.totalTokens).toBe(150);
-    expect(run.usageSource).toBe('provider');
+  it('marks an agent as timed out without fabricating output', async () => {
+    const { service } = makeRuntime((messages) => ({
+      text: 'late', tokens: 5, delayMs: 3000,
+      ...(isReviewerCall(messages) ? { text: 'PASS ok', tokens: 0, delayMs: 0 } : {}),
+    }));
+    const run = await service.createRun('userA', 'Timeout test', [sub('slow', 'research', 'x')], { budgets: { timeoutSeconds: 1 } });
+    const result = await service.executeRun('userA', run.runId);
+    const slow = result.results.find((r) => r.subtaskId === 'slow');
+    expect(slow?.status).toBe('failed');
+    expect(slow?.error).toBe('AGENT_TIMEOUT');
+    expect(slow?.output).toBe('');
+  });
+
+  it('honours a pre-cancelled run and cancels all pending subtasks', async () => {
+    const { service } = makeRuntime();
+    const run = await service.createRun('userA', 'Cancel test', [sub('a', 'research', 'x'), sub('b', 'coding', 'y')]);
+    await service.cancelRun('userA', run.runId);
+    const result = await service.executeRun('userA', run.runId);
+    expect(result.status).toBe('cancelled');
+    expect(result.results.every((r) => r.status === 'cancelled')).toBe(true);
+  });
+});
+
+describe('Feature 03: reviewer gate and usage accounting', () => {
+  it('requires a PASS from the final reviewer to complete the run', async () => {
+    const { service } = makeRuntime((messages) => {
+      if (isReviewerCall(messages)) return { text: 'FAIL objective not met', tokens: 5 };
+      return { text: 'work output', tokens: 5 };
+    });
+    const run = await service.createRun('userA', 'Review test', [sub('a', 'research', 'x')]);
+    const result = await service.executeRun('userA', run.runId);
+    expect(result.status).toBe('failed');
+    expect(result.error).toBe('REVIEWER_REJECTED');
+    expect(result.reviewer?.passed).toBe(false);
+    expect(result.reviewer?.output).toContain('FAIL');
+  });
+
+  it('completes when the reviewer passes and accumulates real usage', async () => {
+    const { service } = makeRuntime((messages) => {
+      if (isReviewerCall(messages)) return { text: 'PASS verified against the objective', tokens: 7 };
+      return { text: 'work output', tokens: 11 };
+    });
+    const run = await service.createRun('userA', 'Complete test', [sub('a', 'research', 'x'), sub('b', 'coding', 'y', ['a'])]);
+    const result = await service.executeRun('userA', run.runId);
+    expect(result.status).toBe('completed');
+    expect(result.reviewer?.passed).toBe(true);
+    expect(result.totalUsage.totalTokens).toBe(11 * 2 + 7);
+    expect(result.results.every((r) => r.status === 'completed')).toBe(true);
+    expect(result.results.every((r) => r.modelId === 'fake-model')).toBe(true);
+  });
+
+  it('fails honestly when the reviewer call itself is unavailable', async () => {
+    const { service } = makeRuntime((messages) => {
+      if (isReviewerCall(messages)) return { fail: 'MODEL_PROVIDER_UNAVAILABLE' };
+      return { text: 'work output', tokens: 5 };
+    });
+    const run = await service.createRun('userA', 'Reviewer outage test', [sub('a', 'research', 'x')]);
+    const result = await service.executeRun('userA', run.runId);
+    expect(result.status).toBe('failed');
+    expect(result.error).toContain('REVIEWER_UNAVAILABLE');
   });
 });
