@@ -104,12 +104,24 @@ export default async (req: Request) => {
     const parsed = await parseBody(req);
     if (parsed.response) return parsed.response;
     const body = parsed.body as Record<string, unknown>;
-    if (String(body.action || '') !== 'execute-run') {
-      return jsonResponse({ ok: false, code: 'INVALID_ACTION', error: 'Workers may only execute runs.' }, 400, requestId);
+    const workerAction = String(body.action || '');
+    if (!['execute-run', 'create-run'].includes(workerAction)) {
+      return jsonResponse({ ok: false, code: 'INVALID_ACTION', error: 'Workers may only create or execute runs.' }, 400, requestId);
     }
     try {
       const runtime = await buildRuntime();
-      const record = await runtime.executeRun(str(body.userId, 'userId', 1, 128), str(body.runId, 'runId', 4, 80));
+      const userIdForRun = str(body.userId, 'userId', 1, 128);
+      // 'create-run' is used by the Feature 05 scheduler for agents_run targets:
+      // the schedule's creation was already permission-gated (scheduler_manage),
+      // so the worker may initiate this run; the audit below records it.
+      let record;
+      if (workerAction === 'create-run') {
+        const objective = str(body.objective, 'objective', 1, 4000);
+        const created = await runtime.createRun(userIdForRun, objective);
+        record = await runtime.executeRun(userIdForRun, created.runId);
+      } else {
+        record = await runtime.executeRun(userIdForRun, str(body.runId, 'runId', 4, 80));
+      }
       await permissionsGateway.recordAuditEvent({
         userId: record.userId,
         category: 'tool_execution',
