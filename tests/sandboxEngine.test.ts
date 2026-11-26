@@ -237,7 +237,7 @@ describe('Feature 06: orchestrator isolation and ownership', () => {
     await expect(orchestrator.cleanup('userA', 'bad id!')).rejects.toMatchObject({ code: 'INVALID_SESSION_ID' });
   });
 
-  it('captures real exit codes: nonzero exits are failed, stdout and stderr are captured separately', async () => {
+  it('captures command output: stdout and stderr are returned separately with the real exit code', async () => {
     const allowAll: ApprovalEvaluator = () => ({ allowed: true, requiresApproval: false, riskLevel: 'read-only', reason: 'test allow' });
     const { orchestrator } = makeOrchestrator(allowAll);
     const session = await orchestrator.createSession('userA', { userId: 'userA' });

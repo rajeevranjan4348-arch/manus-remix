@@ -317,8 +317,8 @@ export class SandboxOrchestratorService {
     const record = await svc.store.getExecution(executionId, userId);
     if (!record) return null;
     if (!['queued', 'running'].includes(record.status)) return record;
-    // Best-effort remote kill inside the sandbox; the durable record always
-    // flips to cancelled even when the process already finished.
+    // The durable record always flips to cancelled, even when the provider-side
+    // process already finished on its own.
     record.status = 'cancelled';
     record.updatedAt = new Date().toISOString();
     record.error = 'Cancelled by user request.';
