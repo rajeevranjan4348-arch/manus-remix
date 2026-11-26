@@ -1,0 +1,297 @@
+/* ==========================================================================
+   Manus Remix — Universal Icon Motion System (additive only)
+   --------------------------------------------------------------------------
+   Applies one consistent animation language to EVERY icon in the app:
+   - svg.lucide          → lucide-react icons (class "lucide lucide-<name>")
+   - svg.pulsoicon       → pulsoicon-react icons (keep their own internal
+                           shape choreography; this layer only adds shared
+                           container-level motion, no property conflicts)
+   - any SVG inside an interactive trigger (button/a/menuitem/tab/label/…)
+                           → covers custom inline SVGs and other icon libs
+                             (e.g. Hugeicons) without touching call sites
+   - svg[data-icon-motion] → dynamically rendered / raw-HTML / custom icons
+                           tagged by src/lib/iconMotion.ts (MutationObserver),
+                           so dynamically mounted icons animate identically.
+
+   Rules:
+   - Only transform / opacity / filter are animated (compositor-driven,
+     60–120 FPS, no layout shifts, no flicker).
+   - Zero-specificity :where() bases keep existing Tailwind utilities
+     (scale-*, animate-spin, …) authoritative → UI and themes preserved.
+   - prefers-reduced-motion, [data-perf-mode="ultra-lite"|"saver"] and
+     html[data-page-hidden="true"] pause or disable decorative motion,
+     mirroring the conventions in manus-motion.css.
+   ========================================================================== */
+
+:root {
+  --icon-motion-duration: 170ms;
+  --icon-motion-hover-scale: 1.09;
+  --icon-motion-press-scale: 0.9;
+  --icon-motion-selected-scale: 1.035;
+  --icon-motion-ease: var(--manus-motion-ease, cubic-bezier(0.16, 1, 0.3, 1));
+  --icon-motion-spring: var(--manus-spring-bounce, cubic-bezier(0.34, 1.56, 0.64, 1));
+}
+
+/* --------------------------------------------------------------------------
+   Base: give every icon target a shared, GPU-friendly transition.
+   Kept at zero specificity so existing utility classes always win.
+   -------------------------------------------------------------------------- */
+:where(svg.lucide, svg.pulsoicon, svg[data-icon-motion]) {
+  transform-origin: 50% 50%;
+  transition:
+    transform var(--icon-motion-duration) var(--icon-motion-ease),
+    opacity var(--icon-motion-duration) var(--icon-motion-ease),
+    filter var(--icon-motion-duration) var(--icon-motion-ease);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* --------------------------------------------------------------------------
+   Hover: subtle scale-up with smooth transition.
+   Works whether the pointer is over the icon itself (standalone icons) or
+   over any interactive trigger that contains it (buttons, links, menus,
+   tabs, labels). Gated to real hover-capable pointers so touch never gets
+   stuck hover states.
+   -------------------------------------------------------------------------- */
+@media (hover: hover) and (pointer: fine) {
+  :where(button:not(:disabled), a, [role="button"]:not([aria-disabled="true"]), [role="menuitem"], [role="menuitemradio"], [role="tab"], [role="link"], label, summary, [data-icon-trigger], .icon-motion-host):is(:hover, :focus-visible)
+    :where(svg.lucide, svg.pulsoicon, svg[data-icon-motion]) {
+    transform: scale(var(--icon-motion-hover-scale));
+  }
+
+  :where(svg.lucide, svg.pulsoicon, svg[data-icon-motion]):hover {
+    transform: scale(var(--icon-motion-hover-scale));
+  }
+
+  /* Gentle characterful motion for a few semantic families (hover only). */
+  :where(button:not(:disabled), a, [role="button"]:not([aria-disabled="true"]), [role="menuitem"], [role="tab"], label, [data-icon-trigger], .icon-motion-host):hover
+    :where(svg[class*="lucide-settings"], svg[class*="lucide-settings-2"], svg[class*="lucide-gear"]) {
+    transform: scale(var(--icon-motion-hover-scale)) rotate(8deg);
+  }
+
+  :where(button:not(:disabled), a, [role="button"]:not([aria-disabled="true"]), [role="menuitem"], [role="tab"], label, [data-icon-trigger], .icon-motion-host):hover
+    :where(svg[class*="lucide-refresh"], svg[class*="lucide-rotate-cw"], svg[class*="lucide-rotate-ccw"], svg[data-icon-motion="rotate"]:hover) {
+    transform: scale(var(--icon-motion-hover-scale)) rotate(24deg);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Click / tap: quick scale-down, spring bounce-back on release.
+   The non-active rule swaps in the spring curve so the return trip
+   overshoots slightly; pressing itself stays snappy and linear.
+   -------------------------------------------------------------------------- */
+:where(button:not(:disabled), a:not([aria-disabled="true"]), [role="button"]:not([aria-disabled="true"]), [role="menuitem"], [role="tab"], [data-icon-trigger], .icon-motion-host):active
+  :where(svg.lucide, svg.pulsoicon, svg[data-icon-motion]) {
+  transform: scale(var(--icon-motion-press-scale));
+  transition-duration: 70ms;
+  transition-timing-function: var(--icon-motion-ease);
+}
+
+:where(svg.lucide, svg.pulsoicon, svg[data-icon-motion]):active {
+  transform: scale(var(--icon-motion-press-scale));
+  transition-duration: 70ms;
+  transition-timing-function: var(--icon-motion-ease);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :where(button:not(:disabled), a, [role="button"]:not([aria-disabled="true"]), [role="menuitem"], [role="tab"], [data-icon-trigger], .icon-motion-host):not(:active):hover
+    :where(svg.lucide, svg.pulsoicon, svg[data-icon-motion]) {
+    transition-timing-function: var(--icon-motion-spring);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Disabled: no unnecessary animation. Interaction transforms are already
+   gated behind :not(:disabled) above; here we drop transitions entirely so
+   disabled icons stay inert and cheap. Functional loaders (spinning icons in
+   busy buttons) keep their animation on purpose.
+   -------------------------------------------------------------------------- */
+:where(button:disabled, a[aria-disabled="true"], [role="button"][aria-disabled="true"], [disabled], [aria-disabled="true"])
+  :where(svg.lucide, svg.pulsoicon, svg[data-icon-motion]) {
+  transition: none;
+}
+
+/* --------------------------------------------------------------------------
+   Selected / active / toggled state: soft highlight glow + gentle lift.
+   aria-current / aria-pressed / radix data-state / opt-in class all work,
+   including dynamically rendered navigation.
+   -------------------------------------------------------------------------- */
+:where([aria-current="page"], [aria-current="true"], [aria-pressed="true"], [aria-selected="true"], [data-state="on"], [data-active="true"], .icon-motion-selected)
+  :where(svg.lucide, svg.pulsoicon, svg[data-icon-motion]) {
+  transform: scale(var(--icon-motion-selected-scale));
+  filter: drop-shadow(0 0 5px color-mix(in srgb, currentColor 38%, transparent));
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :where([aria-current="page"], [aria-current="true"], [aria-pressed="true"], [aria-selected="true"], [data-state="on"], [data-active="true"], .icon-motion-selected):hover
+    :where(svg.lucide, svg.pulsoicon, svg[data-icon-motion]) {
+    transform: scale(var(--icon-motion-hover-scale));
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Navigation: smooth icon transition when pages / panels change.
+   Icons fade/scale in on mount, which covers dynamic rendering naturally
+   (routes, layers, modals, portals). Very short and subtle so virtualized
+   re-mounts and streamed lists never flicker; virtuoso scroll regions are
+   exempt.
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  :where(svg.lucide, svg.pulsoicon, svg[data-icon-motion]) {
+    animation: icon-motion-enter 200ms var(--icon-motion-ease) 1;
+  }
+
+  [data-virtuoso-scroller] :where(svg.lucide, svg.pulsoicon, svg[data-icon-motion]) {
+    animation: none;
+  }
+
+  @keyframes icon-motion-enter {
+    from {
+      opacity: 0;
+      transform: scale(0.94);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Loading: rotating / pulsing animation for loader icons.
+   Lucide loaders spin by default; icons that already use a Tailwind
+   animate-* utility are left untouched. Drop a data-icon-motion="spin" or
+   "pulse" attribute on any custom icon to reuse the same motion.
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  :where(svg.lucide-loader-circle, svg.lucide-loader-circle-2, svg.lucide-loader, svg[data-icon-motion="spin"]):not([class*="animate-"]) {
+    animation: icon-motion-spin 950ms linear infinite;
+  }
+
+  :where(svg[data-icon-motion="pulse"]):not([class*="animate-"]) {
+    animation: icon-motion-pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes icon-motion-spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes icon-motion-pulse {
+    0%, 100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    50% {
+      transform: scale(1.14);
+      opacity: 0.72;
+    }
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Notification: gentle attention motion for bell and alert icons.
+   A one-shot swing that fires on hover, plus a persistent soft pulse for
+   icons explicitly tagged data-icon-motion="ping".
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: no-preference) and (hover: hover) and (pointer: fine) {
+  :where(button:not(:disabled), a, [role="button"]:not([aria-disabled="true"]), [data-icon-trigger], .icon-motion-host):hover
+    :where(svg[class*="lucide-bell"], svg[class*="lucide-bell-ring"], svg[data-icon-motion="ping"]:not([class*="animate-"])) {
+    transform-origin: 50% 14%;
+    animation: icon-motion-ring 680ms var(--icon-motion-ease) 1;
+  }
+
+  @keyframes icon-motion-ring {
+    0% { transform: rotate(0deg); }
+    22% { transform: rotate(-11deg) scale(1.05); }
+    44% { transform: rotate(8deg) scale(1.08); }
+    66% { transform: rotate(-5deg) scale(1.04); }
+    84% { transform: rotate(3deg); }
+    100% { transform: rotate(0deg); }
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Success: smooth checkmark feedback. Two opt-ins:
+   - .icon-motion-success on a container → its check icon pops in.
+   - data-icon-motion="draw" + pathLength="1" on a custom SVG path → stroke
+     draws itself (additive stroke animation, other shapes untouched).
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  .icon-motion-success :where(svg[class*="lucide-check"], svg[data-icon-motion="draw"]) {
+    animation: icon-motion-pop 420ms var(--icon-motion-spring) 1;
+  }
+
+  svg[data-icon-motion="draw"] path[pathLength],
+  .icon-motion-success svg path[pathLength] {
+    stroke-dasharray: 1;
+    animation: icon-motion-draw 460ms var(--icon-motion-ease) 1;
+  }
+
+  @keyframes icon-motion-pop {
+    0% { transform: scale(0.4); opacity: 0; }
+    60% { transform: scale(1.18); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  @keyframes icon-motion-draw {
+    from { stroke-dashoffset: 1; }
+    to { stroke-dashoffset: 0; }
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Exit: opt-in utility for a smooth icon exit animation.
+   The data-icon-motion-exiting marker (applied by the iconMotion helpers)
+   fades and gently scales the icon out; consumers remove the node after the
+   animation ends.
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  :where(svg.lucide, svg.pulsoicon, svg[data-icon-motion])[data-icon-motion-exiting] {
+    animation: icon-motion-exit 160ms var(--icon-motion-ease) 1 both;
+  }
+
+  @keyframes icon-motion-exit {
+    from { opacity: 1; transform: scale(1); }
+    to { opacity: 0; transform: scale(0.86); }
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Global pause / disable mirrors: reduced motion, performance modes,
+   background tabs. Functional loaders keep spinning even in performance
+   modes so loading states never freeze; purely decorative motion does not.
+   -------------------------------------------------------------------------- */
+html[data-page-hidden="true"] :where(svg.lucide, svg.pulsoicon, svg[data-icon-motion]) {
+  animation-play-state: paused;
+}
+
+[data-perf-mode="ultra-lite"] :where(svg.lucide, svg.pulsoicon, svg[data-icon-motion]),
+[data-perf-mode="saver"] :where(svg.lucide, svg.pulsoicon, svg[data-icon-motion]) {
+  animation: none;
+  filter: none;
+  transition-duration: var(--manus-motion-fast, 85ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(svg.lucide, svg.pulsoicon, svg[data-icon-motion]),
+  :where(svg.lucide, svg.pulsoicon, svg[data-icon-motion]) * {
+    transform: none !important;
+    transition: none !important;
+  }
+
+  :where(svg.lucide, svg.pulsoicon, svg[data-icon-motion]) {
+    animation: none !important;
+    filter: none !important;
+  }
+}
+
+/* Functional loaders stay alive in performance modes (slow spin = cheap). */
+[data-perf-mode="ultra-lite"] :where(svg.lucide-loader-circle, svg.lucide-loader-circle-2, svg.lucide-loader, svg[data-icon-motion="spin"]):not([class*="animate-"]),
+[data-perf-mode="saver"] :where(svg.lucide-loader-circle, svg.lucide-loader-circle-2, svg.lucide-loader, svg[data-icon-motion="spin"]):not([class*="animate-"]) {
+  animation: icon-motion-spin 1400ms linear infinite;
+}
