@@ -256,19 +256,23 @@ export function generateResilientResponse(
     );
   }
 
-  if (/techno\s*gamerz|ujjwal\s*chaurasia/i.test(clean)) {
+  // Live-intent guard: requests that need real-time verification must never be
+  // answered from canned entity text (e.g. "Techno gamer current video").
+  const wantsLiveInfo = isRealtimeOrLiveFactQuery(clean);
+
+  if (/techno\s*gamerz|ujjwal\s*chaurasia/i.test(clean) && !wantsLiveInfo) {
     return "**Techno Gamerz** is the flagship gaming YouTube channel created by **Ujjwal Chaurasia**, one of India's most popular gaming content creators and livestreamers.\n\n- **Creator:** Ujjwal Chaurasia (born January 12, 2002, in New Delhi, India)\n- **Known For:** Hindi-language gameplay series and storytelling—especially *Grand Theft Auto V (GTA V)* roleplay, *Minecraft*, *Red Dead Redemption 2*, *Hitman*, and mobile gaming titles.\n- **Impact:** With tens of millions of subscribers across his main channel (**Techno Gamerz**) and second channel (**Ujjwal**), he is widely recognized as a leading figure in the Indian gaming community.";
   }
 
-  if (/\bnvidia\b/i.test(clean)) {
+  if (/\bnvidia\b/i.test(clean) && !wantsLiveInfo) {
     return "**NVIDIA Corporation** is a global technology company headquartered in Santa Clara, California, and the world's leading designer of **graphics processing units (GPUs)**, AI accelerators, and accelerated computing platforms.\n\n- **Founded:** April 5, 1993, by **Jensen Huang** (President & CEO), Chris Malachowsky, and Curtis Priem.\n- **Core Technologies:**\n  - **AI & Data Center:** Hopper (H100/H200), Blackwell (B200/GB200), and Rubin architectures powering generative AI training and inference.\n  - **CUDA Ecosystem:** Parallel computing platform and software stack used by developers and researchers worldwide.\n  - **Gaming & Graphics:** GeForce RTX GPUs featuring real-time ray tracing and DLSS.\n  - **Enterprise & Robotics:** NVIDIA Omniverse, Drive (autonomous vehicles), and Isaac (robotics).";
   }
 
-  if (/samay\s*raina/i.test(clean)) {
+  if (/samay\s*raina/i.test(clean) && !wantsLiveInfo) {
     return "**Samay Raina** is a prominent Indian stand-up comedian, YouTuber, and chess enthusiast. He co-won *Comicstaan Season 2*, popularized online chess streams in India during 2020 alongside grandmasters like Vidit Gujrathi and Viswanathan Anand, and created the hit comedy show *India's Got Latent*.";
   }
 
-  if (/jethalal|dilip\s*joshi|champaklal\s*gada|tmkoc|taarak\s*mehta/i.test(clean)) {
+  if (/jethalal|dilip\s*joshi|champaklal\s*gada|tmkoc|taarak\s*mehta/i.test(clean) && !wantsLiveInfo) {
     return (
       `Jethalal is **Jethalal Champaklal Gada**, the central comedic character of the long-running Indian sitcom *Taarak Mehta Ka Ooltah Chashmah* (TMKOC). He is portrayed by veteran Indian actor **Dilip Joshi**.\n\n` +
       `### Quick Information\n` +
@@ -280,7 +284,10 @@ export function generateResilientResponse(
     );
   }
 
-  if (/who (is|are) (the )?prime minister of india/i.test(clean) || /pm of india/i.test(clean)) {
+  if (
+    (/who (is|are) (the )?prime minister of india/i.test(clean) || /pm of india/i.test(clean)) &&
+    !/\b(current|today|latest|right\s+now|now|recent|202[5-9])\b/i.test(clean)
+  ) {
     return (
       `The Prime Minister of India is **Narendra Modi**, serving as the head of government of the Republic of India.\n\n` +
       `### Quick Information\n` +
@@ -336,9 +343,20 @@ export function generateResilientResponse(
     return `Here is a clean TypeScript implementation for **${raw || 'your request'}**:\n\n\`\`\`typescript\nexport interface TaskResult {\n  status: 'success' | 'pending';\n  timestamp: string;\n  query: string;\n}\n\nexport function executeTask(query = ${JSON.stringify(raw || 'task')}): TaskResult {\n  return {\n    status: 'success',\n    timestamp: new Date().toISOString(),\n    query,\n  };\n}\n\`\`\`\n\nLet me know if you'd like this adapted to a specific framework or signature.`;
   }
 
-  // Concise, natural response for general questions
+  // Live-information requests must never fall through to generic filler:
+  // honestly report unavailability instead of guessing or deflecting.
+  if (wantsLiveInfo) {
+    return (
+      `**${raw || 'your request'}**\n\n` +
+      `I could not verify this with live search right now: the search and model services are currently unavailable, and I will not invent current facts.\n\n` +
+      `- This is usually temporary. Send the same request again and I will retry the live lookup.\n` +
+      `- News, videos, weather, currency, and crypto queries run keyless live lookups first, so they recover automatically.`
+    );
+  }
+
+  // Direct, honest scaffold for general questions when no LLM provider is available.
   const previousTurns = messages.filter(m => m.role === 'user').length;
-  return `Here is a direct answer regarding **${raw || 'your question'}** *(as of ${temporal.istDate})*:\n\n- **Summary:** ${raw || 'Your request'} is a topic I can help explain, break down, or research in detail.${previousTurns > 1 ? ' Following up on our conversation, I can tailor this to your specific context.' : ''}\n- **How we can proceed:** Ask a specific follow-up question, or let me know if you want a deeper breakdown, examples, or step-by-step details.`;
+  return `**${raw || 'your question'}**\n\n- **Direct answer:** I don't have verified information about "${raw || 'your question'}" available offline, and I won't fabricate details.\n- **What works right now:** greetings, math expressions, live time & date, weather, currency and crypto lookups, code scaffolds, and 3D scene generation.${previousTurns > 1 ? ' I also have our earlier conversation in context.' : ''}`;
 }
 
 export async function* streamGeminiResponse(options: StreamChatOptions) {
