@@ -9,6 +9,7 @@
  * 5. Agent Reach Bridge Adapter (AGENT_REACH_BRIDGE_URL)
  * 6. Gemini Google Search Grounding Adapter (GEMINI_API_KEY)
  * 7. Public Real-Time Feeds Adapter (Open-Meteo, Frankfurter, CoinGecko, Hacker News, Spaceflight News, USGS, Wikipedia, DuckDuckGo)
+ * 8. Live YouTube Video Search Adapter (keyless public YouTube results for latest/current video requests)
  */
 
 import { GoogleGenAI } from '@google/genai';
@@ -17,8 +18,11 @@ import {
   fetchLiveExchangeRates,
   fetchLiveNewsAndFacts,
   fetchLiveWeatherSnapshot,
+  fetchLiveYouTubeVideos,
+  detectVideoQuery,
   LiveCryptoItem,
   LiveCurrencySnapshot,
+  LiveVideoResult,
   LiveWeatherSnapshot,
 } from '../realtimeDataService';
 import { fetchAndExtractWebPage, validateSafeExternalUrl } from './contentExtractionService';
@@ -28,6 +32,7 @@ export interface DomainLiveSnapshots {
   weather?: LiveWeatherSnapshot | null;
   currency?: LiveCurrencySnapshot | null;
   crypto?: LiveCryptoItem[];
+  videos?: LiveVideoResult[];
 }
 
 /**
@@ -581,6 +586,35 @@ export async function executeMultiProviderResearch(
             snippet: item.snippet,
             provider: item.source,
             publishedAt: item.publishedAt,
+            retrievedAt,
+          });
+        }
+      })
+    );
+  }
+
+  // I. Live YouTube Video Search Adapter (latest/current video requests)
+  const videoIntentPrimary = detectVideoQuery(rawQuery);
+  const videoIntent = videoIntentPrimary.wantsVideos
+    ? videoIntentPrimary
+    : detectVideoQuery(primarySearchQuery);
+  if (videoIntent.wantsVideos) {
+    jobs.push(
+      fetchLiveYouTubeVideos(videoIntent.searchQuery, 4).then((items) => {
+        domainSnapshots.videos = items;
+        for (const v of items) {
+          rawResults.push({
+            title: `${v.title} — ${v.channel} (YouTube)`,
+            url: v.url,
+            snippet: [
+              v.publishedText ? `Published ${v.publishedText}` : 'Recent upload',
+              v.description || '',
+              v.thumbnailUrl ? `Thumbnail: ${v.thumbnailUrl}` : '',
+            ]
+              .filter(Boolean)
+              .join('. '),
+            provider: 'youtube-live-search',
+            publishedAt: v.publishedAtIso,
             retrievedAt,
           });
         }

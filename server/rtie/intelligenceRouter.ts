@@ -14,6 +14,7 @@
 import {
   detectCryptoQuery,
   detectCurrencyQuery,
+  detectVideoQuery,
   detectWeatherCity,
 } from '../realtimeDataService';
 import { QueryCategory, QueryRouteDecision } from './types';
@@ -339,6 +340,25 @@ export function routeQueryIntent(rawQuery: string): QueryRouteDecision {
         targetUrls,
       },
       freshnessTtlMs: CATEGORY_TTL_MS.programming,
+    };
+  }
+
+  // 4.5 Check video requests (e.g. "Techno gamer current video", "Latest MrBeast video")
+  const videoIntent = detectVideoQuery(clean);
+  if (videoIntent.wantsVideos) {
+    return {
+      category: 'current_information',
+      requiresLiveResearch: true,
+      confidence: 0.95,
+      reason: 'Query asks for the latest/current videos; live YouTube and web search are required.',
+      searchQueries: [
+        videoIntent.searchQuery,
+        `${videoIntent.searchQuery} site:youtube.com`,
+      ],
+      extractedEntities: {
+        targetUrls,
+      },
+      freshnessTtlMs: CATEGORY_TTL_MS.current_information,
     };
   }
 

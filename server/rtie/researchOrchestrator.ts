@@ -190,6 +190,18 @@ export async function orchestrateRealtimeResearch(
     contextBlocks.push(`\n[LIVE CRYPTOCURRENCY MARKET TELEMETRY]\n${cryptoLines}`);
   }
 
+  if (domainSnapshots.videos && domainSnapshots.videos.length > 0) {
+    const videoLines = domainSnapshots.videos
+      .map(
+        (v, idx) =>
+          `${idx + 1}. ${v.title}\n   Channel: ${v.channel}${v.publishedText ? ` | Published: ${v.publishedText}` : ''}${v.durationText ? ` | Duration: ${v.durationText}` : ''}\n   URL: ${v.url}${v.thumbnailUrl ? `\n   Thumbnail: ${v.thumbnailUrl}` : ''}${v.description ? `\n   About: ${v.description}` : ''}`
+      )
+      .join('\n');
+    contextBlocks.push(
+      `\n[LIVE YOUTUBE VIDEO RESULTS (verified at ${nowIso})]\n${videoLines}\nAlways include the direct watch URL, channel name, upload date, and thumbnail URL from these verified results. Never invent video titles, channels, dates, or URLs.`
+    );
+  }
+
   if (verification.verifiedSources.length > 0) {
     const sourceLines = verification.verifiedSources
       .slice(0, 8)
@@ -266,6 +278,17 @@ export async function orchestrateRealtimeResearch(
             }${coin.change24hPct !== undefined ? ` · **${coin.change24hPct >= 0 ? '+' : ''}${coin.change24hPct}%** (24h)` : ''}`
         )
         .join('\n') +
+      citationsMarkdown;
+  } else if (domainSnapshots.videos && domainSnapshots.videos.length > 0) {
+    directFallbackMarkdown =
+      `### Latest YouTube Videos\n\n` +
+      domainSnapshots.videos
+        .map(
+          (v) =>
+            `- **[${v.title}](${v.url})**\n  - **Channel:** ${v.channel}\n  - **Published:** ${v.publishedText || 'recently (exact date not provided by YouTube search)'}\n  - **Thumbnail:** ${v.thumbnailUrl || 'not available'}${v.durationText ? `\n  - **Duration:** ${v.durationText}` : ''}${v.description ? `\n  - **About:** ${v.description}` : ''}`
+        )
+        .join('\n\n') +
+      `\n\n*Retrieved live from YouTube at ${temporal.utcFormatted}*\n\n` +
       citationsMarkdown;
   } else if (verification.verifiedSources.length > 0) {
     directFallbackMarkdown =

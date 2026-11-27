@@ -81,6 +81,19 @@ export interface LiveNewsOrFactItem {
   publishedAt?: string;
 }
 
+export interface LiveVideoResult {
+  title: string;
+  videoId: string;
+  url: string;
+  channel: string;
+  channelUrl?: string;
+  publishedText?: string;
+  publishedAtIso?: string;
+  durationText?: string;
+  description?: string;
+  thumbnailUrl?: string;
+}
+
 export interface RealtimeEnrichmentResult {
   temporal: LiveTemporalContext;
   hasLiveDomainData: boolean;
@@ -88,6 +101,7 @@ export interface RealtimeEnrichmentResult {
   currency?: LiveCurrencySnapshot | null;
   crypto?: LiveCryptoItem[];
   newsAndFacts?: LiveNewsOrFactItem[];
+  videos?: LiveVideoResult[];
   sources: Array<{ title: string; url: string }>;
   systemContextBlock: string;
   directFallbackMarkdown?: string;
@@ -687,6 +701,173 @@ export async function fetchLiveNewsAndFacts(query: string, limit = 5): Promise<L
   return results.slice(0, limit);
 }
 
+/** Convert a relative age like "3 days ago" into an approximate ISO timestamp. */
+function relativeAgeToIso(text: string, now: Date = new Date()): string | undefined {
+  const m = text.match(/(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago/i);
+  if (!m) return undefined;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  const unitMs: Record<string, number> = {
+    second: 1000,
+    minute: 60 * 1000,
+    hour: 60 * 60 * 1000,
+    day: 24 * 60 * 60 * 1000,
+    week: 7 * 24 * 60 * 60 * 1000,
+    month: 30 * 24 * 60 * 60 * 1000,
+    year: 365 * 24 * 60 * 60 * 1000,
+  };
+  const ms = unitMs[String(m[2]).toLowerCase()];
+  if (!ms) return undefined;
+  return new Date(now.getTime() - n * ms).toISOString();
+}
+
+/**
+ * Detects requests for current/latest videos (e.g. "Techno gamer current video",
+ * "Latest MrBeast video", "Latest gaming video") and converts the short phrase
+ * into a meaningful YouTube search query without asking the user to rephrase.
+ */
+export function detectVideoQuery(query: string): { wantsVideos: boolean; searchQuery: string } {
+  const clean = String(query || '').trim();
+  if (!clean) return { wantsVideos: false, searchQuery: '' };
+  const mentionsVideo =
+    /\b(video|videos|youtube|vlog|vlogs|shorts)\b/i.test(clean) || /\bupload(ed)?\b/i.test(clean);
+  const mentionsChannel = /\bchannel\b/i.test(clean);
+  const mentionsRecency =
+    /\b(latest|newest|current|new|today|recent|recently|trending|this\s+week|this\s+month|right\s+now|now)\b/i.test(clean);
+  const wantsVideos = (mentionsVideo && (mentionsRecency || mentionsChannel)) || /\byoutube\b/i.test(clean);
+  if (!wantsVideos) return { wantsVideos: false, searchQuery: clean };
+  const topic = clean
+    .replace(/^\s*(what(?:'s| is| are)|show(?:\s+me)?|find|get|give\s+me|tell\s+me)\s+/i, '')
+    .replace(/\b(the\s+)?(latest|newest|current|new|recent|today'?s?|todays?)\s+/gi, ' ')
+    .replace(/\b(videos?|vlogs?|shorts?|upload(ed)?)\b/gi, ' ')
+    .replace(/\b(right\s+now|now|today|recently|this\s+week|this\s+month|trending)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return {
+    wantsVideos: true,
+    searchQuery: topic ? topic + ' latest video' : 'latest trending videos',
+  };
+}
+
+/** Balanced-brace JSON extractor for the ytInitialData payload. */
+function extractBalancedJsonObject(source: string, startIndex: number): any | null {
+  if (startIndex < 0 || source[startIndex] !== '{') return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = startIndex; i < source.length; i++) {
+    const ch = source[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        try {
+          return JSON.parse(source.slice(startIndex, i + 1));
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function collectVideoRenderers(node: any, out: any[], depth = 0): void {
+  if (!node || typeof node !== 'object' || out.length >= 12 || depth > 40) return;
+  if (Array.isArray(node)) {
+    for (const item of node) collectVideoRenderers(item, out, depth + 1);
+    return;
+  }
+  if (node.videoRenderer) out.push(node.videoRenderer);
+  for (const key of Object.keys(node)) {
+    if (key === 'videoRenderer') continue;
+    collectVideoRenderers(node[key], out, depth + 1);
+  }
+}
+
+function parseVideoRenderer(vr: any): LiveVideoResult | null {
+  const videoId = typeof vr?.videoId === 'string' ? vr.videoId : '';
+  if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return null;
+  const title = String(vr?.title?.runs?.[0]?.text || vr?.title?.simpleText || '').trim();
+  if (!title) return null;
+  const channelRun = vr?.ownerText?.runs?.[0];
+  const channel = String(channelRun?.text || vr?.longBylineText?.runs?.[0]?.text || '').trim();
+  const channelPath = channelRun?.navigationEndpoint?.browseEndpoint?.canonicalBaseUrl;
+  const publishedText = String(vr?.publishedTimeText?.simpleText || '').trim() || undefined;
+  const durationText = String(vr?.lengthText?.simpleText || '').trim() || undefined;
+  let rawDescription = '';
+  if (Array.isArray(vr?.descriptionSnippet?.runs)) {
+    rawDescription = vr.descriptionSnippet.runs.map((r: any) => String(r?.text || '')).join('');
+  } else if (Array.isArray(vr?.detailedMetadataSnippets) && vr.detailedMetadataSnippets[0]?.snippetText?.runs) {
+    rawDescription = vr.detailedMetadataSnippets[0].snippetText.runs.map((r: any) => String(r?.text || '')).join('');
+  }
+  const thumbs = vr?.thumbnail?.thumbnails;
+  const thumbnailUrl =
+    Array.isArray(thumbs) && thumbs.length > 0 ? String(thumbs[thumbs.length - 1].url) : undefined;
+  return {
+    title: title.slice(0, 300),
+    videoId,
+    url: 'https://www.youtube.com/watch?v=' + videoId,
+    channel: channel || 'Unknown channel',
+    channelUrl:
+      typeof channelPath === 'string' && channelPath.startsWith('/')
+        ? 'https://www.youtube.com' + channelPath
+        : undefined,
+    publishedText,
+    publishedAtIso: publishedText ? relativeAgeToIso(publishedText) : undefined,
+    durationText: durationText || undefined,
+    description: rawDescription.trim() ? rawDescription.trim().slice(0, 400) : undefined,
+    thumbnailUrl,
+  };
+}
+
+/**
+ * Live YouTube video search (keyless): fetches the public YouTube results page,
+ * parses ytInitialData videoRenderer entries, and returns only verified video
+ * metadata. Returns [] (never fabricated results) when YouTube is unavailable.
+ */
+export async function fetchLiveYouTubeVideos(query: string, limit = 4): Promise<LiveVideoResult[]> {
+  const searchQuery = String(query || '').trim();
+  if (!searchQuery) return [];
+  const results: LiveVideoResult[] = [];
+  try {
+    const res = await fetch(
+      'https://www.youtube.com/results?search_query=' + encodeURIComponent(searchQuery),
+      {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+        signal: AbortSignal.timeout(6000),
+      }
+    );
+    if (!res.ok) return results;
+    const html = await res.text();
+    const marker = html.indexOf('ytInitialData');
+    if (marker === -1) return results;
+    const data = extractBalancedJsonObject(html, html.indexOf('{', marker));
+    if (!data) return results;
+    const renderers: any[] = [];
+    collectVideoRenderers(data, renderers);
+    for (const vr of renderers) {
+      const parsed = parseVideoRenderer(vr);
+      if (parsed) results.push(parsed);
+      if (results.length >= limit) break;
+    }
+  } catch {
+    return results.slice(0, limit);
+  }
+  return results.slice(0, limit);
+}
+
 /**
  * Determines whether a prompt asks for real-time data, live facts, or current information
  */
@@ -708,7 +889,7 @@ export function isRealtimeOrLiveFactQuery(text: string): boolean {
     return false;
   }
   return (
-    /\b(latest|today|current|currently|right\s+now|now|breaking|live|real[\s-]?time|news|headlines|recent|this\s+week|this\s+month|this\s+year|yesterday|weather|temperature|forecast|aqi|air\s+quality|humidity|stock\s+price|share\s+price|market\s+cap|exchange\s+rate|forex|usd|inr|eur|gbp|jpy|bitcoin|btc|ethereum|eth|solana|crypto|cryptocurrency|gold\s+price|silver\s+price|world\s+news|india\s+news|tech\s+news|space\s+news|earthquake|election|box\s+office|release\s+date|latest\s+version|price\s+today|score|standings|ipl|world\s+cup|who\s+won|who\s+is\s+(the\s+)?(prime\s+minister|president|chief\s+minister|ceo|founder|governor|richest|champion)|what\s+time|what\s+is\s+the\s+date|today's\s+date|todays\s+date|day\s+today)\b/i.test(
+    /\b(latest|today|current|currently|right\s+now|now|breaking|live|real[\s-]?time|news|headlines|recent|this\s+week|this\s+month|this\s+year|yesterday|weather|temperature|forecast|aqi|air\s+quality|humidity|stock\s+price|share\s+price|market\s+cap|exchange\s+rate|forex|usd|inr|eur|gbp|jpy|bitcoin|btc|ethereum|eth|solana|crypto|cryptocurrency|gold\s+price|silver\s+price|world\s+news|india\s+news|tech\s+news|space\s+news|earthquake|election|box\s+office|release\s+date|youtube|new\s+video|upload\s+date|latest\s+version|price\s+today|score|standings|ipl|world\s+cup|who\s+won|who\s+is\s+(the\s+)?(prime\s+minister|president|chief\s+minister|ceo|founder|governor|richest|champion)|what\s+time|what\s+is\s+the\s+date|today's\s+date|todays\s+date|day\s+today)\b/i.test(
       clean
     ) ||
     /\b(202[5-9]|203\d)\b/.test(clean) ||
@@ -736,12 +917,14 @@ export async function enrichQueryWithRealtimeData(query: string): Promise<Realti
   const weatherDetect = detectWeatherCity(clean);
   const currencyDetect = detectCurrencyQuery(clean);
   const wantsCrypto = detectCryptoQuery(clean);
+  const videoDetect = detectVideoQuery(clean);
   const wantsLiveSearch = isRealtimeOrLiveFactQuery(clean);
 
   let weather: LiveWeatherSnapshot | null = null;
   let currency: LiveCurrencySnapshot | null = null;
   let crypto: LiveCryptoItem[] = [];
   let newsAndFacts: LiveNewsOrFactItem[] = [];
+  let videos: LiveVideoResult[] = [];
 
   const tasks: Promise<void>[] = [];
 
@@ -773,6 +956,14 @@ export async function enrichQueryWithRealtimeData(query: string): Promise<Realti
     tasks.push(
       fetchLiveNewsAndFacts(clean, 5).then((items) => {
         newsAndFacts = items;
+      })
+    );
+  }
+
+  if (videoDetect.wantsVideos) {
+    tasks.push(
+      fetchLiveYouTubeVideos(videoDetect.searchQuery, 4).then((items) => {
+        videos = items;
       })
     );
   }
@@ -853,6 +1044,21 @@ export async function enrichQueryWithRealtimeData(query: string): Promise<Realti
     }
   }
 
+  if (videos.length > 0) {
+    const lines = videos
+      .map(
+        (v, idx) =>
+          `${idx + 1}. **${v.title}**\n   Channel: ${v.channel}${v.publishedText ? ` | Published: ${v.publishedText}` : ''}${v.durationText ? ` | Duration: ${v.durationText}` : ''}\n   URL: ${v.url}${v.thumbnailUrl ? `\n   Thumbnail: ${v.thumbnailUrl}` : ''}${v.description ? `\n   About: ${v.description}` : ''}`
+      )
+      .join('\n');
+    contextBlocks.push(
+      `\n[LIVE YOUTUBE VIDEO RESULTS (verified from YouTube search at ${temporal.isoUtc})]\n${lines}\nWhen answering, always include the direct watch URL, channel name, upload date, and the thumbnail image URL from the verified results above. Never invent video titles, channels, dates, or URLs.`
+    );
+    for (const v of videos) {
+      sources.push({ title: `${v.title} — ${v.channel} (YouTube)`, url: v.url });
+    }
+  }
+
   // Build a direct fallback markdown answer if the LLM key is unavailable or rate-limited
   let directFallbackMarkdown: string | undefined;
 
@@ -901,6 +1107,17 @@ export async function enrichQueryWithRealtimeData(query: string): Promise<Realti
         )
         .join('\n') +
       `\n\n*Updated: ${temporal.utcFormatted}*\n\n**Sources**\n- [CoinGecko Live Crypto Prices](https://www.coingecko.com/)`;
+  } else if (videos.length > 0) {
+    directFallbackMarkdown =
+      `### Latest YouTube Videos\n\n` +
+      videos
+        .map(
+          (v) =>
+            `- **[${v.title}](${v.url})**\n  - **Channel:** ${v.channel}\n  - **Published:** ${v.publishedText || 'recently (exact date not provided by YouTube search)'}\n  - **Thumbnail:** ${v.thumbnailUrl || 'not available'}${v.durationText ? `\n  - **Duration:** ${v.durationText}` : ''}${v.description ? `\n  - **About:** ${v.description}` : ''}`
+        )
+        .join('\n\n') +
+      `\n\n*Retrieved live from YouTube at ${temporal.utcFormatted}*\n\n**Sources**\n` +
+      videos.map((v) => `- [${v.title.replace(/[\[\]]/g, '')} — ${v.channel}](${v.url})`).join('\n');
   } else if (newsAndFacts.length > 0) {
     directFallbackMarkdown =
       `### Real-Time Information & Live Results\n\n` +
@@ -917,12 +1134,13 @@ export async function enrichQueryWithRealtimeData(query: string): Promise<Realti
   return {
     temporal,
     hasLiveDomainData: Boolean(
-      isTimeOrDateOnly || weather || currency || crypto.length > 0 || newsAndFacts.length > 0
+      isTimeOrDateOnly || weather || currency || crypto.length > 0 || newsAndFacts.length > 0 || videos.length > 0
     ),
     weather,
     currency,
     crypto,
     newsAndFacts,
+    videos,
     sources,
     systemContextBlock: contextBlocks.join('\n'),
     directFallbackMarkdown,
