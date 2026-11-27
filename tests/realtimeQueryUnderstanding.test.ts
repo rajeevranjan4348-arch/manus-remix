@@ -6,6 +6,7 @@ import {
   isRealtimeOrLiveFactQuery,
 } from '../server/realtimeDataService';
 import { generateResilientResponse, needsLiveSearch } from '../server/geminiService';
+import { searchYouTubeVideosWithFallback } from '../server/rtie/youtubeAdapter';
 
 function makeYouTubeHtml(videos: Array<Record<string, any>>): string {
   const data = {
@@ -142,5 +143,83 @@ describe('Real-Time Query Understanding & Response Fixes', () => {
     expect(generateResilientResponse('Nvidia')).toContain('NVIDIA Corporation');
     expect(generateResilientResponse('Who is Techno Gamerz?')).toContain('Techno Gamerz');
     expect(generateResilientResponse('Hello')).toBe('Hello! How can I help you today?');
+  });
+});
+
+describe('YouTube adapter: Data API primary with keyless fallback', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  const apiPayload = {
+    items: [
+      {
+        id: { videoId: 'abc12345678' },
+        snippet: {
+          title: 'Techno Gamerz latest upload',
+          channelTitle: 'Techno Gamerz',
+          publishedAt: '2026-11-25T10:00:00Z',
+          description: 'Newest episode.',
+          thumbnails: { high: { url: 'https://i.ytimg.com/vi/abc12345678/hqdefault.jpg' } },
+        },
+      },
+    ],
+  };
+
+  it('uses the YouTube Data API when YOUTUBE_API_KEY is set', async () => {
+    vi.stubEnv('YOUTUBE_API_KEY', 'test-key');
+    const fetchMock = vi.fn(async (url: any) => {
+      if (String(url).includes('googleapis.com')) {
+        return new Response(JSON.stringify(apiPayload), { status: 200 });
+      }
+      return new Response('should not be called', { status: 500 });
+    });
+    vi.stubGlobal('fetch', fetchMock as any);
+
+    const { videos, outcome } = await searchYouTubeVideosWithFallback('Techno Gamerz latest video');
+    expect(outcome.status).toBe('ok');
+    expect(outcome.source).toBe('youtube-data-api');
+    expect(videos).toHaveLength(1);
+    expect(videos[0].title).toBe('Techno Gamerz latest upload');
+    expect(videos[0].channel).toBe('Techno Gamerz');
+    expect(videos[0].url).toBe('https://www.youtube.com/watch?v=abc12345678');
+    expect(videos[0].publishedText).toBe('2026-11-25');
+  });
+
+  it('falls back to keyless results when the Data API errors', async () => {
+    vi.stubEnv('YOUTUBE_API_KEY', 'test-key');
+    const fetchMock = vi.fn(async (url: any) => {
+      if (String(url).includes('googleapis.com')) {
+        return new Response('quota exceeded', { status: 403 });
+      }
+      if (String(url).includes('youtube.com')) {
+        return new Response(makeYouTubeHtml([sampleRenderer]), { status: 200 });
+      }
+      return new Response('error', { status: 500 });
+    });
+    vi.stubGlobal('fetch', fetchMock as any);
+
+    const { videos, outcome } = await searchYouTubeVideosWithFallback('Techno Gamerz latest video');
+    expect(outcome.source).toBe('youtube-live-search');
+    expect(outcome.status).toBe('ok');
+    expect(videos).toHaveLength(1);
+    expect(videos[0].channel).toBe('Techno Gamerz');
+  });
+
+  it('works fully keyless when YOUTUBE_API_KEY is not configured', async () => {
+    vi.stubEnv('YOUTUBE_API_KEY', '');
+    const fetchMock = vi.fn(async (url: any) => {
+      if (String(url).includes('youtube.com')) {
+        return new Response(makeYouTubeHtml([sampleRenderer]), { status: 200 });
+      }
+      return new Response('error', { status: 500 });
+    });
+    vi.stubGlobal('fetch', fetchMock as any);
+
+    const { videos, outcome } = await searchYouTubeVideosWithFallback('Techno Gamerz latest video');
+    expect(outcome.status).toBe('ok');
+    expect(outcome.source).toBe('youtube-live-search');
+    expect(videos[0].title).toBe('Techno Gamerz new GTA V episode');
   });
 });

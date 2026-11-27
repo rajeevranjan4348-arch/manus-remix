@@ -357,6 +357,7 @@ export function routeQueryIntent(rawQuery: string): QueryRouteDecision {
       ],
       extractedEntities: {
         targetUrls,
+        videoRequest: { topic: videoIntent.searchQuery },
       },
       freshnessTtlMs: CATEGORY_TTL_MS.current_information,
     };

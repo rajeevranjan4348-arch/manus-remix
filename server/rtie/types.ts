@@ -41,6 +41,7 @@ export interface QueryRouteDecision {
     targetUrls?: string[];
     programmingTopic?: string;
     aiModelTopic?: string;
+    videoRequest?: { topic: string };
   };
   freshnessTtlMs: number;
 }

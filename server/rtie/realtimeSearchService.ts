@@ -12,13 +12,13 @@
  * 8. Live YouTube Video Search Adapter (keyless public YouTube results for latest/current video requests)
  */
 
+import { searchYouTubeVideosWithFallback, type YouTubeSearchOutcome } from './youtubeAdapter';
 import { GoogleGenAI } from '@google/genai';
 import {
   fetchLiveCryptoPrices,
   fetchLiveExchangeRates,
   fetchLiveNewsAndFacts,
   fetchLiveWeatherSnapshot,
-  fetchLiveYouTubeVideos,
   detectVideoQuery,
   LiveCryptoItem,
   LiveCurrencySnapshot,
@@ -33,6 +33,7 @@ export interface DomainLiveSnapshots {
   currency?: LiveCurrencySnapshot | null;
   crypto?: LiveCryptoItem[];
   videos?: LiveVideoResult[];
+  youtube?: YouTubeSearchOutcome;
 }
 
 /**
@@ -594,31 +595,38 @@ export async function executeMultiProviderResearch(
   }
 
   // I. Live YouTube Video Search Adapter (latest/current video requests)
+  // Primary: YouTube Data API v3 (order=date) when YOUTUBE_API_KEY is configured.
+  // Fallback: keyless public YouTube results parsing, so video lookups still work
+  // without any API key and never fabricate results.
   const videoIntentPrimary = detectVideoQuery(rawQuery);
   const videoIntent = videoIntentPrimary.wantsVideos
     ? videoIntentPrimary
     : detectVideoQuery(primarySearchQuery);
-  if (videoIntent.wantsVideos) {
+  const videoQuery = entities.videoRequest?.topic || videoIntent.searchQuery;
+  if (entities.videoRequest || videoIntent.wantsVideos) {
     jobs.push(
-      fetchLiveYouTubeVideos(videoIntent.searchQuery, 4).then((items) => {
-        domainSnapshots.videos = items;
-        for (const v of items) {
-          rawResults.push({
-            title: `${v.title} — ${v.channel} (YouTube)`,
-            url: v.url,
-            snippet: [
-              v.publishedText ? `Published ${v.publishedText}` : 'Recent upload',
-              v.description || '',
-              v.thumbnailUrl ? `Thumbnail: ${v.thumbnailUrl}` : '',
-            ]
-              .filter(Boolean)
-              .join('. '),
-            provider: 'youtube-live-search',
-            publishedAt: v.publishedAtIso,
-            retrievedAt,
-          });
+      searchYouTubeVideosWithFallback(videoQuery, { maxResults: 5, signal: options?.signal }).then(
+        ({ videos, outcome }) => {
+          domainSnapshots.videos = videos;
+          domainSnapshots.youtube = outcome;
+          for (const v of videos) {
+            rawResults.push({
+              title: v.title + ' — ' + v.channel + ' (YouTube)',
+              url: v.url,
+              snippet: [
+                v.publishedText ? 'Published ' + v.publishedText : 'Recent upload',
+                v.description || '',
+                v.thumbnailUrl ? 'Thumbnail: ' + v.thumbnailUrl : '',
+              ]
+                .filter(Boolean)
+                .join('. '),
+              provider: outcome.source === 'youtube-data-api' ? 'youtube-data-api' : 'youtube-live-search',
+              publishedAt: v.publishedAtIso,
+              retrievedAt,
+            });
+          }
         }
-      })
+      )
     );
   }
 
