@@ -524,6 +524,19 @@ export function useAgentTask() {
     return () => { mounted = false; };
   }, [isAuthenticated, sandbox]);
 
+  // Real-time cross-device background task notifications & sync stream
+  useEffect(() => {
+    const uid = auth?.currentUser?.uid || user?.id;
+    if (!isAuthenticated || !uid || auth?.currentUser?.isAnonymous) {
+      notificationDispatcher.stopLiveSync();
+      return;
+    }
+    notificationDispatcher.startLiveSync(uid);
+    return () => {
+      notificationDispatcher.stopLiveSync();
+    };
+  }, [isAuthenticated, user?.id]);
+
   // Synchronize typing indicator in topbar and activity-resetting watchdog timer
   const finalizeRequestTurnRef = useRef<((reqId: number, explicitActiveId?: string | null, explicitText?: string, rawResponse?: any) => boolean) | null>(null);
   useEffect(() => {
@@ -1346,9 +1359,9 @@ export function useAgentTask() {
 
     const buildEnrichedPrompt = async (): Promise<string> => {
       let enriched = prompt;
-      // 1. Inject Long-Term Memory (local & bounded Firestore)
+      // 1. Inject Long-Term Memory (hybrid vector + local/Firestore with strict greeting/non-personal guards)
       try {
-        const memoryContext = await longTermMemory.getRelevantContext(activeUserId, prompt);
+        const memoryContext = await longTermMemory.getRelevantContextHybrid(activeUserId, prompt);
         if (memoryContext) {
           const isExplicitRecall = isExplicitMemoryRecallQuery(prompt);
           if (activeActivityTaskId) {
@@ -1369,15 +1382,17 @@ export function useAgentTask() {
         }
       } catch {}
 
-      // 2. Inject Workspace Knowledge Base RAG (local & synchronous-fast)
+      // 2. Inject Workspace Knowledge Base RAG (hybrid semantic embeddings + BM25, strictly bounded)
       try {
-        const ragPassages = knowledgeBase.retrieve(prompt, activeUserId, 4);
+        const ragPassages = simplePrompt
+          ? knowledgeBase.retrieve(prompt, activeUserId, 4)
+          : await knowledgeBase.retrieveHybrid(prompt, activeUserId, { limit: 4, timeoutMs: 1500 });
         if (ragPassages.length > 0) {
           if (activeActivityTaskId) {
             agentActivityTracker.ingestEvent({
               taskId: activeActivityTaskId,
               title: `Retrieved ${ragPassages.length} workspace document passage(s)`,
-              description: 'Matched relevant files from local workspace knowledge base',
+              description: 'Matched relevant files from hybrid semantic + keyword knowledge base',
               toolName: 'knowledge_base_rag',
               status: 'COMPLETED',
               category: 'file',

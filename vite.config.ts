@@ -59,6 +59,10 @@ import tasksFunctionHandler from './netlify/functions/tasks';
 import multiAgentFunctionHandler from './netlify/functions/multi-agent';
 import skillsFunctionHandler from './netlify/functions/skills';
 import schedulerFunctionHandler from './netlify/functions/scheduler';
+import ragFunctionHandler from './netlify/functions/rag';
+import webhooksFunctionHandler from './netlify/functions/webhooks';
+import mcpFunctionHandler from './netlify/functions/mcp';
+import syncFunctionHandler from './netlify/functions/sync';
 
 class StreamCircuitBreaker {
   private failureCount = 0;
@@ -174,7 +178,7 @@ function geminiApiPlugin(): Plugin {
           return;
         }
 
-        // Delegate /api/sandbox/*, /api/browser/*, /api/permissions/*, /api/tasks/*, /api/multi-agent/*, /api/skills/*, /api/scheduler/* directly to Netlify Function handlers
+        // Delegate /api/sandbox/*, /api/browser/*, /api/permissions/*, /api/tasks/*, /api/multi-agent/*, /api/skills/*, /api/scheduler/*, /api/rag/*, /api/webhooks/*, /api/mcp/*, /api/sync/* directly to Netlify Function handlers
         if (
           url &&
           (url.startsWith('/api/sandbox') ||
@@ -190,7 +194,15 @@ function geminiApiPlugin(): Plugin {
             url.startsWith('/api/skills') ||
             url.startsWith('/.netlify/functions/skills') ||
             url.startsWith('/api/scheduler') ||
-            url.startsWith('/.netlify/functions/scheduler'))
+            url.startsWith('/.netlify/functions/scheduler') ||
+            url.startsWith('/api/rag') ||
+            url.startsWith('/.netlify/functions/rag') ||
+            url.startsWith('/api/webhooks') ||
+            url.startsWith('/.netlify/functions/webhooks') ||
+            url.startsWith('/api/mcp') ||
+            url.startsWith('/.netlify/functions/mcp') ||
+            url.startsWith('/api/sync') ||
+            url.startsWith('/.netlify/functions/sync'))
         ) {
           const chunks: Buffer[] = [];
           req.on('data', (c: any) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
@@ -224,7 +236,15 @@ function geminiApiPlugin(): Plugin {
                           ? skillsFunctionHandler
                           : url.startsWith('/api/scheduler') || url.startsWith('/.netlify/functions/scheduler')
                             ? schedulerFunctionHandler
-                            : permissionsFunctionHandler;
+                            : url.startsWith('/api/rag') || url.startsWith('/.netlify/functions/rag')
+                              ? ragFunctionHandler
+                              : url.startsWith('/api/webhooks') || url.startsWith('/.netlify/functions/webhooks')
+                                ? webhooksFunctionHandler
+                                : url.startsWith('/api/mcp') || url.startsWith('/.netlify/functions/mcp')
+                                  ? mcpFunctionHandler
+                                  : url.startsWith('/api/sync') || url.startsWith('/.netlify/functions/sync')
+                                    ? syncFunctionHandler
+                                    : permissionsFunctionHandler;
 
               const webRes = await handler(webReq);
               res.statusCode = webRes.status;

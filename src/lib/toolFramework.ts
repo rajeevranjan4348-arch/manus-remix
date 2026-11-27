@@ -78,6 +78,126 @@ class ToolRegistryService {
     return Array.from(this.tools.values());
   }
 
+  public unregister(name: string): boolean {
+    return this.tools.delete(name);
+  }
+
+  /**
+   * Dynamically discover tools from all connected MCP servers (/api/mcp/tools)
+   * and register them into the active tool registry as `mcp__<slug>__<tool>`.
+   */
+  public async syncMcpTools(): Promise<{ registered: string[]; count: number }> {
+    if (typeof fetch === 'undefined') {
+      return { registered: [], count: 0 };
+    }
+    const authHeader = await getFirebaseAuthorizationHeader().catch(() => null);
+    if (!authHeader) {
+      return { registered: [], count: 0 };
+    }
+
+    try {
+      const res = await fetch('/api/mcp/tools', {
+        headers: { Accept: 'application/json', Authorization: authHeader },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) return { registered: [], count: 0 };
+      const data = await res.json().catch(() => ({}));
+      const discovered = Array.isArray(data?.tools) ? data.tools : [];
+
+      // Remove stale dynamic MCP tools before re-registering fresh catalog
+      for (const existingName of Array.from(this.tools.keys())) {
+        if (existingName.startsWith('mcp__')) {
+          this.tools.delete(existingName);
+        }
+      }
+
+      const registered: string[] = [];
+      for (const item of discovered) {
+        const namespacedName = String(item?.namespacedName || '').trim();
+        const serverId = String(item?.serverId || '').trim();
+        const toolName = String(item?.tool?.name || '').trim();
+        if (!namespacedName || !serverId || !toolName) continue;
+
+        const inputSchema = item?.tool?.inputSchema || {};
+        const props = inputSchema?.properties && typeof inputSchema.properties === 'object' ? inputSchema.properties : {};
+        const requiredList: string[] = Array.isArray(inputSchema?.required) ? inputSchema.required : [];
+        const parameters: Record<string, ToolParameterSchema> = {};
+
+        for (const [k, rawDef] of Object.entries(props)) {
+          const def = (rawDef || {}) as Record<string, any>;
+          const rawType = String(def.type || 'string');
+          const safeType: ToolParameterSchema['type'] =
+            rawType === 'number' || rawType === 'integer'
+              ? 'number'
+              : rawType === 'boolean'
+                ? 'boolean'
+                : rawType === 'object'
+                  ? 'object'
+                  : rawType === 'array'
+                    ? 'array'
+                    : 'string';
+          parameters[k] = {
+            type: safeType,
+            description: String(def.description || `Parameter '${k}'`),
+            required: requiredList.includes(k),
+            ...(Array.isArray(def.enum) ? { enum: def.enum.map(String) } : {}),
+          };
+        }
+
+        const isReadOnly = Boolean(item?.tool?.annotations?.readOnlyHint);
+        const isDestructive = Boolean(item?.tool?.annotations?.destructiveHint);
+
+        this.register({
+          name: namespacedName,
+          displayName: `${String(item?.serverName || 'MCP')}: ${toolName}`,
+          description: String(item?.tool?.description || `Execute MCP tool '${toolName}' on ${item?.serverName || serverId}.`),
+          category: 'workspace',
+          riskLevel: isDestructive ? 'destructive' : isReadOnly ? 'read-only' : 'moderate',
+          parameters,
+          handler: async (args, context) => {
+            const callAuth = await getFirebaseAuthorizationHeader().catch(() => null);
+            if (!callAuth) {
+              return { success: false, error: 'AUTHENTICATION_REQUIRED', summary: 'Authentication required to call MCP tools.' };
+            }
+            const callRes = await fetch('/api/mcp/call', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: callAuth },
+              signal: context.signal,
+              body: JSON.stringify({
+                serverId,
+                toolName,
+                args,
+                approvalToken: context.approvalToken,
+              }),
+            });
+            const payload = await callRes.json().catch(() => ({}));
+            if (callRes.status === 403 && payload?.requiresApproval) {
+              return {
+                success: false,
+                error: 'APPROVAL_REQUIRED',
+                data: { challenge: payload.challenge },
+                summary: `MCP tool '${toolName}' requires explicit approval.`,
+              };
+            }
+            return {
+              success: Boolean(callRes.ok && payload?.ok),
+              data: payload?.result ?? payload,
+              error: payload?.error,
+              summary: callRes.ok && payload?.ok
+                ? `Executed MCP tool '${toolName}' on ${String(item?.serverName || serverId)}.`
+                : payload?.error || `MCP tool '${toolName}' failed.`,
+            };
+          },
+        });
+        registered.push(namespacedName);
+      }
+
+      return { registered, count: registered.length };
+    } catch {
+      return { registered: [], count: 0 };
+    }
+  }
+
   public getToolDefinitionsForLLM(): any[] {
     return Array.from(this.tools.values()).map(t => ({
       name: t.name,
@@ -1186,6 +1306,243 @@ class ToolRegistryService {
           data: res.data,
           error: res.error,
           summary: res.ok ? `Cleaned up sandbox ${args.sandboxId}.` : res.error || 'Failed to clean up sandbox.',
+        };
+      },
+    });
+
+    // =========================================================================
+    // Next-Gen Platform Tools: Semantic Vector RAG, MCP Bridge & Webhooks
+    // =========================================================================
+
+    // 30. rag_semantic_search
+    this.register({
+      name: 'rag_semantic_search',
+      displayName: 'Semantic Knowledge Search',
+      description: 'Search indexed workspace documents, code files, PDFs, and long-term memories using hybrid dense embeddings + BM25 retrieval.',
+      category: 'workspace',
+      riskLevel: 'read-only',
+      parameters: {
+        query: { type: 'string', description: 'Natural language search query', required: true },
+        limit: { type: 'number', description: 'Maximum results to return (default: 5)', default: 5 },
+      },
+      handler: async (args, context) => {
+        const authHeader = await getFirebaseAuthorizationHeader().catch(() => null);
+        if (!authHeader) {
+          return { success: false, error: 'AUTHENTICATION_REQUIRED', summary: 'Sign in to query Semantic Vector RAG.' };
+        }
+        const res = await fetch('/api/rag/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+          signal: context.signal,
+          body: JSON.stringify({
+            query: String(args.query || ''),
+            limit: typeof args.limit === 'number' ? args.limit : 5,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        const hits = Array.isArray(data?.hits) ? data.hits : [];
+        return {
+          success: res.ok,
+          data,
+          error: res.ok ? undefined : data?.error || `HTTP ${res.status}`,
+          summary: res.ok
+            ? `Found ${hits.length} hybrid semantic passage(s) using ${data?.retrievalMode || 'hybrid'} retrieval.`
+            : data?.error || 'Semantic RAG search failed.',
+        };
+      },
+    });
+
+    // 31. rag_index_document
+    this.register({
+      name: 'rag_index_document',
+      displayName: 'Index Document to Vector RAG',
+      description: 'Chunk, embed, and durably index a Markdown, code, PDF, or text document into Semantic Vector Memory.',
+      category: 'workspace',
+      riskLevel: 'moderate',
+      parameters: {
+        title: { type: 'string', description: 'Document title', required: true },
+        content: { type: 'string', description: 'Document text, Markdown, or code content', required: true },
+        sourceType: {
+          type: 'string',
+          description: 'Document category',
+          enum: ['document', 'file', 'memory', 'research', 'session'],
+          default: 'document',
+        },
+      },
+      handler: async (args, context) => {
+        const authHeader = await getFirebaseAuthorizationHeader().catch(() => null);
+        if (!authHeader) {
+          return { success: false, error: 'AUTHENTICATION_REQUIRED', summary: 'Sign in to index documents.' };
+        }
+        const res = await fetch('/api/rag/index', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+          signal: context.signal,
+          body: JSON.stringify({
+            title: String(args.title || ''),
+            content: String(args.content || ''),
+            sourceType: typeof args.sourceType === 'string' ? args.sourceType : 'document',
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        return {
+          success: res.ok,
+          data,
+          error: res.ok ? undefined : data?.error || `HTTP ${res.status}`,
+          summary: res.ok
+            ? `Indexed "${args.title}" into ${data?.document?.chunkCount ?? 0} semantic chunk(s).`
+            : data?.error || 'Document indexing failed.',
+        };
+      },
+    });
+
+    // 32. mcp_list_servers
+    this.register({
+      name: 'mcp_list_servers',
+      displayName: 'List Connected MCP Servers',
+      description: 'List registered Model Context Protocol (MCP) servers and their dynamically discovered tools.',
+      category: 'workspace',
+      riskLevel: 'read-only',
+      parameters: {},
+      handler: async (_args, context) => {
+        const authHeader = await getFirebaseAuthorizationHeader().catch(() => null);
+        if (!authHeader) {
+          return { success: false, error: 'AUTHENTICATION_REQUIRED', summary: 'Sign in to list MCP servers.' };
+        }
+        const res = await fetch('/api/mcp/servers', {
+          headers: { Accept: 'application/json', Authorization: authHeader },
+          signal: context.signal,
+        });
+        const data = await res.json().catch(() => ({}));
+        const servers = Array.isArray(data?.servers) ? data.servers : [];
+        return {
+          success: res.ok,
+          data,
+          error: res.ok ? undefined : data?.error || `HTTP ${res.status}`,
+          summary: res.ok ? `Found ${servers.length} registered MCP server(s).` : data?.error || 'Failed to list MCP servers.',
+        };
+      },
+    });
+
+    // 33. mcp_call_tool
+    this.register({
+      name: 'mcp_call_tool',
+      displayName: 'Invoke MCP Server Tool',
+      description: 'Call a discovered tool on a registered Model Context Protocol (MCP) server.',
+      category: 'workspace',
+      riskLevel: 'moderate',
+      parameters: {
+        serverId: { type: 'string', description: 'Registered MCP server ID', required: true },
+        toolName: { type: 'string', description: 'Tool name exposed by the MCP server', required: true },
+        args: { type: 'object', description: 'Tool arguments object' },
+      },
+      handler: async (args, context) => {
+        const authHeader = await getFirebaseAuthorizationHeader().catch(() => null);
+        if (!authHeader) {
+          return { success: false, error: 'AUTHENTICATION_REQUIRED', summary: 'Sign in to invoke MCP tools.' };
+        }
+        const res = await fetch('/api/mcp/call', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+          signal: context.signal,
+          body: JSON.stringify({
+            serverId: String(args.serverId || ''),
+            toolName: String(args.toolName || ''),
+            args: args.args && typeof args.args === 'object' ? args.args : {},
+            approvalToken: context.approvalToken,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 403 && data?.requiresApproval) {
+          return {
+            success: false,
+            error: 'APPROVAL_REQUIRED',
+            data: { challenge: data.challenge },
+            summary: `MCP tool '${args.toolName}' requires explicit user approval.`,
+          };
+        }
+        return {
+          success: Boolean(res.ok && data?.ok),
+          data: data?.result ?? data,
+          error: data?.error,
+          summary: res.ok && data?.ok
+            ? `Executed MCP tool '${args.toolName}' on server '${args.serverId}'.`
+            : data?.error || `MCP tool '${args.toolName}' failed.`,
+        };
+      },
+    });
+
+    // 34. webhook_list_triggers
+    this.register({
+      name: 'webhook_list_triggers',
+      displayName: 'List Event Webhooks',
+      description: 'List configured inbound event-driven webhook triggers and outbound notification webhooks.',
+      category: 'workspace',
+      riskLevel: 'read-only',
+      parameters: {},
+      handler: async (_args, context) => {
+        const authHeader = await getFirebaseAuthorizationHeader().catch(() => null);
+        if (!authHeader) {
+          return { success: false, error: 'AUTHENTICATION_REQUIRED', summary: 'Sign in to list webhooks.' };
+        }
+        const [inRes, outRes] = await Promise.all([
+          fetch('/api/webhooks/inbound', { headers: { Accept: 'application/json', Authorization: authHeader }, signal: context.signal }),
+          fetch('/api/webhooks/outbound', { headers: { Accept: 'application/json', Authorization: authHeader }, signal: context.signal }),
+        ]);
+        const inbound = inRes.ok ? await inRes.json().catch(() => ({})) : {};
+        const outbound = outRes.ok ? await outRes.json().catch(() => ({})) : {};
+        const inCount = Array.isArray(inbound?.webhooks) ? inbound.webhooks.length : 0;
+        const outCount = Array.isArray(outbound?.subscriptions) ? outbound.subscriptions.length : 0;
+        return {
+          success: inRes.ok && outRes.ok,
+          data: { inbound: inbound?.webhooks || [], outbound: outbound?.subscriptions || [] },
+          summary: `Found ${inCount} inbound trigger(s) and ${outCount} outbound subscription(s).`,
+        };
+      },
+    });
+
+    // 35. webhook_create_outbound
+    this.register({
+      name: 'webhook_create_outbound',
+      displayName: 'Create Outbound Webhook',
+      description: 'Register an SSRF-validated outbound webhook (Slack, Discord, Email Relay, or Generic JSON) to deliver finished agent results.',
+      category: 'workspace',
+      riskLevel: 'privileged',
+      parameters: {
+        name: { type: 'string', description: 'Friendly subscription name', required: true },
+        url: { type: 'string', description: 'Public HTTPS webhook URL', required: true },
+        format: {
+          type: 'string',
+          description: 'Payload format',
+          enum: ['generic', 'slack', 'discord', 'email_relay'],
+          default: 'generic',
+        },
+        events: { type: 'array', description: 'List of lifecycle event types to subscribe to' },
+      },
+      handler: async (args, context) => {
+        const authHeader = await getFirebaseAuthorizationHeader().catch(() => null);
+        if (!authHeader) {
+          return { success: false, error: 'AUTHENTICATION_REQUIRED', summary: 'Sign in to create webhooks.' };
+        }
+        const res = await fetch('/api/webhooks/outbound/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+          signal: context.signal,
+          body: JSON.stringify({
+            name: String(args.name || ''),
+            url: String(args.url || ''),
+            format: typeof args.format === 'string' ? args.format : 'generic',
+            events: Array.isArray(args.events) ? args.events : undefined,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        return {
+          success: res.ok,
+          data,
+          error: res.ok ? undefined : data?.error || `HTTP ${res.status}`,
+          summary: res.ok
+            ? `Created outbound webhook "${args.name}" (${data?.subscription?.subscriptionId}).`
+            : data?.error || 'Failed to create outbound webhook.',
         };
       },
     });

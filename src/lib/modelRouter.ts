@@ -8,6 +8,29 @@
 import { observability } from './observability';
 
 export type TaskType = 'coding' | 'web_research' | 'fast_chat' | 'reasoning' | 'creative' | 'data_analysis';
+export type ComplexityLevel = 'low' | 'medium' | 'high';
+export type ModelCircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+
+export interface ComplexityAnalysis {
+  level: ComplexityLevel;
+  score: number;
+  signals: string[];
+}
+
+export interface ModelHealthStatus {
+  modelId: string;
+  state: ModelCircuitState;
+  consecutiveFailures: number;
+  lastError?: string;
+  lastLatencyMs?: number;
+  cooldownRemainingMs: number;
+}
+
+export interface ModelRouteOptions {
+  thinkHarder?: boolean;
+  mode?: 'chat' | 'work';
+  estimatedInputTokens?: number;
+}
 
 export interface ModelRouteDecision {
   selectedModel: string;
@@ -15,6 +38,11 @@ export interface ModelRouteDecision {
   reason: string;
   fallbackModels: string[];
   temperature: number;
+  complexity?: ComplexityAnalysis;
+  circuitState?: ModelCircuitState;
+  compactionRecommended?: boolean;
+  estimatedInputTokens?: number;
+  thinkingBudgetHint?: number;
 }
 
 export interface ModelProfile {
@@ -75,7 +103,20 @@ export const SUPPORTED_MODELS: ModelProfile[] = [
   },
 ];
 
+interface CircuitRecord {
+  state: ModelCircuitState;
+  consecutiveFailures: number;
+  openedAt: number;
+  lastError?: string;
+  lastLatencyMs?: number;
+}
+
+const CIRCUIT_FAILURE_THRESHOLD = 3;
+const CIRCUIT_COOLDOWN_MS = 30_000;
+
 class ModelRouterService {
+  private circuits = new Map<string, CircuitRecord>();
+
   /**
    * Classify user prompt into task category
    */
@@ -101,17 +142,162 @@ class ModelRouterService {
   }
 
   /**
-   * Selects best model with graceful fallbacks
+   * Score prompt complexity to adaptively select fast vs deep-reasoning models.
    */
-  public route(prompt: string, userPreference?: string): ModelRouteDecision {
+  public analyzeComplexity(prompt: string, options?: ModelRouteOptions): ComplexityAnalysis {
+    const text = String(prompt || '').trim();
+    const signals: string[] = [];
+    let score = 0;
+
+    if (options?.thinkHarder) {
+      score += 45;
+      signals.push('think_harder_enabled');
+    }
+    if (options?.mode === 'work') {
+      score += 20;
+      signals.push('work_mode');
+    }
+    if (text.length > 600) {
+      score += 25;
+      signals.push('long_prompt');
+    } else if (text.length > 180) {
+      score += 12;
+      signals.push('medium_prompt');
+    }
+    if (/```[\s\S]+```/.test(text)) {
+      score += 20;
+      signals.push('contains_code_block');
+    }
+    if (/\b(architect|architecture|distributed|trade-?off|security audit|migration|multi-step|optimize|refactor|proof|theorem|algorithm|root cause)\b/i.test(text)) {
+      score += 25;
+      signals.push('deep_reasoning_keywords');
+    }
+    if (/\b(compare|benchmark|synthesize|step[- ]by[- ]step|debug|investigate|implement)\b/i.test(text)) {
+      score += 12;
+      signals.push('analytical_keywords');
+    }
+    if ((options?.estimatedInputTokens ?? 0) > 12_000) {
+      score += 15;
+      signals.push('large_context');
+    }
+
+    const level: ComplexityLevel = score >= 45 ? 'high' : score >= 18 ? 'medium' : 'low';
+    return { level, score, signals };
+  }
+
+  /**
+   * Record execution outcome for per-model circuit breaking and adaptive failover.
+   */
+  public recordOutcome(
+    modelId: string,
+    outcome: { ok: boolean; latencyMs?: number; statusCode?: number; error?: string },
+  ): ModelHealthStatus {
+    const existing = this.circuits.get(modelId) || {
+      state: 'CLOSED' as ModelCircuitState,
+      consecutiveFailures: 0,
+      openedAt: 0,
+    };
+
+    if (outcome.ok) {
+      existing.state = 'CLOSED';
+      existing.consecutiveFailures = 0;
+      existing.openedAt = 0;
+      existing.lastError = undefined;
+      existing.lastLatencyMs = outcome.latencyMs;
+    } else {
+      existing.consecutiveFailures += 1;
+      existing.lastError = outcome.error || (outcome.statusCode ? `HTTP ${outcome.statusCode}` : 'Provider error');
+      existing.lastLatencyMs = outcome.latencyMs;
+
+      // Trip circuit immediately on 429/502/503/504 after threshold
+      const isOutageStatus = !outcome.statusCode || outcome.statusCode === 429 || outcome.statusCode >= 500;
+      if (isOutageStatus && existing.consecutiveFailures >= CIRCUIT_FAILURE_THRESHOLD) {
+        existing.state = 'OPEN';
+        existing.openedAt = Date.now();
+      }
+    }
+
+    this.circuits.set(modelId, existing);
+    return this.getModelHealth(modelId);
+  }
+
+  public getModelHealth(modelId: string): ModelHealthStatus {
+    const rec = this.circuits.get(modelId);
+    if (!rec) {
+      return {
+        modelId,
+        state: 'CLOSED',
+        consecutiveFailures: 0,
+        cooldownRemainingMs: 0,
+      };
+    }
+
+    if (rec.state === 'OPEN') {
+      const elapsed = Date.now() - rec.openedAt;
+      if (elapsed >= CIRCUIT_COOLDOWN_MS) {
+        rec.state = 'HALF_OPEN';
+        return {
+          modelId,
+          state: 'HALF_OPEN',
+          consecutiveFailures: rec.consecutiveFailures,
+          lastError: rec.lastError,
+          lastLatencyMs: rec.lastLatencyMs,
+          cooldownRemainingMs: 0,
+        };
+      }
+      return {
+        modelId,
+        state: 'OPEN',
+        consecutiveFailures: rec.consecutiveFailures,
+        lastError: rec.lastError,
+        lastLatencyMs: rec.lastLatencyMs,
+        cooldownRemainingMs: Math.max(0, CIRCUIT_COOLDOWN_MS - elapsed),
+      };
+    }
+
+    return {
+      modelId,
+      state: rec.state,
+      consecutiveFailures: rec.consecutiveFailures,
+      lastError: rec.lastError,
+      lastLatencyMs: rec.lastLatencyMs,
+      cooldownRemainingMs: 0,
+    };
+  }
+
+  public resetCircuit(modelId?: string): void {
+    if (modelId) {
+      this.circuits.delete(modelId);
+    } else {
+      this.circuits.clear();
+    }
+  }
+
+  public shouldCompactContext(estimatedTokens: number, modelId?: string): boolean {
+    const profile = SUPPORTED_MODELS.find((m) => m.id === modelId);
+    const softBudget = profile && profile.contextWindow < 100_000 ? 12_000 : 18_000;
+    return estimatedTokens >= softBudget;
+  }
+
+  /**
+   * Selects best model with complexity adaptation, circuit-breaker failover, and compaction hints.
+   */
+  public route(prompt: string, userPreference?: string, options?: ModelRouteOptions): ModelRouteDecision {
     const taskType = this.classifyTask(prompt);
+    const complexity = this.analyzeComplexity(prompt, options);
+    const estimatedInputTokens = options?.estimatedInputTokens ?? Math.ceil(String(prompt || '').length / 4);
+
     let selectedModel = 'gemini-3.8-flash';
     let reason = 'Balanced high-speed general intelligence';
     let temperature = 0.7;
 
-    if (userPreference && SUPPORTED_MODELS.some(m => m.id === userPreference)) {
+    if (userPreference && SUPPORTED_MODELS.some((m) => m.id === userPreference)) {
       selectedModel = userPreference;
       reason = `Selected by user setting (${userPreference})`;
+    } else if (complexity.level === 'high') {
+      selectedModel = 'gemini-3.1-pro-preview';
+      reason = `Deep reasoning model selected for high-complexity ${taskType} task (${complexity.signals.join(', ')})`;
+      temperature = taskType === 'coding' || taskType === 'data_analysis' ? 0.2 : 0.35;
     } else {
       switch (taskType) {
         case 'coding':
@@ -142,15 +328,37 @@ class ModelRouterService {
       }
     }
 
-    const fallbackModels = SUPPORTED_MODELS
-      .map(m => m.id)
-      .filter(id => id !== selectedModel);
+    // Circuit-breaker automatic failover if selected model is currently OPEN
+    const initialHealth = this.getModelHealth(selectedModel);
+    const orderedModels = SUPPORTED_MODELS.map((m) => m.id);
+    if (initialHealth.state === 'OPEN') {
+      const healthyFallback = orderedModels.find(
+        (id) => id !== selectedModel && this.getModelHealth(id).state !== 'OPEN',
+      );
+      if (healthyFallback) {
+        reason = `Circuit OPEN for ${selectedModel}; automatically failed over to ${healthyFallback}`;
+        selectedModel = healthyFallback;
+      }
+    }
+
+    const fallbackModels = orderedModels
+      .filter((id) => id !== selectedModel)
+      .sort((a, b) => {
+        const ha = this.getModelHealth(a).state === 'OPEN' ? 1 : 0;
+        const hb = this.getModelHealth(b).state === 'OPEN' ? 1 : 0;
+        return ha - hb;
+      });
+
+    const finalHealth = this.getModelHealth(selectedModel);
+    const compactionRecommended = this.shouldCompactContext(estimatedInputTokens, selectedModel);
+    const thinkingBudgetHint =
+      complexity.level === 'high' ? 2048 : complexity.level === 'medium' ? 512 : 0;
 
     observability.log({
       level: 'info',
       category: 'router',
-      message: `Routed ${taskType} task to ${selectedModel}`,
-      details: { taskType, selectedModel, reason },
+      message: `Routed ${taskType} (${complexity.level}) task to ${selectedModel}`,
+      details: { taskType, selectedModel, complexity: complexity.level, circuitState: finalHealth.state, reason },
     });
 
     return {
@@ -159,6 +367,11 @@ class ModelRouterService {
       reason,
       fallbackModels,
       temperature,
+      complexity,
+      circuitState: finalHealth.state,
+      compactionRecommended,
+      estimatedInputTokens,
+      thinkingBudgetHint,
     };
   }
 }

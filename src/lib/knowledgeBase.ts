@@ -6,6 +6,7 @@
  */
 
 import { observability } from './observability';
+import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
 
 export interface DocumentChunk {
   id: string;
@@ -94,6 +95,14 @@ class KnowledgeBaseService {
     this.chunks.push(...newChunks);
     this.persistChunks();
 
+    // Non-blocking cloud vector embedding sync when authenticated in browser
+    void this.syncDocumentToServerRag({
+      documentId,
+      title: documentTitle,
+      content,
+      sourceType: documentId.startsWith('research_') ? 'research' : 'document',
+    }).catch(() => {});
+
     observability.log({
       level: 'info',
       category: 'knowledge_base',
@@ -101,6 +110,158 @@ class KnowledgeBaseService {
     });
 
     return newChunks.length;
+  }
+
+  /**
+   * Explicitly index a document (Markdown, code, PDF text/base64, plain text, or session summary)
+   * into both the local index and the server-side semantic vector RAG engine (/api/rag/index).
+   */
+  public async indexDocumentSemantic(params: {
+    documentId?: string;
+    documentTitle: string;
+    content: string;
+    userId: string;
+    sourceType?: 'document' | 'file' | 'memory' | 'research' | 'session';
+    mimeType?: string;
+    fileName?: string;
+    pdfBase64?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<{ localChunks: number; remoteIndexed: boolean; remoteChunks?: number; embeddingModel?: string; documentId: string }> {
+    const documentId = params.documentId || `doc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const localChunks = params.content?.trim()
+      ? this.indexDocument({
+          documentId,
+          documentTitle: params.documentTitle,
+          content: params.content,
+          userId: params.userId,
+        })
+      : 0;
+
+    const remote = await this.syncDocumentToServerRag({
+      documentId,
+      title: params.documentTitle,
+      content: params.content,
+      sourceType: params.sourceType || 'document',
+      mimeType: params.mimeType,
+      fileName: params.fileName,
+      pdfBase64: params.pdfBase64,
+      metadata: params.metadata,
+    });
+
+    return {
+      localChunks,
+      remoteIndexed: remote.indexed,
+      remoteChunks: remote.chunkCount,
+      embeddingModel: remote.embeddingModel,
+      documentId,
+    };
+  }
+
+  private async syncDocumentToServerRag(payload: {
+    documentId?: string;
+    title: string;
+    content: string;
+    sourceType?: string;
+    mimeType?: string;
+    fileName?: string;
+    pdfBase64?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<{ indexed: boolean; chunkCount?: number; embeddingModel?: string }> {
+    if (typeof window === 'undefined' || typeof fetch === 'undefined') {
+      return { indexed: false };
+    }
+    const authHeader = await getFirebaseAuthorizationHeader().catch(() => null);
+    if (!authHeader) return { indexed: false };
+
+    try {
+      const res = await fetch('/api/rag/index', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) return { indexed: false };
+      const data = await res.json().catch(() => ({}));
+      return {
+        indexed: true,
+        chunkCount: data?.document?.chunkCount,
+        embeddingModel: data?.embeddingModel,
+      };
+    } catch {
+      return { indexed: false };
+    }
+  }
+
+  /**
+   * Hybrid semantic + keyword retrieval combining server-side vector RAG (/api/rag/search)
+   * with local BM25 passages, strictly bounded so prompts never stall.
+   */
+  public async retrieveHybrid(
+    query: string,
+    userId: string,
+    options?: { limit?: number; sourceTypes?: string[]; timeoutMs?: number },
+  ): Promise<RetrievalResult[]> {
+    const limit = options?.limit ?? 4;
+    const localResults = this.retrieve(query, userId, limit);
+
+    if (typeof window === 'undefined' || typeof fetch === 'undefined' || !query.trim()) {
+      return localResults;
+    }
+
+    const authHeader = await getFirebaseAuthorizationHeader().catch(() => null);
+    if (!authHeader) {
+      return localResults;
+    }
+
+    try {
+      const res = await fetch('/api/rag/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({
+          query,
+          limit,
+          sourceTypes: options?.sourceTypes,
+        }),
+        signal: AbortSignal.timeout(options?.timeoutMs ?? 1800),
+      });
+
+      if (!res.ok) return localResults;
+      const data = await res.json().catch(() => ({}));
+      const hits = Array.isArray(data?.hits) ? data.hits : [];
+      if (hits.length === 0) return localResults;
+
+      const remoteResults: RetrievalResult[] = hits.map((hit: any, idx: number) => ({
+        chunk: {
+          id: String(hit.chunkId || `remote_${idx}`),
+          documentId: String(hit.documentId || `remote_doc_${idx}`),
+          documentTitle: String(hit.documentTitle || 'Workspace Document'),
+          userId,
+          chunkIndex: Number(hit.chunkIndex || 0),
+          content: String(hit.content || ''),
+          tokenEstimate: Math.round(String(hit.content || '').length / 4),
+        },
+        score: Number(hit.hybridScore || hit.semanticScore || 1) * 10,
+        citation: {
+          title: String(hit.documentTitle || 'Workspace Document'),
+          snippet: String(hit.snippet || String(hit.content || '').slice(0, 180)),
+          documentId: String(hit.documentId || ''),
+        },
+      }));
+
+      // Merge remote semantic hits first, then deduplicated local hits
+      const merged: RetrievalResult[] = [];
+      const seen = new Set<string>();
+      for (const item of [...remoteResults, ...localResults]) {
+        const key = `${item.chunk.documentId}::${item.chunk.content.slice(0, 80)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(item);
+        if (merged.length >= limit) break;
+      }
+      return merged;
+    } catch {
+      return localResults;
+    }
   }
 
   /**
@@ -284,6 +445,18 @@ class KnowledgeBaseService {
   public removeDocument(documentId: string): void {
     this.chunks = this.chunks.filter(c => c.documentId !== documentId);
     this.persistChunks();
+    if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+      void getFirebaseAuthorizationHeader()
+        .then((authHeader) => {
+          if (!authHeader) return;
+          return fetch('/api/rag/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+            body: JSON.stringify({ documentId }),
+          });
+        })
+        .catch(() => {});
+    }
   }
 
   private persistChunks() {

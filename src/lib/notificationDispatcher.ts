@@ -8,6 +8,12 @@
 import { playNotificationSound } from './settingsStore';
 import { observability } from './observability';
 import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
+import {
+  liveSyncClient,
+  type LiveSyncClientEvent,
+  type LiveSyncEventListener,
+  type LiveSyncSnapshot,
+} from './liveSyncClient';
 
 export type NotificationChannel = 'task_completed' | 'task_failed' | 'approval_needed' | 'schedule_triggered';
 
@@ -21,6 +27,52 @@ export interface NotificationPayload {
 
 class NotificationDispatcherService {
   private lastDispatched = new Map<string, number>();
+  private liveSyncUnsub: (() => void) | null = null;
+
+  public startLiveSync(userId: string): void {
+    if (!userId || typeof window === 'undefined') return;
+    if (!this.liveSyncUnsub) {
+      this.liveSyncUnsub = liveSyncClient.subscribe((event) => {
+        if (!event.notifyUser) return;
+        const channel: NotificationChannel =
+          event.type === 'task:failed' || event.type === 'multi_agent:failed'
+            ? 'task_failed'
+            : event.type === 'approval:required'
+              ? 'approval_needed'
+              : event.type === 'schedule:executed'
+                ? 'schedule_triggered'
+                : 'task_completed';
+
+        void this.dispatch({
+          title: event.title,
+          body: event.message,
+          channel,
+          taskId: event.taskId || event.resourceId,
+        });
+      });
+    }
+    liveSyncClient.start(userId);
+  }
+
+  public stopLiveSync(): void {
+    liveSyncClient.stop();
+    if (this.liveSyncUnsub) {
+      this.liveSyncUnsub();
+      this.liveSyncUnsub = null;
+    }
+  }
+
+  public onSyncEvent(listener: LiveSyncEventListener): () => void {
+    return liveSyncClient.subscribe(listener);
+  }
+
+  public async fetchSyncSnapshot(): Promise<LiveSyncSnapshot | null> {
+    return liveSyncClient.fetchSnapshot();
+  }
+
+  public async acknowledgeNotification(notificationId: string): Promise<boolean> {
+    return liveSyncClient.acknowledgeNotification(notificationId);
+  }
 
   public async fetchDurableNotifications(unreadOnly = false): Promise<any[]> {
     const authHeader = await getFirebaseAuthorizationHeader();
@@ -101,4 +153,5 @@ class NotificationDispatcherService {
   }
 }
 
+export type { LiveSyncClientEvent, LiveSyncSnapshot };
 export const notificationDispatcher = new NotificationDispatcherService();

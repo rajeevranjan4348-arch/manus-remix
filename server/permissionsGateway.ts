@@ -5,6 +5,7 @@ import {
   defaultCollectionStore,
   type DurableCollectionStore,
 } from './infrastructure/durableCollectionStore';
+import { defaultLiveSyncHub, type LiveSyncHub } from './realtime/liveSyncHub';
 
 export type PolicyRiskLevel = 'read-only' | 'destructive' | 'privileged';
 
@@ -95,6 +96,8 @@ export interface PermissionsGatewayOptions {
   requireStableSecret?: boolean;
   /** Durable collection store for user policies, approval history, and atomic CAS locks */
   collectionStore?: DurableCollectionStore;
+  /** LiveSyncHub for real-time approval challenge & resolution events */
+  syncHub?: LiveSyncHub;
 }
 
 export function isProductionRuntime(): boolean {
@@ -113,12 +116,14 @@ export class PermissionsGatewayService {
   private readonly explicitSecret?: string;
   private readonly requireStableSecret: boolean;
   private readonly collectionStore: DurableCollectionStore;
+  private readonly syncHub: LiveSyncHub;
   private ephemeralDevSecret: string | null = null;
 
   constructor(options?: PermissionsGatewayOptions) {
     this.explicitSecret = options?.signingSecret;
     this.requireStableSecret = options?.requireStableSecret ?? false;
     this.collectionStore = options?.collectionStore ?? defaultCollectionStore;
+    this.syncHub = options?.syncHub ?? defaultLiveSyncHub;
     this.registerDefaultPolicies();
   }
 
@@ -744,6 +749,34 @@ export class PermissionsGatewayService {
         },
         store,
       );
+
+      await this.syncHub.publish(reqCtx, {
+        type: 'approval:required',
+        title: `Approval Required: ${result.challenge.displayName}`,
+        message: result.reason,
+        resourceId: result.challenge.challengeId,
+        challengeId: result.challenge.challengeId,
+        severity: 'warning',
+        notifyUser: true,
+        data: {
+          toolName: result.challenge.toolName,
+          riskLevel: result.challenge.riskLevel,
+          target: result.challenge.target || null,
+          expiresAt: result.challenge.expiresAt,
+        },
+      });
+
+      void import('./webhooks/webhookEngine')
+        .then((m) =>
+          m.defaultWebhookEngine.dispatchOutboundEvent(reqCtx, 'approval.required', {
+            challengeId: result.challenge!.challengeId,
+            toolName: result.challenge!.toolName,
+            displayName: result.challenge!.displayName,
+            riskLevel: result.challenge!.riskLevel,
+            reason: result.reason,
+          }),
+        )
+        .catch(() => {});
     }
 
     return result;
@@ -808,6 +841,19 @@ export class PermissionsGatewayService {
           },
           store,
         );
+        await this.syncHub.publish(reqCtx, {
+          type: 'approval:resolved',
+          title: `Approval ${resolution.status}: ${updated.displayName}`,
+          message:
+            resolution.status === 'approved'
+              ? `Approved action '${updated.toolName}'.`
+              : `Permission challenge '${updated.toolName}' was ${resolution.status}.`,
+          resourceId: updated.challengeId,
+          challengeId: updated.challengeId,
+          severity: resolution.status === 'approved' ? 'success' : 'info',
+          notifyUser: false,
+          data: { status: resolution.status, toolName: updated.toolName },
+        });
       }
       return resolution;
     } finally {

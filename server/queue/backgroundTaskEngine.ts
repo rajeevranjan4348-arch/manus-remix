@@ -28,6 +28,7 @@ import {
   type DurableRequestContext,
   type PersistenceMode,
 } from '../sandbox/durableStore';
+import { defaultLiveSyncHub, type LiveSyncHub } from '../realtime/liveSyncHub';
 
 export type BackgroundTaskStatus =
   | 'queued'
@@ -294,6 +295,7 @@ export interface BackgroundTaskEngineOptions {
   auditStore?: DurableExecutionStore;
   permissions?: PermissionsGatewayService;
   dispatcher?: ExternalWorkerDispatcher;
+  syncHub?: LiveSyncHub;
   maxConcurrentPerUser?: number;
   defaultLeaseMs?: number;
   defaultTimeoutMs?: number;
@@ -307,6 +309,7 @@ export class BackgroundTaskEngine {
   private readonly auditStore: DurableExecutionStore;
   private readonly permissions: PermissionsGatewayService;
   private readonly dispatcher: ExternalWorkerDispatcher;
+  private readonly syncHub: LiveSyncHub;
   private readonly maxConcurrentPerUser: number;
   private readonly defaultLeaseMs: number;
   private readonly defaultTimeoutMs: number;
@@ -319,6 +322,7 @@ export class BackgroundTaskEngine {
     this.auditStore = options?.auditStore ?? defaultDurableStore;
     this.permissions = options?.permissions ?? permissionsGateway;
     this.dispatcher = options?.dispatcher ?? new DefaultExternalWorkerDispatcher();
+    this.syncHub = options?.syncHub ?? defaultLiveSyncHub;
     this.maxConcurrentPerUser = Math.max(1, options?.maxConcurrentPerUser ?? 3);
     this.defaultLeaseMs = Math.max(5_000, options?.defaultLeaseMs ?? 60_000);
     this.defaultTimeoutMs = Math.max(5_000, options?.defaultTimeoutMs ?? 15 * 60_000);
@@ -479,6 +483,18 @@ export class BackgroundTaskEngine {
       this.auditStore,
     );
 
+    await this.syncHub.publish(ctx, {
+      type: 'task:queued',
+      title: `Queued: ${task.title}`,
+      message: `Background task queued (${task.priority} priority).`,
+      resourceId: task.taskId,
+      taskId: task.taskId,
+      scheduleId: task.scheduleId,
+      severity: 'info',
+      notifyUser: false,
+      data: { status: task.status, phase: task.phase, progress: task.progress, priority: task.priority },
+    });
+
     return { task, deduplicated: false, dispatch: dispatchResult };
   }
 
@@ -602,6 +618,17 @@ export class BackgroundTaskEngine {
         );
 
         if (cas.committed && cas.value) {
+          await this.syncHub.publish(taskCtx, {
+            type: 'task:claimed',
+            title: `Started: ${cas.value.title}`,
+            message: `Claimed by worker '${workerId}' (attempt ${cas.value.attempt}/${cas.value.maxAttempts}).`,
+            resourceId: cas.value.taskId,
+            taskId: cas.value.taskId,
+            scheduleId: cas.value.scheduleId,
+            severity: 'info',
+            notifyUser: false,
+            data: { status: cas.value.status, phase: cas.value.phase, workerId, attempt: cas.value.attempt },
+          });
           return cas.value;
         }
         await this.store.releaseLease(taskLeaseKey, workerId);
@@ -664,6 +691,17 @@ export class BackgroundTaskEngine {
     });
 
     await this.store.put(ctx, TASKS_COLLECTION, existing.taskId, existing);
+    await this.syncHub.publish(ctx, {
+      type: 'task:progress',
+      title: existing.title,
+      message: params.message || `Task phase updated to '${existing.phase}' (${existing.progress}%).`,
+      resourceId: existing.taskId,
+      taskId: existing.taskId,
+      scheduleId: existing.scheduleId,
+      severity: 'info',
+      notifyUser: false,
+      data: { status: existing.status, phase: existing.phase, progress: existing.progress },
+    });
     return existing;
   }
 
@@ -740,6 +778,31 @@ export class BackgroundTaskEngine {
       taskId: existing.taskId,
       scheduleId: existing.scheduleId,
     });
+
+    await this.syncHub.publish(ctx, {
+      type: 'task:completed',
+      title: `Completed: ${existing.title}`,
+      message: params.summary || `Background task '${existing.title}' finished successfully.`,
+      resourceId: existing.taskId,
+      taskId: existing.taskId,
+      scheduleId: existing.scheduleId,
+      severity: 'success',
+      notifyUser: true,
+      data: { status: existing.status, phase: existing.phase, progress: 100 },
+    });
+
+    // Non-blocking outbound webhook dispatch (lazy import prevents circular dependency)
+    void import('../webhooks/webhookEngine')
+      .then((m) =>
+        m.defaultWebhookEngine.dispatchOutboundEvent(ctx, 'task.completed', {
+          taskId: existing.taskId,
+          title: existing.title,
+          summary: params.summary || 'Task completed successfully.',
+          completedAt: existing.completedAt,
+          scheduleId: existing.scheduleId || null,
+        }),
+      )
+      .catch(() => {});
 
     return existing;
   }
@@ -821,6 +884,33 @@ export class BackgroundTaskEngine {
     if (previousLeaseOwner) {
       await this.store.releaseLease(`task_lease:${existing.taskId}`, previousLeaseOwner);
     }
+
+    if (!shouldRetry) {
+      await this.syncHub.publish(ctx, {
+        type: 'task:failed',
+        title: `Failed: ${existing.title}`,
+        message: existing.error,
+        resourceId: existing.taskId,
+        taskId: existing.taskId,
+        scheduleId: existing.scheduleId,
+        severity: 'error',
+        notifyUser: true,
+        data: { status: existing.status, phase: existing.phase, attempt: existing.attempt },
+      });
+
+      void import('../webhooks/webhookEngine')
+        .then((m) =>
+          m.defaultWebhookEngine.dispatchOutboundEvent(ctx, 'task.failed', {
+            taskId: existing.taskId,
+            title: existing.title,
+            status: existing.status,
+            error: existing.error,
+            attempt: existing.attempt,
+          }),
+        )
+        .catch(() => {});
+    }
+
     return existing;
   }
 
@@ -859,6 +949,16 @@ export class BackgroundTaskEngine {
     if (prevOwner) {
       await this.store.releaseLease(`task_lease:${taskId}`, prevOwner);
     }
+    await this.syncHub.publish(ctx, {
+      type: 'task:cancelled',
+      title: `Cancelled: ${existing.title}`,
+      message: reason ? `Cancelled by user: ${reason}` : 'Cancelled by user.',
+      resourceId: existing.taskId,
+      taskId: existing.taskId,
+      severity: 'warning',
+      notifyUser: false,
+      data: { status: existing.status, phase: existing.phase },
+    });
     return existing;
   }
 
@@ -985,6 +1085,18 @@ export class BackgroundTaskEngine {
       metadata: input.metadata,
     };
     await this.store.put(ctx, NOTIFICATIONS_COLLECTION, notificationId, record);
+    await this.syncHub.publish(ctx, {
+      type: 'notification:created',
+      title: record.title,
+      message: record.body,
+      resourceId: record.notificationId,
+      notificationId: record.notificationId,
+      taskId: record.taskId,
+      scheduleId: record.scheduleId,
+      severity: record.kind === 'task_failed' ? 'error' : record.kind === 'approval_required' ? 'warning' : 'info',
+      notifyUser: true,
+      data: { kind: record.kind },
+    });
     return record;
   }
 

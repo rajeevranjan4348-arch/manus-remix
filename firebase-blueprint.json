@@ -642,6 +642,178 @@
         "expiresAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["key", "userId", "createdAt", "expiresAt"]
+    },
+    "VectorDocument": {
+      "title": "VectorDocument",
+      "description": "Per-user indexed document metadata for semantic vector RAG",
+      "type": "object",
+      "properties": {
+        "documentId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "maxLength": 512 },
+        "sourceType": { "type": "string", "enum": ["document", "memory", "session", "project_file", "research"] },
+        "format": { "type": "string", "enum": ["markdown", "code", "pdf", "text"] },
+        "chunkCount": { "type": "number" },
+        "totalChars": { "type": "number" },
+        "embeddingModel": { "type": "string", "maxLength": 128 },
+        "embeddingMode": { "type": "string", "enum": ["gemini-embedding-2", "lexical-fallback"] },
+        "contentHash": { "type": "string", "maxLength": 128 },
+        "metadata": { "type": "object" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["documentId", "userId", "title", "sourceType", "format", "chunkCount", "totalChars", "embeddingModel", "embeddingMode", "contentHash", "createdAt", "updatedAt"]
+    },
+    "VectorChunk": {
+      "title": "VectorChunk",
+      "description": "Per-user semantic chunk and dense embedding vector for hybrid RAG retrieval",
+      "type": "object",
+      "properties": {
+        "chunkId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "documentId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "documentTitle": { "type": "string", "maxLength": 512 },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sourceType": { "type": "string", "enum": ["document", "memory", "session", "project_file", "research"] },
+        "format": { "type": "string", "enum": ["markdown", "code", "pdf", "text"] },
+        "chunkIndex": { "type": "number" },
+        "heading": { "type": "string", "maxLength": 512 },
+        "pageNumber": { "type": "number" },
+        "content": { "type": "string", "maxLength": 32000 },
+        "tokenEstimate": { "type": "number" },
+        "embedding": { "type": "array" },
+        "embeddingModel": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["chunkId", "documentId", "documentTitle", "userId", "sourceType", "format", "chunkIndex", "content", "tokenEstimate", "embeddingModel", "createdAt"]
+    },
+    "InboundWebhook": {
+      "title": "InboundWebhook",
+      "description": "Per-user signed inbound webhook trigger that enqueues durable agent tasks",
+      "type": "object",
+      "properties": {
+        "webhookId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "provider": { "type": "string", "enum": ["generic", "github", "stripe", "slack"] },
+        "enabled": { "type": "boolean" },
+        "allowedEvents": { "type": "array" },
+        "encryptedSecret": { "type": "object" },
+        "devSecret": { "type": "string", "maxLength": 512 },
+        "secretFingerprint": { "type": "string", "maxLength": 128 },
+        "taskTemplate": { "type": "object" },
+        "triggerCount": { "type": "number" },
+        "lastTriggeredAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["webhookId", "userId", "name", "provider", "enabled", "allowedEvents", "secretFingerprint", "taskTemplate", "triggerCount", "createdAt", "updatedAt"]
+    },
+    "OutboundWebhook": {
+      "title": "OutboundWebhook",
+      "description": "Per-user outbound webhook subscription for task, schedule, approval, and multi-agent events",
+      "type": "object",
+      "properties": {
+        "subscriptionId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 200 },
+        "url": { "type": "string", "maxLength": 2048 },
+        "format": { "type": "string", "enum": ["generic", "slack", "discord", "email_relay"] },
+        "events": { "type": "array" },
+        "enabled": { "type": "boolean" },
+        "encryptedSecret": { "type": "object" },
+        "devSecret": { "type": "string", "maxLength": 512 },
+        "secretFingerprint": { "type": "string", "maxLength": 128 },
+        "customHeaders": { "type": "object" },
+        "deliveryCount": { "type": "number" },
+        "lastDeliveredAt": { "type": "string", "maxLength": 64 },
+        "lastStatus": { "type": "string", "enum": ["succeeded", "failed"] },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["subscriptionId", "userId", "name", "url", "format", "events", "enabled", "secretFingerprint", "deliveryCount", "createdAt", "updatedAt"]
+    },
+    "WebhookDelivery": {
+      "title": "WebhookDelivery",
+      "description": "Append-only per-user inbound and outbound webhook delivery log",
+      "type": "object",
+      "properties": {
+        "deliveryId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "direction": { "type": "string", "enum": ["inbound", "outbound"] },
+        "webhookId": { "type": "string", "maxLength": 128 },
+        "eventType": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["succeeded", "failed", "ignored", "deduplicated"] },
+        "httpStatus": { "type": "number" },
+        "attempts": { "type": "number" },
+        "taskId": { "type": "string", "maxLength": 128 },
+        "targetUrl": { "type": "string", "maxLength": 2048 },
+        "error": { "type": "string", "maxLength": 2000 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["deliveryId", "userId", "direction", "webhookId", "eventType", "status", "attempts", "createdAt"]
+    },
+    "WebhookDedup": {
+      "title": "WebhookDedup",
+      "description": "Per-user inbound webhook delivery deduplication marker",
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["createdAt"]
+    },
+    "McpServer": {
+      "title": "McpServer",
+      "description": "Per-user registered external Model Context Protocol (MCP) server and discovered capabilities",
+      "type": "object",
+      "properties": {
+        "serverId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 200 },
+        "slug": { "type": "string", "maxLength": 128, "pattern": "^[a-z0-9_\\-]+$" },
+        "description": { "type": "string", "maxLength": 2000 },
+        "endpointUrl": { "type": "string", "maxLength": 2048 },
+        "authType": { "type": "string", "enum": ["none", "bearer", "api_key_header", "custom_headers"] },
+        "authHeaderName": { "type": "string", "maxLength": 128 },
+        "encryptedAuthPayload": { "type": "object" },
+        "devAuthPayload": { "type": "string", "maxLength": 8192 },
+        "enabled": { "type": "boolean" },
+        "protocolVersion": { "type": "string", "maxLength": 64 },
+        "serverInfo": { "type": "object" },
+        "tools": { "type": "array" },
+        "resources": { "type": "array" },
+        "prompts": { "type": "array" },
+        "lastDiscoveredAt": { "type": "string", "maxLength": 64 },
+        "lastError": { "type": "string", "maxLength": 2000 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["serverId", "userId", "name", "slug", "endpointUrl", "authType", "enabled", "tools", "resources", "prompts", "createdAt", "updatedAt"]
+    },
+    "SyncEvent": {
+      "title": "SyncEvent",
+      "description": "Append-only per-user live cross-device synchronization and notification event",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "seq": { "type": "number" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "maxLength": 300 },
+        "message": { "type": "string", "maxLength": 4000 },
+        "resourceId": { "type": "string", "maxLength": 128 },
+        "taskId": { "type": "string", "maxLength": 128 },
+        "runId": { "type": "string", "maxLength": 128 },
+        "scheduleId": { "type": "string", "maxLength": 128 },
+        "challengeId": { "type": "string", "maxLength": 128 },
+        "notificationId": { "type": "string", "maxLength": 128 },
+        "severity": { "type": "string", "enum": ["info", "success", "warning", "error"] },
+        "notifyUser": { "type": "boolean" },
+        "data": { "type": "object" },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["eventId", "seq", "userId", "type", "title", "message", "severity", "notifyUser", "createdAt"]
     }
   },
   "firestore": {
@@ -712,6 +884,38 @@
     "/users/{userId}/idempotency/{keyId}": {
       "schema": "IdempotencyRecord",
       "description": "Stores per-user idempotent execution results"
+    },
+    "/users/{userId}/vector_documents/{documentId}": {
+      "schema": "VectorDocument",
+      "description": "Stores per-user indexed document metadata for semantic vector memory & RAG"
+    },
+    "/users/{userId}/vector_chunks/{chunkId}": {
+      "schema": "VectorChunk",
+      "description": "Stores per-user document chunks and dense vector embeddings for hybrid RAG search"
+    },
+    "/users/{userId}/webhooks/{webhookId}": {
+      "schema": "InboundWebhook",
+      "description": "Stores per-user signed inbound webhook triggers"
+    },
+    "/users/{userId}/outbound_webhooks/{subscriptionId}": {
+      "schema": "OutboundWebhook",
+      "description": "Stores per-user outbound webhook subscriptions"
+    },
+    "/users/{userId}/webhook_deliveries/{deliveryId}": {
+      "schema": "WebhookDelivery",
+      "description": "Stores append-only per-user webhook delivery audit logs"
+    },
+    "/users/{userId}/webhook_dedup/{dedupId}": {
+      "schema": "WebhookDedup",
+      "description": "Stores per-user inbound webhook delivery deduplication keys"
+    },
+    "/users/{userId}/mcp_servers/{serverId}": {
+      "schema": "McpServer",
+      "description": "Stores per-user registered MCP connector servers and discovered tools"
+    },
+    "/users/{userId}/sync_events/{eventId}": {
+      "schema": "SyncEvent",
+      "description": "Stores append-only per-user live cross-device sync and notification events"
     },
     "/projects/{projectId}": {
       "schema": "Project",

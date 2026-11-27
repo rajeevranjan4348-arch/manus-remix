@@ -367,6 +367,154 @@ service cloud.firestore {
         data.expiresAt is string && data.expiresAt.size() <= 64;
     }
 
+    function isValidVectorDocument(data, ownerId, documentId) {
+      return data.keys().hasAll(['documentId', 'userId', 'title', 'sourceType', 'format', 'chunkCount', 'totalChars', 'embeddingModel', 'embeddingMode', 'contentHash', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['documentId', 'userId', 'title', 'sourceType', 'format', 'chunkCount', 'totalChars', 'embeddingModel', 'embeddingMode', 'contentHash', 'metadata', 'createdAt', 'updatedAt']) &&
+        data.documentId is string && isValidId(data.documentId) && data.documentId == documentId &&
+        data.userId is string && data.userId == ownerId &&
+        data.title is string && data.title.size() <= 512 &&
+        data.sourceType in ['document', 'memory', 'session', 'project_file', 'research'] &&
+        data.format in ['markdown', 'code', 'pdf', 'text'] &&
+        data.chunkCount is number && data.chunkCount >= 0 && data.chunkCount <= 10000 &&
+        data.totalChars is number && data.totalChars >= 0 && data.totalChars <= 5000000 &&
+        data.embeddingModel is string && data.embeddingModel.size() <= 128 &&
+        data.embeddingMode in ['gemini-embedding-2', 'lexical-fallback'] &&
+        data.contentHash is string && data.contentHash.size() <= 128 &&
+        (!('metadata' in data) || (data.metadata is map && data.metadata.keys().size() <= 40)) &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidVectorChunk(data, ownerId, chunkId) {
+      return data.keys().hasAll(['chunkId', 'documentId', 'documentTitle', 'userId', 'sourceType', 'format', 'chunkIndex', 'content', 'tokenEstimate', 'embeddingModel', 'createdAt']) &&
+        data.keys().hasOnly(['chunkId', 'documentId', 'documentTitle', 'userId', 'sourceType', 'format', 'chunkIndex', 'heading', 'pageNumber', 'content', 'tokenEstimate', 'embedding', 'embeddingModel', 'createdAt']) &&
+        data.chunkId is string && isValidId(data.chunkId) && data.chunkId == chunkId &&
+        data.documentId is string && isValidId(data.documentId) &&
+        data.documentTitle is string && data.documentTitle.size() <= 512 &&
+        data.userId is string && data.userId == ownerId &&
+        data.sourceType in ['document', 'memory', 'session', 'project_file', 'research'] &&
+        data.format in ['markdown', 'code', 'pdf', 'text'] &&
+        data.chunkIndex is number && data.chunkIndex >= 0 && data.chunkIndex <= 10000 &&
+        (!('heading' in data) || (data.heading is string && data.heading.size() <= 512)) &&
+        (!('pageNumber' in data) || (data.pageNumber is number && data.pageNumber >= 1 && data.pageNumber <= 100000)) &&
+        data.content is string && data.content.size() <= 32000 &&
+        data.tokenEstimate is number && data.tokenEstimate >= 0 && data.tokenEstimate <= 50000 &&
+        (!('embedding' in data) || (data.embedding is list && data.embedding.size() <= 4096 && (data.embedding.size() == 0 || data.embedding[0] is number))) &&
+        data.embeddingModel is string && data.embeddingModel.size() <= 128 &&
+        data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidInboundWebhook(data, ownerId, webhookId) {
+      return data.keys().hasAll(['webhookId', 'userId', 'name', 'provider', 'enabled', 'allowedEvents', 'secretFingerprint', 'taskTemplate', 'triggerCount', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['webhookId', 'userId', 'name', 'description', 'provider', 'enabled', 'allowedEvents', 'encryptedSecret', 'devSecret', 'secretFingerprint', 'taskTemplate', 'triggerCount', 'lastTriggeredAt', 'createdAt', 'updatedAt']) &&
+        data.webhookId is string && isValidId(data.webhookId) && data.webhookId == webhookId &&
+        data.userId is string && data.userId == ownerId &&
+        data.name is string && data.name.size() <= 200 &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 2000)) &&
+        data.provider in ['generic', 'github', 'stripe', 'slack'] &&
+        data.enabled is bool &&
+        data.allowedEvents is list && data.allowedEvents.size() <= 50 && (data.allowedEvents.size() == 0 || data.allowedEvents[0] is string) &&
+        (!('encryptedSecret' in data) || (data.encryptedSecret is map && data.encryptedSecret.keys().size() <= 10)) &&
+        (!('devSecret' in data) || (data.devSecret is string && data.devSecret.size() <= 512)) &&
+        data.secretFingerprint is string && data.secretFingerprint.size() <= 128 &&
+        data.taskTemplate is map && data.taskTemplate.keys().size() <= 20 &&
+        data.triggerCount is number && data.triggerCount >= 0 &&
+        (!('lastTriggeredAt' in data) || (data.lastTriggeredAt is string && data.lastTriggeredAt.size() <= 64)) &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidOutboundWebhook(data, ownerId, subscriptionId) {
+      return data.keys().hasAll(['subscriptionId', 'userId', 'name', 'url', 'format', 'events', 'enabled', 'secretFingerprint', 'deliveryCount', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['subscriptionId', 'userId', 'name', 'url', 'format', 'events', 'enabled', 'encryptedSecret', 'devSecret', 'secretFingerprint', 'customHeaders', 'deliveryCount', 'lastDeliveredAt', 'lastStatus', 'createdAt', 'updatedAt']) &&
+        data.subscriptionId is string && isValidId(data.subscriptionId) && data.subscriptionId == subscriptionId &&
+        data.userId is string && data.userId == ownerId &&
+        data.name is string && data.name.size() <= 200 &&
+        data.url is string && data.url.size() <= 2048 &&
+        data.format in ['generic', 'slack', 'discord', 'email_relay'] &&
+        data.events is list && data.events.size() <= 30 && (data.events.size() == 0 || data.events[0] is string) &&
+        data.enabled is bool &&
+        (!('encryptedSecret' in data) || (data.encryptedSecret is map && data.encryptedSecret.keys().size() <= 10)) &&
+        (!('devSecret' in data) || (data.devSecret is string && data.devSecret.size() <= 512)) &&
+        data.secretFingerprint is string && data.secretFingerprint.size() <= 128 &&
+        (!('customHeaders' in data) || (data.customHeaders is map && data.customHeaders.keys().size() <= 20)) &&
+        data.deliveryCount is number && data.deliveryCount >= 0 &&
+        (!('lastDeliveredAt' in data) || (data.lastDeliveredAt is string && data.lastDeliveredAt.size() <= 64)) &&
+        (!('lastStatus' in data) || data.lastStatus in ['succeeded', 'failed']) &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidWebhookDelivery(data, ownerId, deliveryId) {
+      return data.keys().hasAll(['deliveryId', 'userId', 'direction', 'webhookId', 'eventType', 'status', 'attempts', 'createdAt']) &&
+        data.keys().hasOnly(['deliveryId', 'userId', 'direction', 'webhookId', 'eventType', 'status', 'httpStatus', 'attempts', 'taskId', 'targetUrl', 'error', 'createdAt']) &&
+        data.deliveryId is string && isValidId(data.deliveryId) && data.deliveryId == deliveryId &&
+        data.userId is string && data.userId == ownerId &&
+        data.direction in ['inbound', 'outbound'] &&
+        data.webhookId is string && data.webhookId.size() <= 128 &&
+        data.eventType is string && data.eventType.size() <= 128 &&
+        data.status in ['succeeded', 'failed', 'ignored', 'deduplicated'] &&
+        (!('httpStatus' in data) || (data.httpStatus is number && data.httpStatus >= 100 && data.httpStatus <= 599)) &&
+        data.attempts is number && data.attempts >= 0 && data.attempts <= 20 &&
+        (!('taskId' in data) || (data.taskId is string && data.taskId.size() <= 128)) &&
+        (!('targetUrl' in data) || (data.targetUrl is string && data.targetUrl.size() <= 2048)) &&
+        (!('error' in data) || (data.error is string && data.error.size() <= 2000)) &&
+        data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidWebhookDedup(data) {
+      return data.keys().hasAll(['createdAt']) &&
+        data.keys().hasOnly(['taskId', 'createdAt']) &&
+        (!('taskId' in data) || (data.taskId is string && data.taskId.size() <= 128)) &&
+        data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidMcpServer(data, ownerId, serverId) {
+      return data.keys().hasAll(['serverId', 'userId', 'name', 'slug', 'endpointUrl', 'authType', 'enabled', 'tools', 'resources', 'prompts', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['serverId', 'userId', 'name', 'slug', 'description', 'endpointUrl', 'authType', 'authHeaderName', 'encryptedAuthPayload', 'devAuthPayload', 'enabled', 'protocolVersion', 'serverInfo', 'tools', 'resources', 'prompts', 'lastDiscoveredAt', 'lastError', 'createdAt', 'updatedAt']) &&
+        data.serverId is string && isValidId(data.serverId) && data.serverId == serverId &&
+        data.userId is string && data.userId == ownerId &&
+        data.name is string && data.name.size() <= 200 &&
+        data.slug is string && data.slug.size() <= 128 && data.slug.matches('^[a-z0-9_\\-]+$') &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 2000)) &&
+        data.endpointUrl is string && data.endpointUrl.size() <= 2048 &&
+        data.authType in ['none', 'bearer', 'api_key_header', 'custom_headers'] &&
+        (!('authHeaderName' in data) || (data.authHeaderName is string && data.authHeaderName.size() <= 128)) &&
+        (!('encryptedAuthPayload' in data) || (data.encryptedAuthPayload is map && data.encryptedAuthPayload.keys().size() <= 10)) &&
+        (!('devAuthPayload' in data) || (data.devAuthPayload is string && data.devAuthPayload.size() <= 8192)) &&
+        data.enabled is bool &&
+        (!('protocolVersion' in data) || (data.protocolVersion is string && data.protocolVersion.size() <= 64)) &&
+        (!('serverInfo' in data) || (data.serverInfo is map && data.serverInfo.keys().size() <= 10)) &&
+        data.tools is list && data.tools.size() <= 200 && (data.tools.size() == 0 || data.tools[0] is map) &&
+        data.resources is list && data.resources.size() <= 200 && (data.resources.size() == 0 || data.resources[0] is map) &&
+        data.prompts is list && data.prompts.size() <= 200 && (data.prompts.size() == 0 || data.prompts[0] is map) &&
+        (!('lastDiscoveredAt' in data) || (data.lastDiscoveredAt is string && data.lastDiscoveredAt.size() <= 64)) &&
+        (!('lastError' in data) || (data.lastError is string && data.lastError.size() <= 2000)) &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidSyncEvent(data, ownerId, eventId) {
+      return data.keys().hasAll(['eventId', 'seq', 'userId', 'type', 'title', 'message', 'severity', 'notifyUser', 'createdAt']) &&
+        data.keys().hasOnly(['eventId', 'seq', 'userId', 'type', 'title', 'message', 'resourceId', 'taskId', 'runId', 'scheduleId', 'challengeId', 'notificationId', 'severity', 'notifyUser', 'data', 'createdAt']) &&
+        data.eventId is string && isValidId(data.eventId) && data.eventId == eventId &&
+        data.seq is number && data.seq >= 0 &&
+        data.userId is string && data.userId == ownerId &&
+        data.type is string && data.type.size() <= 64 &&
+        data.title is string && data.title.size() <= 300 &&
+        data.message is string && data.message.size() <= 4000 &&
+        (!('resourceId' in data) || (data.resourceId is string && data.resourceId.size() <= 128)) &&
+        (!('taskId' in data) || (data.taskId is string && data.taskId.size() <= 128)) &&
+        (!('runId' in data) || (data.runId is string && data.runId.size() <= 128)) &&
+        (!('scheduleId' in data) || (data.scheduleId is string && data.scheduleId.size() <= 128)) &&
+        (!('challengeId' in data) || (data.challengeId is string && data.challengeId.size() <= 128)) &&
+        (!('notificationId' in data) || (data.notificationId is string && data.notificationId.size() <= 128)) &&
+        data.severity in ['info', 'success', 'warning', 'error'] &&
+        data.notifyUser is bool &&
+        (!('data' in data) || (data.data is map && data.data.keys().size() <= 30)) &&
+        data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
     match /test/connection {
       allow get: if isSignedIn() || request.time != null;
     }
@@ -562,6 +710,89 @@ service cloud.firestore {
           incoming().userId == existing().userId &&
           incoming().createdAt == existing().createdAt;
         allow delete: if isOwner(userId) && isValidId(notificationId);
+      }
+
+      match /vector_documents/{documentId} {
+        allow get: if isOwner(userId) && isValidId(documentId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(documentId) && isValidVectorDocument(incoming(), userId, documentId);
+        allow update: if isOwner(userId) && isValidId(documentId) &&
+          isValidVectorDocument(incoming(), userId, documentId) &&
+          incoming().documentId == existing().documentId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt;
+        allow delete: if isOwner(userId) && isValidId(documentId);
+      }
+
+      match /vector_chunks/{chunkId} {
+        allow get: if isOwner(userId) && isValidId(chunkId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(chunkId) && isValidVectorChunk(incoming(), userId, chunkId);
+        allow update: if isOwner(userId) && isValidId(chunkId) &&
+          isValidVectorChunk(incoming(), userId, chunkId) &&
+          incoming().chunkId == existing().chunkId &&
+          incoming().documentId == existing().documentId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt;
+        allow delete: if isOwner(userId) && isValidId(chunkId);
+      }
+
+      match /webhooks/{webhookId} {
+        allow get: if isOwner(userId) && isValidId(webhookId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(webhookId) && isValidInboundWebhook(incoming(), userId, webhookId);
+        allow update: if isOwner(userId) && isValidId(webhookId) &&
+          isValidInboundWebhook(incoming(), userId, webhookId) &&
+          incoming().webhookId == existing().webhookId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt;
+        allow delete: if isOwner(userId) && isValidId(webhookId);
+      }
+
+      match /outbound_webhooks/{subscriptionId} {
+        allow get: if isOwner(userId) && isValidId(subscriptionId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(subscriptionId) && isValidOutboundWebhook(incoming(), userId, subscriptionId);
+        allow update: if isOwner(userId) && isValidId(subscriptionId) &&
+          isValidOutboundWebhook(incoming(), userId, subscriptionId) &&
+          incoming().subscriptionId == existing().subscriptionId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt;
+        allow delete: if isOwner(userId) && isValidId(subscriptionId);
+      }
+
+      match /webhook_deliveries/{deliveryId} {
+        allow get: if isOwner(userId) && isValidId(deliveryId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(deliveryId) && isValidWebhookDelivery(incoming(), userId, deliveryId);
+        allow update, delete: if false;
+      }
+
+      match /webhook_dedup/{dedupId} {
+        allow get: if isOwner(userId) && isValidId(dedupId);
+        allow list: if false;
+        allow create: if isOwner(userId) && isValidId(dedupId) && isValidWebhookDedup(incoming());
+        allow update: if false;
+        allow delete: if isOwner(userId) && isValidId(dedupId);
+      }
+
+      match /mcp_servers/{serverId} {
+        allow get: if isOwner(userId) && isValidId(serverId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(serverId) && isValidMcpServer(incoming(), userId, serverId);
+        allow update: if isOwner(userId) && isValidId(serverId) &&
+          isValidMcpServer(incoming(), userId, serverId) &&
+          incoming().serverId == existing().serverId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt;
+        allow delete: if isOwner(userId) && isValidId(serverId);
+      }
+
+      match /sync_events/{eventId} {
+        allow get: if isOwner(userId) && isValidId(eventId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(eventId) && isValidSyncEvent(incoming(), userId, eventId);
+        allow update, delete: if false;
       }
     }
 

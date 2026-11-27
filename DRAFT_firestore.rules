@@ -51,9 +51,19 @@ service cloud.firestore {
         (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
     }
 
-    // Helper for validation of Memories
     function isValidMemories(data) {
       return (!('records' in data) || data.records is list) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    function isValidSchedules(data) {
+      return (!('schedules' in data) || data.schedules is list) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    function isValidKnowledgeCache(data) {
+      return (!('entries' in data) || data.entries is list) &&
+        (!('history' in data) || data.history is list) &&
         (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
     }
 
@@ -85,9 +95,32 @@ service cloud.firestore {
         data.status in ['idle', 'running', 'completed', 'error'] &&
         (!('outputFormat' in data) || (data.outputFormat is string && data.outputFormat.size() <= 64)) &&
         (!('chartType' in data) || (data.chartType is string && data.chartType.size() <= 64)) &&
-        (!('projectId' in data) || data.projectId == null || (data.projectId is string && data.projectId.size() <= 128)) &&
+        (!('projectId' in data) || data.projectId == null || (data.projectId is string && isValidId(data.projectId))) &&
         (!('result' in data) || (data.result is string && data.result.size() <= 500000)) &&
-        (!('prompt' in data) || (data.prompt is string && data.prompt.size() <= 10000));
+        (!('prompt' in data) || (data.prompt is string && data.prompt.size() <= 10000)) &&
+        (!('steps' in data) || data.steps is list) &&
+        (!('messages' in data) || data.messages is list);
+    }
+
+    function isValidConversationUpdate() {
+      return isValidConversation(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().userId == existing().userId &&
+        incoming().createdAt == existing().createdAt &&
+        (existing().status != 'completed' || (
+          incoming().status in ['completed', 'running'] &&
+          incoming().title == existing().title &&
+          incoming().mode == existing().mode &&
+          (!('outputFormat' in existing()) || ('outputFormat' in incoming() && incoming().outputFormat == existing().outputFormat)) &&
+          (!('chartType' in existing()) || ('chartType' in incoming() && incoming().chartType == existing().chartType)) &&
+          (!('projectId' in existing()) || ('projectId' in incoming() && incoming().projectId == existing().projectId)) &&
+          (!('prompt' in existing()) || ('prompt' in incoming() && incoming().prompt == existing().prompt)) &&
+          ((incoming().status == 'running' && !('result' in incoming())) ||
+            (incoming().status == 'completed' && (!('result' in existing()) || ('result' in incoming() && incoming().result == existing().result)))) &&
+          ((incoming().status == 'running' && !('steps' in incoming())) ||
+            (incoming().status == 'completed' && (!('steps' in existing()) || ('steps' in incoming() && incoming().steps == existing().steps)))) &&
+          (!('messages' in existing()) || ('messages' in incoming() && incoming().messages == existing().messages))
+        ));
     }
 
     // Helper for validation of Message
@@ -103,58 +136,689 @@ service cloud.firestore {
         data.status in ['pending', 'success', 'failed', 'streaming'];
     }
 
-    // Healthcheck / test connection route (scoped to verified client or test)
+    function isValidCheckpoint(data, ownerId, checkpointId) {
+      return data.keys().hasAll(['id', 'taskId', 'conversationId', 'userId', 'stepIndex', 'stepLabel', 'completedToolCalls', 'accumulatedResult', 'checksum', 'timestamp']) &&
+        data.keys().hasOnly(['id', 'taskId', 'conversationId', 'userId', 'stepIndex', 'totalSteps', 'stepLabel', 'status', 'completedToolCalls', 'accumulatedResult', 'stateSnapshot', 'checksum', 'timestamp', 'resumedAt']) &&
+        data.id is string && isValidId(data.id) &&
+        data.taskId is string && isValidId(data.taskId) && data.taskId == checkpointId &&
+        data.conversationId is string && isValidId(data.conversationId) &&
+        data.userId is string && isValidId(data.userId) && data.userId == ownerId &&
+        data.stepIndex is int && data.stepIndex >= 0 && data.stepIndex <= 100000 &&
+        (!('totalSteps' in data) || (data.totalSteps is int && data.totalSteps >= 0 && data.totalSteps <= 100000)) &&
+        data.stepLabel is string && data.stepLabel.size() <= 256 &&
+        (!('status' in data) || data.status in ['in_progress', 'completed', 'interrupted', 'failed']) &&
+        data.completedToolCalls is list && data.completedToolCalls.size() <= 100 &&
+        data.accumulatedResult is string && data.accumulatedResult.size() <= 500000 &&
+        (!('stateSnapshot' in data) || (data.stateSnapshot is map && data.stateSnapshot.keys().size() <= 100)) &&
+        data.checksum is string && data.checksum.size() <= 128 &&
+        data.timestamp is string && data.timestamp.size() <= 64 &&
+        (!('resumedAt' in data) || (data.resumedAt is string && data.resumedAt.size() <= 64));
+    }
+
+    function isValidCheckpointTransition() {
+      return !('status' in existing()) || !('status' in incoming()) ||
+        (existing().status == 'completed' && incoming().status == 'completed') ||
+        (existing().status == 'failed' && incoming().status in ['failed', 'completed']) ||
+        (existing().status == 'interrupted' && incoming().status in ['interrupted', 'failed', 'completed']) ||
+        (existing().status == 'in_progress');
+    }
+
+    function isValidSandbox(data, ownerId, sandboxId) {
+      return data.keys().hasAll(['sandboxId', 'workspaceId', 'provider', 'providerSandboxId', 'userId', 'projectId', 'runtime', 'workspaceRoot', 'status', 'createdAt', 'updatedAt', 'expiresAt']) &&
+        data.keys().hasOnly(['sandboxId', 'workspaceId', 'provider', 'providerSandboxId', 'userId', 'projectId', 'taskId', 'runtime', 'image', 'workspaceRoot', 'status', 'limits', 'persistent', 'previewUrl', 'previewPort', 'previewStatus', 'previewCommandExecutionId', 'createdAt', 'updatedAt', 'lastActiveAt', 'expiresAt', 'cleanedUpAt', 'error']) &&
+        data.sandboxId is string && isValidId(data.sandboxId) && data.sandboxId == sandboxId &&
+        data.workspaceId is string && isValidId(data.workspaceId) &&
+        data.provider in ['e2b', 'daytona', 'http-runtime', 'unconfigured'] &&
+        data.providerSandboxId is string && data.providerSandboxId.size() <= 256 &&
+        data.userId is string && data.userId == ownerId &&
+        data.projectId is string && isValidId(data.projectId) &&
+        data.runtime in ['node', 'typescript', 'javascript', 'python', 'html', 'react', 'vite', 'nextjs', 'custom'] &&
+        data.workspaceRoot is string && data.workspaceRoot.size() <= 256 &&
+        data.status in ['creating', 'running', 'idle', 'stopping', 'stopped', 'expired', 'error'] &&
+        (!('limits' in data) || (data.limits is map && data.limits.keys().size() <= 20)) &&
+        (!('persistent' in data) || data.persistent is bool) &&
+        (!('previewUrl' in data) || (data.previewUrl is string && data.previewUrl.size() <= 1024)) &&
+        (!('previewPort' in data) || (data.previewPort is int && data.previewPort >= 0 && data.previewPort <= 65535)) &&
+        (!('previewStatus' in data) || data.previewStatus in ['stopped', 'starting', 'ready', 'failed']) &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64 &&
+        data.expiresAt is string && data.expiresAt.size() <= 64 &&
+        (!('error' in data) || (data.error is string && data.error.size() <= 2000));
+    }
+
+    function isValidExecution(data, ownerId, executionId) {
+      return data.keys().hasAll(['executionId', 'sandboxId', 'workspaceId', 'userId', 'provider', 'command', 'cwd', 'status', 'startedAt', 'timeoutMs', 'retryCount', 'untrustedData']) &&
+        data.keys().hasOnly(['executionId', 'sandboxId', 'workspaceId', 'userId', 'provider', 'providerExecutionId', 'command', 'cwd', 'status', 'stdout', 'stderr', 'exitCode', 'startedAt', 'completedAt', 'durationMs', 'timeoutMs', 'idempotencyKey', 'retryCount', 'cancelled', 'error', 'untrustedData']) &&
+        data.executionId is string && isValidId(data.executionId) && data.executionId == executionId &&
+        data.sandboxId is string && isValidId(data.sandboxId) &&
+        data.workspaceId is string && data.workspaceId.size() <= 128 &&
+        data.userId is string && data.userId == ownerId &&
+        data.provider in ['e2b', 'daytona', 'http-runtime', 'unconfigured'] &&
+        data.command is string && data.command.size() <= 4096 &&
+        data.cwd is string && data.cwd.size() <= 512 &&
+        data.status in ['queued', 'running', 'completed', 'failed', 'timed_out', 'cancelled'] &&
+        (!('stdout' in data) || (data.stdout is string && data.stdout.size() <= 250000)) &&
+        (!('stderr' in data) || (data.stderr is string && data.stderr.size() <= 250000)) &&
+        (!('exitCode' in data) || data.exitCode == null || data.exitCode is int) &&
+        data.startedAt is string && data.startedAt.size() <= 64 &&
+        data.timeoutMs is int && data.timeoutMs >= 0 && data.timeoutMs <= 600000 &&
+        data.retryCount is int && data.retryCount >= 0 && data.retryCount <= 10 &&
+        data.untrustedData == true;
+    }
+
+    function isValidBrowserSession(data, ownerId, sessionId) {
+      return data.keys().hasAll(['sessionId', 'provider', 'providerSessionId', 'userId', 'status', 'isolatedStorage', 'createdAt', 'updatedAt', 'expiresAt']) &&
+        data.keys().hasOnly(['sessionId', 'provider', 'providerSessionId', 'userId', 'projectId', 'taskId', 'status', 'currentUrl', 'currentTitle', 'viewport', 'isolatedStorage', 'createdAt', 'updatedAt', 'lastActiveAt', 'expiresAt', 'closedAt', 'error']) &&
+        data.sessionId is string && isValidId(data.sessionId) && data.sessionId == sessionId &&
+        data.provider in ['browserless', 'browserbase', 'http-browser', 'unconfigured'] &&
+        data.providerSessionId is string && data.providerSessionId.size() <= 256 &&
+        data.userId is string && data.userId == ownerId &&
+        data.status in ['creating', 'active', 'closed', 'expired', 'error'] &&
+        (!('currentUrl' in data) || (data.currentUrl is string && data.currentUrl.size() <= 2048)) &&
+        (!('currentTitle' in data) || (data.currentTitle is string && data.currentTitle.size() <= 300)) &&
+        (!('viewport' in data) || (data.viewport is map && data.viewport.keys().size() <= 5)) &&
+        data.isolatedStorage == true &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64 &&
+        data.expiresAt is string && data.expiresAt.size() <= 64;
+    }
+
+    function isValidApproval(data, ownerId, challengeId) {
+      return data.keys().hasAll(['challengeId', 'toolName', 'riskLevel', 'parametersHash', 'userId', 'createdAt', 'expiresAt', 'status']) &&
+        data.keys().hasOnly(['challengeId', 'toolName', 'displayName', 'riskLevel', 'target', 'parametersHash', 'parametersSummary', 'consequences', 'userId', 'createdAt', 'expiresAt', 'status', 'approvalToken', 'resolvedAt', 'revokedAt', 'revocationReason']) &&
+        data.challengeId is string && isValidId(data.challengeId) && data.challengeId == challengeId &&
+        data.toolName is string && data.toolName.size() <= 128 &&
+        data.riskLevel in ['read-only', 'destructive', 'privileged'] &&
+        data.parametersHash is string && data.parametersHash.size() <= 128 &&
+        data.userId is string && data.userId == ownerId &&
+        data.createdAt is int && data.expiresAt is int &&
+        data.status in ['pending', 'approved', 'rejected', 'expired', 'consumed', 'revoked'] &&
+        (!('parametersSummary' in data) || (data.parametersSummary is map && data.parametersSummary.keys().size() <= 30)) &&
+        (!('consequences' in data) || (data.consequences is list && data.consequences.size() <= 20)) &&
+        (!('revocationReason' in data) || (data.revocationReason is string && data.revocationReason.size() <= 300));
+    }
+
+    function isValidPermissionPolicy(data, ownerId, policyId) {
+      return data.keys().hasAll(['policyId', 'userId', 'toolName', 'mode', 'updatedAt', 'updatedBy']) &&
+        data.keys().hasOnly(['policyId', 'userId', 'toolName', 'mode', 'updatedAt', 'updatedBy', 'note']) &&
+        data.policyId is string && isValidId(data.policyId) && data.policyId == policyId &&
+        data.userId is string && data.userId == ownerId &&
+        data.toolName is string && data.toolName.size() <= 128 &&
+        data.mode in ['default', 'always_require_approval', 'auto_allow_non_destructive', 'deny'] &&
+        data.updatedAt is string && data.updatedAt.size() <= 64 &&
+        data.updatedBy is string && data.updatedBy == ownerId &&
+        (!('note' in data) || (data.note is string && data.note.size() <= 300));
+    }
+
+    function isValidBackgroundTask(data, ownerId, taskId) {
+      return data.keys().hasAll(['taskId', 'userId', 'type', 'title', 'prompt', 'status', 'phase', 'priority', 'attempt', 'maxAttempts', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['taskId', 'userId', 'type', 'title', 'prompt', 'payload', 'status', 'phase', 'priority', 'priorityScore', 'progress', 'idempotencyKey', 'scheduleId', 'attempt', 'maxAttempts', 'baseBackoffMs', 'timeoutMs', 'nextAttemptAt', 'leaseOwner', 'leaseExpiresAt', 'workerDispatchState', 'workerDispatchDetail', 'result', 'error', 'createdAt', 'updatedAt', 'startedAt', 'completedAt', 'cancelledAt', 'history']) &&
+        data.taskId is string && isValidId(data.taskId) && data.taskId == taskId &&
+        data.userId is string && data.userId == ownerId &&
+        data.type in ['research', 'coding', 'automation', 'multi_agent', 'scheduled', 'skill', 'general'] &&
+        data.title is string && data.title.size() <= 180 &&
+        data.prompt is string && data.prompt.size() <= 20000 &&
+        data.status in ['queued', 'claimed', 'running', 'completed', 'failed', 'cancelled', 'dead_letter'] &&
+        data.phase is string && data.phase.size() <= 64 &&
+        data.priority in ['low', 'normal', 'high', 'urgent'] &&
+        data.attempt is int && data.attempt >= 0 && data.attempt <= 20 &&
+        data.maxAttempts is int && data.maxAttempts >= 1 && data.maxAttempts <= 10 &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64 &&
+        (!('history' in data) || (data.history is list && data.history.size() <= 200));
+    }
+
+    function isValidMultiAgentRun(data, ownerId, runId) {
+      return data.keys().hasAll(['runId', 'userId', 'objective', 'status', 'provider', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['runId', 'userId', 'objective', 'status', 'provider', 'maxConcurrency', 'maxRecursionDepth', 'maxTotalTokens', 'maxCostUsd', 'timeoutMs', 'nodes', 'qaReview', 'consolidatedAnswer', 'totalUsage', 'error', 'createdAt', 'updatedAt', 'completedAt']) &&
+        data.runId is string && isValidId(data.runId) && data.runId == runId &&
+        data.userId is string && data.userId == ownerId &&
+        data.objective is string && data.objective.size() <= 4000 &&
+        data.status in ['running', 'completed', 'failed', 'cancelled'] &&
+        data.provider is string && data.provider.size() <= 64 &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64 &&
+        (!('nodes' in data) || (data.nodes is list && data.nodes.size() <= 30));
+    }
+
+    function isValidInstalledSkill(data, ownerId, skillId) {
+      return data.keys().hasAll(['skillId', 'userId', 'name', 'version', 'executionType', 'trustTier', 'integrityHash', 'enabled', 'installedAt', 'updatedAt']) &&
+        data.keys().hasOnly(['skillId', 'userId', 'name', 'description', 'version', 'instructions', 'supportedTools', 'dependencies', 'permissions', 'compatibility', 'executionType', 'sandboxScript', 'tags', 'trustTier', 'integrityHash', 'enabled', 'config', 'versions', 'installedAt', 'updatedAt']) &&
+        data.skillId is string && isValidId(data.skillId) && data.skillId == skillId &&
+        data.userId is string && data.userId == ownerId &&
+        data.name is string && data.name.size() <= 128 &&
+        data.version is string && data.version.size() <= 32 &&
+        data.executionType in ['declarative', 'tool_workflow', 'sandbox_code'] &&
+        data.trustTier in ['verified_builtin', 'third_party'] &&
+        data.integrityHash is string && data.integrityHash.size() <= 128 &&
+        data.enabled is bool &&
+        data.installedAt is string && data.installedAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64 &&
+        (!('versions' in data) || (data.versions is list && data.versions.size() <= 50));
+    }
+
+    function isValidSkillExecution(data, ownerId, executionId) {
+      return data.keys().hasAll(['executionId', 'userId', 'skillId', 'skillVersion', 'status', 'startedAt', 'completedAt']) &&
+        data.keys().hasOnly(['executionId', 'userId', 'skillId', 'skillVersion', 'executionType', 'status', 'inputSummary', 'output', 'sandboxId', 'error', 'startedAt', 'completedAt', 'durationMs']) &&
+        data.executionId is string && isValidId(data.executionId) && data.executionId == executionId &&
+        data.userId is string && data.userId == ownerId &&
+        data.skillId is string && data.skillId.size() <= 64 &&
+        data.skillVersion is string && data.skillVersion.size() <= 32 &&
+        data.status in ['succeeded', 'failed', 'denied'] &&
+        data.startedAt is string && data.startedAt.size() <= 64 &&
+        data.completedAt is string && data.completedAt.size() <= 64;
+    }
+
+    function isValidSchedule(data, ownerId, scheduleId) {
+      return data.keys().hasAll(['scheduleId', 'userId', 'name', 'kind', 'status', 'timeZone', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['scheduleId', 'userId', 'name', 'description', 'kind', 'status', 'timeZone', 'runAt', 'intervalMinutes', 'timeOfDay', 'dayOfWeek', 'dayOfMonth', 'cronExpression', 'missedJobPolicy', 'maxCatchUpRuns', 'condition', 'taskTemplate', 'notifyOnRun', 'nextRunAt', 'lastRunAt', 'lastRunStatus', 'runCount', 'createdAt', 'updatedAt']) &&
+        data.scheduleId is string && isValidId(data.scheduleId) && data.scheduleId == scheduleId &&
+        data.userId is string && data.userId == ownerId &&
+        data.name is string && data.name.size() <= 160 &&
+        data.kind in ['once', 'interval', 'daily', 'weekly', 'monthly', 'cron'] &&
+        data.status in ['active', 'paused', 'completed', 'cancelled'] &&
+        data.timeZone is string && data.timeZone.size() <= 64 &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidScheduleRun(data, ownerId, runId) {
+      return data.keys().hasAll(['runId', 'scheduleId', 'userId', 'scheduledFor', 'executedAt', 'status']) &&
+        data.keys().hasOnly(['runId', 'scheduleId', 'userId', 'scheduledFor', 'executedAt', 'status', 'taskId', 'deduplicated', 'reason']) &&
+        data.runId is string && isValidId(data.runId) && data.runId == runId &&
+        data.scheduleId is string && isValidId(data.scheduleId) &&
+        data.userId is string && data.userId == ownerId &&
+        data.scheduledFor is string && data.scheduledFor.size() <= 64 &&
+        data.executedAt is string && data.executedAt.size() <= 64 &&
+        data.status in ['dispatched', 'skipped_condition', 'failed'];
+    }
+
+    function isValidNotification(data, ownerId, notificationId) {
+      return data.keys().hasAll(['notificationId', 'userId', 'kind', 'title', 'body', 'read', 'createdAt']) &&
+        data.keys().hasOnly(['notificationId', 'userId', 'kind', 'title', 'body', 'taskId', 'scheduleId', 'read', 'createdAt', 'readAt', 'metadata']) &&
+        data.notificationId is string && isValidId(data.notificationId) && data.notificationId == notificationId &&
+        data.userId is string && data.userId == ownerId &&
+        data.kind in ['task_completed', 'task_failed', 'approval_required', 'schedule_reminder', 'schedule_executed', 'system'] &&
+        data.title is string && data.title.size() <= 160 &&
+        data.body is string && data.body.size() <= 1000 &&
+        data.read is bool &&
+        data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidAuditLog(data, ownerId, auditId) {
+      return data.keys().hasAll(['auditId', 'userId', 'action', 'resourceType', 'resourceId', 'status', 'timestamp']) &&
+        data.keys().hasOnly(['auditId', 'userId', 'action', 'resourceType', 'resourceId', 'status', 'details', 'timestamp']) &&
+        data.auditId is string && isValidId(data.auditId) && data.auditId == auditId &&
+        data.userId is string && data.userId == ownerId &&
+        data.action is string && data.action.size() <= 128 &&
+        data.resourceType in ['sandbox', 'terminal', 'filesystem', 'preview', 'browser', 'permission', 'webhook'] &&
+        data.resourceId is string && data.resourceId.size() <= 128 &&
+        data.status in ['allowed', 'denied', 'challenged', 'succeeded', 'failed'] &&
+        (!('details' in data) || (data.details is map && data.details.keys().size() <= 30)) &&
+        data.timestamp is string && data.timestamp.size() <= 64;
+    }
+
+    function isValidIdempotency(data, ownerId, keyId) {
+      return data.keys().hasAll(['key', 'userId', 'createdAt', 'expiresAt']) &&
+        data.keys().hasOnly(['key', 'userId', 'result', 'createdAt', 'expiresAt']) &&
+        data.key is string && isValidId(data.key) && data.key == keyId &&
+        data.userId is string && data.userId == ownerId &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.expiresAt is string && data.expiresAt.size() <= 64;
+    }
+
+    function isValidVectorDocument(data, ownerId, documentId) {
+      return data.keys().hasAll(['documentId', 'userId', 'title', 'sourceType', 'format', 'chunkCount', 'totalChars', 'embeddingModel', 'embeddingMode', 'contentHash', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['documentId', 'userId', 'title', 'sourceType', 'format', 'chunkCount', 'totalChars', 'embeddingModel', 'embeddingMode', 'contentHash', 'metadata', 'createdAt', 'updatedAt']) &&
+        data.documentId is string && isValidId(data.documentId) && data.documentId == documentId &&
+        data.userId is string && data.userId == ownerId &&
+        data.title is string && data.title.size() <= 512 &&
+        data.sourceType in ['document', 'memory', 'session', 'project_file', 'research'] &&
+        data.format in ['markdown', 'code', 'pdf', 'text'] &&
+        data.chunkCount is number && data.chunkCount >= 0 && data.chunkCount <= 10000 &&
+        data.totalChars is number && data.totalChars >= 0 && data.totalChars <= 5000000 &&
+        data.embeddingModel is string && data.embeddingModel.size() <= 128 &&
+        data.embeddingMode in ['gemini-embedding-2', 'lexical-fallback'] &&
+        data.contentHash is string && data.contentHash.size() <= 128 &&
+        (!('metadata' in data) || (data.metadata is map && data.metadata.keys().size() <= 40)) &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidVectorChunk(data, ownerId, chunkId) {
+      return data.keys().hasAll(['chunkId', 'documentId', 'documentTitle', 'userId', 'sourceType', 'format', 'chunkIndex', 'content', 'tokenEstimate', 'embeddingModel', 'createdAt']) &&
+        data.keys().hasOnly(['chunkId', 'documentId', 'documentTitle', 'userId', 'sourceType', 'format', 'chunkIndex', 'heading', 'pageNumber', 'content', 'tokenEstimate', 'embedding', 'embeddingModel', 'createdAt']) &&
+        data.chunkId is string && isValidId(data.chunkId) && data.chunkId == chunkId &&
+        data.documentId is string && isValidId(data.documentId) &&
+        data.documentTitle is string && data.documentTitle.size() <= 512 &&
+        data.userId is string && data.userId == ownerId &&
+        data.sourceType in ['document', 'memory', 'session', 'project_file', 'research'] &&
+        data.format in ['markdown', 'code', 'pdf', 'text'] &&
+        data.chunkIndex is number && data.chunkIndex >= 0 && data.chunkIndex <= 10000 &&
+        (!('heading' in data) || (data.heading is string && data.heading.size() <= 512)) &&
+        (!('pageNumber' in data) || (data.pageNumber is number && data.pageNumber >= 1 && data.pageNumber <= 100000)) &&
+        data.content is string && data.content.size() <= 32000 &&
+        data.tokenEstimate is number && data.tokenEstimate >= 0 && data.tokenEstimate <= 50000 &&
+        (!('embedding' in data) || (data.embedding is list && data.embedding.size() <= 4096 && (data.embedding.size() == 0 || data.embedding[0] is number))) &&
+        data.embeddingModel is string && data.embeddingModel.size() <= 128 &&
+        data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidInboundWebhook(data, ownerId, webhookId) {
+      return data.keys().hasAll(['webhookId', 'userId', 'name', 'provider', 'enabled', 'allowedEvents', 'secretFingerprint', 'taskTemplate', 'triggerCount', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['webhookId', 'userId', 'name', 'description', 'provider', 'enabled', 'allowedEvents', 'encryptedSecret', 'devSecret', 'secretFingerprint', 'taskTemplate', 'triggerCount', 'lastTriggeredAt', 'createdAt', 'updatedAt']) &&
+        data.webhookId is string && isValidId(data.webhookId) && data.webhookId == webhookId &&
+        data.userId is string && data.userId == ownerId &&
+        data.name is string && data.name.size() <= 200 &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 2000)) &&
+        data.provider in ['generic', 'github', 'stripe', 'slack'] &&
+        data.enabled is bool &&
+        data.allowedEvents is list && data.allowedEvents.size() <= 50 && (data.allowedEvents.size() == 0 || data.allowedEvents[0] is string) &&
+        (!('encryptedSecret' in data) || (data.encryptedSecret is map && data.encryptedSecret.keys().size() <= 10)) &&
+        (!('devSecret' in data) || (data.devSecret is string && data.devSecret.size() <= 512)) &&
+        data.secretFingerprint is string && data.secretFingerprint.size() <= 128 &&
+        data.taskTemplate is map && data.taskTemplate.keys().size() <= 20 &&
+        data.triggerCount is number && data.triggerCount >= 0 &&
+        (!('lastTriggeredAt' in data) || (data.lastTriggeredAt is string && data.lastTriggeredAt.size() <= 64)) &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidOutboundWebhook(data, ownerId, subscriptionId) {
+      return data.keys().hasAll(['subscriptionId', 'userId', 'name', 'url', 'format', 'events', 'enabled', 'secretFingerprint', 'deliveryCount', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['subscriptionId', 'userId', 'name', 'url', 'format', 'events', 'enabled', 'encryptedSecret', 'devSecret', 'secretFingerprint', 'customHeaders', 'deliveryCount', 'lastDeliveredAt', 'lastStatus', 'createdAt', 'updatedAt']) &&
+        data.subscriptionId is string && isValidId(data.subscriptionId) && data.subscriptionId == subscriptionId &&
+        data.userId is string && data.userId == ownerId &&
+        data.name is string && data.name.size() <= 200 &&
+        data.url is string && data.url.size() <= 2048 &&
+        data.format in ['generic', 'slack', 'discord', 'email_relay'] &&
+        data.events is list && data.events.size() <= 30 && (data.events.size() == 0 || data.events[0] is string) &&
+        data.enabled is bool &&
+        (!('encryptedSecret' in data) || (data.encryptedSecret is map && data.encryptedSecret.keys().size() <= 10)) &&
+        (!('devSecret' in data) || (data.devSecret is string && data.devSecret.size() <= 512)) &&
+        data.secretFingerprint is string && data.secretFingerprint.size() <= 128 &&
+        (!('customHeaders' in data) || (data.customHeaders is map && data.customHeaders.keys().size() <= 20)) &&
+        data.deliveryCount is number && data.deliveryCount >= 0 &&
+        (!('lastDeliveredAt' in data) || (data.lastDeliveredAt is string && data.lastDeliveredAt.size() <= 64)) &&
+        (!('lastStatus' in data) || data.lastStatus in ['succeeded', 'failed']) &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidWebhookDelivery(data, ownerId, deliveryId) {
+      return data.keys().hasAll(['deliveryId', 'userId', 'direction', 'webhookId', 'eventType', 'status', 'attempts', 'createdAt']) &&
+        data.keys().hasOnly(['deliveryId', 'userId', 'direction', 'webhookId', 'eventType', 'status', 'httpStatus', 'attempts', 'taskId', 'targetUrl', 'error', 'createdAt']) &&
+        data.deliveryId is string && isValidId(data.deliveryId) && data.deliveryId == deliveryId &&
+        data.userId is string && data.userId == ownerId &&
+        data.direction in ['inbound', 'outbound'] &&
+        data.webhookId is string && data.webhookId.size() <= 128 &&
+        data.eventType is string && data.eventType.size() <= 128 &&
+        data.status in ['succeeded', 'failed', 'ignored', 'deduplicated'] &&
+        (!('httpStatus' in data) || (data.httpStatus is number && data.httpStatus >= 100 && data.httpStatus <= 599)) &&
+        data.attempts is number && data.attempts >= 0 && data.attempts <= 20 &&
+        (!('taskId' in data) || (data.taskId is string && data.taskId.size() <= 128)) &&
+        (!('targetUrl' in data) || (data.targetUrl is string && data.targetUrl.size() <= 2048)) &&
+        (!('error' in data) || (data.error is string && data.error.size() <= 2000)) &&
+        data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidWebhookDedup(data) {
+      return data.keys().hasAll(['createdAt']) &&
+        data.keys().hasOnly(['taskId', 'createdAt']) &&
+        (!('taskId' in data) || (data.taskId is string && data.taskId.size() <= 128)) &&
+        data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidMcpServer(data, ownerId, serverId) {
+      return data.keys().hasAll(['serverId', 'userId', 'name', 'slug', 'endpointUrl', 'authType', 'enabled', 'tools', 'resources', 'prompts', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['serverId', 'userId', 'name', 'slug', 'description', 'endpointUrl', 'authType', 'authHeaderName', 'encryptedAuthPayload', 'devAuthPayload', 'enabled', 'protocolVersion', 'serverInfo', 'tools', 'resources', 'prompts', 'lastDiscoveredAt', 'lastError', 'createdAt', 'updatedAt']) &&
+        data.serverId is string && isValidId(data.serverId) && data.serverId == serverId &&
+        data.userId is string && data.userId == ownerId &&
+        data.name is string && data.name.size() <= 200 &&
+        data.slug is string && data.slug.size() <= 128 && data.slug.matches('^[a-z0-9_\\-]+$') &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 2000)) &&
+        data.endpointUrl is string && data.endpointUrl.size() <= 2048 &&
+        data.authType in ['none', 'bearer', 'api_key_header', 'custom_headers'] &&
+        (!('authHeaderName' in data) || (data.authHeaderName is string && data.authHeaderName.size() <= 128)) &&
+        (!('encryptedAuthPayload' in data) || (data.encryptedAuthPayload is map && data.encryptedAuthPayload.keys().size() <= 10)) &&
+        (!('devAuthPayload' in data) || (data.devAuthPayload is string && data.devAuthPayload.size() <= 8192)) &&
+        data.enabled is bool &&
+        (!('protocolVersion' in data) || (data.protocolVersion is string && data.protocolVersion.size() <= 64)) &&
+        (!('serverInfo' in data) || (data.serverInfo is map && data.serverInfo.keys().size() <= 10)) &&
+        data.tools is list && data.tools.size() <= 200 && (data.tools.size() == 0 || data.tools[0] is map) &&
+        data.resources is list && data.resources.size() <= 200 && (data.resources.size() == 0 || data.resources[0] is map) &&
+        data.prompts is list && data.prompts.size() <= 200 && (data.prompts.size() == 0 || data.prompts[0] is map) &&
+        (!('lastDiscoveredAt' in data) || (data.lastDiscoveredAt is string && data.lastDiscoveredAt.size() <= 64)) &&
+        (!('lastError' in data) || (data.lastError is string && data.lastError.size() <= 2000)) &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidSyncEvent(data, ownerId, eventId) {
+      return data.keys().hasAll(['eventId', 'seq', 'userId', 'type', 'title', 'message', 'severity', 'notifyUser', 'createdAt']) &&
+        data.keys().hasOnly(['eventId', 'seq', 'userId', 'type', 'title', 'message', 'resourceId', 'taskId', 'runId', 'scheduleId', 'challengeId', 'notificationId', 'severity', 'notifyUser', 'data', 'createdAt']) &&
+        data.eventId is string && isValidId(data.eventId) && data.eventId == eventId &&
+        data.seq is number && data.seq >= 0 &&
+        data.userId is string && data.userId == ownerId &&
+        data.type is string && data.type.size() <= 64 &&
+        data.title is string && data.title.size() <= 300 &&
+        data.message is string && data.message.size() <= 4000 &&
+        (!('resourceId' in data) || (data.resourceId is string && data.resourceId.size() <= 128)) &&
+        (!('taskId' in data) || (data.taskId is string && data.taskId.size() <= 128)) &&
+        (!('runId' in data) || (data.runId is string && data.runId.size() <= 128)) &&
+        (!('scheduleId' in data) || (data.scheduleId is string && data.scheduleId.size() <= 128)) &&
+        (!('challengeId' in data) || (data.challengeId is string && data.challengeId.size() <= 128)) &&
+        (!('notificationId' in data) || (data.notificationId is string && data.notificationId.size() <= 128)) &&
+        data.severity in ['info', 'success', 'warning', 'error'] &&
+        data.notifyUser is bool &&
+        (!('data' in data) || (data.data is map && data.data.keys().size() <= 30)) &&
+        data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
     match /test/connection {
       allow get: if isSignedIn() || request.time != null;
     }
 
-    // Users collection
     match /users/{userId} {
       allow get: if isOwner(userId) && isValidId(userId);
       allow list: if false;
-      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming());
-      allow update: if isOwner(userId) && isValidId(userId) && isValidUser(incoming()) && incoming().id == existing().id;
+      allow create: if isOwner(userId) && isValidId(userId) && incoming().id == userId && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidId(userId) && isValidUser(incoming()) &&
+        incoming().id == existing().id &&
+        (!('createdAt' in existing()) || ('createdAt' in incoming() && incoming().createdAt == existing().createdAt));
       allow delete: if isOwner(userId) && isValidId(userId);
 
-      // User Settings & Memories subcollection
       match /settings/{settingsId} {
         allow get: if isOwner(userId) && isValidId(settingsId);
         allow list: if isOwner(userId);
         allow create: if isOwner(userId) && isValidId(settingsId) && (
           (settingsId == 'preferences' && isValidSettings(incoming())) ||
-          (settingsId == 'memories' && isValidMemories(incoming()))
+          (settingsId == 'memories' && isValidMemories(incoming())) ||
+          (settingsId == 'schedules' && isValidSchedules(incoming())) ||
+          (settingsId == 'knowledge_cache' && isValidKnowledgeCache(incoming()))
         );
         allow update: if isOwner(userId) && isValidId(settingsId) && (
           (settingsId == 'preferences' && isValidSettings(incoming()) && incoming().userId == existing().userId) ||
-          (settingsId == 'memories' && isValidMemories(incoming()))
+          (settingsId == 'memories' && isValidMemories(incoming())) ||
+          (settingsId == 'schedules' && isValidSchedules(incoming())) ||
+          (settingsId == 'knowledge_cache' && isValidKnowledgeCache(incoming()))
         );
         allow delete: if isOwner(userId) && isValidId(settingsId);
       }
+
+      match /checkpoints/{checkpointId} {
+        allow get, list: if isOwner(userId) && isValidId(checkpointId);
+        allow create: if isOwner(userId) && isValidId(checkpointId) && isValidCheckpoint(incoming(), userId, checkpointId);
+        allow update: if isOwner(userId) && isValidId(checkpointId) &&
+          isValidCheckpoint(incoming(), userId, checkpointId) &&
+          incoming().id == existing().id && incoming().taskId == existing().taskId &&
+          incoming().conversationId == existing().conversationId && incoming().userId == existing().userId &&
+          isValidCheckpointTransition();
+        allow delete: if isOwner(userId) && isValidId(checkpointId);
+      }
+
+      match /sandboxes/{sandboxId} {
+        allow get: if isOwner(userId) && isValidId(sandboxId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(sandboxId) && isValidSandbox(incoming(), userId, sandboxId);
+        allow update: if isOwner(userId) && isValidId(sandboxId) &&
+          isValidSandbox(incoming(), userId, sandboxId) &&
+          incoming().sandboxId == existing().sandboxId &&
+          incoming().workspaceId == existing().workspaceId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt &&
+          (!(existing().status in ['stopped', 'expired']) || incoming().status == existing().status);
+        allow delete: if isOwner(userId) && isValidId(sandboxId);
+      }
+
+      match /executions/{executionId} {
+        allow get: if isOwner(userId) && isValidId(executionId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(executionId) && isValidExecution(incoming(), userId, executionId);
+        allow update: if isOwner(userId) && isValidId(executionId) &&
+          isValidExecution(incoming(), userId, executionId) &&
+          incoming().executionId == existing().executionId &&
+          incoming().sandboxId == existing().sandboxId &&
+          incoming().userId == existing().userId &&
+          incoming().startedAt == existing().startedAt;
+        allow delete: if false;
+      }
+
+      match /browser_sessions/{sessionId} {
+        allow get: if isOwner(userId) && isValidId(sessionId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(sessionId) && isValidBrowserSession(incoming(), userId, sessionId);
+        allow update: if isOwner(userId) && isValidId(sessionId) &&
+          isValidBrowserSession(incoming(), userId, sessionId) &&
+          incoming().sessionId == existing().sessionId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt &&
+          (!(existing().status in ['closed', 'expired']) || incoming().status == existing().status);
+        allow delete: if isOwner(userId) && isValidId(sessionId);
+      }
+
+      match /approvals/{challengeId} {
+        allow get: if isOwner(userId) && isValidId(challengeId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(challengeId) && isValidApproval(incoming(), userId, challengeId);
+        allow update: if isOwner(userId) && isValidId(challengeId) &&
+          isValidApproval(incoming(), userId, challengeId) &&
+          incoming().challengeId == existing().challengeId &&
+          incoming().parametersHash == existing().parametersHash &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt &&
+          (!(existing().status in ['consumed', 'rejected', 'expired']) || incoming().status == existing().status);
+        allow delete: if false;
+      }
+
+      match /audit_logs/{auditId} {
+        allow get: if isOwner(userId) && isValidId(auditId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(auditId) && isValidAuditLog(incoming(), userId, auditId);
+        allow update, delete: if false;
+      }
+
+      match /idempotency/{keyId} {
+        allow get: if isOwner(userId) && isValidId(keyId);
+        allow list: if false;
+        allow create: if isOwner(userId) && isValidId(keyId) && isValidIdempotency(incoming(), userId, keyId);
+        allow update: if false;
+        allow delete: if isOwner(userId) && isValidId(keyId);
+      }
+
+      match /permission_policies/{policyId} {
+        allow get: if isOwner(userId) && isValidId(policyId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(policyId) && isValidPermissionPolicy(incoming(), userId, policyId);
+        allow update: if isOwner(userId) && isValidId(policyId) &&
+          isValidPermissionPolicy(incoming(), userId, policyId) &&
+          incoming().policyId == existing().policyId &&
+          incoming().userId == existing().userId;
+        allow delete: if isOwner(userId) && isValidId(policyId);
+      }
+
+      match /background_tasks/{taskId} {
+        allow get: if isOwner(userId) && isValidId(taskId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(taskId) && isValidBackgroundTask(incoming(), userId, taskId);
+        allow update: if isOwner(userId) && isValidId(taskId) &&
+          isValidBackgroundTask(incoming(), userId, taskId) &&
+          incoming().taskId == existing().taskId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt;
+        allow delete: if false;
+      }
+
+      match /multi_agent_runs/{runId} {
+        allow get: if isOwner(userId) && isValidId(runId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(runId) && isValidMultiAgentRun(incoming(), userId, runId);
+        allow update: if isOwner(userId) && isValidId(runId) &&
+          isValidMultiAgentRun(incoming(), userId, runId) &&
+          incoming().runId == existing().runId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt;
+        allow delete: if false;
+      }
+
+      match /skills/{skillId} {
+        allow get: if isOwner(userId) && isValidId(skillId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(skillId) && isValidInstalledSkill(incoming(), userId, skillId);
+        allow update: if isOwner(userId) && isValidId(skillId) &&
+          isValidInstalledSkill(incoming(), userId, skillId) &&
+          incoming().skillId == existing().skillId &&
+          incoming().userId == existing().userId &&
+          incoming().installedAt == existing().installedAt;
+        allow delete: if isOwner(userId) && isValidId(skillId);
+      }
+
+      match /skill_executions/{executionId} {
+        allow get: if isOwner(userId) && isValidId(executionId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(executionId) && isValidSkillExecution(incoming(), userId, executionId);
+        allow update, delete: if false;
+      }
+
+      match /schedules/{scheduleId} {
+        allow get: if isOwner(userId) && isValidId(scheduleId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(scheduleId) && isValidSchedule(incoming(), userId, scheduleId);
+        allow update: if isOwner(userId) && isValidId(scheduleId) &&
+          isValidSchedule(incoming(), userId, scheduleId) &&
+          incoming().scheduleId == existing().scheduleId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt &&
+          (existing().status != 'cancelled' || incoming().status == 'cancelled');
+        allow delete: if isOwner(userId) && isValidId(scheduleId);
+      }
+
+      match /schedule_runs/{runId} {
+        allow get: if isOwner(userId) && isValidId(runId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(runId) && isValidScheduleRun(incoming(), userId, runId);
+        allow update, delete: if false;
+      }
+
+      match /notifications/{notificationId} {
+        allow get: if isOwner(userId) && isValidId(notificationId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(notificationId) && isValidNotification(incoming(), userId, notificationId);
+        allow update: if isOwner(userId) && isValidId(notificationId) &&
+          isValidNotification(incoming(), userId, notificationId) &&
+          incoming().notificationId == existing().notificationId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt;
+        allow delete: if isOwner(userId) && isValidId(notificationId);
+      }
+
+      match /vector_documents/{documentId} {
+        allow get: if isOwner(userId) && isValidId(documentId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(documentId) && isValidVectorDocument(incoming(), userId, documentId);
+        allow update: if isOwner(userId) && isValidId(documentId) &&
+          isValidVectorDocument(incoming(), userId, documentId) &&
+          incoming().documentId == existing().documentId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt;
+        allow delete: if isOwner(userId) && isValidId(documentId);
+      }
+
+      match /vector_chunks/{chunkId} {
+        allow get: if isOwner(userId) && isValidId(chunkId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(chunkId) && isValidVectorChunk(incoming(), userId, chunkId);
+        allow update: if isOwner(userId) && isValidId(chunkId) &&
+          isValidVectorChunk(incoming(), userId, chunkId) &&
+          incoming().chunkId == existing().chunkId &&
+          incoming().documentId == existing().documentId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt;
+        allow delete: if isOwner(userId) && isValidId(chunkId);
+      }
+
+      match /webhooks/{webhookId} {
+        allow get: if isOwner(userId) && isValidId(webhookId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(webhookId) && isValidInboundWebhook(incoming(), userId, webhookId);
+        allow update: if isOwner(userId) && isValidId(webhookId) &&
+          isValidInboundWebhook(incoming(), userId, webhookId) &&
+          incoming().webhookId == existing().webhookId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt;
+        allow delete: if isOwner(userId) && isValidId(webhookId);
+      }
+
+      match /outbound_webhooks/{subscriptionId} {
+        allow get: if isOwner(userId) && isValidId(subscriptionId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(subscriptionId) && isValidOutboundWebhook(incoming(), userId, subscriptionId);
+        allow update: if isOwner(userId) && isValidId(subscriptionId) &&
+          isValidOutboundWebhook(incoming(), userId, subscriptionId) &&
+          incoming().subscriptionId == existing().subscriptionId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt;
+        allow delete: if isOwner(userId) && isValidId(subscriptionId);
+      }
+
+      match /webhook_deliveries/{deliveryId} {
+        allow get: if isOwner(userId) && isValidId(deliveryId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(deliveryId) && isValidWebhookDelivery(incoming(), userId, deliveryId);
+        allow update, delete: if false;
+      }
+
+      match /webhook_dedup/{dedupId} {
+        allow get: if isOwner(userId) && isValidId(dedupId);
+        allow list: if false;
+        allow create: if isOwner(userId) && isValidId(dedupId) && isValidWebhookDedup(incoming());
+        allow update: if false;
+        allow delete: if isOwner(userId) && isValidId(dedupId);
+      }
+
+      match /mcp_servers/{serverId} {
+        allow get: if isOwner(userId) && isValidId(serverId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(serverId) && isValidMcpServer(incoming(), userId, serverId);
+        allow update: if isOwner(userId) && isValidId(serverId) &&
+          isValidMcpServer(incoming(), userId, serverId) &&
+          incoming().serverId == existing().serverId &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt;
+        allow delete: if isOwner(userId) && isValidId(serverId);
+      }
+
+      match /sync_events/{eventId} {
+        allow get: if isOwner(userId) && isValidId(eventId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(eventId) && isValidSyncEvent(incoming(), userId, eventId);
+        allow update, delete: if false;
+      }
     }
 
-    // Projects collection
     match /projects/{projectId} {
       allow get: if isSignedIn() && isValidId(projectId) && existing().userId == request.auth.uid;
       allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && isValidId(projectId) && incoming().userId == request.auth.uid && isValidProject(incoming());
-      allow update: if isSignedIn() && isValidId(projectId) && existing().userId == request.auth.uid && incoming().userId == existing().userId && isValidProject(incoming());
+      allow create: if isSignedIn() && isValidId(projectId) && incoming().id == projectId && incoming().userId == request.auth.uid && isValidProject(incoming());
+      allow update: if isSignedIn() && isValidId(projectId) && existing().userId == request.auth.uid &&
+        incoming().id == existing().id && incoming().id == projectId && incoming().userId == existing().userId &&
+        incoming().created_at == existing().created_at && isValidProject(incoming());
       allow delete: if isSignedIn() && isValidId(projectId) && existing().userId == request.auth.uid;
     }
 
-    // Conversations collection
     match /conversations/{conversationId} {
       allow get: if isSignedIn() && isValidId(conversationId) && existing().userId == request.auth.uid;
       allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && isValidId(conversationId) && incoming().userId == request.auth.uid && isValidConversation(incoming());
-      allow update: if isSignedIn() && isValidId(conversationId) && existing().userId == request.auth.uid && incoming().userId == existing().userId && isValidConversation(incoming());
+      allow create: if isSignedIn() && isValidId(conversationId) && incoming().id == conversationId && incoming().userId == request.auth.uid && isValidConversation(incoming());
+      allow update: if isSignedIn() && isValidId(conversationId) && existing().userId == request.auth.uid &&
+        incoming().id == conversationId && isValidConversationUpdate();
       allow delete: if isSignedIn() && isValidId(conversationId) && existing().userId == request.auth.uid;
 
-      // Messages subcollection
       match /messages/{messageId} {
         allow get: if isSignedIn() && isValidId(messageId) && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid;
         allow list: if isSignedIn() && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid;
-        allow create: if isSignedIn() && isValidId(messageId) && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid && incoming().userId == request.auth.uid && isValidMessage(incoming());
-        allow update: if isSignedIn() && isValidId(messageId) && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid && existing().userId == request.auth.uid && incoming().userId == existing().userId && isValidMessage(incoming());
+        allow create: if isSignedIn() && isValidId(messageId) && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid && get(/databases/$(database)/documents/conversations/$(conversationId)).data.status != 'completed' && incoming().id == messageId && incoming().conversationId == conversationId && incoming().userId == request.auth.uid && isValidMessage(incoming());
+        allow update: if isSignedIn() && isValidId(messageId) && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid && get(/databases/$(database)/documents/conversations/$(conversationId)).data.status != 'completed' && existing().id == messageId && existing().conversationId == conversationId && incoming().id == existing().id && incoming().conversationId == existing().conversationId && existing().userId == request.auth.uid && incoming().userId == existing().userId && incoming().timestamp == existing().timestamp && isValidMessage(incoming());
         allow delete: if isSignedIn() && isValidId(messageId) && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid;
       }
     }

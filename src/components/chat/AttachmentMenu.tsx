@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Camera, Image, Brain, Check, PhoneCall, Plug } from 'lucide-react';
+import { Camera, Image, Brain, Check, PhoneCall, Plug, MonitorUp } from 'lucide-react';
 import { Paperclip } from 'pulsoicon-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
@@ -12,6 +12,9 @@ const VoiceCallModal = React.lazy(() =>
 );
 const LiveCameraModal = React.lazy(() =>
   import('../camera/LiveCameraModal').then((module) => ({ default: module.LiveCameraModal }))
+);
+const LiveScreenShareModal = React.lazy(() =>
+  import('../screen/LiveScreenShareModal').then((module) => ({ default: module.LiveScreenShareModal }))
 );
 
 export interface AttachmentMenuProps {
@@ -46,6 +49,7 @@ export function AttachmentMenu({
   const [isOpen, setIsOpen] = useState(false);
   const [isVoiceCallOpen, setIsVoiceCallOpen] = useState(false);
   const [isLiveCameraOpen, setIsLiveCameraOpen] = useState(false);
+  const [isLiveScreenShareOpen, setIsLiveScreenShareOpen] = useState(false);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const photosInputRef = useRef<HTMLInputElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
@@ -176,6 +180,23 @@ export function AttachmentMenu({
               <span className="font-semibold text-base text-[#000000] dark:text-[#FFFFFF] tracking-tight">Camera</span>
             </button>
 
+            {/* Live Screen Share Option */}
+            <button
+              onClick={() => {
+                setIsOpen(false);
+                setIsLiveScreenShareOpen(true);
+              }}
+              className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-2xl hover:bg-[#F2F2F2] dark:hover:bg-[#111111] transition-colors text-left group cursor-pointer"
+            >
+              <div className="w-10 h-10 rounded-full bg-[#F2F2F2] dark:bg-[#111111] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform text-[#000000] dark:text-[#FFFFFF]">
+                <MonitorUp size={22} strokeWidth={2.4} />
+              </div>
+              <div className="flex flex-col">
+                <span className="font-semibold text-base text-[#000000] dark:text-[#FFFFFF] tracking-tight">Live screen share</span>
+                <span className="text-[11px] text-[#777777] dark:text-[#AAAAAA] leading-tight">Share your screen live with AI</span>
+              </div>
+            </button>
+
             {/* Photos Option */}
             <button
               onClick={() => {
@@ -299,6 +320,22 @@ export function AttachmentMenu({
               onFileSelect(file);
               setIsOpen(false);
             }}
+          />
+        </React.Suspense>
+      )}
+
+      {/* Live Screen Share Modal (Real-time display capture, AI screen analysis, frame attach) */}
+      {isLiveScreenShareOpen && (
+        <React.Suspense fallback={<div role="status" className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 text-sm text-white">Opening screen share…</div>}>
+          <LiveScreenShareModal
+            isOpen
+            onClose={() => setIsLiveScreenShareOpen(false)}
+            onCapture={(file) => {
+              onFileSelect(file);
+              setIsOpen(false);
+            }}
+            conversationMessages={conversationMessages}
+            onExchangeComplete={onVoiceExchangeComplete}
           />
         </React.Suspense>
       )}

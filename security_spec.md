@@ -16,6 +16,10 @@
 - **Resource Boundary Limits**:
   - All IDs must match `^[a-zA-Z0-9_\-]+$` and length `<= 128`.
   - All string sizes are strictly bound.
+- **Extended Per-User Agent Infrastructure Collections** (`/users/{userId}/vector_documents`, `vector_chunks`, `webhooks`, `outbound_webhooks`, `webhook_deliveries`, `webhook_dedup`, `mcp_servers`, `sync_events`):
+  - Strictly owner-scoped (`isOwner(userId)`), rejecting cross-tenant read/list/write and shadow fields via `hasAll` + `hasOnly`.
+  - `webhook_deliveries` and `sync_events` are append-only (`allow update, delete: if false;`) to preserve audit integrity.
+  - `webhook_dedup` is write-once (`allow update: if false;`) and non-listable (`allow list: if false;`).
 
 ---
 

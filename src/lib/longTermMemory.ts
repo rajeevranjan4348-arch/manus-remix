@@ -10,6 +10,7 @@ import { auth, db } from './firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { securityCenter } from './securityCenter';
 import { captureExplicitMemory, clearAgentMemory } from './agentMemory';
+import { getFirebaseAuthorizationHeader } from './firebaseAuthorization';
 
 export interface MemoryRecord {
   id: string;
@@ -559,6 +560,26 @@ class LongTermMemoryService {
       return { persisted: false, error: persistRes.error };
     }
 
+    // Fire-and-forget semantic embedding index sync for cross-session vector recall
+    if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+      void getFirebaseAuthorizationHeader()
+        .then((authHeader) => {
+          if (!authHeader) return;
+          return fetch('/api/rag/index', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+            body: JSON.stringify({
+              documentId: `mem_${newRecord.id}`,
+              title: `User Memory: ${newRecord.key}`,
+              content: `[${newRecord.category.toUpperCase()}] ${newRecord.key}: ${newRecord.value}`,
+              sourceType: 'memory',
+              metadata: { memoryId: newRecord.id, category: newRecord.category },
+            }),
+          });
+        })
+        .catch(() => {});
+    }
+
     return { persisted: true, record: newRecord };
   }
 
@@ -718,6 +739,68 @@ class LongTermMemoryService {
       .slice(0, 5)
       .map(({ record }) => `- [${record.category.toUpperCase()}] ${record.key}: ${record.value}`)
       .join('\n');
+  }
+
+  /**
+   * Hybrid vector + lexical memory recall. Strictly applies the exact same greeting,
+   * explicit-recall, and personal-reference guards as getRelevantContext.
+   */
+  public async getRelevantContextHybrid(userId: string, queryText = ''): Promise<string> {
+    const cleanedQuery = stripInternalMessageWrappers(queryText).trim();
+    if (!cleanedQuery || isGreetingOrSmallTalk(cleanedQuery) || detectExplicitMemoryIntent(cleanedQuery).matched) {
+      return '';
+    }
+
+    const baseContext = await this.getRelevantContext(userId, cleanedQuery);
+    if (isExplicitMemoryRecallQuery(cleanedQuery)) {
+      return baseContext;
+    }
+
+    const isPersonalQuery = isPersonalSelfReferenceQuery(cleanedQuery);
+    if (!isPersonalQuery || typeof window === 'undefined' || typeof fetch === 'undefined') {
+      return baseContext;
+    }
+
+    const authHeader = await getFirebaseAuthorizationHeader().catch(() => null);
+    if (!authHeader) return baseContext;
+
+    try {
+      const res = await fetch('/api/rag/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+        body: JSON.stringify({
+          query: cleanedQuery,
+          limit: 4,
+          sourceTypes: ['memory'],
+        }),
+        signal: AbortSignal.timeout(1200),
+      });
+      if (!res.ok) return baseContext;
+      const data = await res.json().catch(() => ({}));
+      const hits = Array.isArray(data?.hits) ? data.hits : [];
+      if (hits.length === 0) return baseContext;
+
+      const existingLines = new Set(
+        baseContext
+          .split('\n')
+          .map((l) => l.trim().toLowerCase())
+          .filter(Boolean),
+      );
+      const vectorLines: string[] = [];
+      for (const hit of hits) {
+        const text = String(hit.content || '').trim();
+        if (!text) continue;
+        const formatted = text.startsWith('- ') ? text : `- ${text}`;
+        if (!existingLines.has(formatted.toLowerCase())) {
+          existingLines.add(formatted.toLowerCase());
+          vectorLines.push(formatted);
+        }
+      }
+      if (vectorLines.length === 0) return baseContext;
+      return [baseContext, ...vectorLines.slice(0, 3)].filter(Boolean).join('\n');
+    } catch {
+      return baseContext;
+    }
   }
 
   /**

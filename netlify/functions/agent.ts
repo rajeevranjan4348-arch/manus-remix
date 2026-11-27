@@ -44,6 +44,7 @@ import {
   sanitizeExecutionMetadata,
   VerifiedExecutionMetadata,
 } from '../../server/modelIdentity';
+import { compactConversationMessages } from '../../server/contextCompaction';
 
 const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -396,7 +397,21 @@ export default async (req: Request) => {
       });
     }
 
-    const candidateModels = resolveCandidateModels(configuredModelId);
+    let adaptiveModelId = configuredModelId;
+    if (requestedRoute.isAutoSelected) {
+      const isComplex = Boolean(
+        body.thinkHarder ||
+        body.mode === 'work' ||
+        latestUserText.length > 140 ||
+        /\b(analyze|compare|architecture|debug|explain why|step[\s-]by[\s-]step|algorithm|implement|design|math|calculate|prove|strategy)\b/i.test(latestUserText)
+      );
+      if (body.thinkHarder) {
+        adaptiveModelId = 'gemini-3.1-pro-preview';
+      } else if (!isComplex && latestUserText.length <= 80 && !useGoogleSearch) {
+        adaptiveModelId = 'gemini-3.1-flash-lite-preview';
+      }
+    }
+    const candidateModels = resolveCandidateModels(adaptiveModelId);
 
     let systemInstruction = body.systemInstruction ||
       'Answer the user\'s question directly from the first sentence with clear, helpful, high-quality responses. Never prepend unsolicited greetings, self-introductions, or product descriptions (such as "Hello! I am Deku AI, your independent workspace assistant.") to normal questions. Only greet when the user greets you. Do not generate fake reports or fake charts unless specifically asked for them. Never expose private internal chain-of-thought.';
@@ -494,7 +509,32 @@ export default async (req: Request) => {
       return parts;
     };
 
-    const contents = messages
+    // Smart context compaction prevents token-window overflow on long multi-turn threads
+    const compactionResult = await compactConversationMessages(
+      messages.map((m: any) => ({ role: m.role, content: String(m.content || '') })),
+      systemInstruction,
+      {
+        maxTokenBudget: body.mode === 'work' ? 22_000 : 16_000,
+        preserveRecentTurns: 8,
+        signal: req.signal,
+      },
+    );
+    const compactedMessages = compactionResult.messages;
+    if (compactionResult.compacted) {
+      const compactHandle = agentActivityHub.startActivity(
+        taskId,
+        {
+          title: 'Compacting long conversation context',
+          description: `Summarized ${compactionResult.summarizedMessageCount} earlier turn(s) (~${compactionResult.originalTokens} → ~${compactionResult.compactedTokens} tokens)`,
+          toolName: 'context_compaction',
+          category: 'analysis',
+        },
+        pushBufferedActivity,
+      );
+      compactHandle.complete(`Compacted via ${compactionResult.strategy}`);
+    }
+
+    const contents = compactedMessages
       .filter((m: any) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim().length > 0)
       .map((m: any) => ({
         role: m.role === 'assistant' ? 'model' : 'user',
@@ -831,7 +871,9 @@ export default async (req: Request) => {
               model: orModel,
               messages: [
                 { role: 'system', content: `${systemInstruction}\n\n${buildDekuIdentitySystemInstruction(null)}` },
-                ...messages.map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })),
+                ...compactedMessages
+                  .filter((m: any) => m.role === 'user' || m.role === 'assistant')
+                  .map((m: any) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })),
               ],
               stream: true,
               stream_options: { include_usage: true },

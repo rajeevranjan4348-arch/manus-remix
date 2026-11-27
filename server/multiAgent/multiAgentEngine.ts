@@ -28,6 +28,7 @@ import {
   type DurableExecutionStore,
   type DurableRequestContext,
 } from '../sandbox/durableStore';
+import { defaultLiveSyncHub, type LiveSyncHub } from '../realtime/liveSyncHub';
 
 export type AgentRoleId =
   | 'research'
@@ -538,6 +539,7 @@ export interface MultiAgentEngineOptions {
   store?: DurableCollectionStore;
   auditStore?: DurableExecutionStore;
   permissions?: PermissionsGatewayService;
+  syncHub?: LiveSyncHub;
   providers?: ModelProviderAdapter[];
   toolExecutor?: AgentToolExecutor;
   defaultMaxConcurrency?: number;
@@ -551,6 +553,7 @@ export class MultiAgentRuntimeEngine {
   private readonly store: DurableCollectionStore;
   private readonly auditStore: DurableExecutionStore;
   private readonly permissions: PermissionsGatewayService;
+  private readonly syncHub: LiveSyncHub;
   private readonly providers: ModelProviderAdapter[];
   private readonly toolExecutor?: AgentToolExecutor;
   private readonly defaultMaxConcurrency: number;
@@ -564,6 +567,7 @@ export class MultiAgentRuntimeEngine {
     this.store = options?.store ?? defaultCollectionStore;
     this.auditStore = options?.auditStore ?? defaultDurableStore;
     this.permissions = options?.permissions ?? permissionsGateway;
+    this.syncHub = options?.syncHub ?? defaultLiveSyncHub;
     this.providers = options?.providers ?? resolveDefaultProviders();
     this.toolExecutor = options?.toolExecutor;
     this.defaultMaxConcurrency = Math.max(1, options?.defaultMaxConcurrency ?? 3);
@@ -1041,6 +1045,21 @@ export class MultiAgentRuntimeEngine {
         for (const res of waveResults) {
           completedOutputs.set(res.nodeId, res);
           record.nodes.push(res);
+          await this.syncHub.publish(ctx, {
+            type: 'multi_agent:milestone',
+            title: `Agent Milestone: ${res.title}`,
+            message: `${AGENT_ROLE_CATALOG[res.role]?.displayName || res.role} completed node '${res.nodeId}' (${record.nodes.length}/${planNodes.length}).`,
+            resourceId: runId,
+            runId,
+            severity: 'info',
+            notifyUser: false,
+            data: {
+              nodeId: res.nodeId,
+              role: res.role,
+              completedCount: record.nodes.length,
+              totalNodes: planNodes.length,
+            },
+          });
         }
 
         record.updatedAt = new Date().toISOString();
@@ -1104,6 +1123,34 @@ export class MultiAgentRuntimeEngine {
         this.auditStore,
       );
 
+      await this.syncHub.publish(ctx, {
+        type: 'multi_agent:completed',
+        title: 'Multi-Agent Run Completed',
+        message: `Finished ${record.nodes.length} specialized agent stage(s) for "${record.objective.slice(0, 120)}".`,
+        resourceId: runId,
+        runId,
+        severity: 'success',
+        notifyUser: true,
+        data: {
+          nodeCount: record.nodes.length,
+          totalTokens: record.totalUsage.totalTokens,
+          costUsd: record.totalUsage.costUsd,
+        },
+      });
+
+      void import('../webhooks/webhookEngine')
+        .then((m) =>
+          m.defaultWebhookEngine.dispatchOutboundEvent(ctx, 'multi_agent.completed', {
+            runId,
+            objective: record.objective,
+            nodeCount: record.nodes.length,
+            totalTokens: record.totalUsage.totalTokens,
+            costUsd: record.totalUsage.costUsd,
+            qaPassed: record.qaReview?.passed ?? true,
+          }),
+        )
+        .catch(() => {});
+
       return record;
     } catch (err) {
       const doneIso = new Date().toISOString();
@@ -1113,6 +1160,17 @@ export class MultiAgentRuntimeEngine {
       record.updatedAt = doneIso;
       record.completedAt = doneIso;
       await this.store.put(ctx, RUNS_COLLECTION, runId, record);
+
+      await this.syncHub.publish(ctx, {
+        type: 'multi_agent:failed',
+        title: isCancelled ? 'Multi-Agent Run Cancelled' : 'Multi-Agent Run Failed',
+        message: record.error,
+        resourceId: runId,
+        runId,
+        severity: isCancelled ? 'warning' : 'error',
+        notifyUser: true,
+        data: { status: record.status },
+      });
 
       await this.permissions.recordSecurityAuditDurable(
         ctx,

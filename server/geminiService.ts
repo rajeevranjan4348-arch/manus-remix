@@ -47,6 +47,8 @@ import {
   sanitizeExecutionMetadata,
   DEKU_PRODUCT_NAME,
 } from './modelIdentity';
+import { compactConversationMessages } from './contextCompaction';
+import { geminiCircuitBreaker, openRouterCircuitBreaker } from './circuitBreaker';
 
 export type { VerifiedExecutionMetadata } from './modelIdentity';
 
@@ -521,6 +523,37 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
   const enrichedSystemInstruction =
     (options.systemInstruction || '') + realtimeSnapshot.systemContextBlock;
 
+  // Smart Context Compaction for long multi-turn threads (prevents context overflow cleanly)
+  const compactionResult = await compactConversationMessages(
+    options.messages,
+    enrichedSystemInstruction,
+    {
+      maxTokenBudget: options.mode === 'work' ? 22_000 : 16_000,
+      preserveRecentTurns: 8,
+      signal: options.signal,
+    },
+  );
+  const effectiveMessages = compactionResult.messages;
+  if (compactionResult.compacted) {
+    const compactHandle = agentActivityHub.startActivity(
+      activityTaskId,
+      {
+        title: 'Compacting long conversation context',
+        description: `Summarized ${compactionResult.summarizedMessageCount} earlier turn(s) (~${compactionResult.originalTokens} → ~${compactionResult.compactedTokens} tokens)`,
+        toolName: 'context_compaction',
+        category: 'analysis',
+      },
+      emitActivity,
+    );
+    compactHandle.complete(
+      `Compacted via ${compactionResult.strategy} (${compactionResult.originalTokens} → ${compactionResult.compactedTokens} est. tokens)`,
+    );
+  }
+  const effectiveOptions: StreamChatOptions = {
+    ...options,
+    messages: effectiveMessages,
+  };
+
   const requestedRoute = resolveRequestedModelRoute(options.model, preferredModel);
   const emitExecutionMetadata = (meta: VerifiedExecutionMetadata) => {
     options.onExecutionMetadata?.(sanitizeExecutionMetadata(meta));
@@ -542,7 +575,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     try {
       let claudeChars = 0;
       for await (const delta of streamAnthropicResponse(
-        { ...options, systemInstruction: enrichedSystemInstruction, onExecutionMetadata: emitExecutionMetadata },
+        { ...effectiveOptions, systemInstruction: enrichedSystemInstruction, onExecutionMetadata: emitExecutionMetadata },
         anthropicApiKey,
         requestedRoute.targetModelId,
         requestedRoute.requestedRaw
@@ -576,7 +609,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     try {
       let openaiChars = 0;
       for await (const delta of streamOpenAIResponse(
-        { ...options, systemInstruction: enrichedSystemInstruction, onExecutionMetadata: emitExecutionMetadata },
+        { ...effectiveOptions, systemInstruction: enrichedSystemInstruction, onExecutionMetadata: emitExecutionMetadata },
         openaiApiKey,
         requestedRoute.targetModelId,
         requestedRoute.requestedRaw
@@ -596,7 +629,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
 
   const waterfallStartTimeMs = Date.now();
 
-  if (apiKey) {
+  if (apiKey && geminiCircuitBreaker.canAttempt()) {
     const ai = new GoogleGenAI({
       apiKey,
       httpOptions: {
@@ -606,15 +639,25 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
       },
     });
 
-    // Order candidate models prioritizing active high-speed models (max 3 valid models)
-    const candidateModels = resolveCandidateModels(preferredModel);
-
     const isComplexReasoningPrompt = Boolean(
       options.thinkHarder ||
       options.mode === 'work' ||
       latestUserText.length > 140 ||
       /\b(analyze|compare|architecture|debug|explain why|step[\s-]by[\s-]step|algorithm|implement|design|math|calculate|prove|strategy)\b/i.test(latestUserText)
     );
+
+    // Adaptive complexity-aware model ordering when the user did not pin a specific model
+    let adaptivePreferredModel = preferredModel;
+    if (requestedRoute.isAutoSelected) {
+      if (options.thinkHarder) {
+        adaptivePreferredModel = 'gemini-3.1-pro-preview';
+      } else if (!isComplexReasoningPrompt && latestUserText.length <= 80 && !useGoogleSearch) {
+        adaptivePreferredModel = 'gemini-3.1-flash-lite-preview';
+      }
+    }
+
+    // Order candidate models prioritizing active high-speed / complexity-appropriate models (max 3 valid models)
+    const candidateModels = resolveCandidateModels(adaptivePreferredModel);
 
     let baseSystemPrompt = options.systemInstruction || (
       isComplexReasoningPrompt
@@ -653,7 +696,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
       '[INTERACTIVE 3D STUDIO PBR RENDERER]\n' +
       'When the user asks to render, preview, or interact with a 3D model, 3D asset, or Three.js scene, emit a ```threejs-scene JSON code block with keys `{"preset":"chronograph_watch"|"cyber_rover"|"robot_mech"|"architectural_pavilion"|"quantum_gyroscope"|"alpine_sanctuary","finish":"brushed_gold"|"anodized_titanium"|"blued_steel"|"obsidian_chrome"|"ceramic_ivory","environment":"studio_warm"|"cyber_twilight"|"alpine_daylight"|"obsidian_void","explodedFactor":0}` so the live WebGL Studio PBR viewer mounts directly in the response.';
 
-    const contents = options.messages
+    const contents = effectiveMessages
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .map(m => {
         if (m.role === 'user' && m.content.includes('[IMAGE_DATA_URL:')) {
@@ -855,6 +898,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
             }
 
             if (hasYielded) {
+              geminiCircuitBreaker.recordSuccess();
               if (!metadataEmitted) {
                 metadataEmitted = true;
                 emitExecutionMetadata(geminiExecutionMeta);
@@ -907,6 +951,7 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
             }
 
             const classified = classifyGeminiError(err, Boolean(options.signal?.aborted));
+            geminiCircuitBreaker.recordFailure(err);
             modelHandle.fail(
               classified.category === 'auth_error'
                 ? 'Gemini API authentication failed; checking fallback provider'
@@ -951,6 +996,9 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
   const uniqueKeys = Array.from(new Set(apiKeys));
 
   for (const openRouterKey of uniqueKeys) {
+    if (!openRouterCircuitBreaker.canAttempt()) {
+      break;
+    }
     const orHandle = agentActivityHub.startActivity(
       activityTaskId,
       {
@@ -964,15 +1012,17 @@ export async function* streamGeminiResponse(options: StreamChatOptions) {
     try {
       let orChars = 0;
       for await (const delta of streamOpenRouterResponse(
-        { ...options, systemInstruction: enrichedSystemInstruction, onExecutionMetadata: emitExecutionMetadata },
+        { ...effectiveOptions, systemInstruction: enrichedSystemInstruction, onExecutionMetadata: emitExecutionMetadata },
         openRouterKey
       )) {
         orChars += delta.length;
         yield delta;
       }
+      openRouterCircuitBreaker.recordSuccess();
       orHandle.complete(`Streamed ${orChars} chars via fallback gateway`);
       return;
     } catch (orErr: any) {
+      openRouterCircuitBreaker.recordFailure(orErr);
       orHandle.fail('Fallback provider unavailable; continuing');
       console.log('[AI Model Router] OpenRouter key unavailable, attempting fallback...');
     }

@@ -109,6 +109,26 @@
   status = 200
 
 [[redirects]]
+  from = "/api/rag/*"
+  to = "/.netlify/functions/rag"
+  status = 200
+
+[[redirects]]
+  from = "/api/webhooks/*"
+  to = "/.netlify/functions/webhooks"
+  status = 200
+
+[[redirects]]
+  from = "/api/mcp/*"
+  to = "/.netlify/functions/mcp"
+  status = 200
+
+[[redirects]]
+  from = "/api/sync/*"
+  to = "/.netlify/functions/sync"
+  status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
@@ -119,6 +139,6 @@
     X-Content-Type-Options = "nosniff"
     X-XSS-Protection = "1; mode=block"
     Referrer-Policy = "strict-origin-when-cross-origin"
-    Permissions-Policy = "camera=(self), microphone=(self), geolocation=(self)"
+    Permissions-Policy = "camera=(self), microphone=(self), geolocation=(self), display-capture=(self)"
     Content-Security-Policy = "default-src 'self' https: http: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https: http: wss: ws:; frame-ancestors *;"
     Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"

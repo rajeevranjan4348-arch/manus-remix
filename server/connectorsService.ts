@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { validateBrowserNavigationUrl } from './sandbox/security';
 
 export interface OAuthSessionState {
   stateToken: string;
@@ -520,44 +521,10 @@ export async function handleOAuthCallback(
 }
 
 /**
- * SSRF Validation Helper
+ * SSRF Validation Helper (delegates to hardened IPv4/IPv6/obfuscated-IP security policy)
  */
 export function isSafeUrl(targetUrl: string): boolean {
-  try {
-    const parsed = new URL(targetUrl);
-    const hostname = parsed.hostname.toLowerCase();
-
-    if (
-      hostname === 'localhost' ||
-      hostname === '127.0.0.1' ||
-      hostname === '0.0.0.0' ||
-      hostname === '169.254.169.254' ||
-      hostname.startsWith('10.') ||
-      hostname.startsWith('192.168.') ||
-      hostname.startsWith('172.16.') ||
-      hostname.startsWith('172.17.') ||
-      hostname.startsWith('172.18.') ||
-      hostname.startsWith('172.19.') ||
-      hostname.startsWith('172.20.') ||
-      hostname.startsWith('172.21.') ||
-      hostname.startsWith('172.22.') ||
-      hostname.startsWith('172.23.') ||
-      hostname.startsWith('172.24.') ||
-      hostname.startsWith('172.25.') ||
-      hostname.startsWith('172.26.') ||
-      hostname.startsWith('172.27.') ||
-      hostname.startsWith('172.28.') ||
-      hostname.startsWith('172.29.') ||
-      hostname.startsWith('172.30.') ||
-      hostname.startsWith('172.31.')
-    ) {
-      return false;
-    }
-
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-  } catch {
-    return false;
-  }
+  return validateBrowserNavigationUrl(targetUrl).valid;
 }
 
 /**
@@ -818,6 +785,36 @@ export async function executeServerConnectorTool(
 ): Promise<{ success: boolean; data?: any; error?: string; message?: string }> {
   const activeUserId = userId || 'usr_manus_default';
   const query = args.query || args.search || args.topic || 'latest updates';
+
+  if (connectorId.startsWith('mcp:')) {
+    const serverId = connectorId.slice(4).trim();
+    try {
+      const { defaultMcpBridgeService } = await import('./mcp/mcpBridgeService');
+      const result = await defaultMcpBridgeService.callServerTool(
+        { userId: activeUserId },
+        {
+          serverId,
+          toolName,
+          args,
+          approvalToken: typeof args?.__approvalToken === 'string' ? args.__approvalToken : undefined,
+        },
+      );
+      return {
+        success: result.ok,
+        data: result.requiresApproval ? { challenge: result.challenge } : result.result,
+        error: result.requiresApproval ? 'APPROVAL_REQUIRED' : result.error,
+        message: result.ok
+          ? `Executed MCP tool '${toolName}' on server '${serverId}'.`
+          : result.error || `MCP tool '${toolName}' failed.`,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err?.code || 'MCP_EXECUTION_ERROR',
+        message: err?.message || `MCP execution failed for '${toolName}'.`,
+      };
+    }
+  }
 
   if (connectorId === 'github' || toolName.startsWith('github_')) {
     const userTokenObj = getUserToken(activeUserId, 'github');

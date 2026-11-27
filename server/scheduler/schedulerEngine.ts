@@ -37,6 +37,7 @@ import {
   type PersistenceMode,
 } from '../sandbox/durableStore';
 import { parseReminderIntent } from '../scheduledTasks';
+import { defaultLiveSyncHub, type LiveSyncHub } from '../realtime/liveSyncHub';
 
 export type ScheduleKind = 'once' | 'interval' | 'daily' | 'weekly' | 'monthly' | 'cron';
 export type ScheduleStatus = 'active' | 'paused' | 'completed' | 'cancelled';
@@ -449,6 +450,7 @@ export interface SchedulerEngineOptions {
   auditStore?: DurableExecutionStore;
   permissions?: PermissionsGatewayService;
   taskEngine?: BackgroundTaskEngine;
+  syncHub?: LiveSyncHub;
   schedulerSecret?: string;
 }
 
@@ -457,6 +459,7 @@ export class PersistentSchedulerEngine {
   private readonly auditStore: DurableExecutionStore;
   private readonly permissions: PermissionsGatewayService;
   private readonly taskEngine: BackgroundTaskEngine;
+  private readonly syncHub: LiveSyncHub;
   private readonly explicitSecret?: string;
 
   constructor(options?: SchedulerEngineOptions) {
@@ -464,6 +467,7 @@ export class PersistentSchedulerEngine {
     this.auditStore = options?.auditStore ?? defaultDurableStore;
     this.permissions = options?.permissions ?? permissionsGateway;
     this.taskEngine = options?.taskEngine ?? defaultBackgroundTaskEngine;
+    this.syncHub = options?.syncHub ?? defaultLiveSyncHub;
     this.explicitSecret = options?.schedulerSecret;
   }
 
@@ -974,6 +978,28 @@ export class PersistentSchedulerEngine {
                 scheduleId: fresh.scheduleId,
               });
             }
+            await this.syncHub.publish(ctx, {
+              type: 'schedule:executed',
+              title: `Schedule Fired: ${fresh.name}`,
+              message: `Dispatched background task '${enqueued.task.title}' (${enqueued.task.taskId}).`,
+              resourceId: fresh.scheduleId,
+              scheduleId: fresh.scheduleId,
+              taskId: enqueued.task.taskId,
+              severity: 'info',
+              notifyUser: fresh.notifyOnRun,
+              data: { scheduledFor: dueIso, runCount: fresh.runCount },
+            });
+            void import('../webhooks/webhookEngine')
+              .then((m) =>
+                m.defaultWebhookEngine.dispatchOutboundEvent(ctx, 'schedule.executed', {
+                  scheduleId: fresh.scheduleId,
+                  name: fresh.name,
+                  taskId: enqueued.task.taskId,
+                  scheduledFor: dueIso,
+                  runCount: fresh.runCount,
+                }),
+              )
+              .catch(() => {});
           }
 
           dispatched.push(runRecord);
